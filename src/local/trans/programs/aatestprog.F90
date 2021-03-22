@@ -42,7 +42,7 @@ INTEGER (KIND=JPIM) :: NRGRI (8000)
 INTEGER (KIND=JPIM) :: ITIME
 
 LOGICAL :: LUSEFLT, LUSERPNM, LKEEPRPNM
-LOGICAL :: LSPLIT, LEQ_REGIONS, LDEBUG, LELAM
+LOGICAL :: LSPLIT, LEQ_REGIONS, LDEBUG, LELAM, LCOS
 LOGICAL :: LLHOOK
 
 #include "setup_trans0.h"
@@ -249,7 +249,11 @@ DO ITIME = 1, NTIME
   ZTSTEP = TIMEF()
 
   IF (LELAM) THEN
+    WRITE(*,*) 'NSPEC2=', NSPEC2
+    WRITE(*,*) 'ZGPBUFL=', ZGPBUFL
     CALL EDIR_TRANS (PSPSCALAR=ZSPBUFL, PGP=ZGPBUFL, KVSETSC=IVSET)
+    WRITE(*,*) 'IVSET=', IVSET
+    WRITE(*,*) 'COEFF_SPEC', ZSPBUFL(3,:)
     CALL EINV_TRANS (PSPSCALAR=ZSPBUFL, PGP=ZGPBUFL, KVSETSC=IVSET)
   ELSE
     CALL DIR_TRANS (PSPSCALAR=ZSPBUFL, PGP=ZGPBUFL, KVSETSC=IVSET)
@@ -497,16 +501,34 @@ IF (MYPROC == 1) THEN
   BLOCK
     REAL (KIND=JPRB) :: ZLON, ZLAT, ZVAL, ZX, ZY
     INTEGER (KIND=JPIM) :: JLAT, JLON, JGLO
+    
+    LCOS = .TRUE.
 
     JGLO = 1
 
     DO JLAT = 1, NDGLG
+
       DO JLON = 1, NLOEN (JLAT)
        
         IF (LELAM) THEN
-          ZX = REAL (JLON-1, JPRB) / REAL (NDLON, JPRB)
-          ZY = REAL (JLAT-1, JPRB) / REAL (NDLON, JPRB)
-          ZVAL = ZX * (1._JPRB - ZX) * ZY * (1._JPRB - ZY)
+          IF (LCOS) THEN
+                     
+            ZX = REAL (JLON-1, JPRB) / REAL (NDLON-1, JPRB)
+            ZY = REAL (JLAT-1, JPRB) / REAL (NDLON-1, JPRB)
+            ZY = 0.0_JPRB
+            ZVAL = COS(2.0_JPRB*RPI*ZX)*COS(2.0_JPRB*RPI*ZY)
+            WRITE(*,*) 'ZY=', ZY
+            WRITE(*,*) 'ZVAL=', ZVAL
+            !ZVAL = 0.0_JPRB
+            !IF (JLAT==NDGLG/2) THEN
+            !  ZVAL = COS(2.0_JPRB*RPI*ZX)
+            !ENDIF
+            !WRITE(*,*) 'ZVAL=',ZVAL
+          ELSE
+            ZX = REAL (JLON-1, JPRB) / REAL (NDLON, JPRB)
+            ZY = REAL (JLAT-1, JPRB) / REAL (NDLON, JPRB)
+            ZVAL = ZX * (1._JPRB - ZX) * ZY * (1._JPRB - ZY)
+          ENDIF
         ELSE
           ZLAT = + RPI * (0.5_JPRB - REAL (JLAT, JPRB) / REAL (NDGLG+1, JPRB))
           ZLON = 2 * RPI * REAL (JLON-1, JPRB) / REAL (NLOEN (JLAT))
