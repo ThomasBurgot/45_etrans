@@ -1,0 +1,340 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:00      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: efsc_mod.F90
+
+(    1) MODULE EFSC_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EFSC(KF_UV,KF_SCALARS,KF_SCDERS,&
+(    4)  & PUV,PSCALAR,PNSDERS,PEWDERS,PUVDERS)
+(    5) 
+(    6) !**** *FSC - Division by a*cos(theta), east-west derivatives
+(    7) 
+(    8) !     Purpose.
+(    9) !     --------
+(   10) !        In Fourier space divide u and v and all north-south
+(   11) !        derivatives by a*cos(theta). Also compute east-west derivatives
+(   12) !        of u,v,thermodynamic, passiv scalar variables and surface
+(   13) !        pressure.
+(   14) 
+(   15) !**   Interface.
+(   16) !     ----------
+(   17) !        CALL FSC(..)
+(   18) !        Explicit arguments :  PUV     - u and v
+(   19) !        --------------------  PSCALAR - scalar valued varaibles
+(   20) !                              PNSDERS - N-S derivative of S.V.V.
+(   21) !                              PEWDERS - E-W derivative of S.V.V.
+(   22) !                              PUVDERS - E-W derivative of u and v
+(   23) !     Method.
+(   24) !     -------
+(   25) 
+(   26) !     Externals.   None.
+(   27) !     ----------
+(   28) 
+(   29) !     Author.
+(   30) !     -------
+(   31) !        Mats Hamrud *ECMWF*
+(   32) 
+(   33) !     Modifications.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:00      page 2
+
+(   34) !     --------------
+(   35) !        Original : 00-03-03 (From SC2FSC)
+(   36) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   37) 
+(   38) !     ------------------------------------------------------------------
+(   39) 
+(   40) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   41) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   42) 
+(   43) USE TPM_TRANS       ,ONLY : LUVDER
+(   44) USE TPM_DISTR       ,ONLY : D, MYSETW, D_NPTRLS, D_NSTAGTF
+(   45) USE TPM_GEOMETRY    ,ONLY : G, G_NMEN
+(   46) USE TPMALD_GEO      ,ONLY : GALD
+(   47) !
+(   48) 
+(   49) IMPLICIT NONE
+(   50) 
+(   51) INTEGER(KIND=JPIM) , INTENT(IN) :: KF_UV,KF_SCALARS,KF_SCDERS
+(   52) REAL(KIND=JPRB) , INTENT(INOUT) :: PUV(:,:)
+(   53) REAL(KIND=JPRB) , INTENT(IN   ) :: PSCALAR(:,:)
+(   54) REAL(KIND=JPRB) , INTENT(INOUT) :: PNSDERS(:,:)
+(   55) REAL(KIND=JPRB) , INTENT(  OUT) :: PEWDERS(:,:)
+(   56) REAL(KIND=JPRB) , INTENT(  OUT) :: PUVDERS(:,:)
+(   57) 
+(   58) INTEGER(KIND=JPIM) :: IMEN,ISTAGTF
+(   59) 
+(   60) INTEGER(KIND=JPIM) :: JF,IGLG,II,IR,JM,JGL
+(   61) REAL(KIND=JPRB) :: ZIM
+(   62) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   63) !     ------------------------------------------------------------------
+(   64) 
+(   65) IF (LHOOK) CALL DR_HOOK('EFSC_MOD:EFSC',0,ZHOOK_HANDLE)
+(   66) 
+(   67) !     ------------------------------------------------------------------
+(   68)   
+(   69) !*           EAST-WEST DERIVATIVES
+(   70) !              ---------------------
+(   71)   
+(   72) !*       2.1      U AND V.
+(   73)   
+(   74) IF(LUVDER)THEN
+(   75) !$acc parallel loop collapse (2) private (JF, JGL, IGLG, IMEN, ISTAGTF, JM, ZIM, IR, II) &
+(   76) !$acc & present (D_NPTRLS, G_NMEN, D_NSTAGTF, PUVDERS, PUV)
+(   77)   DO JF=1,2*KF_UV
+(   78)     DO JGL = 1, D%NDGL_FS
+(   79)       IGLG    = D_NPTRLS(MYSETW)+JGL-1
+(   80)       IMEN    = G_NMEN(IGLG)
+(   81)       ISTAGTF = D_NSTAGTF(JGL)
+(   82)       DO JM=0,IMEN
+(   83)         ZIM=REAL(JM,JPRB)*GALD%EXWN
+(   84)         IR = ISTAGTF+2*JM+1
+(   85)         II = IR+1
+(   86)         PUVDERS(IR,JF) = -PUV(II,JF)*ZIM
+(   87)         PUVDERS(II,JF) =  PUV(IR,JF)*ZIM
+(   88)       ENDDO
+(   89)     ENDDO
+(   90)   ENDDO
+(   91) !$acc end parallel loop
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:00      page 3
+
+(   92) ENDIF
+(   93)   
+(   94) !*       2.2     SCALAR VARIABLES
+(   95)   
+(   96) IF(KF_SCDERS > 0)THEN
+(   97) !$acc parallel loop collapse (2) private (JF, JGL, IGLG, IMEN, ISTAGTF, JM, ZIM, IR, II) &
+(   98) !$acc & present (D_NPTRLS, G_NMEN, D_NSTAGTF, PEWDERS, PSCALAR)
+(   99)   DO JF=1,KF_SCALARS
+(  100)     DO JGL = 1, D%NDGL_FS
+(  101)       IGLG    = D_NPTRLS(MYSETW)+JGL-1
+(  102)       IMEN    = G_NMEN(IGLG)
+(  103)       ISTAGTF = D_NSTAGTF(JGL)
+(  104)       DO JM=0,IMEN
+(  105)         ZIM=REAL(JM,JPRB)*GALD%EXWN
+(  106)         IR = ISTAGTF+2*JM+1
+(  107)         II = IR+1
+(  108)         PEWDERS(IR,JF) = -PSCALAR(II,JF)*ZIM
+(  109)         PEWDERS(II,JF) =  PSCALAR(IR,JF)*ZIM
+(  110)       ENDDO
+(  111)     ENDDO
+(  112)   ENDDO
+(  113) !$acc end parallel loop
+(  114) ENDIF
+(  115) 
+(  116) IF (LHOOK) CALL DR_HOOK('EFSC_MOD:EFSC',1,ZHOOK_HANDLE)
+(  117) 
+(  118) !     ------------------------------------------------------------------
+(  119) 
+(  120) END SUBROUTINE EFSC
+(  121) END MODULE EFSC_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:00      page 4
+
+(    1) # 1 "efsc_mod.F90"
+(    1) MODULE EFSC_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EFSC(KF_UV,KF_SCALARS,KF_SCDERS,&
+(    4)  & PUV,PSCALAR,PNSDERS,PEWDERS,PUVDERS)
+(    5) # 6 "efsc_mod.F90"
+(    6) !**** *FSC - Division by a*cos(theta), east-west derivatives
+(    7) # 8 "efsc_mod.F90"
+(    8) !     Purpose.
+(    9) !     --------
+(   10) !        In Fourier space divide u and v and all north-south
+(   11) !        derivatives by a*cos(theta). Also compute east-west derivatives
+(   12) !        of u,v,thermodynamic, passiv scalar variables and surface
+(   13) !        pressure.
+(   14) # 15 "efsc_mod.F90"
+(   15) !**   Interface.
+(   16) !     ----------
+(   17) !        CALL FSC(..)
+(   18) !        Explicit arguments :  PUV     - u and v
+(   19) !        --------------------  PSCALAR - scalar valued varaibles
+(   20) !                              PNSDERS - N-S derivative of S.V.V.
+(   21) !                              PEWDERS - E-W derivative of S.V.V.
+(   22) !                              PUVDERS - E-W derivative of u and v
+(   23) !     Method.
+(   24) !     -------
+(   25) # 26 "efsc_mod.F90"
+(   26) !     Externals.   None.
+(   27) !     ----------
+(   28) # 29 "efsc_mod.F90"
+(   29) !     Author.
+(   30) !     -------
+(   31) !        Mats Hamrud *ECMWF*
+(   32) # 33 "efsc_mod.F90"
+(   33) !     Modifications.
+(   34) !     --------------
+(   35) !        Original : 00-03-03 (From SC2FSC)
+(   36) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   37) # 38 "efsc_mod.F90"
+(   38) !     ------------------------------------------------------------------
+(   39) # 40 "efsc_mod.F90"
+(   40) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   41) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   42) # 43 "efsc_mod.F90"
+(   43) USE TPM_TRANS       ,ONLY : LUVDER
+(   44) USE TPM_DISTR       ,ONLY : D, MYSETW, D_NPTRLS, D_NSTAGTF
+(   45) USE TPM_GEOMETRY    ,ONLY : G, G_NMEN
+(   46) USE TPMALD_GEO      ,ONLY : GALD
+(   47) !
+(   48) # 49 "efsc_mod.F90"
+(   49) IMPLICIT NONE
+(   50) # 51 "efsc_mod.F90"
+(   51) INTEGER(KIND=JPIM) , INTENT(IN) :: KF_UV,KF_SCALARS,KF_SCDERS
+(   52) REAL(KIND=JPRB) , INTENT(INOUT) :: PUV(:,:)
+(   53) REAL(KIND=JPRB) , INTENT(IN   ) :: PSCALAR(:,:)
+(   54) REAL(KIND=JPRB) , INTENT(INOUT) :: PNSDERS(:,:)
+(   55) REAL(KIND=JPRB) , INTENT(  OUT) :: PEWDERS(:,:)
+(   56) REAL(KIND=JPRB) , INTENT(  OUT) :: PUVDERS(:,:)
+(   57) # 58 "efsc_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:00      page 5
+
+(   58) INTEGER(KIND=JPIM) :: IMEN,ISTAGTF
+(   59) # 60 "efsc_mod.F90"
+(   60) INTEGER(KIND=JPIM) :: JF,IGLG,II,IR,JM,JGL
+(   61) REAL(KIND=JPRB) :: ZIM
+(   62) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   63) !     ------------------------------------------------------------------
+(   64) # 65 "efsc_mod.F90"
+(   65) IF (LHOOK) CALL DR_HOOK('EFSC_MOD:EFSC',0,ZHOOK_HANDLE)
+(   66) # 67 "efsc_mod.F90"
+(   67) !     ------------------------------------------------------------------
+(   68)   
+(   69) !*           EAST-WEST DERIVATIVES
+(   70) !              ---------------------
+(   71)   
+(   72) !*       2.1      U AND V.
+(   73)   
+(   74) IF(LUVDER)THEN
+(   76) !$acc & present (D_NPTRLS, G_NMEN, D_NSTAGTF, PUVDERS, PUV)
+(   77)   DO JF=1,2*KF_UV
+(   78)     DO JGL = 1, D%NDGL_FS
+(   79)       IGLG    = D_NPTRLS(MYSETW)+JGL-1
+(   80)       IMEN    = G_NMEN(IGLG)
+(   81)       ISTAGTF = D_NSTAGTF(JGL)
+(   82)       DO JM=0,IMEN
+(   83)         ZIM=REAL(JM,JPRB)*GALD%EXWN
+(   84)         IR = ISTAGTF+2*JM+1
+(   85)         II = IR+1
+(   86)         PUVDERS(IR,JF) = -PUV(II,JF)*ZIM
+(   87)         PUVDERS(II,JF) =  PUV(IR,JF)*ZIM
+(   88)       ENDDO
+(   89)     ENDDO
+(   90)   ENDDO
+(   91) !$acc end parallel loop
+(   92) ENDIF
+(   93)   
+(   94) !*       2.2     SCALAR VARIABLES
+(   95)   
+(   96) IF(KF_SCDERS > 0)THEN
+(   98) !$acc & present (D_NPTRLS, G_NMEN, D_NSTAGTF, PEWDERS, PSCALAR)
+(   99)   DO JF=1,KF_SCALARS
+(  100)     DO JGL = 1, D%NDGL_FS
+(  101)       IGLG    = D_NPTRLS(MYSETW)+JGL-1
+(  102)       IMEN    = G_NMEN(IGLG)
+(  103)       ISTAGTF = D_NSTAGTF(JGL)
+(  104)       DO JM=0,IMEN
+(  105)         ZIM=REAL(JM,JPRB)*GALD%EXWN
+(  106)         IR = ISTAGTF+2*JM+1
+(  107)         II = IR+1
+(  108)         PEWDERS(IR,JF) = -PSCALAR(II,JF)*ZIM
+(  109)         PEWDERS(II,JF) =  PSCALAR(IR,JF)*ZIM
+(  110)       ENDDO
+(  111)     ENDDO
+(  112)   ENDDO
+(  113) !$acc end parallel loop
+(  114) ENDIF
+(  115) # 116 "efsc_mod.F90"
+(  116) IF (LHOOK) CALL DR_HOOK('EFSC_MOD:EFSC',1,ZHOOK_HANDLE)
+(  117) # 118 "efsc_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:00      page 6
+
+(  118) !     ------------------------------------------------------------------
+(  119) # 120 "efsc_mod.F90"
+(  120) END SUBROUTINE EFSC
+(  121) END MODULE EFSC_MOD

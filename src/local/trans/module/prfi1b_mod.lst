@@ -1,0 +1,449 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:15      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: prfi1b_mod.F90
+
+(    1) MODULE PRFI1B_MOD
+(    2)   CONTAINS
+(    3)   SUBROUTINE PRFI1B(PIA,PSPEC,KFIELDS,KFLDPTR)
+(    4)   
+(    5)    USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(    6)   
+(    7)   use tpm_gen, only: nout
+(    8)   USE TPM_DIM         ,ONLY : R,R_NSMAX
+(    9)   USE TPM_DISTR       ,ONLY : D,D_NUMP,D_MYMS,D_NASM0
+(   10)   use ieee_arithmetic
+(   11)   !use openacc
+(   12)   
+(   13)   !**** *PRFI1* - Prepare spectral fields for inverse Legendre transform
+(   14)   
+(   15)   !     Purpose.
+(   16)   !     --------
+(   17)   !        To extract the spectral fields for a specific zonal wavenumber
+(   18)   !        and put them in an order suitable for the inverse Legendre           .
+(   19)   !        tranforms.The ordering is from NSMAX to KM for better conditioning.
+(   20)   !        Elements 1,2 and NLCM(KM)+1 are zeroed in preparation for computing
+(   21)   !        u,v and derivatives in spectral space.
+(   22)   
+(   23)   !**   Interface.
+(   24)   !     ----------
+(   25)   !        *CALL* *PRFI1B(...)*
+(   26)   
+(   27)   !        Explicit arguments :  KM     - zonal wavenumber
+(   28)   !        ------------------    PIA    - spectral components for transform
+(   29)   !                              PSPEC  - spectral array
+(   30)   !                              KFIELDS  - number of fields
+(   31)   
+(   32)   
+(   33)   !        Implicit arguments :  None.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:15      page 2
+
+(   34)   !        --------------------
+(   35)   
+(   36)   !     Method.
+(   37)   !     -------
+(   38)   
+(   39)   !     Externals.   None.
+(   40)   !     ----------
+(   41)   
+(   42)   !     Reference.
+(   43)   !     ----------
+(   44)   !        ECMWF Research Department documentation of the IFS
+(   45)   
+(   46)   !     Author.
+(   47)   !     -------
+(   48)   !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   49)   
+(   50)   !     Modifications.
+(   51)   !     --------------
+(   52)   !        Original : 00-02-01 From PRFI1B in IFS CY22R1
+(   53)   
+(   54)   !     ------------------------------------------------------------------
+(   55)   
+(   56)   IMPLICIT NONE
+(   57)   
+(   58)   INTEGER(KIND=JPIM),INTENT(IN)   :: KFIELDS
+(   59)   INTEGER(KIND=JPIM) :: KM,KMLOC
+(   60)   REAL(KIND=JPRB)   ,INTENT(IN)   :: PSPEC(:,:)
+(   61)   REAL(KIND=JPRB)   ,INTENT(OUT)  :: PIA(:,:,:)
+(   62)   INTEGER(KIND=JPIM),INTENT(IN),OPTIONAL :: KFLDPTR(:)
+(   63)   
+(   64)   !     LOCAL INTEGER SCALARS
+(   65)   INTEGER(KIND=JPIM) :: II, INM, IR, J, JFLD, ILCM, IOFF,IFLD
+(   66)   
+(   67)   
+(   68)   !     ------------------------------------------------------------------
+(   69)   
+(   70)   !*       1.    EXTRACT FIELDS FROM SPECTRAL ARRAYS.
+(   71)   !              --------------------------------------------------
+(   72)   
+(   73)   IF(PRESENT(KFLDPTR)) THEN
+(   74)    ! stop 'Error: code path not (yet) supported in GPU version'
+(   75)    !$ACC DATA                                                     &
+(   76)    !$ACC      COPYIN (D_NUMP,R_NSMAX,D,D_MYMS,D_NASM0,R,KFLDPTR)  &
+(   77)    !$ACC      present(PIA)                                        &
+(   78)    !$ACC      COPYIN (PSPEC,KFLDPTR)
+(   79)    
+(   80)    !loop over wavenumber
+(   81)    
+(   82)    !$ACC parallel loop collapse(3) private(KM,ILCM,IFLD,IOFF,IR,II,INM)
+(   83)    DO KMLOC=1,D_NUMP
+(   84)       DO J=1,R_NSMAX+1
+(   85)          DO JFLD=1,KFIELDS
+(   86)             KM = D_MYMS(KMLOC)
+(   87)             ILCM = R_NSMAX+1-KM
+(   88)             IFLD = KFLDPTR(JFLD)
+(   89)             IF (J .LE. ILCM) THEN
+(   90)                IOFF = D_NASM0(KM)
+(   91)                INM = IOFF+(ILCM-J)*2
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:15      page 3
+
+(   92)                IR = 2*(JFLD-1)+1
+(   93)                II = IR+1
+(   94)                PIA(IR,J+2,KMLOC) = PSPEC(iFLD,INM  )
+(   95)                PIA(II,J+2,KMLOC) = PSPEC(iFLD,INM+1)
+(   96)             END IF
+(   97)          ENDDO
+(   98)       ENDDO
+(   99)    
+(  100)       ! end loop over wavenumber
+(  101)    END DO
+(  102) 
+(  103)    !$ACC PARALLEL LOOP COLLAPSE(2)
+(  104)    DO KMLOC=1,D_NUMP
+(  105)       DO JFLD=1,2*KFIELDS
+(  106)          KM = D_MYMS(KMLOC) 
+(  107)          ILCM = R_NSMAX+1-KM
+(  108)          PIA(JFLD,1,KMLOC) = 0.0_JPRBT
+(  109)          PIA(JFLD,2,KMLOC) = 0.0_JPRBT
+(  110)          PIA(JFLD,ILCM+3,KMLOC) = 0.0_JPRBT
+(  111)       ENDDO 
+(  112)       ! end loop over wavenumber
+(  113)    END DO
+(  114)    
+(  115)    !$ACC end data
+(  116) 
+(  117)   ELSE
+(  118) 
+(  119)    !$ACC DATA                                                     &
+(  120)    !$ACC      COPYIN (D_NUMP,R_NSMAX,D,D_MYMS,D_NASM0,R)          &
+(  121)    !$ACC      present(PIA)                                        &
+(  122)    !$ACC      COPYIN (PSPEC)
+(  123) 
+(  124)    !loop over wavenumber
+(  125) 
+(  126)    !$ACC parallel loop collapse(3) private(KM,ILCM,IOFF,INM,IR,II)
+(  127)    DO KMLOC=1,D_NUMP
+(  128)       DO J=1,R_NSMAX+1
+(  129)          DO JFLD=1,KFIELDS
+(  130)             KM = D_MYMS(KMLOC)
+(  131)             ILCM = R_NSMAX+1-KM
+(  132)             if (J .le. ILCM) then
+(  133)                IOFF = D_NASM0(KM)
+(  134)                INM = IOFF+(ILCM-J)*2
+(  135)                IR = 2*(JFLD-1)+1
+(  136)                II = IR+1
+(  137)                PIA(IR,J+2,KMLOC) = PSPEC(JFLD,INM  )
+(  138)                PIA(II,J+2,KMLOC) = PSPEC(JFLD,INM+1)
+(  139)             end if
+(  140)          ENDDO
+(  141)       ENDDO
+(  142)    
+(  143)       ! end loop over wavenumber
+(  144)    END DO
+(  145) 
+(  146)    !$ACC parallel loop collapse(2) private(KM,ILCM)
+(  147)    DO KMLOC=1,D_NUMP
+(  148)       DO JFLD=1,2*KFIELDS
+(  149)          KM = D_MYMS(KMLOC) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:15      page 4
+
+(  150)          ILCM = R_NSMAX+1-KM
+(  151)          PIA(JFLD,1,KMLOC) = 0.0_JPRBT
+(  152)          PIA(JFLD,2,KMLOC) = 0.0_JPRBT
+(  153)          PIA(JFLD,ILCM+3,KMLOC) = 0.0_JPRBT
+(  154)       ENDDO 
+(  155)       ! end loop over wavenumber
+(  156)    END DO
+(  157)    
+(  158)    !$ACC end data
+(  159)   END IF   
+(  160) 
+(  161)   !     ------------------------------------------------------------------
+(  162)   
+(  163)   END SUBROUTINE PRFI1B
+(  164)   END MODULE PRFI1B_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:15      page 5
+
+(    1) # 1 "prfi1b_mod.F90"
+(    1) MODULE PRFI1B_MOD
+(    2)   CONTAINS
+(    3)   SUBROUTINE PRFI1B(PIA,PSPEC,KFIELDS,KFLDPTR)
+(    4)   
+(    5)    USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(    6)   
+(    7)   use tpm_gen, only: nout
+(    8)   USE TPM_DIM         ,ONLY : R,R_NSMAX
+(    9)   USE TPM_DISTR       ,ONLY : D,D_NUMP,D_MYMS,D_NASM0
+(   10)   use ieee_arithmetic
+(   11)   !use openacc
+(   12)   
+(   13)   !**** *PRFI1* - Prepare spectral fields for inverse Legendre transform
+(   14)   
+(   15)   !     Purpose.
+(   16)   !     --------
+(   17)   !        To extract the spectral fields for a specific zonal wavenumber
+(   18)   !        and put them in an order suitable for the inverse Legendre           .
+(   19)   !        tranforms.The ordering is from NSMAX to KM for better conditioning.
+(   20)   !        Elements 1,2 and NLCM(KM)+1 are zeroed in preparation for computing
+(   21)   !        u,v and derivatives in spectral space.
+(   22)   
+(   23)   !**   Interface.
+(   24)   !     ----------
+(   25)   !        *CALL* *PRFI1B(...)*
+(   26)   
+(   27)   !        Explicit arguments :  KM     - zonal wavenumber
+(   28)   !        ------------------    PIA    - spectral components for transform
+(   29)   !                              PSPEC  - spectral array
+(   30)   !                              KFIELDS  - number of fields
+(   31)   
+(   32)   
+(   33)   !        Implicit arguments :  None.
+(   34)   !        --------------------
+(   35)   
+(   36)   !     Method.
+(   37)   !     -------
+(   38)   
+(   39)   !     Externals.   None.
+(   40)   !     ----------
+(   41)   
+(   42)   !     Reference.
+(   43)   !     ----------
+(   44)   !        ECMWF Research Department documentation of the IFS
+(   45)   
+(   46)   !     Author.
+(   47)   !     -------
+(   48)   !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   49)   
+(   50)   !     Modifications.
+(   51)   !     --------------
+(   52)   !        Original : 00-02-01 From PRFI1B in IFS CY22R1
+(   53)   
+(   54)   !     ------------------------------------------------------------------
+(   55)   
+(   56)   IMPLICIT NONE
+(   57)   
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:15      page 6
+
+(   58)   INTEGER(KIND=JPIM),INTENT(IN)   :: KFIELDS
+(   59)   INTEGER(KIND=JPIM) :: KM,KMLOC
+(   60)   REAL(KIND=JPRB)   ,INTENT(IN)   :: PSPEC(:,:)
+(   61)   REAL(KIND=JPRB)   ,INTENT(OUT)  :: PIA(:,:,:)
+(   62)   INTEGER(KIND=JPIM),INTENT(IN),OPTIONAL :: KFLDPTR(:)
+(   63)   
+(   64)   !     LOCAL INTEGER SCALARS
+(   65)   INTEGER(KIND=JPIM) :: II, INM, IR, J, JFLD, ILCM, IOFF,IFLD
+(   66)   
+(   67)   
+(   68)   !     ------------------------------------------------------------------
+(   69)   
+(   70)   !*       1.    EXTRACT FIELDS FROM SPECTRAL ARRAYS.
+(   71)   !              --------------------------------------------------
+(   72)   
+(   73)   IF(PRESENT(KFLDPTR)) THEN
+(   74)    ! stop 'Error: code path not (yet) supported in GPU version'
+(   76)    !$ACC      COPYIN (D_NUMP,R_NSMAX,D,D_MYMS,D_NASM0,R,KFLDPTR)  &
+(   77)    !$ACC      present(PIA)                                        &
+(   78)    !$ACC      COPYIN (PSPEC,KFLDPTR)
+(   79)    
+(   80)    !loop over wavenumber
+(   81)    
+(   82)    !$ACC parallel loop collapse(3) private(KM,ILCM,IFLD,IOFF,IR,II,INM)
+(   83)    DO KMLOC=1,D_NUMP
+(   84)       DO J=1,R_NSMAX+1
+(   85)          DO JFLD=1,KFIELDS
+(   86)             KM = D_MYMS(KMLOC)
+(   87)             ILCM = R_NSMAX+1-KM
+(   88)             IFLD = KFLDPTR(JFLD)
+(   89)             IF (J .LE. ILCM) THEN
+(   90)                IOFF = D_NASM0(KM)
+(   91)                INM = IOFF+(ILCM-J)*2
+(   92)                IR = 2*(JFLD-1)+1
+(   93)                II = IR+1
+(   94)                PIA(IR,J+2,KMLOC) = PSPEC(iFLD,INM  )
+(   95)                PIA(II,J+2,KMLOC) = PSPEC(iFLD,INM+1)
+(   96)             END IF
+(   97)          ENDDO
+(   98)       ENDDO
+(   99)    
+(  100)       ! end loop over wavenumber
+(  101)    END DO
+(  102) # 103 "prfi1b_mod.F90"
+(  103)    !$ACC PARALLEL LOOP COLLAPSE(2)
+(  104)    DO KMLOC=1,D_NUMP
+(  105)       DO JFLD=1,2*KFIELDS
+(  106)          KM = D_MYMS(KMLOC) 
+(  107)          ILCM = R_NSMAX+1-KM
+(  108)          PIA(JFLD,1,KMLOC) = 0.0_JPRBT
+(  109)          PIA(JFLD,2,KMLOC) = 0.0_JPRBT
+(  110)          PIA(JFLD,ILCM+3,KMLOC) = 0.0_JPRBT
+(  111)       ENDDO 
+(  112)       ! end loop over wavenumber
+(  113)    END DO
+(  114)    
+(  115)    !$ACC end data
+(  116) # 117 "prfi1b_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:15      page 7
+
+(  117)   ELSE
+(  118) # 119 "prfi1b_mod.F90"
+(  120)    !$ACC      COPYIN (D_NUMP,R_NSMAX,D,D_MYMS,D_NASM0,R)          &
+(  121)    !$ACC      present(PIA)                                        &
+(  122)    !$ACC      COPYIN (PSPEC)
+(  123) # 124 "prfi1b_mod.F90"
+(  124)    !loop over wavenumber
+(  125) # 126 "prfi1b_mod.F90"
+(  126)    !$ACC parallel loop collapse(3) private(KM,ILCM,IOFF,INM,IR,II)
+(  127)    DO KMLOC=1,D_NUMP
+(  128)       DO J=1,R_NSMAX+1
+(  129)          DO JFLD=1,KFIELDS
+(  130)             KM = D_MYMS(KMLOC)
+(  131)             ILCM = R_NSMAX+1-KM
+(  132)             if (J .le. ILCM) then
+(  133)                IOFF = D_NASM0(KM)
+(  134)                INM = IOFF+(ILCM-J)*2
+(  135)                IR = 2*(JFLD-1)+1
+(  136)                II = IR+1
+(  137)                PIA(IR,J+2,KMLOC) = PSPEC(JFLD,INM  )
+(  138)                PIA(II,J+2,KMLOC) = PSPEC(JFLD,INM+1)
+(  139)             end if
+(  140)          ENDDO
+(  141)       ENDDO
+(  142)    
+(  143)       ! end loop over wavenumber
+(  144)    END DO
+(  145) # 146 "prfi1b_mod.F90"
+(  146)    !$ACC parallel loop collapse(2) private(KM,ILCM)
+(  147)    DO KMLOC=1,D_NUMP
+(  148)       DO JFLD=1,2*KFIELDS
+(  149)          KM = D_MYMS(KMLOC) 
+(  150)          ILCM = R_NSMAX+1-KM
+(  151)          PIA(JFLD,1,KMLOC) = 0.0_JPRBT
+(  152)          PIA(JFLD,2,KMLOC) = 0.0_JPRBT
+(  153)          PIA(JFLD,ILCM+3,KMLOC) = 0.0_JPRBT
+(  154)       ENDDO 
+(  155)       ! end loop over wavenumber
+(  156)    END DO
+(  157)    
+(  158)    !$ACC end data
+(  159)   END IF   
+(  160) # 161 "prfi1b_mod.F90"
+(  161)   !     ------------------------------------------------------------------
+(  162)   
+(  163)   END SUBROUTINE PRFI1B
+(  164)   END MODULE PRFI1B_MOD

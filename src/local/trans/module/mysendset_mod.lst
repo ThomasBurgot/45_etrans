@@ -1,0 +1,215 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:33      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: mysendset_mod.F90
+
+(    1) MODULE MYSENDSET_MOD
+(    2) CONTAINS
+(    3) FUNCTION MYSENDSET(KSETS,KMYSET,KSET)
+(    4) 
+(    5) 
+(    6) !**** *MYSENDSET* RETURNS SET NUMBER TO SEND TO
+(    7) 
+(    8) !     Purpose.
+(    9) !     --------
+(   10) !
+(   11) 
+(   12) !**   Interface.
+(   13) !     ----------
+(   14) !        ISENDSET = MYSENDSET(KSETS,KMYSET,KSET)
+(   15) 
+(   16) !        Explicit arguments :
+(   17) !        --------------------
+(   18) !                  input:   KSETS
+(   19) 
+(   20) !        Implicit arguments :  NONE
+(   21) !        --------------------
+(   22) !     Method.
+(   23) !     -------
+(   24) 
+(   25) !     Externals.
+(   26) !     ----------
+(   27) !         NONE
+(   28) 
+(   29) !     Reference.
+(   30) !     ----------
+(   31) !        ECMWF Research Department documentation of the IFS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:33      page 2
+
+(   32) 
+(   33) !     Author.
+(   34) !     -------
+(   35) !        Mats Hamrud *ECMWF*
+(   36) 
+(   37) !     Modifications.
+(   38) !     --------------
+(   39) !        Original : 00-02-03
+(   40) 
+(   41) !     ------------------------------------------------------------------
+(   42) 
+(   43) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   44) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   45) 
+(   46) IMPLICIT NONE
+(   47) INTEGER(KIND=JPIM) :: MYSENDSET
+(   48) INTEGER(KIND=JPIM),INTENT(IN)  :: KSETS,KMYSET,KSET
+(   49) 
+(   50) 
+(   51) !     ------------------------------------------------------------------
+(   52) 
+(   53) !*       1.    Check input argument for validity
+(   54) !              ---------------------------------
+(   55) 
+(   56) IF(KSETS < 1 .OR. KMYSET > KSETS .OR. KSET > KSETS-1) THEN
+(   57) 
+(   58)   CALL ABORT_TRANS(' MYSENDSET: INVALID ARGUMENT ')
+(   59) 
+(   60) ELSE
+(   61) 
+(   62) !*       2.    Compute output parameters
+(   63) !              -------------------------
+(   64) 
+(   65)   MYSENDSET = MOD(KMYSET+KSET-1,KSETS)+1
+(   66) 
+(   67) ENDIF
+(   68) 
+(   69) END FUNCTION MYSENDSET
+(   70) END MODULE MYSENDSET_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:33      page 3
+
+(    1) # 1 "mysendset_mod.F90"
+(    1) MODULE MYSENDSET_MOD
+(    2) CONTAINS
+(    3) FUNCTION MYSENDSET(KSETS,KMYSET,KSET)
+(    4) # 6 "mysendset_mod.F90"
+(    6) !**** *MYSENDSET* RETURNS SET NUMBER TO SEND TO
+(    7) # 8 "mysendset_mod.F90"
+(    8) !     Purpose.
+(    9) !     --------
+(   10) !
+(   11) # 12 "mysendset_mod.F90"
+(   12) !**   Interface.
+(   13) !     ----------
+(   14) !        ISENDSET = MYSENDSET(KSETS,KMYSET,KSET)
+(   15) # 16 "mysendset_mod.F90"
+(   16) !        Explicit arguments :
+(   17) !        --------------------
+(   18) !                  input:   KSETS
+(   19) # 20 "mysendset_mod.F90"
+(   20) !        Implicit arguments :  NONE
+(   21) !        --------------------
+(   22) !     Method.
+(   23) !     -------
+(   24) # 25 "mysendset_mod.F90"
+(   25) !     Externals.
+(   26) !     ----------
+(   27) !         NONE
+(   28) # 29 "mysendset_mod.F90"
+(   29) !     Reference.
+(   30) !     ----------
+(   31) !        ECMWF Research Department documentation of the IFS
+(   32) # 33 "mysendset_mod.F90"
+(   33) !     Author.
+(   34) !     -------
+(   35) !        Mats Hamrud *ECMWF*
+(   36) # 37 "mysendset_mod.F90"
+(   37) !     Modifications.
+(   38) !     --------------
+(   39) !        Original : 00-02-03
+(   40) # 41 "mysendset_mod.F90"
+(   41) !     ------------------------------------------------------------------
+(   42) # 43 "mysendset_mod.F90"
+(   43) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   44) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   45) # 46 "mysendset_mod.F90"
+(   46) IMPLICIT NONE
+(   47) INTEGER(KIND=JPIM) :: MYSENDSET
+(   48) INTEGER(KIND=JPIM),INTENT(IN)  :: KSETS,KMYSET,KSET
+(   49) # 51 "mysendset_mod.F90"
+(   51) !     ------------------------------------------------------------------
+(   52) # 53 "mysendset_mod.F90"
+(   53) !*       1.    Check input argument for validity
+(   54) !              ---------------------------------
+(   55) # 56 "mysendset_mod.F90"
+(   56) IF(KSETS < 1 .OR. KMYSET > KSETS .OR. KSET > KSETS-1) THEN
+(   57) # 58 "mysendset_mod.F90"
+(   58)   CALL ABORT_TRANS(' MYSENDSET: INVALID ARGUMENT ')
+(   59) # 60 "mysendset_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:33      page 4
+
+(   60) ELSE
+(   61) # 62 "mysendset_mod.F90"
+(   62) !*       2.    Compute output parameters
+(   63) !              -------------------------
+(   64) # 65 "mysendset_mod.F90"
+(   65)   MYSENDSET = MOD(KMYSET+KSET-1,KSETS)+1
+(   66) # 67 "mysendset_mod.F90"
+(   67) ENDIF
+(   68) # 69 "mysendset_mod.F90"
+(   69) END FUNCTION MYSENDSET
+(   70) END MODULE MYSENDSET_MOD

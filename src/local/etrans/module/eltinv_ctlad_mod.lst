@@ -1,0 +1,326 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:12      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eltinv_ctlad_mod.F90
+
+(    1) MODULE ELTINV_CTLAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ELTINV_CTLAD(KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS,&
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2,&
+(    6)  & KFLDPTRUV,KFLDPTRSC,FSPGL_PROC,PSPMEANU,PSPMEANV)
+(    7) 
+(    8) !**** *ELTINV_CTLAD* - Control routine for inverse Legandre transform - adj.
+(    9) 
+(   10) !     Purpose.
+(   11) !     --------
+(   12) !     Control routine for the inverse LEGENDRE transform
+(   13) 
+(   14) !**   Interface.
+(   15) !     ----------
+(   16) !     CALL EINV_TRANS_CTL(...)
+(   17) !     KF_OUT_LT    - number of fields coming out from inverse LT
+(   18) !     KF_UV        - local number of spectral u-v fields
+(   19) !     KF_SCALARS   - local number of scalar spectral fields
+(   20) !     KF_SCDERS    - local number of derivatives of scalar spectral fields
+(   21) !     PSPVOR(:,:)  - spectral vorticity (input)
+(   22) !     PSPDIV(:,:)  - spectral divergence (input)
+(   23) !     PSPSCALAR(:,:) - spectral scalarvalued fields (input)
+(   24) !     KFLDPTRUV(:) - field pointer array for vor./div.
+(   25) !     KFLDPTRSC(:) - field pointer array for PSPSCALAR
+(   26) !     FSPGL_PROC  - external procedure to be executed in fourier space
+(   27) !                   before transposition
+(   28) 
+(   29) !     Method.
+(   30) !     -------
+(   31) 
+(   32) !     Externals.
+(   33) !     ----------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:12      page 2
+
+(   34) 
+(   35) !     Author.
+(   36) !     -------
+(   37) !        Mats Hamrud *ECMWF*
+(   38) 
+(   39) !     Modifications.
+(   40) !     --------------
+(   41) !        Original : 00-06-03
+(   42) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   43) !        O.Spaniel     Oct-2004 phasing for AL29
+(   44) !        N. Lopes & R. El Khatib 15-Jun-2012 Scalability enhancement +
+(   45) !        thread-safety
+(   46) !     ------------------------------------------------------------------
+(   47) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   48) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   49) USE TPM_GEN         ,ONLY : LALLOPERM
+(   50) !USE TPM_DIM
+(   51) USE TPM_TRANS       ,ONLY : FOUBUF, FOUBUF_IN
+(   52) USE TPM_DISTR       ,ONLY : D
+(   53) USE ELTINVAD_MOD    ,ONLY : ELTINVAD
+(   54) USE TRLTOM_MOD      ,ONLY : TRLTOM
+(   55) !
+(   56) 
+(   57) IMPLICIT NONE
+(   58) 
+(   59) INTEGER(KIND=JPIM),INTENT(IN) :: KF_OUT_LT
+(   60) INTEGER(KIND=JPIM),INTENT(IN) :: KF_UV
+(   61) INTEGER(KIND=JPIM),INTENT(IN) :: KF_SCALARS
+(   62) INTEGER(KIND=JPIM),INTENT(IN) :: KF_SCDERS
+(   63) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPVOR(:,:)
+(   64) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPDIV(:,:)
+(   65) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPSCALAR(:,:)
+(   66) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT)  :: PSPSC3A(:,:,:)
+(   67) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT)  :: PSPSC3B(:,:,:)
+(   68) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT)  :: PSPSC2(:,:)
+(   69) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN) :: KFLDPTRUV(:)
+(   70) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN) :: KFLDPTRSC(:)
+(   71) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPMEANU(:)
+(   72) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPMEANV(:)
+(   73) 
+(   74) EXTERNAL  FSPGL_PROC
+(   75) OPTIONAL  FSPGL_PROC
+(   76) 
+(   77) INTEGER(KIND=JPIM) :: IBLEN, ILEI2
+(   78) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   79) 
+(   80) !     ------------------------------------------------------------------
+(   81) 
+(   82) IF (LHOOK) CALL DR_HOOK('ELTINV_CTLAD_MOD:ELTINV_CTLAD',0,ZHOOK_HANDLE)
+(   83) 
+(   84) ILEI2 = 8*KF_UV + 2*KF_SCALARS + 2*KF_SCDERS
+(   85) IBLEN = D%NLENGT0B*2*KF_OUT_LT
+(   86) IF (ALLOCATED(FOUBUF_IN)) THEN
+(   87)   IF (MAX(1,IBLEN) > SIZE(FOUBUF_IN)) THEN
+(   88)     DEALLOCATE(FOUBUF_IN)
+(   89)     ALLOCATE(FOUBUF_IN(MAX(1,IBLEN)))
+(   90)   ENDIF
+(   91) ELSE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:12      page 3
+
+(   92)   ALLOCATE(FOUBUF_IN(MAX(1,IBLEN)))
+(   93) ENDIF
+(   94) CALL GSTATS(180,0)
+(   95) CALL TRLTOM(FOUBUF,FOUBUF_IN,2*KF_OUT_LT)
+(   96) CALL GSTATS(180,1)
+(   97) IF (.NOT.LALLOPERM) DEALLOCATE(FOUBUF)
+(   98) 
+(   99) CALL GSTATS(1648,0)
+(  100) IF(KF_OUT_LT > 0) THEN
+(  101)   CALL ELTINVAD(KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS,ILEI2,&
+(  102)    & PSPVOR,PSPDIV,PSPSCALAR,PSPSC3A,PSPSC3B,PSPSC2, &
+(  103)    & KFLDPTRUV,KFLDPTRSC,FSPGL_PROC,PSPMEANU,PSPMEANV)
+(  104) ENDIF
+(  105) CALL GSTATS(1648,1)
+(  106) 
+(  107) IF (.NOT.LALLOPERM) DEALLOCATE(FOUBUF_IN)
+(  108) IF (LHOOK) CALL DR_HOOK('ELTINV_CTLAD_MOD:ELTINV_CTLAD',1,ZHOOK_HANDLE)
+(  109) 
+(  110) !     ------------------------------------------------------------------
+(  111) 
+(  112) END SUBROUTINE ELTINV_CTLAD
+(  113) END MODULE ELTINV_CTLAD_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:12      page 4
+
+(    1) # 1 "eltinv_ctlad_mod.F90"
+(    1) MODULE ELTINV_CTLAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ELTINV_CTLAD(KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS,&
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2,&
+(    6)  & KFLDPTRUV,KFLDPTRSC,FSPGL_PROC,PSPMEANU,PSPMEANV)
+(    7) # 8 "eltinv_ctlad_mod.F90"
+(    8) !**** *ELTINV_CTLAD* - Control routine for inverse Legandre transform - adj.
+(    9) # 10 "eltinv_ctlad_mod.F90"
+(   10) !     Purpose.
+(   11) !     --------
+(   12) !     Control routine for the inverse LEGENDRE transform
+(   13) # 14 "eltinv_ctlad_mod.F90"
+(   14) !**   Interface.
+(   15) !     ----------
+(   16) !     CALL EINV_TRANS_CTL(...)
+(   17) !     KF_OUT_LT    - number of fields coming out from inverse LT
+(   18) !     KF_UV        - local number of spectral u-v fields
+(   19) !     KF_SCALARS   - local number of scalar spectral fields
+(   20) !     KF_SCDERS    - local number of derivatives of scalar spectral fields
+(   21) !     PSPVOR(:,:)  - spectral vorticity (input)
+(   22) !     PSPDIV(:,:)  - spectral divergence (input)
+(   23) !     PSPSCALAR(:,:) - spectral scalarvalued fields (input)
+(   24) !     KFLDPTRUV(:) - field pointer array for vor./div.
+(   25) !     KFLDPTRSC(:) - field pointer array for PSPSCALAR
+(   26) !     FSPGL_PROC  - external procedure to be executed in fourier space
+(   27) !                   before transposition
+(   28) # 29 "eltinv_ctlad_mod.F90"
+(   29) !     Method.
+(   30) !     -------
+(   31) # 32 "eltinv_ctlad_mod.F90"
+(   32) !     Externals.
+(   33) !     ----------
+(   34) # 35 "eltinv_ctlad_mod.F90"
+(   35) !     Author.
+(   36) !     -------
+(   37) !        Mats Hamrud *ECMWF*
+(   38) # 39 "eltinv_ctlad_mod.F90"
+(   39) !     Modifications.
+(   40) !     --------------
+(   41) !        Original : 00-06-03
+(   42) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   43) !        O.Spaniel     Oct-2004 phasing for AL29
+(   44) !        N. Lopes & R. El Khatib 15-Jun-2012 Scalability enhancement +
+(   45) !        thread-safety
+(   46) !     ------------------------------------------------------------------
+(   47) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   48) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   49) USE TPM_GEN         ,ONLY : LALLOPERM
+(   50) !USE TPM_DIM
+(   51) USE TPM_TRANS       ,ONLY : FOUBUF, FOUBUF_IN
+(   52) USE TPM_DISTR       ,ONLY : D
+(   53) USE ELTINVAD_MOD    ,ONLY : ELTINVAD
+(   54) USE TRLTOM_MOD      ,ONLY : TRLTOM
+(   55) !
+(   56) # 57 "eltinv_ctlad_mod.F90"
+(   57) IMPLICIT NONE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:12      page 5
+
+(   58) # 59 "eltinv_ctlad_mod.F90"
+(   59) INTEGER(KIND=JPIM),INTENT(IN) :: KF_OUT_LT
+(   60) INTEGER(KIND=JPIM),INTENT(IN) :: KF_UV
+(   61) INTEGER(KIND=JPIM),INTENT(IN) :: KF_SCALARS
+(   62) INTEGER(KIND=JPIM),INTENT(IN) :: KF_SCDERS
+(   63) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPVOR(:,:)
+(   64) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPDIV(:,:)
+(   65) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPSCALAR(:,:)
+(   66) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT)  :: PSPSC3A(:,:,:)
+(   67) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT)  :: PSPSC3B(:,:,:)
+(   68) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT)  :: PSPSC2(:,:)
+(   69) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN) :: KFLDPTRUV(:)
+(   70) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN) :: KFLDPTRSC(:)
+(   71) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPMEANU(:)
+(   72) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPMEANV(:)
+(   73) # 74 "eltinv_ctlad_mod.F90"
+(   74) EXTERNAL  FSPGL_PROC
+(   75) OPTIONAL  FSPGL_PROC
+(   76) # 77 "eltinv_ctlad_mod.F90"
+(   77) INTEGER(KIND=JPIM) :: IBLEN, ILEI2
+(   78) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   79) # 80 "eltinv_ctlad_mod.F90"
+(   80) !     ------------------------------------------------------------------
+(   81) # 82 "eltinv_ctlad_mod.F90"
+(   82) IF (LHOOK) CALL DR_HOOK('ELTINV_CTLAD_MOD:ELTINV_CTLAD',0,ZHOOK_HANDLE)
+(   83) # 84 "eltinv_ctlad_mod.F90"
+(   84) ILEI2 = 8*KF_UV + 2*KF_SCALARS + 2*KF_SCDERS
+(   85) IBLEN = D%NLENGT0B*2*KF_OUT_LT
+(   86) IF (ALLOCATED(FOUBUF_IN)) THEN
+(   87)   IF (MAX(1,IBLEN) > SIZE(FOUBUF_IN)) THEN
+(   88)     DEALLOCATE(FOUBUF_IN)
+(   89)     ALLOCATE(FOUBUF_IN(MAX(1,IBLEN)))
+(   90)   ENDIF
+(   91) ELSE
+(   92)   ALLOCATE(FOUBUF_IN(MAX(1,IBLEN)))
+(   93) ENDIF
+(   94) CALL GSTATS(180,0)
+(   95) CALL TRLTOM(FOUBUF,FOUBUF_IN,2*KF_OUT_LT)
+(   96) CALL GSTATS(180,1)
+(   97) IF (.NOT.LALLOPERM) DEALLOCATE(FOUBUF)
+(   98) # 99 "eltinv_ctlad_mod.F90"
+(   99) CALL GSTATS(1648,0)
+(  100) IF(KF_OUT_LT > 0) THEN
+(  101)   CALL ELTINVAD(KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS,ILEI2,&
+(  102)    & PSPVOR,PSPDIV,PSPSCALAR,PSPSC3A,PSPSC3B,PSPSC2, &
+(  103)    & KFLDPTRUV,KFLDPTRSC,FSPGL_PROC,PSPMEANU,PSPMEANV)
+(  104) ENDIF
+(  105) CALL GSTATS(1648,1)
+(  106) # 107 "eltinv_ctlad_mod.F90"
+(  107) IF (.NOT.LALLOPERM) DEALLOCATE(FOUBUF_IN)
+(  108) IF (LHOOK) CALL DR_HOOK('ELTINV_CTLAD_MOD:ELTINV_CTLAD',1,ZHOOK_HANDLE)
+(  109) # 110 "eltinv_ctlad_mod.F90"
+(  110) !     ------------------------------------------------------------------
+(  111) # 112 "eltinv_ctlad_mod.F90"
+(  112) END SUBROUTINE ELTINV_CTLAD
+(  113) END MODULE ELTINV_CTLAD_MOD

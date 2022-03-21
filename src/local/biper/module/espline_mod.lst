@@ -1,0 +1,484 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:30      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: espline_mod.F90
+
+(    1) MODULE ESPLINE_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ESPLINE(KDLUN,KDLON,KDGUN,KDGL,KDLUX,KDGUX,KSTART,&
+(    4)  & KDLSM,KDGSA,KDGEN,KNUBI,PWORK,PALFA,LDBIX,LDBIY,KDAD)  
+(    5) 
+(    6) !   purpose  :
+(    7) !   --------
+(    8) !     Make spline extension.
+(    9) 
+(   10) !    *CALL* *ESPLINE*(...)
+(   11) 
+(   12) !      externals :
+(   13) !      ----------
+(   14) !             None
+(   15) 
+(   16) !      explicit arguments :
+(   17) !      ------------------
+(   18) !     KDLUN : lower bound for the x (or longitude) dimension
+(   19) !             of the gridpoint array
+(   20) !     KDLON : upper bound for the x (or longitude) dimension
+(   21) !             of the gridpoint array on C U I U E
+(   22) !     KDGUN : lower bound for the y (or latitude) dimension
+(   23) !             of the gridpoint array
+(   24) !     KDGL : upper bound for the y (or latitude) dimension
+(   25) !             of the gridpoint array on C U I U E
+(   26) !     KDLUX : upper bound for the x (or longitude) dimension
+(   27) !             of  C U I.
+(   28) !     KDGUX : upper bound for the y (or latitude) dimension
+(   29) !             of  C U I.
+(   30) !     KSTART : first dimension in x direction of g-p array
+(   31) !     KDLSM  : last dimension in x direction of g-p array
+(   32) !     KDGSA  : first dimension in y of g-p array
+(   33) !     KDGEN  :  last dimension in y of g-p array
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:30      page 2
+
+(   34) !     KNUBI  : number of levels to biperiodicise
+(   35) !     PWORK : gridpoint array on C U I U E.
+(   36) !     PALFA : boundary condition of a spline:
+(   37) !             = 0. ... natural spline
+(   38) !             = 1. ... boundary condition computed differentially
+(   39) !                      (additional option)
+(   40) !     LDBIX : .TRUE. biperiodicisation in x  ( and vice versa )
+(   41) !     LDBIY : .TRUE. biperiodicisation in y  ( and vice versa )
+(   42) !     KDAD  : 1 for test of biperiodic.
+(   43) 
+(   44) !      references :
+(   45) !      ----------
+(   46) 
+(   47) !      author :
+(   48) !      ------
+(   49) !       Michal Batka and Radmila Bubnova ( B & B )
+(   50) 
+(   51) !      modifications :
+(   52) !      -------------
+(   53) !      J.Vivoda 03-2002 2D model fix
+(   54) !      A. Stanesic  : 28-03-08: KDADD - test of externalized biper.
+(   55) !      -------------------------------------------------------------
+(   56) 
+(   57) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   58) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   59) 
+(   60) !      -------------------------------------------------------------
+(   61) 
+(   62) IMPLICIT NONE
+(   63) 
+(   64) INTEGER(KIND=JPIM),INTENT(IN)    :: KSTART 
+(   65) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLSM 
+(   66) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGSA 
+(   67) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGEN 
+(   68) INTEGER(KIND=JPIM),INTENT(IN)    :: KNUBI 
+(   69) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLUN 
+(   70) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLON 
+(   71) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGUN 
+(   72) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGL 
+(   73) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLUX 
+(   74) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGUX 
+(   75) REAL(KIND=JPRB)   ,INTENT(INOUT) :: PWORK(KSTART:KDLSM,KNUBI,KDGSA:KDGEN) 
+(   76) REAL(KIND=JPRB)   ,INTENT(IN)    :: PALFA 
+(   77) LOGICAL           ,INTENT(IN)    :: LDBIX 
+(   78) LOGICAL           ,INTENT(IN)    :: LDBIY 
+(   79) INTEGER(KIND=JPIM),INTENT(IN)    :: KDAD 
+(   80) 
+(   81) !      -------------------------------------------------------------
+(   82) 
+(   83) LOGICAL :: LLBIX
+(   84) LOGICAL :: LLBIY
+(   85) INTEGER(KIND=JPIM) :: IENDX, IENDY, JFL, JLAT, JLON, IA
+(   86) REAL(KIND=JPRB) :: ZA, ZB, ZC, ZD, ZEPSA, ZEPSB, ZJ, ZK, ZKP1,&
+(   87)  & ZLAM, ZLAMB, ZM1, ZM2, ZMM, ZNY  
+(   88) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   89) 
+(   90) !      -------------------------------------------------------------
+(   91) IF (LHOOK) CALL DR_HOOK('ESPLINE',0,ZHOOK_HANDLE)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:30      page 3
+
+(   92) !      -------------------------------------------------------------
+(   93) 
+(   94) !*         1. Spline   Extension.
+(   95) !             -------------------
+(   96) 
+(   97) LLBIX=LDBIX
+(   98) LLBIY=LDBIY
+(   99) 
+(  100) IF( KDLUN==1.AND.KDLUX==1 ) LLBIX=.FALSE.
+(  101) IF( KDGUN==1.AND.KDGUX==1 ) LLBIY=.FALSE.
+(  102) 
+(  103) IENDX = KDGUX 
+(  104) IENDY = KDLON 
+(  105) 
+(  106) IF(LLBIX.AND.(.NOT.LLBIY)) THEN
+(  107)   IENDY = KDLUN - 1
+(  108) 
+(  109) ELSEIF((.NOT.LLBIX).AND.LLBIY) THEN
+(  110)   IENDX = KDGUN - 1
+(  111)   IENDY = KDLUX
+(  112) 
+(  113) ELSEIF((.NOT.LLBIX).AND.(.NOT.LLBIY)) THEN
+(  114)   IF (LHOOK) CALL DR_HOOK('ESPLINE',1,ZHOOK_HANDLE)
+(  115)   RETURN
+(  116) ENDIF
+(  117) DO JFL = 1, KNUBI
+(  118) 
+(  119)   ZK    = REAL(KDLON-KDLUX+1,JPRB)
+(  120)   ZKP1  = ZK + 1.0_JPRB
+(  121)   ZLAMB = ZK/ZKP1
+(  122)   ZNY   = PALFA/ZKP1
+(  123) 
+(  124)   DO JLAT=KDGUN,IENDX
+(  125) 
+(  126)     ZEPSA = ((PWORK(KDLUN,JFL,JLAT)-PWORK(KDLUX,JFL,JLAT))/ZK -&
+(  127)      & PWORK(KDLUX,JFL,JLAT)+PWORK(KDLUX-1,JFL,JLAT))*6._JPRB/ZKP1 -&
+(  128)      & ZNY*(PWORK(KDLUX,JFL,JLAT)-2.0_JPRB* PWORK(KDLUX-1,JFL,JLAT)+&
+(  129)      & PWORK(KDLUX-2,JFL,JLAT))  
+(  130) 
+(  131)     ZEPSB = (PWORK(KDLUN+1,JFL,JLAT)-PWORK(KDLUN,JFL,JLAT) -&
+(  132)      & (PWORK(KDLUN,JFL,JLAT)-PWORK(KDLUX,JFL,JLAT))/ZK)*6._JPRB/ZKP1-&
+(  133)      & ZNY*(PWORK(KDLUN+2,JFL,JLAT)-2.0_JPRB* PWORK(KDLUN+1,JFL,JLAT)+&
+(  134)      & PWORK(KDLUN,JFL,JLAT))  
+(  135) 
+(  136)     ZMM = 4._JPRB - ZLAMB*ZLAMB
+(  137)     ZM1 = (2.0_JPRB*ZEPSA - ZLAMB*ZEPSB)/ZMM
+(  138)     ZM2 = (2.0_JPRB*ZEPSB - ZLAMB*ZEPSA)/ZMM
+(  139)     ZA  = PWORK(KDLUX,JFL,JLAT)
+(  140)     ZB  = (PWORK(KDLUN,JFL,JLAT)-PWORK(KDLUX,JFL,JLAT))/ZK-&
+(  141)      & (2.0_JPRB*ZM1 + ZM2) * ZK/6._JPRB  
+(  142)     ZC  = 0.5_JPRB * ZM1
+(  143)     ZD  = (ZM2 - ZM1)/(6._JPRB*ZK)
+(  144) 
+(  145)     DO JLON=KDLUX+1,KDLON+KDAD
+(  146)       ZJ  = REAL(JLON - KDLUX,JPRB)
+(  147)       PWORK(JLON,JFL,JLAT) = ZA + ZJ * (ZB + ZJ * (ZC + ZD * ZJ))
+(  148)     ENDDO 
+(  149)   ENDDO 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:30      page 4
+
+(  150) 
+(  151)   ZK   = REAL(KDGL - KDGUX + 1,JPRB)
+(  152)   ZKP1 = ZK + 1
+(  153)   ZLAM = ZK/ZKP1
+(  154)   ZNY  = PALFA/ZKP1
+(  155) 
+(  156)   DO JLON=KDLUN,IENDY+KDAD
+(  157) 
+(  158)     ZEPSA = ((PWORK(JLON,JFL,KDGUN)-PWORK(JLON,JFL,KDGUX))/ZK -&
+(  159)      & PWORK(JLON,JFL,KDGUX)+PWORK(JLON,JFL,KDGUX-1))*6._JPRB/ZKP1-&
+(  160)      & ZNY*(PWORK(JLON,JFL,KDGUX)-2.0_JPRB*PWORK(JLON,JFL,KDGUX-1)+&
+(  161)      & PWORK(JLON,JFL,KDGUX-2))  
+(  162) 
+(  163)     ZEPSB = (PWORK(JLON,JFL,KDGUN+1)-PWORK(JLON,JFL,KDGUN) -&
+(  164)      & (PWORK(JLON,JFL,KDGUN)-PWORK(JLON,JFL,KDGUX))/ZK)*6._JPRB/ZKP1-&
+(  165)      & ZNY*(PWORK(JLON,JFL,KDGUN+2)-2.0_JPRB*PWORK(JLON,JFL,KDGUN+1) +&
+(  166)      & PWORK(JLON,JFL,KDGUN))  
+(  167) 
+(  168)     ZMM = 4._JPRB - ZLAMB*ZLAMB
+(  169)     ZM1 = (2.0_JPRB*ZEPSA - ZLAMB*ZEPSB)/ ZMM
+(  170)     ZM2 = (2.0_JPRB*ZEPSB - ZLAMB*ZEPSA)/ ZMM
+(  171)     ZA  = PWORK(JLON,JFL,KDGUX)
+(  172)     ZB  = (PWORK(JLON,JFL,KDGUN)-PWORK(JLON,JFL,KDGUX))/ZK - (2.0_JPRB*&
+(  173)      & ZM1 &
+(  174)      & + ZM2) * ZK/6._JPRB  
+(  175)     ZC  = 0.5_JPRB * ZM1
+(  176)     ZD  = (ZM2 - ZM1)/(6._JPRB*ZK)
+(  177) 
+(  178)     DO JLAT=KDGUX+1,KDGL+KDAD
+(  179)       ZJ = REAL(JLAT - KDGUX,JPRB)
+(  180)       PWORK(JLON,JFL,JLAT) = ZA +ZJ*(ZB +ZJ*(ZC + ZJ * ZD))
+(  181)     ENDDO 
+(  182)   ENDDO 
+(  183) 
+(  184) ENDDO
+(  185) 
+(  186) !      -------------------------------------------------------------
+(  187) IF (LHOOK) CALL DR_HOOK('ESPLINE',1,ZHOOK_HANDLE)
+(  188) END SUBROUTINE ESPLINE
+(  189) END MODULE ESPLINE_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:30      page 5
+
+(    1) # 1 "espline_mod.F90"
+(    1) MODULE ESPLINE_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ESPLINE(KDLUN,KDLON,KDGUN,KDGL,KDLUX,KDGUX,KSTART,&
+(    4)  & KDLSM,KDGSA,KDGEN,KNUBI,PWORK,PALFA,LDBIX,LDBIY,KDAD)  
+(    5) # 6 "espline_mod.F90"
+(    6) !   purpose  :
+(    7) !   --------
+(    8) !     Make spline extension.
+(    9) # 10 "espline_mod.F90"
+(   10) !    *CALL* *ESPLINE*(...)
+(   11) # 12 "espline_mod.F90"
+(   12) !      externals :
+(   13) !      ----------
+(   14) !             None
+(   15) # 16 "espline_mod.F90"
+(   16) !      explicit arguments :
+(   17) !      ------------------
+(   18) !     KDLUN : lower bound for the x (or longitude) dimension
+(   19) !             of the gridpoint array
+(   20) !     KDLON : upper bound for the x (or longitude) dimension
+(   21) !             of the gridpoint array on C U I U E
+(   22) !     KDGUN : lower bound for the y (or latitude) dimension
+(   23) !             of the gridpoint array
+(   24) !     KDGL : upper bound for the y (or latitude) dimension
+(   25) !             of the gridpoint array on C U I U E
+(   26) !     KDLUX : upper bound for the x (or longitude) dimension
+(   27) !             of  C U I.
+(   28) !     KDGUX : upper bound for the y (or latitude) dimension
+(   29) !             of  C U I.
+(   30) !     KSTART : first dimension in x direction of g-p array
+(   31) !     KDLSM  : last dimension in x direction of g-p array
+(   32) !     KDGSA  : first dimension in y of g-p array
+(   33) !     KDGEN  :  last dimension in y of g-p array
+(   34) !     KNUBI  : number of levels to biperiodicise
+(   35) !     PWORK : gridpoint array on C U I U E.
+(   36) !     PALFA : boundary condition of a spline:
+(   37) !             = 0. ... natural spline
+(   38) !             = 1. ... boundary condition computed differentially
+(   39) !                      (additional option)
+(   40) !     LDBIX : .TRUE. biperiodicisation in x  ( and vice versa )
+(   41) !     LDBIY : .TRUE. biperiodicisation in y  ( and vice versa )
+(   42) !     KDAD  : 1 for test of biperiodic.
+(   43) # 44 "espline_mod.F90"
+(   44) !      references :
+(   45) !      ----------
+(   46) # 47 "espline_mod.F90"
+(   47) !      author :
+(   48) !      ------
+(   49) !       Michal Batka and Radmila Bubnova ( B & B )
+(   50) # 51 "espline_mod.F90"
+(   51) !      modifications :
+(   52) !      -------------
+(   53) !      J.Vivoda 03-2002 2D model fix
+(   54) !      A. Stanesic  : 28-03-08: KDADD - test of externalized biper.
+(   55) !      -------------------------------------------------------------
+(   56) # 57 "espline_mod.F90"
+(   57) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:30      page 6
+
+(   58) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   59) # 60 "espline_mod.F90"
+(   60) !      -------------------------------------------------------------
+(   61) # 62 "espline_mod.F90"
+(   62) IMPLICIT NONE
+(   63) # 64 "espline_mod.F90"
+(   64) INTEGER(KIND=JPIM),INTENT(IN)    :: KSTART 
+(   65) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLSM 
+(   66) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGSA 
+(   67) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGEN 
+(   68) INTEGER(KIND=JPIM),INTENT(IN)    :: KNUBI 
+(   69) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLUN 
+(   70) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLON 
+(   71) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGUN 
+(   72) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGL 
+(   73) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLUX 
+(   74) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGUX 
+(   75) REAL(KIND=JPRB)   ,INTENT(INOUT) :: PWORK(KSTART:KDLSM,KNUBI,KDGSA:KDGEN) 
+(   76) REAL(KIND=JPRB)   ,INTENT(IN)    :: PALFA 
+(   77) LOGICAL           ,INTENT(IN)    :: LDBIX 
+(   78) LOGICAL           ,INTENT(IN)    :: LDBIY 
+(   79) INTEGER(KIND=JPIM),INTENT(IN)    :: KDAD 
+(   80) # 81 "espline_mod.F90"
+(   81) !      -------------------------------------------------------------
+(   82) # 83 "espline_mod.F90"
+(   83) LOGICAL :: LLBIX
+(   84) LOGICAL :: LLBIY
+(   85) INTEGER(KIND=JPIM) :: IENDX, IENDY, JFL, JLAT, JLON, IA
+(   86) REAL(KIND=JPRB) :: ZA, ZB, ZC, ZD, ZEPSA, ZEPSB, ZJ, ZK, ZKP1,&
+(   87)  & ZLAM, ZLAMB, ZM1, ZM2, ZMM, ZNY  
+(   88) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   89) # 90 "espline_mod.F90"
+(   90) !      -------------------------------------------------------------
+(   91) IF (LHOOK) CALL DR_HOOK('ESPLINE',0,ZHOOK_HANDLE)
+(   92) !      -------------------------------------------------------------
+(   93) # 94 "espline_mod.F90"
+(   94) !*         1. Spline   Extension.
+(   95) !             -------------------
+(   96) # 97 "espline_mod.F90"
+(   97) LLBIX=LDBIX
+(   98) LLBIY=LDBIY
+(   99) # 100 "espline_mod.F90"
+(  100) IF( KDLUN==1.AND.KDLUX==1 ) LLBIX=.FALSE.
+(  101) IF( KDGUN==1.AND.KDGUX==1 ) LLBIY=.FALSE.
+(  102) # 103 "espline_mod.F90"
+(  103) IENDX = KDGUX 
+(  104) IENDY = KDLON 
+(  105) # 106 "espline_mod.F90"
+(  106) IF(LLBIX.AND.(.NOT.LLBIY)) THEN
+(  107)   IENDY = KDLUN - 1
+(  108) # 109 "espline_mod.F90"
+(  109) ELSEIF((.NOT.LLBIX).AND.LLBIY) THEN
+(  110)   IENDX = KDGUN - 1
+(  111)   IENDY = KDLUX
+(  112) # 113 "espline_mod.F90"
+(  113) ELSEIF((.NOT.LLBIX).AND.(.NOT.LLBIY)) THEN
+(  114)   IF (LHOOK) CALL DR_HOOK('ESPLINE',1,ZHOOK_HANDLE)
+(  115)   RETURN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:30      page 7
+
+(  116) ENDIF
+(  117) DO JFL = 1, KNUBI
+(  118) # 119 "espline_mod.F90"
+(  119)   ZK    = REAL(KDLON-KDLUX+1,JPRB)
+(  120)   ZKP1  = ZK + 1.0_JPRB
+(  121)   ZLAMB = ZK/ZKP1
+(  122)   ZNY   = PALFA/ZKP1
+(  123) # 124 "espline_mod.F90"
+(  124)   DO JLAT=KDGUN,IENDX
+(  125) # 126 "espline_mod.F90"
+(  126)     ZEPSA = ((PWORK(KDLUN,JFL,JLAT)-PWORK(KDLUX,JFL,JLAT))/ZK -&
+(  127)      & PWORK(KDLUX,JFL,JLAT)+PWORK(KDLUX-1,JFL,JLAT))*6._JPRB/ZKP1 -&
+(  128)      & ZNY*(PWORK(KDLUX,JFL,JLAT)-2.0_JPRB* PWORK(KDLUX-1,JFL,JLAT)+&
+(  129)      & PWORK(KDLUX-2,JFL,JLAT))  
+(  130) # 131 "espline_mod.F90"
+(  131)     ZEPSB = (PWORK(KDLUN+1,JFL,JLAT)-PWORK(KDLUN,JFL,JLAT) -&
+(  132)      & (PWORK(KDLUN,JFL,JLAT)-PWORK(KDLUX,JFL,JLAT))/ZK)*6._JPRB/ZKP1-&
+(  133)      & ZNY*(PWORK(KDLUN+2,JFL,JLAT)-2.0_JPRB* PWORK(KDLUN+1,JFL,JLAT)+&
+(  134)      & PWORK(KDLUN,JFL,JLAT))  
+(  135) # 136 "espline_mod.F90"
+(  136)     ZMM = 4._JPRB - ZLAMB*ZLAMB
+(  137)     ZM1 = (2.0_JPRB*ZEPSA - ZLAMB*ZEPSB)/ZMM
+(  138)     ZM2 = (2.0_JPRB*ZEPSB - ZLAMB*ZEPSA)/ZMM
+(  139)     ZA  = PWORK(KDLUX,JFL,JLAT)
+(  140)     ZB  = (PWORK(KDLUN,JFL,JLAT)-PWORK(KDLUX,JFL,JLAT))/ZK-&
+(  141)      & (2.0_JPRB*ZM1 + ZM2) * ZK/6._JPRB  
+(  142)     ZC  = 0.5_JPRB * ZM1
+(  143)     ZD  = (ZM2 - ZM1)/(6._JPRB*ZK)
+(  144) # 145 "espline_mod.F90"
+(  145)     DO JLON=KDLUX+1,KDLON+KDAD
+(  146)       ZJ  = REAL(JLON - KDLUX,JPRB)
+(  147)       PWORK(JLON,JFL,JLAT) = ZA + ZJ * (ZB + ZJ * (ZC + ZD * ZJ))
+(  148)     ENDDO 
+(  149)   ENDDO 
+(  150) # 151 "espline_mod.F90"
+(  151)   ZK   = REAL(KDGL - KDGUX + 1,JPRB)
+(  152)   ZKP1 = ZK + 1
+(  153)   ZLAM = ZK/ZKP1
+(  154)   ZNY  = PALFA/ZKP1
+(  155) # 156 "espline_mod.F90"
+(  156)   DO JLON=KDLUN,IENDY+KDAD
+(  157) # 158 "espline_mod.F90"
+(  158)     ZEPSA = ((PWORK(JLON,JFL,KDGUN)-PWORK(JLON,JFL,KDGUX))/ZK -&
+(  159)      & PWORK(JLON,JFL,KDGUX)+PWORK(JLON,JFL,KDGUX-1))*6._JPRB/ZKP1-&
+(  160)      & ZNY*(PWORK(JLON,JFL,KDGUX)-2.0_JPRB*PWORK(JLON,JFL,KDGUX-1)+&
+(  161)      & PWORK(JLON,JFL,KDGUX-2))  
+(  162) # 163 "espline_mod.F90"
+(  163)     ZEPSB = (PWORK(JLON,JFL,KDGUN+1)-PWORK(JLON,JFL,KDGUN) -&
+(  164)      & (PWORK(JLON,JFL,KDGUN)-PWORK(JLON,JFL,KDGUX))/ZK)*6._JPRB/ZKP1-&
+(  165)      & ZNY*(PWORK(JLON,JFL,KDGUN+2)-2.0_JPRB*PWORK(JLON,JFL,KDGUN+1) +&
+(  166)      & PWORK(JLON,JFL,KDGUN))  
+(  167) # 168 "espline_mod.F90"
+(  168)     ZMM = 4._JPRB - ZLAMB*ZLAMB
+(  169)     ZM1 = (2.0_JPRB*ZEPSA - ZLAMB*ZEPSB)/ ZMM
+(  170)     ZM2 = (2.0_JPRB*ZEPSB - ZLAMB*ZEPSA)/ ZMM
+(  171)     ZA  = PWORK(JLON,JFL,KDGUX)
+(  172)     ZB  = (PWORK(JLON,JFL,KDGUN)-PWORK(JLON,JFL,KDGUX))/ZK - (2.0_JPRB*&
+(  173)      & ZM1 &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:30      page 8
+
+(  174)      & + ZM2) * ZK/6._JPRB  
+(  175)     ZC  = 0.5_JPRB * ZM1
+(  176)     ZD  = (ZM2 - ZM1)/(6._JPRB*ZK)
+(  177) # 178 "espline_mod.F90"
+(  178)     DO JLAT=KDGUX+1,KDGL+KDAD
+(  179)       ZJ = REAL(JLAT - KDGUX,JPRB)
+(  180)       PWORK(JLON,JFL,JLAT) = ZA +ZJ*(ZB +ZJ*(ZC + ZJ * ZD))
+(  181)     ENDDO 
+(  182)   ENDDO 
+(  183) # 184 "espline_mod.F90"
+(  184) ENDDO
+(  185) # 186 "espline_mod.F90"
+(  186) !      -------------------------------------------------------------
+(  187) IF (LHOOK) CALL DR_HOOK('ESPLINE',1,ZHOOK_HANDLE)
+(  188) END SUBROUTINE ESPLINE
+(  189) END MODULE ESPLINE_MOD

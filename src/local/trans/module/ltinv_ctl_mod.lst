@@ -1,0 +1,347 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:18      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: ltinv_ctl_mod.F90
+
+(    1) MODULE LTINV_CTL_MOD
+(    2)   CONTAINS
+(    3)   SUBROUTINE LTINV_CTL(KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS,&
+(    4)    & PSPVOR,PSPDIV,PSPSCALAR,&
+(    5)    & PSPSC3A,PSPSC3B,PSPSC2,&
+(    6)    & KFLDPTRUV,KFLDPTRSC,FSPGL_PROC)
+(    7)   
+(    8)   !**** *LTINV_CTL* - Control routine for inverse Legandre transform.
+(    9)   
+(   10)   !     Purpose.
+(   11)   !     --------
+(   12)   !        Control routine for the inverse LEGENDRE transform
+(   13)   
+(   14)   !**   Interface.
+(   15)   !     ----------
+(   16)   !     CALL INV_TRANS_CTL(...)
+(   17)   !     KF_OUT_LT    - number of fields coming out from inverse LT
+(   18)   !     KF_UV        - local number of spectral u-v fields
+(   19)   !     KF_SCALARS   - local number of scalar spectral fields
+(   20)   !     KF_SCDERS    - local number of derivatives of scalar spectral fields
+(   21)   !     PSPVOR(:,:)  - spectral vorticity (input)
+(   22)   !     PSPDIV(:,:)  - spectral divergence (input)
+(   23)   !     PSPSCALAR(:,:) - spectral scalarvalued fields (input)
+(   24)   !     KFLDPTRUV(:) - field pointer array for vor./div.
+(   25)   !     KFLDPTRSC(:) - field pointer array for PSPSCALAR
+(   26)   !     FSPGL_PROC  - external procedure to be executed in fourier space
+(   27)   !                   before transposition
+(   28)   
+(   29)   !     Method.
+(   30)   !     -------
+(   31)   
+(   32)   !     Externals.
+(   33)   !     ----------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:18      page 2
+
+(   34)   !
+(   35)   
+(   36)   !     Author.
+(   37)   !     -------
+(   38)   !        Mats Hamrud *ECMWF*
+(   39)   
+(   40)   !     Modifications.
+(   41)   !     --------------
+(   42)   !        Original : 00-06-03
+(   43)   
+(   44)   !     ------------------------------------------------------------------
+(   45)   
+(   46)   USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   47)   
+(   48)   USE TPM_GEN, only: nout
+(   49)   USE TPM_DIM         ,ONLY : R
+(   50)   USE TPM_TRANS       ,ONLY : FOUBUF, FOUBUF_IN
+(   51)   USE TPM_DISTR       ,ONLY : D
+(   52)   USE TPM_GEOMETRY    ,ONLY : G
+(   53)   
+(   54)   USE TPM_FIELDS      ,ONLY : F, ZIA,ZSOA1,ZAOA1,ZEPSNM
+(   55)   
+(   56)   USE TPM_FLT
+(   57)   
+(   58)   USE LTINV_MOD       ,ONLY : LTINV
+(   59)   USE TRMTOL_MOD      ,ONLY : TRMTOL
+(   60)   
+(   61)   IMPLICIT NONE
+(   62)   
+(   63)   INTEGER(KIND=JPIM),INTENT(IN) :: KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS
+(   64)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(IN)  :: PSPVOR(:,:)
+(   65)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(IN)  :: PSPDIV(:,:)
+(   66)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(IN)  :: PSPSCALAR(:,:)
+(   67)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(IN)  :: PSPSC3A(:,:,:)
+(   68)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(IN)  :: PSPSC3B(:,:,:)
+(   69)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(IN)  :: PSPSC2(:,:)
+(   70)   INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN) :: KFLDPTRUV(:)
+(   71)   INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN) :: KFLDPTRSC(:)
+(   72)   EXTERNAL  FSPGL_PROC
+(   73)   OPTIONAL  FSPGL_PROC
+(   74)   
+(   75)   INTEGER(KIND=JPIM) :: JM,IM,IBLEN,ILEI2,IDIM1, i, j
+(   76)   
+(   77)   
+(   78)   
+(   79)   
+(   80)   CALL GSTATS(102,0)
+(   81)   ILEI2 = 8*KF_UV + 2*KF_SCALARS + 2*KF_SCDERS
+(   82)   IDIM1 = 2*KF_OUT_LT
+(   83)   IBLEN = D%NLENGT0B*2*KF_OUT_LT
+(   84)   
+(   85)   IF(KF_OUT_LT > 0) THEN
+(   86)     CALL GSTATS(1647,0)
+(   87)  
+(   88)     !!$ACC DATA &
+(   89)     !!$ACC      COPY   (ZIA)                    &
+(   90)     !!$ACC      COPY   (ZEPSNM)                 &
+(   91)     !!$ACC      COPYOUT(ZAOA1,ZSOA1) &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:18      page 3
+
+(   92)     !!$ACC COPYIN(D,D%NASM0,D%NUMP,D%MYMS,D%NPROCL,D%NPMT,D%NPNTGTB1,D%NSTAGT0B)  &
+(   93)     !!$ACC COPYIN(R,F,G,F%REPSNM,D%NPNTGTB1,D%NSTAGT0B,R%NDGNH,G%NDGLU)           &
+(   94)     !!$ACC  COPYIN(KFLDPTRSC)
+(   95) 
+(   96)     !!$ACC DATA IF( PRESENT(PSPVOR)) COPYIN(PSPVOR)
+(   97)     !!$ACC DATA IF( PRESENT(PSPDIV)) COPYIN(PSPDIV)
+(   98)     !!$ACC DATA IF( PRESENT(PSPSCALAR))COPYIN(PSPSCALAR)
+(   99)     !!$ACC DATA IF( PRESENT(PSPSC3A)) COPYIN(PSPSC3A)
+(  100)     !!$ACC DATA IF( PRESENT(PSPSC3B)) COPYIN(PSPSC3B)
+(  101)     !!$ACC DATA IF( PRESENT(PSPSC2)) COPYIN(PSPSC2)
+(  102) 
+(  103)       CALL LTINV(KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS,ILEI2,IDIM1,&
+(  104)           & PSPVOR,PSPDIV,PSPSCALAR ,&
+(  105)           & PSPSC3A,PSPSC3B,PSPSC2 , &
+(  106)           & KFLDPTRUV,KFLDPTRSC,FSPGL_PROC)
+(  107)     
+(  108)     !!$ACC end data
+(  109)     !!$ACC end data
+(  110)     !!$ACC end data
+(  111)     !!$ACC end data
+(  112)     !!$ACC end data
+(  113)     !!$ACC end data
+(  114)   
+(  115)     CALL GSTATS(1647,1)
+(  116)   ENDIF
+(  117)   CALL GSTATS(102,1)
+(  118) 
+(  119)   CALL GSTATS(152,0)
+(  120)   CALL TRMTOL(FOUBUF_IN,FOUBUF,2*KF_OUT_LT)
+(  121)   CALL GSTATS(152,1)
+(  122)   
+(  123)   !     ------------------------------------------------------------------
+(  124)   
+(  125)   END SUBROUTINE LTINV_CTL
+(  126)   END MODULE LTINV_CTL_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:18      page 4
+
+(    1) # 1 "ltinv_ctl_mod.F90"
+(    1) MODULE LTINV_CTL_MOD
+(    2)   CONTAINS
+(    3)   SUBROUTINE LTINV_CTL(KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS,&
+(    4)    & PSPVOR,PSPDIV,PSPSCALAR,&
+(    5)    & PSPSC3A,PSPSC3B,PSPSC2,&
+(    6)    & KFLDPTRUV,KFLDPTRSC,FSPGL_PROC)
+(    7)   
+(    8)   !**** *LTINV_CTL* - Control routine for inverse Legandre transform.
+(    9)   
+(   10)   !     Purpose.
+(   11)   !     --------
+(   12)   !        Control routine for the inverse LEGENDRE transform
+(   13)   
+(   14)   !**   Interface.
+(   15)   !     ----------
+(   16)   !     CALL INV_TRANS_CTL(...)
+(   17)   !     KF_OUT_LT    - number of fields coming out from inverse LT
+(   18)   !     KF_UV        - local number of spectral u-v fields
+(   19)   !     KF_SCALARS   - local number of scalar spectral fields
+(   20)   !     KF_SCDERS    - local number of derivatives of scalar spectral fields
+(   21)   !     PSPVOR(:,:)  - spectral vorticity (input)
+(   22)   !     PSPDIV(:,:)  - spectral divergence (input)
+(   23)   !     PSPSCALAR(:,:) - spectral scalarvalued fields (input)
+(   24)   !     KFLDPTRUV(:) - field pointer array for vor./div.
+(   25)   !     KFLDPTRSC(:) - field pointer array for PSPSCALAR
+(   26)   !     FSPGL_PROC  - external procedure to be executed in fourier space
+(   27)   !                   before transposition
+(   28)   
+(   29)   !     Method.
+(   30)   !     -------
+(   31)   
+(   32)   !     Externals.
+(   33)   !     ----------
+(   34)   !
+(   35)   
+(   36)   !     Author.
+(   37)   !     -------
+(   38)   !        Mats Hamrud *ECMWF*
+(   39)   
+(   40)   !     Modifications.
+(   41)   !     --------------
+(   42)   !        Original : 00-06-03
+(   43)   
+(   44)   !     ------------------------------------------------------------------
+(   45)   
+(   46)   USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   47)   
+(   48)   USE TPM_GEN, only: nout
+(   49)   USE TPM_DIM         ,ONLY : R
+(   50)   USE TPM_TRANS       ,ONLY : FOUBUF, FOUBUF_IN
+(   51)   USE TPM_DISTR       ,ONLY : D
+(   52)   USE TPM_GEOMETRY    ,ONLY : G
+(   53)   
+(   54)   USE TPM_FIELDS      ,ONLY : F, ZIA,ZSOA1,ZAOA1,ZEPSNM
+(   55)   
+(   56)   USE TPM_FLT
+(   57)   
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:18      page 5
+
+(   58)   USE LTINV_MOD       ,ONLY : LTINV
+(   59)   USE TRMTOL_MOD      ,ONLY : TRMTOL
+(   60)   
+(   61)   IMPLICIT NONE
+(   62)   
+(   63)   INTEGER(KIND=JPIM),INTENT(IN) :: KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS
+(   64)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(IN)  :: PSPVOR(:,:)
+(   65)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(IN)  :: PSPDIV(:,:)
+(   66)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(IN)  :: PSPSCALAR(:,:)
+(   67)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(IN)  :: PSPSC3A(:,:,:)
+(   68)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(IN)  :: PSPSC3B(:,:,:)
+(   69)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(IN)  :: PSPSC2(:,:)
+(   70)   INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN) :: KFLDPTRUV(:)
+(   71)   INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN) :: KFLDPTRSC(:)
+(   72)   EXTERNAL  FSPGL_PROC
+(   73)   OPTIONAL  FSPGL_PROC
+(   74)   
+(   75)   INTEGER(KIND=JPIM) :: JM,IM,IBLEN,ILEI2,IDIM1, i, j
+(   76)   
+(   77)   
+(   78)   
+(   79)   
+(   80)   CALL GSTATS(102,0)
+(   81)   ILEI2 = 8*KF_UV + 2*KF_SCALARS + 2*KF_SCDERS
+(   82)   IDIM1 = 2*KF_OUT_LT
+(   83)   IBLEN = D%NLENGT0B*2*KF_OUT_LT
+(   84)   
+(   85)   IF(KF_OUT_LT > 0) THEN
+(   86)     CALL GSTATS(1647,0)
+(   87)  
+(   88)     !!$ACC DATA &
+(   89)     !!$ACC      COPY   (ZIA)                    &
+(   90)     !!$ACC      COPY   (ZEPSNM)                 &
+(   91)     !!$ACC      COPYOUT(ZAOA1,ZSOA1) &
+(   92)     !!$ACC COPYIN(D,D%NASM0,D%NUMP,D%MYMS,D%NPROCL,D%NPMT,D%NPNTGTB1,D%NSTAGT0B)  &
+(   93)     !!$ACC COPYIN(R,F,G,F%REPSNM,D%NPNTGTB1,D%NSTAGT0B,R%NDGNH,G%NDGLU)           &
+(   94)     !!$ACC  COPYIN(KFLDPTRSC)
+(   95) # 96 "ltinv_ctl_mod.F90"
+(   96)     !!$ACC DATA IF( PRESENT(PSPVOR)) COPYIN(PSPVOR)
+(   97)     !!$ACC DATA IF( PRESENT(PSPDIV)) COPYIN(PSPDIV)
+(   98)     !!$ACC DATA IF( PRESENT(PSPSCALAR))COPYIN(PSPSCALAR)
+(   99)     !!$ACC DATA IF( PRESENT(PSPSC3A)) COPYIN(PSPSC3A)
+(  100)     !!$ACC DATA IF( PRESENT(PSPSC3B)) COPYIN(PSPSC3B)
+(  101)     !!$ACC DATA IF( PRESENT(PSPSC2)) COPYIN(PSPSC2)
+(  102) # 103 "ltinv_ctl_mod.F90"
+(  103)       CALL LTINV(KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS,ILEI2,IDIM1,&
+(  104)           & PSPVOR,PSPDIV,PSPSCALAR ,&
+(  105)           & PSPSC3A,PSPSC3B,PSPSC2 , &
+(  106)           & KFLDPTRUV,KFLDPTRSC,FSPGL_PROC)
+(  107)     
+(  108)     !!$ACC end data
+(  109)     !!$ACC end data
+(  110)     !!$ACC end data
+(  111)     !!$ACC end data
+(  112)     !!$ACC end data
+(  113)     !!$ACC end data
+(  114)   
+(  115)     CALL GSTATS(1647,1)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:18      page 6
+
+(  116)   ENDIF
+(  117)   CALL GSTATS(102,1)
+(  118) # 119 "ltinv_ctl_mod.F90"
+(  119)   CALL GSTATS(152,0)
+(  120)   CALL TRMTOL(FOUBUF_IN,FOUBUF,2*KF_OUT_LT)
+(  121)   CALL GSTATS(152,1)
+(  122)   
+(  123)   !     ------------------------------------------------------------------
+(  124)   
+(  125)   END SUBROUTINE LTINV_CTL
+(  126)   END MODULE LTINV_CTL_MOD

@@ -1,0 +1,220 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:37      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: efourier_out_mod.F90
+
+(    1) MODULE EFOURIER_OUT_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EFOURIER_OUT(PREEL,KFIELDS)
+(    4) 
+(    5) !**** *FOURIER_OUT* - Copy fourier data from local array to buffer
+(    6) 
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Routine for copying fourier data from local array to buffer
+(   10) 
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !     CALL FOURIER_OUT(...)
+(   14) 
+(   15) !     Explicit arguments :  PREEL - local fourier/GP array
+(   16) !     --------------------  KFIELDS - number of fields
+(   17) !
+(   18) !     Externals.  None.
+(   19) !     ----------
+(   20) 
+(   21) !     Author.
+(   22) !     -------
+(   23) !        Mats Hamrud *ECMWF*
+(   24) 
+(   25) !     Modifications.
+(   26) !     --------------
+(   27) !        Original : 2000-04-01
+(   28) 
+(   29) !     ------------------------------------------------------------------
+(   30) 
+(   31) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   32) 
+(   33) USE TPM_DISTR       ,ONLY : D, MYSETW, MYPROC, NPROC, &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:37      page 2
+
+(   34)             &               D_NPTRLS, D_NSTAGTF, D_MSTABF, D_NSTAGT1B, &
+(   35)             &               D_NPNTGTB0, D_NPROCM, D_NPROCL
+(   36) USE TPM_TRANS       ,ONLY : FOUBUF_IN
+(   37) USE TPM_GEOMETRY    ,ONLY : G, G_NMEN,G_NMEN_MAX
+(   38) !
+(   39) 
+(   40) IMPLICIT NONE
+(   41) 
+(   42) REAL(KIND=JPRBT),  INTENT(IN) :: PREEL(:,:)
+(   43) INTEGER(KIND=JPIM),INTENT(IN) :: KFIELDS
+(   44) 
+(   45) INTEGER(KIND=JPIM) :: JGL
+(   46) INTEGER(KIND=JPIM) :: JM, JF, IGLG, IPROC, IR, II, ISTA, JMMAX
+(   47) INTEGER(KIND=JPIM) :: IOFF
+(   48) 
+(   49) !     ------------------------------------------------------------------
+(   50) 
+(   51) !$acc data &
+(   52) !$acc& copy(D_NPTRLS,D_NSTAGTF,D_MSTABF,D_NSTAGT1B,D_NPNTGTB0,G_NMEN,G_NMEN_MAX,D_NPROCM) &
+(   53) !$acc& present(PREEL,FOUBUF_IN)
+(   54) 
+(   55) !$acc parallel loop collapse(3) private(IGLG,JMMAX,IPROC,ISTA,IOFF)
+(   56) DO JGL = 1, D%NDGL_FS
+(   57)    DO JM=0,G_NMEN_MAX      
+(   58)       DO JF=1,KFIELDS
+(   59)          IGLG = D_NPTRLS(MYSETW)+JGL-1
+(   60)          JMMAX = G_NMEN(IGLG)
+(   61)          IF (JM .LE. JMMAX) THEN
+(   62)             IPROC = D_NPROCM(JM)
+(   63)             ISTA  = (D_NSTAGT1B(D_MSTABF(IPROC))+D_NPNTGTB0(JM,JGL))*2*KFIELDS
+(   64)             IOFF  = 1+D_NSTAGTF(JGL)
+(   65)             FOUBUF_IN(ISTA+2*JF-1) = PREEL(IOFF+2*JM+0, JF)
+(   66)             FOUBUF_IN(ISTA+2*JF  ) = PREEL(IOFF+2*JM+1, JF)
+(   67)          END IF         
+(   68)       ENDDO
+(   69)    ENDDO   
+(   70) END DO
+(   71) !$acc end data
+(   72) 
+(   73) END SUBROUTINE EFOURIER_OUT
+(   74) END MODULE EFOURIER_OUT_MOD
+(   75) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:37      page 3
+
+(    1) # 1 "efourier_out_mod.F90"
+(    1) MODULE EFOURIER_OUT_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EFOURIER_OUT(PREEL,KFIELDS)
+(    4) # 5 "efourier_out_mod.F90"
+(    5) !**** *FOURIER_OUT* - Copy fourier data from local array to buffer
+(    6) # 7 "efourier_out_mod.F90"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Routine for copying fourier data from local array to buffer
+(   10) # 11 "efourier_out_mod.F90"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !     CALL FOURIER_OUT(...)
+(   14) # 15 "efourier_out_mod.F90"
+(   15) !     Explicit arguments :  PREEL - local fourier/GP array
+(   16) !     --------------------  KFIELDS - number of fields
+(   17) !
+(   18) !     Externals.  None.
+(   19) !     ----------
+(   20) # 21 "efourier_out_mod.F90"
+(   21) !     Author.
+(   22) !     -------
+(   23) !        Mats Hamrud *ECMWF*
+(   24) # 25 "efourier_out_mod.F90"
+(   25) !     Modifications.
+(   26) !     --------------
+(   27) !        Original : 2000-04-01
+(   28) # 29 "efourier_out_mod.F90"
+(   29) !     ------------------------------------------------------------------
+(   30) # 31 "efourier_out_mod.F90"
+(   31) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   32) # 33 "efourier_out_mod.F90"
+(   33) USE TPM_DISTR       ,ONLY : D, MYSETW, MYPROC, NPROC, &
+(   34)             &               D_NPTRLS, D_NSTAGTF, D_MSTABF, D_NSTAGT1B, &
+(   35)             &               D_NPNTGTB0, D_NPROCM, D_NPROCL
+(   36) USE TPM_TRANS       ,ONLY : FOUBUF_IN
+(   37) USE TPM_GEOMETRY    ,ONLY : G, G_NMEN,G_NMEN_MAX
+(   38) !
+(   39) # 40 "efourier_out_mod.F90"
+(   40) IMPLICIT NONE
+(   41) # 42 "efourier_out_mod.F90"
+(   42) REAL(KIND=JPRBT),  INTENT(IN) :: PREEL(:,:)
+(   43) INTEGER(KIND=JPIM),INTENT(IN) :: KFIELDS
+(   44) # 45 "efourier_out_mod.F90"
+(   45) INTEGER(KIND=JPIM) :: JGL
+(   46) INTEGER(KIND=JPIM) :: JM, JF, IGLG, IPROC, IR, II, ISTA, JMMAX
+(   47) INTEGER(KIND=JPIM) :: IOFF
+(   48) # 49 "efourier_out_mod.F90"
+(   49) !     ------------------------------------------------------------------
+(   50) # 51 "efourier_out_mod.F90"
+(   52) !$acc& copy(D_NPTRLS,D_NSTAGTF,D_MSTABF,D_NSTAGT1B,D_NPNTGTB0,G_NMEN,G_NMEN_MAX,D_NPROCM) &
+(   53) !$acc& present(PREEL,FOUBUF_IN)
+(   54) # 55 "efourier_out_mod.F90"
+(   55) !$acc parallel loop collapse(3) private(IGLG,JMMAX,IPROC,ISTA,IOFF)
+(   56) DO JGL = 1, D%NDGL_FS
+(   57)    DO JM=0,G_NMEN_MAX      
+(   58)       DO JF=1,KFIELDS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:37      page 4
+
+(   59)          IGLG = D_NPTRLS(MYSETW)+JGL-1
+(   60)          JMMAX = G_NMEN(IGLG)
+(   61)          IF (JM .LE. JMMAX) THEN
+(   62)             IPROC = D_NPROCM(JM)
+(   63)             ISTA  = (D_NSTAGT1B(D_MSTABF(IPROC))+D_NPNTGTB0(JM,JGL))*2*KFIELDS
+(   64)             IOFF  = 1+D_NSTAGTF(JGL)
+(   65)             FOUBUF_IN(ISTA+2*JF-1) = PREEL(IOFF+2*JM+0, JF)
+(   66)             FOUBUF_IN(ISTA+2*JF  ) = PREEL(IOFF+2*JM+1, JF)
+(   67)          END IF         
+(   68)       ENDDO
+(   69)    ENDDO   
+(   70) END DO
+(   71) !$acc end data
+(   72) # 73 "efourier_out_mod.F90"
+(   73) END SUBROUTINE EFOURIER_OUT
+(   74) END MODULE EFOURIER_OUT_MOD

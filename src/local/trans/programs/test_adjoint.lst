@@ -1,0 +1,2238 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: test_adjoint.F90
+
+(    1) PROGRAM TEST_ADJOINT
+(    2) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    3) USE MPL_MODULE  ,ONLY : MPL_INIT, MPL_END, MPL_BARRIER, MPL_MYRANK
+(    4) USE ABORT_TRANS_MOD  ! This is not really correct usage
+(    5) !
+(    6) 
+(    7) IMPLICIT NONE
+(    8) 
+(    9) 
+(   10) INTEGER(KIND=JPIM) :: NSMAX,NDGL,NPROC,NPRGPNS,NPRGPEW,NPRTRW,NPRTRV,NREP
+(   11) INTEGER(KIND=JPIM) :: IERROR,NOUT,MYPROC,NSPECG,NSPEC2G,NGPTOTG
+(   12) INTEGER(KIND=JPIM) :: NFLEV,NFLEVG
+(   13) INTEGER(KIND=JPIM) :: NSPEC2,NGPTOT,NPROMA,NGPBLKS,MYSETV,NUMP
+(   14) INTEGER(KIND=JPIM) :: IVSET(1000)
+(   15) INTEGER(KIND=JPIM) ,ALLOCATABLE :: NLOEN(:),ITO(:),MYMS(:),NASM0(:),IPRCIDS(:)
+(   16) INTEGER(KIND=JPIM) :: JLEV,JREP,JROC
+(   17) 
+(   18) CHARACTER*6 CLNAME
+(   19) 
+(   20) REAL(KIND=JPRBT) , ALLOCATABLE :: ZSPECX(:,:),ZSPECY(:,:),ZSPECP(:,:)
+(   21) REAL(KIND=JPRBT) , ALLOCATABLE :: ZVORX(:,:),ZVORY(:,:),ZVORP(:,:)
+(   22) REAL(KIND=JPRBT) , ALLOCATABLE :: ZDIVX(:,:),ZDIVY(:,:),ZDIVP(:,:)
+(   23) REAL(KIND=JPRBT) , ALLOCATABLE :: ZGX(:,:,:)
+(   24) REAL(KIND=JPRBT) , ALLOCATABLE :: ZSPECYG(:,:),ZSPECXG(:,:)
+(   25) REAL(KIND=JPRBT) , ALLOCATABLE :: ZNORM(:),GW(:),ZRANDSP(:),ZRANDGP(:,:),ZPERT(:,:,:)
+(   26) REAL(KIND=JPRBT) :: ZSC,ZWALL,ZWALL0
+(   27) REAL(KIND=JPRBT),EXTERNAL :: TIMEF
+(   28) LOGICAL :: LSTATS,LSTATSCPU,LSYNCSTATS,LDETAILED_STATS,&
+(   29)             &LSTATS_OMP, LSTATS_COMMS,&
+(   30)             &LTRACE_STATS
+(   31) INTEGER(KIND=JPIM) ::NTRACE_STATS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 2
+
+(   32) REAL(KIND=JPRBT) :: ZAVEAVE(0:200)
+(   33) 
+(   34) NAMELIST /NAMCTL/ NPROMA,NPRGPNS,NPRGPEW,NPRTRW,NPRTRV,NREP,NDGL,NFLEVG
+(   35) #include "setup_trans0.h"
+(   36) #include "setup_trans.h"
+(   37) #include "trans_inq.h"
+(   38) #include "specnorm.h"
+(   39) #include "dir_trans.h"
+(   40) #include "inv_trans.h"
+(   41) #include "dir_transad.h"
+(   42) #include "inv_transad.h"
+(   43) #include "dist_grid.h"
+(   44) #include "gath_spec.h"
+(   45) #include "dist_spec.h"
+(   46) #include "gath_grid.h"
+(   47) 
+(   48) NDGL = 32
+(   49) NFLEVG = 9
+(   50) NPROMA = 8
+(   51) 
+(   52) NPRGPNS = 1
+(   53) NPRGPEW = 1
+(   54) NPRTRW = 1
+(   55) NPRTRV = 1
+(   56) NREP = 1
+(   57) 
+(   58) LSTATS = .TRUE.
+(   59) LSTATSCPU = .FALSE.
+(   60) LSYNCSTATS = .TRUE.
+(   61) LDETAILED_STATS = .FALSE.
+(   62) LTRACE_STATS = .FALSE.
+(   63) NTRACE_STATS = 0
+(   64) READ(4,NAMCTL)
+(   65) NPROC = NPRGPNS*NPRGPEW
+(   66) IF(NPROC /= NPRTRW*NPRTRV) THEN
+(   67)   PRINT *,'NPRGPNS,NPRGPEW,NPRTRW,NPRTRV ',NPRGPNS,NPRGPEW,NPRTRW,NPRTRV
+(   68)   CALL ABORT_TRANS('NPRGPNS*NPRGPEW /= NPRTRW*NPRTRV')
+(   69) ENDIF
+(   70) NSMAX = (2*NDGL-1)/3
+(   71) NSPECG = (NSMAX+1)*(NSMAX+2)/2
+(   72) NSPEC2G = NSPECG*2
+(   73) IF(NPROC > 1 ) THEN
+(   74)   CALL MPL_INIT
+(   75)   MYPROC = MPL_MYRANK()
+(   76)   NOUT = 20
+(   77)   WRITE(CLNAME,'(A,I2.2)') 'OUT.',MYPROC
+(   78)   OPEN(NOUT,FILE=CLNAME)
+(   79) ELSE
+(   80)   NOUT = 6
+(   81)   MYPROC = 1
+(   82) ENDIF
+(   83) ALLOCATE(IPRCIDS(NPROC))
+(   84) DO JROC=1,NPROC
+(   85)   IPRCIDS(JROC) = JROC
+(   86) ENDDO
+(   87) 
+(   88) WRITE(NOUT,*) ' NSMAX= ',NSMAX,' NDGL=',NDGL
+(   89) MYSETV = MOD(MYPROC-1,NPRTRV)+1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 3
+
+(   90) ALLOCATE(ZSPECYG(NFLEVG,NSPEC2G))
+(   91) ALLOCATE(ZSPECXG(NFLEVG,NSPEC2G))
+(   92) ALLOCATE(ZRANDSP(NSPEC2G))
+(   93) ALLOCATE(NLOEN(NDGL))
+(   94) ALLOCATE(ZNORM(NFLEVG))
+(   95) ALLOCATE(ITO(NFLEVG))
+(   96) NLOEN(:) = 2*NDGL
+(   97) CALL SETUP_TRANS0(KOUT=NOUT,KERR=0,KPRINTLEV=0,KMAX_RESOL=1,&
+(   98)  & KPRGPNS=NPRGPNS,KPRGPEW=NPRGPEW,KPRTRW=NPRTRW)
+(   99) CALL SETUP_TRANS(KSMAX=NSMAX,KDGL=NDGL,KLOEN=NLOEN,LDSPLIT=.TRUE.)
+(  100) CALL TRANS_INQ(KSPEC2=NSPEC2,KGPTOT=NGPTOT,KGPTOTG=NGPTOTG,KNUMP=NUMP)
+(  101) 
+(  102) ALLOCATE(MYMS(NUMP))
+(  103) ALLOCATE(NASM0(0:NSMAX))
+(  104) ALLOCATE(GW(NDGL))
+(  105) ALLOCATE(ZRANDGP(NGPTOTG,1))
+(  106) CALL TRANS_INQ(KMYMS=MYMS,KASM0=NASM0,PGW=GW)
+(  107) NGPBLKS = (NGPTOT-1)/NPROMA+1
+(  108) WRITE(NOUT,*) 'NSPEC2=',NSPEC2,' NGPTOT=',NGPTOT
+(  109) WRITE(NOUT,*) 'SETUP FINISHED'
+(  110) CALL FLUSH(NOUT)
+(  111) 
+(  112) NFLEV = 0
+(  113) DO JLEV=1,NFLEVG
+(  114)   IVSET(JLEV) = MOD(JLEV,NPRTRV)+1
+(  115)   IF(IVSET(JLEV) == MYSETV) NFLEV = NFLEV+1
+(  116) ENDDO
+(  117) WRITE(NOUT,*)' NFLEV=',NFLEV
+(  118) ALLOCATE(ZSPECX(NFLEV,NSPEC2))
+(  119) ALLOCATE(ZSPECY(NFLEV,NSPEC2))
+(  120) ALLOCATE(ZSPECP(NFLEV,NSPEC2))
+(  121) ALLOCATE(ZVORX(NFLEV,NSPEC2))
+(  122) ALLOCATE(ZVORY(NFLEV,NSPEC2))
+(  123) ALLOCATE(ZVORP(NFLEV,NSPEC2))
+(  124) ALLOCATE(ZDIVX(NFLEV,NSPEC2))
+(  125) ALLOCATE(ZDIVY(NFLEV,NSPEC2))
+(  126) ALLOCATE(ZDIVP(NFLEV,NSPEC2))
+(  127) ALLOCATE(ZGX(NPROMA,3*NFLEVG,NGPBLKS))
+(  128) ALLOCATE(ZPERT(NPROMA,1,NGPBLKS))
+(  129) 
+(  130) ! Prepare perturbations
+(  131) 
+(  132) IF(MYPROC == 1) THEN
+(  133)   DO JLEV=1,NFLEVG
+(  134)     CALL RANDOM_NUMBER(ZRANDSP)
+(  135)     ZSPECYG(JLEV,:) = (1.0_JPRBT-2.0_JPRBT*ZRANDSP(:))
+(  136)     CALL RANDOM_NUMBER(ZRANDSP)
+(  137)     ZSPECXG(JLEV,:) = (1.0_JPRBT-2.0_JPRBT*ZRANDSP(:))
+(  138)   ENDDO
+(  139) ENDIF
+(  140) CALL RANDOM_NUMBER(ZRANDGP)
+(  141) ZRANDGP(:,:) = (1.0_JPRBT-2.0_JPRBT*ZRANDGP(:,:))
+(  142) ITO(:) = 1
+(  143) ZVORX = 0.0_JPRBT
+(  144) ZVORY = 0.0_JPRBT
+(  145) ZVORP = 0.0_JPRBT
+(  146) ZDIVX = 0.0_JPRBT
+(  147) ZDIVY = 0.0_JPRBT
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 4
+
+(  148) ZDIVP = 0.0_JPRBT
+(  149) 
+(  150) ! Distribute perturbations
+(  151) 
+(  152) CALL DIST_GRID(PGPG=ZRANDGP,KFDISTG=1,KFROM=ITO,PGP=ZPERT,KPROMA=NPROMA)
+(  153) CALL DIST_SPEC(PSPECG=ZSPECXG,KFDISTG=NFLEVG,KFROM=ITO,PSPEC=ZSPECX,&
+(  154)  & KVSET=IVSET(1:NFLEVG))
+(  155) 
+(  156) !ZWALL=TIMEF()
+(  157) !ZWALL0=ZWALL
+(  158) CALL GSTATS(0,0)
+(  159) CALL GSTATS_SETUP(NPROC,MYPROC,IPRCIDS,&
+(  160)  &LSTATS,LSTATSCPU,LSYNCSTATS,LDETAILED_STATS,&
+(  161)  &LSTATS_OMP,LSTATS_COMMS,&
+(  162)  &LTRACE_STATS,NTRACE_STATS)
+(  163) CALL GSTATS_PSUT
+(  164) DO JREP=1,NREP
+(  165) 
+(  166)   CALL DIST_SPEC(PSPECG=ZSPECYG,KFDISTG=NFLEVG,KFROM=ITO,PSPEC=ZSPECY,&
+(  167)    & KVSET=IVSET(1:NFLEVG))
+(  168) ! Direct caclulations
+(  169) 
+(  170)   CALL INV_TRANS(PSPSCALAR=ZSPECX,PSPVOR=ZVORX,PSPDIV=ZDIVX,PGP=ZGX,&
+(  171)    & KPROMA=NPROMA,KVSETSC=IVSET(1:NFLEVG), KVSETUV=IVSET(1:NFLEVG))
+(  172)   CALL GPC(ZGX)
+(  173)   CALL DIR_TRANS(PSPSCALAR=ZSPECP,PSPVOR=ZVORP,PSPDIV=ZDIVP,PGP=ZGX,&
+(  174)    &KPROMA=NPROMA,KVSETSC=IVSET(1:NFLEVG), KVSETUV=IVSET(1:NFLEVG))
+(  175)   CALL SCALPRODSP(ZSPECP,ZSPECY,ZSC)
+(  176)   IF(JREP == NREP) WRITE(NOUT,*)'<Fx,y> ',ZSC
+(  177) 
+(  178) ! Adjoint
+(  179) 
+(  180)   ZSPECP = 0.0_JPRBT
+(  181)   CALL DIR_TRANSAD(PSPSCALAR=ZSPECY,PSPVOR=ZVORY,PSPDIV=ZDIVY,PGP=ZGX,&
+(  182)    &KPROMA=NPROMA, KVSETSC=IVSET(1:NFLEVG), KVSETUV=IVSET(1:NFLEVG))
+(  183)   CALL GPCAD(ZGX)
+(  184)   CALL INV_TRANSAD(PSPSCALAR=ZSPECP,PSPVOR=ZVORP,PSPDIV=ZDIVP,PGP=ZGX,&
+(  185)    & KPROMA=NPROMA,KVSETSC=IVSET(1:NFLEVG),KVSETUV=IVSET(1:NFLEVG))
+(  186) 
+(  187)   CALL SCALPRODSP(ZSPECX,ZSPECP,ZSC)
+(  188)   IF(JREP == NREP) WRITE(NOUT,*)'<x,F*y> ',ZSC
+(  189) !  ZWALL=TIMEF()
+(  190) !  IF(MYPROC == 1) WRITE(0,*) 'Time spent in loop(i)=',jrep,(zwall-zwall0)*0.001
+(  191) !  ZWALL0 = ZWALL
+(  192) ENDDO
+(  193) CALL GSTATS(0,1)
+(  194) 
+(  195) !ZWALL=TIMEF()
+(  196) !WRITE(NOUT,*) 'Time spent in main loop=',zwall*0.001
+(  197) !IF(MYPROC == 1) WRITE(0,*) 'Time spent in main loop=',zwall*0.001
+(  198) 
+(  199) CALL GSTATS_PRINT(NOUT,ZAVEAVE,200)
+(  200) IF(NPROC > 1 ) THEN
+(  201)  CALL MPL_BARRIER()
+(  202)  CALL MPL_END
+(  203) ENDIF
+(  204) 
+(  205) CONTAINS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 5
+
+(  206) 
+(  207) SUBROUTINE GPC(PGP)
+(  208) 
+(  209) ! Grid-point computations
+(  210) 
+(  211) REAL(KIND=JPRBT) :: PGP(:,:,:)
+(  212) 
+(  213) INTEGER(KIND=JPIM) :: JLEV,JKGLO,JROF,IEND,IBL,IOFF,IROF,JGL,JL
+(  214) 
+(  215) CALL GSTATS(108,0)
+(  216) !$OMP PARALLEL DO SCHEDULE(STATIC,1) PRIVATE(JLEV,JKGLO,IEND,IOFF,IBL,JROF)
+(  217) DO JLEV=1,NFLEVG
+(  218)   DO JKGLO=1,NGPTOT,NPROMA
+(  219)     IEND = MIN(NPROMA,NGPTOT-JKGLO+1)
+(  220)     IOFF = JKGLO-1
+(  221)     IBL  = (JKGLO-1)/NPROMA+1
+(  222)     DO JROF=1,IEND
+(  223)       PGP(JROF,JLEV,IBL) = PGP(JROF,JLEV,IBL)*ZPERT(JROF,1,IBL)
+(  224)     ENDDO
+(  225)   ENDDO
+(  226) ENDDO
+(  227) !$OMP END PARALLEL DO
+(  228) CALL GSTATS(108,1)
+(  229) 
+(  230) 
+(  231) END SUBROUTINE GPC
+(  232) 
+(  233) SUBROUTINE GPCAD(PGP)
+(  234) 
+(  235) ! Adjoint of GPC
+(  236) 
+(  237) REAL(KIND=JPRBT) :: PGP(:,:,:)
+(  238) INTEGER(KIND=JPIM) :: JLEV,JKGLO,JROF,IEND,IBL,IOFF,IROF,JGL,JL
+(  239) 
+(  240) CALL GSTATS(135,0)
+(  241) !$OMP PARALLEL DO SCHEDULE(STATIC,1) PRIVATE(JLEV,JKGLO,IEND,IOFF,IBL,JROF)
+(  242) DO JLEV=1,NFLEVG
+(  243)   DO JKGLO=1,NGPTOT,NPROMA
+(  244)     IEND = MIN(NPROMA,NGPTOT-JKGLO+1)
+(  245)     IOFF = JKGLO-1
+(  246)     IBL  = (JKGLO-1)/NPROMA+1
+(  247)     DO JROF=1,IEND
+(  248)       PGP(JROF,JLEV,IBL) = PGP(JROF,JLEV,IBL)*ZPERT(JROF,1,IBL)
+(  249)     ENDDO
+(  250)   ENDDO
+(  251) ENDDO
+(  252) !$OMP END PARALLEL DO
+(  253) CALL GSTATS(135,1)
+(  254) 
+(  255) 
+(  256) END SUBROUTINE GPCAD
+(  257) 
+(  258) SUBROUTINE SCALPRODSP(PSP1,PSP2,PSC)
+(  259) 
+(  260) ! Scalar product in spectral space
+(  261) REAL(KIND=JPRBT) :: PSP1(:,:),PSP2(:,:)
+(  262) REAL(KIND=JPRBT) :: PSC
+(  263) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 6
+
+(  264) INTEGER(KIND=JPIM) :: JMLOC,IM,JIR,JN,INM,JLEV
+(  265) REAL(KIND=JPRBT) :: ZMFACT,ZSP(NFLEV,NSPEC2),ZSPG(NFLEVG,NSPEC2G)
+(  266) 
+(  267) PSC = 0.0_JPRBT
+(  268) ZSP(:,:) = 0.0_JPRBT
+(  269) 
+(  270) CALL GSTATS(110,0)
+(  271) !$OMP PARALLEL DO SCHEDULE(STATIC,1) PRIVATE(JLEV,JMLOC,IM,ZMFACT,JIR,JN,INM)
+(  272) DO JLEV=1,NFLEV
+(  273)   DO JMLOC=1,NUMP
+(  274)     IM = MYMS(JMLOC)
+(  275)     ZMFACT=1.0_JPRBT+REAL(MIN(1,IM),JPRBT)
+(  276)     DO JIR=0,MIN(1,IM)
+(  277)       DO JN=IM,NSMAX
+(  278)         INM = NASM0(IM)+(JN-IM)*2+JIR
+(  279)         ZSP(JLEV,INM) = PSP1(JLEV,INM)*PSP2(JLEV,INM)*ZMFACT/2.0_JPRBT
+(  280)       ENDDO
+(  281)     ENDDO
+(  282)   ENDDO
+(  283) ENDDO
+(  284) !$OMP END PARALLEL DO
+(  285) 
+(  286) CALL GATH_SPEC(PSPECG=ZSPG,KFGATHG=NFLEVG,KTO=ITO,PSPEC=ZSP,&
+(  287)  & KVSET=IVSET(1:NFLEVG))
+(  288) 
+(  289) IF(MYPROC == 1) THEN
+(  290)   PSC = SUM(ZSPG)
+(  291) ELSE
+(  292)   PSC = 0.0_JPRBT
+(  293) ENDIF
+(  294) CALL GSTATS(110,1)
+(  295) 
+(  296) END SUBROUTINE SCALPRODSP
+(  297) 
+(  298) SUBROUTINE SCALPRODGP(PGP1,PGP2,PSC)
+(  299) 
+(  300) !Scalar product in gridpoint space
+(  301) 
+(  302) REAL(KIND=JPRBT) :: PGP1(:,:,:),PGP2(:,:,:)
+(  303) REAL(KIND=JPRBT) :: PSC
+(  304) 
+(  305) INTEGER(KIND=JPIM) :: JLEV,JKGLO,JROF,IEND,IBL,IOFF,IROF,JGL,JL
+(  306) REAL(KIND=JPRBT) :: ZGP(NPROMA,NFLEVG,NGPBLKS),ZGPG(NGPTOTG,NFLEVG),ZWTG(NGPTOTG,1),ZWT(NPROMA,1,NGPBLKS)
+(  307) 
+(  308) PSC = 0.0_JPRBT
+(  309) ZGP(:,:,:) = 0.0_JPRBT
+(  310) 
+(  311) IROF=0
+(  312) DO JGL=1,NDGL
+(  313)   DO JL=1,NLOEN(JGL)
+(  314)     IROF=IROF+1
+(  315)     ZWTG(IROF,1) = 1.0_JPRBT
+(  316)   ENDDO
+(  317) ENDDO
+(  318) CALL DIST_GRID(PGPG=ZWTG,KFDISTG=1,KFROM=ITO,PGP=ZWT,KPROMA=NPROMA)
+(  319) 
+(  320) DO JLEV=1,NFLEV
+(  321)   DO JKGLO=1,NGPTOT,NPROMA
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 7
+
+(  322)     IEND = MIN(NPROMA,NGPTOT-JKGLO+1)
+(  323)     IOFF = JKGLO-1
+(  324)     IBL  = (JKGLO-1)/NPROMA+1
+(  325)     DO JROF=1,IEND
+(  326)       ZGP(JROF,JLEV,IBL) = PGP1(JROF,JLEV,IBL)*PGP2(JROF,JLEV,IBL)*&
+(  327)        &ZWT(JROF,1,IBL)
+(  328)     ENDDO
+(  329)   ENDDO
+(  330) ENDDO
+(  331) 
+(  332) CALL GATH_GRID(PGPG=ZGPG,KFGATHG=NFLEVG,KTO=ITO,PGP=ZGP,KPROMA=NPROMA)
+(  333) 
+(  334) PSC = SUM(ZGPG)
+(  335) 
+(  336) END SUBROUTINE SCALPRODGP
+(  337) 
+(  338) END PROGRAM TEST_ADJOINT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 8
+
+(    1) # 1 "test_adjoint.F90"
+(    1) PROGRAM TEST_ADJOINT
+(    2) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    3) USE MPL_MODULE  ,ONLY : MPL_INIT, MPL_END, MPL_BARRIER, MPL_MYRANK
+(    4) USE ABORT_TRANS_MOD  ! This is not really correct usage
+(    5) !
+(    6) # 7 "test_adjoint.F90"
+(    7) IMPLICIT NONE
+(    8) # 10 "test_adjoint.F90"
+(   10) INTEGER(KIND=JPIM) :: NSMAX,NDGL,NPROC,NPRGPNS,NPRGPEW,NPRTRW,NPRTRV,NREP
+(   11) INTEGER(KIND=JPIM) :: IERROR,NOUT,MYPROC,NSPECG,NSPEC2G,NGPTOTG
+(   12) INTEGER(KIND=JPIM) :: NFLEV,NFLEVG
+(   13) INTEGER(KIND=JPIM) :: NSPEC2,NGPTOT,NPROMA,NGPBLKS,MYSETV,NUMP
+(   14) INTEGER(KIND=JPIM) :: IVSET(1000)
+(   15) INTEGER(KIND=JPIM) ,ALLOCATABLE :: NLOEN(:),ITO(:),MYMS(:),NASM0(:),IPRCIDS(:)
+(   16) INTEGER(KIND=JPIM) :: JLEV,JREP,JROC
+(   17) # 18 "test_adjoint.F90"
+(   18) CHARACTER*6 CLNAME
+(   19) # 20 "test_adjoint.F90"
+(   20) REAL(KIND=JPRBT) , ALLOCATABLE :: ZSPECX(:,:),ZSPECY(:,:),ZSPECP(:,:)
+(   21) REAL(KIND=JPRBT) , ALLOCATABLE :: ZVORX(:,:),ZVORY(:,:),ZVORP(:,:)
+(   22) REAL(KIND=JPRBT) , ALLOCATABLE :: ZDIVX(:,:),ZDIVY(:,:),ZDIVP(:,:)
+(   23) REAL(KIND=JPRBT) , ALLOCATABLE :: ZGX(:,:,:)
+(   24) REAL(KIND=JPRBT) , ALLOCATABLE :: ZSPECYG(:,:),ZSPECXG(:,:)
+(   25) REAL(KIND=JPRBT) , ALLOCATABLE :: ZNORM(:),GW(:),ZRANDSP(:),ZRANDGP(:,:),ZPERT(:,:,:)
+(   26) REAL(KIND=JPRBT) :: ZSC,ZWALL,ZWALL0
+(   27) REAL(KIND=JPRBT),EXTERNAL :: TIMEF
+(   28) LOGICAL :: LSTATS,LSTATSCPU,LSYNCSTATS,LDETAILED_STATS,&
+(   29)             &LSTATS_OMP, LSTATS_COMMS,&
+(   30)             &LTRACE_STATS
+(   31) INTEGER(KIND=JPIM) ::NTRACE_STATS
+(   32) REAL(KIND=JPRBT) :: ZAVEAVE(0:200)
+(   33) # 34 "test_adjoint.F90"
+(   34) NAMELIST /NAMCTL/ NPROMA,NPRGPNS,NPRGPEW,NPRTRW,NPRTRV,NREP,NDGL,NFLEVG
+(   35) # 35 "test_adjoint.F90"
+(   35) # 1 ".D[10]/setup_trans0.h"
+(    1) INTERFACE
+(    2) SUBROUTINE SETUP_TRANS0(KOUT,KERR,KPRINTLEV,KMAX_RESOL,KPROMATR,&
+(    3) &                       KPRGPNS,KPRGPEW,KPRTRW,KCOMBFLEN,&
+(    4) &                       LDMPOFF,LDSYNC_TRANS,KTRANS_SYNC_LEVEL,&
+(    5) &                       LDEQ_REGIONS,K_REGIONS_NS,K_REGIONS_EW,K_REGIONS,&
+(    6) &                       PRAD,LDALLOPERM,LDALLOPERM2)
+(    7) # 8 ".D[10]/setup_trans0.h"
+(    8) !**** *SETUP_TRANS0* - General setup routine for transform package
+(    9) # 10 ".D[10]/setup_trans0.h"
+(   10) !     Purpose.
+(   11) !     --------
+(   12) !     Resolution independent part of setup of transform package
+(   13) !     Has to be called BEFORE SETUP_TRANS
+(   14) # 15 ".D[10]/setup_trans0.h"
+(   15) !**   Interface.
+(   16) !     ----------
+(   17) !     CALL SETUP_TRANS0(...)
+(   18) # 19 ".D[10]/setup_trans0.h"
+(   19) !     Explicit arguments : All arguments are optional, [..] default value
+(   20) !     -------------------
+(   21) !     KOUT - Unit number for listing output [6]
+(   22) !     KERR - Unit number for error messages [0]
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 9
+
+(   23) !     KPRINTLEV - level of output to KOUT, 0->no output,1->normal,2->debug [0]
+(   24) !     KMAX_RESOL - maximum number of different resolutions for this run [1]
+(   25) !     KPRGPNS - splitting level in N-S direction in grid-point space [1]
+(   26) !     KPRGPEW - splitting level in E-W direction in grid-point space [1]
+(   27) !     KPRTRW  - splitting level in wave direction in spectral space [1]
+(   28) !     KCOMBFLEN - Size of communication buffer [1800000 (*8bytes) ]
+(   29) !     LDMPOFF - switch off message passing [false]
+(   30) !     LDSYNC_TRANS - switch to activate barrier before transforms [false]
+(   31) !     KTRANS_SYNC_LEVEL - use of synchronization/blocking [0]
+(   32) !     LDEQ_REGIONS - true if new eq_regions partitioning [false]
+(   33) !     K_REGIONS    - Number of regions (1D or 2D partitioning)
+(   34) !     K_REGIONS_NS - Maximum number of NS partitions
+(   35) !     K_REGIONS_EW - Maximum number of EW partitions
+(   36) !     PRAD         - Radius of the planet
+(   37) !     LDALLOPERM  - Allocate certain arrays permanently
+(   38) # 39 ".D[10]/setup_trans0.h"
+(   39) !     The total number of (MPI)-processors has to be equal to KPRGPNS*KPRGPEW
+(   40) # 41 ".D[10]/setup_trans0.h"
+(   41) !     Method.
+(   42) !     -------
+(   43) # 44 ".D[10]/setup_trans0.h"
+(   44) !     Externals.  SUMP_TRANS0 - initial setup routine
+(   45) !     ----------
+(   46) # 47 ".D[10]/setup_trans0.h"
+(   47) !     Author.
+(   48) !     -------
+(   49) !        Mats Hamrud *ECMWF*
+(   50) # 51 ".D[10]/setup_trans0.h"
+(   51) !     Modifications.
+(   52) !     --------------
+(   53) !        Original : 00-03-03
+(   54) !        R. El Khatib 03-01-24 LDMPOFF
+(   55) !        G. Mozdzynski 2006-09-13 LDEQ_REGIONS
+(   56) !        N. Wedi  2009-11-30 add radius
+(   57) # 58 ".D[10]/setup_trans0.h"
+(   58) !     ------------------------------------------------------------------
+(   59) # 60 ".D[10]/setup_trans0.h"
+(   60) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   61) # 62 ".D[10]/setup_trans0.h"
+(   62) IMPLICIT NONE
+(   63) # 64 ".D[10]/setup_trans0.h"
+(   64) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN)  :: KOUT,KERR,KPRINTLEV,KMAX_RESOL,KPROMATR
+(   65) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN)  :: KPRGPNS,KPRGPEW,KPRTRW,KCOMBFLEN
+(   66) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDMPOFF
+(   67) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDSYNC_TRANS
+(   68) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN)  :: KTRANS_SYNC_LEVEL
+(   69) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDEQ_REGIONS
+(   70) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDALLOPERM
+(   71) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDALLOPERM2
+(   72) REAL(KIND=JPRB)    ,OPTIONAL,INTENT(IN)  :: PRAD
+(   73) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT) :: K_REGIONS(:)
+(   74) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT) :: K_REGIONS_NS
+(   75) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT) :: K_REGIONS_EW
+(   76) # 77 ".D[10]/setup_trans0.h"
+(   77) END SUBROUTINE SETUP_TRANS0
+(   78) # 81 ".D[10]/setup_trans0.h"
+(   81) END INTERFACE
+(   82) # 36 "test_adjoint.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 10
+
+(   36) # 36 "test_adjoint.F90"
+(   36) # 1 ".D[18]/setup_trans.h"
+(    1) INTERFACE
+(    2) SUBROUTINE SETUP_TRANS(KSMAX,KDGL,KDLON,KLOEN,LDSPLIT,PSTRET,&
+(    3) &KFLEV,KTMAX,KRESOL,PWEIGHT,LDGRIDONLY,LDUSERPNM,LDKEEPRPNM,LDUSEFLT,&
+(    4) &LDSPSETUPONLY,LDPNMONLY,LDUSEFFTW,&
+(    5) &LDLL,LDSHIFTLL,CDIO_LEGPOL,CDLEGPOLFNAME,KLEGPOLPTR,KLEGPOLPTR_LEN)
+(    6) # 7 ".D[18]/setup_trans.h"
+(    7) !**** *SETUP_TRANS* - Setup transform package for specific resolution
+(    8) # 9 ".D[18]/setup_trans.h"
+(    9) !     Purpose.
+(   10) !     --------
+(   11) !     To setup for making spectral transforms. Each call to this routine
+(   12) !     creates a new resolution up to a maximum of NMAX_RESOL set up in
+(   13) !     SETUP_TRANS0. You need to call SETUP_TRANS0 before this routine can
+(   14) !     be called.
+(   15) # 16 ".D[18]/setup_trans.h"
+(   16) !**   Interface.
+(   17) !     ----------
+(   18) !     CALL SETUP_TRANS(...)
+(   19) # 20 ".D[18]/setup_trans.h"
+(   20) !     Explicit arguments : KLOEN,LDSPLIT are optional arguments
+(   21) !     -------------------- 
+(   22) !     KSMAX - spectral truncation required
+(   23) !     KDGL  - number of Gaussian latitudes
+(   24) !     KDLON - number of points on each latitude [2*KDGL]
+(   25) !     KLOEN(:) - number of points on each Gaussian latitude [2*KDGL]
+(   26) !     LDSPLIT - true if split latitudes in grid-point space [false]
+(   27) !     KTMAX - truncation order for tendencies?
+(   28) !     KRESOL - the resolution identifier
+(   29) !     PWEIGHT - the weight per grid-point (for a weighted distribution)
+(   30) !     LDGRIDONLY - true if only grid space is required
+(   31) # 32 ".D[18]/setup_trans.h"
+(   32) !     KSMAX,KDGL,KTMAX and KLOEN are GLOBAL variables desribing the resolution
+(   33) !     in spectral and grid-point space
+(   34) # 35 ".D[18]/setup_trans.h"
+(   35) !     LDSPLIT describe the distribution among processors of grid-point data and
+(   36) !     has no relevance if you are using a single processor
+(   37) # 38 ".D[18]/setup_trans.h"
+(   38) !     LDUSEFLT   - use Fast Legandre Transform (Butterfly algorithm)
+(   39) !     LDUSERPNM  - Use Belusov to compute legendre pol. (else new alg.)
+(   40) !     LDKEEPRPNM - Keep Legendre Polynomials (only applicable when using
+(   41) !                  FLT, otherwise always kept)
+(   42) !     LDPNMONLY  - Compute the Legendre polynomialsonly, not the FFTs.
+(   43) !     LDUSEFFTW   - Use FFTW for FFTs
+(   44) !     LDLL                 - Setup second set of input/output latitudes
+(   45) !                                 the number of input/output latitudes to transform is equal KDGL 
+(   46) !                                 or KDGL+2 in the case that includes poles + equator
+(   47) !                                 the number of input/output longitudes to transform is 2*KDGL
+(   48) !     LDSHIFTLL       - Shift output lon/lat data by 0.5*dx and 0.5*dy
+(   49)  
+(   50) !     Method.
+(   51) !     -------
+(   52) # 53 ".D[18]/setup_trans.h"
+(   53) !     Externals.  SET_RESOL   - set resolution
+(   54) !     ----------  SETUP_DIMS  - setup distribution independent dimensions
+(   55) !                 SUMP_TRANS_PRELEG - first part of setup of distr. environment
+(   56) !                 SULEG - Compute Legandre polonomial and Gaussian 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 11
+
+(   57) !                         Latitudes and Weights
+(   58) !                 SUMP_TRANS - Second part of setup of distributed environment
+(   59) !                 SUFFT - setup for FFT
+(   60) # 61 ".D[18]/setup_trans.h"
+(   61) !     Author.
+(   62) !     -------
+(   63) !        Mats Hamrud *ECMWF*
+(   64) # 65 ".D[18]/setup_trans.h"
+(   65) !     Modifications.
+(   66) !     --------------
+(   67) !        Original : 00-03-03
+(   68) # 69 ".D[18]/setup_trans.h"
+(   69) !     ------------------------------------------------------------------
+(   70) # 71 ".D[18]/setup_trans.h"
+(   71) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   72)     USE, INTRINSIC :: ISO_C_BINDING, ONLY:  C_PTR, C_INT,C_ASSOCIATED,C_SIZE_T
+(   73) # 75 ".D[18]/setup_trans.h"
+(   75) IMPLICIT NONE
+(   76) # 77 ".D[18]/setup_trans.h"
+(   77) ! Dummy arguments
+(   78) # 79 ".D[18]/setup_trans.h"
+(   79) INTEGER(KIND=JPIM) ,INTENT(IN) :: KSMAX,KDGL
+(   80) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KDLON
+(   81) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KLOEN(:)
+(   82) LOGICAL   ,OPTIONAL,INTENT(IN) :: LDSPLIT
+(   83) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KTMAX
+(   84) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT):: KRESOL
+(   85) REAL(KIND=JPRB)    ,OPTIONAL,INTENT(IN) :: PWEIGHT(:)
+(   86) REAL(KIND=JPRB)    ,OPTIONAL,INTENT(IN) :: PSTRET
+(   87) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KFLEV
+(   88) LOGICAL   ,OPTIONAL,INTENT(IN):: LDGRIDONLY
+(   89) LOGICAL   ,OPTIONAL,INTENT(IN):: LDUSEFLT
+(   90) LOGICAL   ,OPTIONAL,INTENT(IN):: LDUSERPNM
+(   91) LOGICAL   ,OPTIONAL,INTENT(IN):: LDKEEPRPNM
+(   92) LOGICAL   ,OPTIONAL,INTENT(IN):: LDPNMONLY
+(   93) LOGICAL   ,OPTIONAL,INTENT(IN):: LDSPSETUPONLY
+(   94) LOGICAL   ,OPTIONAL,INTENT(IN):: LDUSEFFTW
+(   95) LOGICAL   ,OPTIONAL,INTENT(IN):: LDLL
+(   96) LOGICAL   ,OPTIONAL,INTENT(IN):: LDSHIFTLL
+(   97) CHARACTER(LEN=*),OPTIONAL,INTENT(IN):: CDIO_LEGPOL
+(   98) CHARACTER(LEN=*),OPTIONAL,INTENT(IN):: CDLEGPOLFNAME
+(   99) TYPE(C_PTR) ,OPTIONAL,INTENT(IN) :: KLEGPOLPTR
+(  100) INTEGER(C_SIZE_T) ,OPTIONAL,INTENT(IN) :: KLEGPOLPTR_LEN
+(  101) # 103 ".D[18]/setup_trans.h"
+(  103) END SUBROUTINE SETUP_TRANS
+(  104) # 106 ".D[18]/setup_trans.h"
+(  106) END INTERFACE
+(  107) # 37 "test_adjoint.F90"
+(   37) # 37 "test_adjoint.F90"
+(   37) # 1 ".D[18]/trans_inq.h"
+(    1) INTERFACE
+(    2) SUBROUTINE TRANS_INQ(KRESOL,KSPEC,KSPEC2,KSPEC2G,KSPEC2MX,KNUMP,&
+(    3)                     &KGPTOT,KGPTOTG,KGPTOTMX,KGPTOTL,&
+(    4)                     &KMYMS,KASM0,KUMPP,KPOSSP,KPTRMS,KALLMS,KDIM0G,&
+(    5)                     &KFRSTLAT,KLSTLAT,KFRSTLOFF,KPTRLAT,&
+(    6)                     &KPTRFRSTLAT,KPTRLSTLAT,KPTRFLOFF,KSTA,KONL,&
+(    7)                     &KULTPP,KPTRLS,KNMENG,&
+(    8)                     &KPRTRW,KMYSETW,KMYSETV,KMY_REGION_NS,KMY_REGION_EW,&
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 12
+
+(    9)                     &LDSPLITLAT,&
+(   10)                     &KSMAX,PLAPIN,KNVALUE,KDEF_RESOL,LDLAM,&
+(   11)                     &PMU,PGW,PRPNM,KLEI3,KSPOLEGL,KPMS,KDGLU)
+(   12) # 13 ".D[18]/trans_inq.h"
+(   13) !**** *TRANS_INQ* - Extract information from the transform package
+(   14) # 15 ".D[18]/trans_inq.h"
+(   15) !     Purpose.
+(   16) !     --------
+(   17) !     Interface routine for extracting information from the T.P.
+(   18) # 19 ".D[18]/trans_inq.h"
+(   19) !**   Interface.
+(   20) !     ----------
+(   21) !     CALL TRANS_INQ(...)
+(   22) !     Explicit arguments : All arguments are optional.
+(   23) !     -------------------- 
+(   24) !     KRESOL   - resolution tag for which info is required ,default is the
+(   25) !                first defined resulution (input)
+(   26) # 27 ".D[18]/trans_inq.h"
+(   27) !                   MULTI-TRANSFORMS MANAGEMENT
+(   28) !     KDEF_RESOL - number or resolutions defined
+(   29) !     LDLAM      - .T. if the corresponding resolution is LAM, .F. if it is global
+(   30) # 31 ".D[18]/trans_inq.h"
+(   31) !                   SPECTRAL SPACE
+(   32) !     KSPEC    - number of complex spectral coefficients on this PE
+(   33) !     KSPEC2   - 2*KSPEC 
+(   34) !     KSPEC2G  - global KSPEC2
+(   35) !     KSPEC2MX - maximun KSPEC2 among all PEs
+(   36) !     KNUMP    - Number of spectral waves handled by this PE
+(   37) !     KGPTOT   - Total number of grid columns on this PE
+(   38) !     KGPTOTG  - Total number of grid columns on the Globe
+(   39) !     KGPTOTMX - Maximum number of grid columns on any of the PEs
+(   40) !     KGPTOTL  - Number of grid columns one each PE (dimension N_REGIONS_NS:N_REGIONS_EW)
+(   41) !     KMYMS    - This PEs spectral zonal wavenumbers
+(   42) !     KASM0    - Address in a spectral array of (m, n=m)
+(   43) !     KUMPP    - No. of wave numbers each wave set is responsible for
+(   44) !     KPOSSP   - Defines partitioning of global spectral fields among PEs
+(   45) !     KPTRMS   - Pointer to the first wave number of a given a-set
+(   46) !     KALLMS   - Wave numbers for all wave-set concatenated together 
+(   47) !                to give all wave numbers in wave-set order
+(   48) !     KDIM0G   - Defines partitioning of global spectral fields among PEs
+(   49) !     KSMAX    - spectral truncation
+(   50) !     KNVALUE  - n value for each KSPEC2 spectral coeffient
+(   51) # 52 ".D[18]/trans_inq.h"
+(   52) !                 GRIDPOINT SPACE                  
+(   53) !     KFRSTLAT    - First latitude of each a-set in grid-point space
+(   54) !     KLSTTLAT    - Last latitude of each a-set in grid-point space
+(   55) !     KFRSTLOFF   - Offset for first lat of own a-set in grid-point space
+(   56) !     KPTRLAT     - Pointer to the start of each latitude
+(   57) !     KPTRFRSTLAT - Pointer to the first latitude of each a-set in 
+(   58) !                   NSTA and NONL arrays
+(   59) !     KPTRLSTLAT  - Pointer to the last latitude of each a-set in
+(   60) !                   NSTA and NONL arrays
+(   61) !     KPTRFLOFF   - Offset for pointer to the first latitude of own a-set
+(   62) !                   NSTA and NONL arrays, i.e. nptrfrstlat(myseta)-1
+(   63) !     KSTA        - Position of first grid column for the latitudes on a 
+(   64) !                   processor. The information is available for all processors.
+(   65) !                   The b-sets are distinguished by the last dimension of 
+(   66) !                   nsta().The latitude band for each a-set is addressed by 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 13
+
+(   67) !                   nptrfrstlat(jaset),nptrlstlat(jaset), and 
+(   68) !                   nptrfloff=nptrfrstlat(myseta) on this processors a-set.
+(   69) !                   Each split latitude has two entries in nsta(,:) which 
+(   70) !                   necessitates the rather complex addressing of nsta(,:)
+(   71) !                   and the overdimensioning of nsta by N_REGIONS_NS.
+(   72) !     KONL        - Number of grid columns for the latitudes on a processor.
+(   73) !                   Similar to nsta() in data structure.
+(   74) !     LDSPLITLAT  - TRUE if latitude is split in grid point space over 
+(   75) !                   two a-sets
+(   76) # 77 ".D[18]/trans_inq.h"
+(   77) !                FOURIER SPACE
+(   78) !     KULTPP   - number of latitudes for which each a-set is calculating 
+(   79) !                the FFT's.
+(   80) !     KPTRLS   - pointer to first global latitude of each a-set for which
+(   81) !                it performs the Fourier calculations
+(   82) !     KNMENG   - associated (with NLOENG) cut-off zonal wavenumber
+(   83) # 84 ".D[18]/trans_inq.h"
+(   84) !                 LEGENDRE
+(   85) !     PMU      - sin(Gaussian latitudes)
+(   86) !     PGW      - Gaussian weights
+(   87) !     PRPNM    - Legendre polynomials
+(   88) !     KLEI3    - First dimension of Legendre polynomials
+(   89) !     KSPOLEGL - Second dimension of Legendre polynomials
+(   90) !     KPMS     - Adress for legendre polynomial for given M (NSMAX)
+(   91) !     PLAPIN   - Eigen-values of the inverse Laplace operator
+(   92) !     KDGLU    - Number of active points in an hemisphere for a given wavenumber "m"
+(   93) # 94 ".D[18]/trans_inq.h"
+(   94) !     Method.
+(   95) !     -------
+(   96) # 97 ".D[18]/trans_inq.h"
+(   97) !     Externals.  SET_RESOL - set resolution
+(   98) !     ----------  
+(   99) # 100 ".D[18]/trans_inq.h"
+(  100) !     Author.
+(  101) !     -------
+(  102) !        Mats Hamrud *ECMWF*
+(  103) # 104 ".D[18]/trans_inq.h"
+(  104) !     Modifications.
+(  105) !     --------------
+(  106) !        Original : 00-03-03
+(  107) !        M. Hortal : 2001-03-05 Dimensions of the Legendre polynomials
+(  108) !        R. El Khatib 08-Aug-2012 KSMAX,PLAPIN,KNVALUE,LDLAM,KDEF_RESOL
+(  109) # 110 ".D[18]/trans_inq.h"
+(  110) !     ------------------------------------------------------------------
+(  111) # 112 ".D[18]/trans_inq.h"
+(  112) USE PARKIND1  ,ONLY : JPIM     ,JPRB, JPRD
+(  113) # 115 ".D[18]/trans_inq.h"
+(  115) IMPLICIT NONE
+(  116) # 117 ".D[18]/trans_inq.h"
+(  117) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(  118) # 119 ".D[18]/trans_inq.h"
+(  119) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KSPEC
+(  120) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KSPEC2
+(  121) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KSPEC2G
+(  122) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KSPEC2MX
+(  123) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KNUMP
+(  124) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KGPTOT
+(  125) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KGPTOTG
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 14
+
+(  126) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KGPTOTMX
+(  127) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KGPTOTL(:,:)
+(  128) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KFRSTLOFF
+(  129) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPTRFLOFF
+(  130) # 131 ".D[18]/trans_inq.h"
+(  131) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KMYMS(:)
+(  132) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KASM0(0:)
+(  133) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KUMPP(:)
+(  134) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPOSSP(:)
+(  135) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPTRMS(:)
+(  136) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KALLMS(:)
+(  137) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KDIM0G(0:)
+(  138) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KFRSTLAT(:)
+(  139) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KLSTLAT(:)
+(  140) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPTRLAT(:)
+(  141) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPTRFRSTLAT(:)
+(  142) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPTRLSTLAT(:)
+(  143) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KSTA(:,:)
+(  144) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KONL(:,:)
+(  145) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPRTRW
+(  146) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KMYSETW
+(  147) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KMYSETV
+(  148) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KMY_REGION_NS
+(  149) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KMY_REGION_EW
+(  150) LOGICAL   ,OPTIONAL, INTENT(OUT) :: LDSPLITLAT(:)
+(  151) # 152 ".D[18]/trans_inq.h"
+(  152) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KULTPP(:)
+(  153) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPTRLS(:)
+(  154) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KNMENG(:)
+(  155) # 156 ".D[18]/trans_inq.h"
+(  156) REAL(KIND=JPRD)    ,OPTIONAL, INTENT(OUT) :: PMU(:)
+(  157) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PGW(:)
+(  158) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PRPNM(:,:)
+(  159) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KLEI3
+(  160) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KSPOLEGL
+(  161) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPMS(0:)
+(  162) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KDGLU(0:)
+(  163) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PLAPIN(-1:)
+(  164) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KSMAX
+(  165) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KNVALUE(:)
+(  166) # 167 ".D[18]/trans_inq.h"
+(  167) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KDEF_RESOL
+(  168) LOGICAL           ,OPTIONAL,INTENT(OUT)   :: LDLAM
+(  169) # 170 ".D[18]/trans_inq.h"
+(  170) END SUBROUTINE TRANS_INQ
+(  171) # 177 ".D[18]/trans_inq.h"
+(  177) END INTERFACE
+(  178) # 38 "test_adjoint.F90"
+(   38) # 38 "test_adjoint.F90"
+(   38) # 1 ".D[18]/specnorm.h"
+(    1) INTERFACE
+(    2) SUBROUTINE SPECNORM(PSPEC,KVSET,KMASTER,KRESOL,PMET,PNORM)
+(    3) # 4 ".D[18]/specnorm.h"
+(    4) !**** *SPECNORM* - Compute global spectral norms
+(    5) # 6 ".D[18]/specnorm.h"
+(    6) !     Purpose.
+(    7) !     --------
+(    8) !        Interface routine for computing spectral norms
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 15
+
+(    9) # 10 ".D[18]/specnorm.h"
+(   10) !**   Interface.
+(   11) !     ----------
+(   12) !     CALL SPECNORM(...)
+(   13) # 14 ".D[18]/specnorm.h"
+(   14) !     Explicit arguments : All arguments optional
+(   15) !     -------------------- 
+(   16) !     PSPEC(:,:)  - Spectral array
+(   17) !     KVSET(:)    - "B-Set" for each field
+(   18) !     KMASTER     - processor to recieve norms
+(   19) !     KRESOL      - resolution tag  which is required ,default is the
+(   20) !                   first defined resulution (input)
+(   21) !     PMET(:)     - metric
+(   22) !     PNORM(:)    - Norms (output for processor KMASTER)
+(   23) !
+(   24) !     Method.
+(   25) !     -------
+(   26) # 27 ".D[18]/specnorm.h"
+(   27) !     Externals.  SET_RESOL - set resolution
+(   28) !     ----------  SPNORM_CTL - control routine
+(   29) # 30 ".D[18]/specnorm.h"
+(   30) !     Author.
+(   31) !     -------
+(   32) !        Mats Hamrud *ECMWF*
+(   33) # 34 ".D[18]/specnorm.h"
+(   34) !     Modifications.
+(   35) !     --------------
+(   36) !        Original : 00-03-03
+(   37) # 38 ".D[18]/specnorm.h"
+(   38) !     ------------------------------------------------------------------
+(   39) # 40 ".D[18]/specnorm.h"
+(   40) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   41) # 43 ".D[18]/specnorm.h"
+(   43) IMPLICIT NONE
+(   44) # 45 ".D[18]/specnorm.h"
+(   45) ! Declaration of arguments
+(   46) # 48 ".D[18]/specnorm.h"
+(   48) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPEC(:,:)
+(   49) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSET(:)
+(   50) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KMASTER
+(   51) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PMET(:)
+(   52) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PNORM(:)
+(   53) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   54) # 55 ".D[18]/specnorm.h"
+(   55) !     ------------------------------------------------------------------
+(   56) # 57 ".D[18]/specnorm.h"
+(   57) END SUBROUTINE SPECNORM
+(   58) # 59 ".D[18]/specnorm.h"
+(   59) END INTERFACE
+(   60) # 39 "test_adjoint.F90"
+(   39) # 39 "test_adjoint.F90"
+(   39) # 1 ".D[18]/dir_trans.h"
+(    1) INTERFACE
+(    2) SUBROUTINE DIR_TRANS(PSPVOR,PSPDIV,PSPSCALAR,PSPSC3A,PSPSC3B,PSPSC2,&
+(    3) & LDLATLON,KPROMA,KVSETUV,KVSETSC,KRESOL,KVSETSC3A,KVSETSC3B,KVSETSC2,&
+(    4) & PGP,PGPUV,PGP3A,PGP3B,PGP2)
+(    5) # 7 ".D[18]/dir_trans.h"
+(    7) !**** *DIR_TRANS* - Direct spectral transform (from grid-point to spectral).
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 16
+
+(    8) # 9 ".D[18]/dir_trans.h"
+(    9) !     Purpose.
+(   10) !     --------
+(   11) !        Interface routine for the direct spectral transform
+(   12) # 13 ".D[18]/dir_trans.h"
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !     CALL DIR_TRANS(...)
+(   16) # 17 ".D[18]/dir_trans.h"
+(   17) !     Explicit arguments : All arguments except from PGP are optional.
+(   18) !     -------------------- 
+(   19) !     PSPVOR(:,:) - spectral vorticity (output)
+(   20) !     PSPDIV(:,:) - spectral divergence (output)
+(   21) !     PSPSCALAR(:,:) - spectral scalarvalued fields (output)
+(   22) !     PSPSC3A(:,:,:) - alternative to use of PSPSCALAR, see PGP3A below (input)
+(   23) !     PSPSC3B(:,:,:) - alternative to use of PSPSCALAR, see PGP3B below (input)
+(   24) !     PSPSC2(:,:)  - alternative to use of PSPSCALAR, see PGP2 below (input)
+(   25) !     LDLATLON   - indicating if regular lat-lon is the input data
+(   26) !     KPROMA      - required blocking factor for gridpoint output
+(   27) !     KVSETUV(:)  - indicating which 'b-set' in spectral space owns a 
+(   28) !                   vor/div field. Equivalant to NBSETLEV in the IFS.
+(   29) !                   The length of KVSETUV should be the GLOBAL number
+(   30) !                   of u/v fields which is the dimension of u and v releated
+(   31) !                   fields in grid-point space. 
+(   32) !     KVESETSC(:) - indicating which 'b-set' in spectral space owns a
+(   33) !                   scalar field. As for KVSETUV this argument is required
+(   34) !                   if the total number of processors is greater than
+(   35) !                   the number of processors used for distribution in
+(   36) !                   spectral wave space.  
+(   37) !     KVSETSC3A(:) - as KVESETSC for PSPSC3A (distribution on first dimension)
+(   38) !     KVSETSC3B(:) - as KVESETSC for PSPSC3B (distribution on first dimension)
+(   39) !     KVSETSC2(:) - as KVESETSC for PSPSC2 (distribution on first dimension)
+(   40) !     KRESOL   - resolution tag  which is required ,default is the
+(   41) !                first defined resulution (input)
+(   42) !     PGP(:,:,:) - gridpoint fields (input)
+(   43) !                  PGP need to  dimensioned (NPROMA,IF_GP,NGPBLKS) where
+(   44) !                  NPROMA is the blocking factor, IF_GP the total number
+(   45) !                  of output fields and NGPBLKS the number of NPROMA blocks.
+(   46) !                  The ordering of the output fields is as follows (all 
+(   47) !                  parts are optional depending on the input switches):
+(   48) !
+(   49) !     u             : IF_UV_G fields (if psvor present)
+(   50) !     v             : IF_UV_G fields (if psvor present)
+(   51) !     scalar fields : IF_SCALARS_G fields (if pspscalar present)
+(   52) !   
+(   53) !     Here IF_UV_G is the GLOBAL number of u/v fields as given by the length
+(   54) !     of KVSETUV (or by PSPVOR if no split in spectral 'b-set' direction
+(   55) !     IF_SCALARS_G is the GLOBAL number of scalar fields as giben by the 
+(   56) !     length of KVESETSC (or by number of fields in PSPSCALAR if no spectral
+(   57) !     'b-set' split
+(   58) # 59 ".D[18]/dir_trans.h"
+(   59) !     As an alternative to using PGP you can also use a combination of the
+(   60) !     following arrays. The reason for introducing these alternative ways
+(   61) !     of calling DIR_TRANS is to avoid uneccessary copies where your data
+(   62) !     structures don't fit in to the 'PSPVOR,PSPDIV, PSPSCALAR, PGP' layout.
+(   63) !     The use of any of these precludes the use of PGP and vice versa.
+(   64) # 65 ".D[18]/dir_trans.h"
+(   65) !     PGPUV(:,:,:,:) - the 'u-v' related grid-point variables in the order
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 17
+
+(   66) !                      described for PGP. The second dimension of PGPUV should
+(   67) !                      be the same as the "global" first dimension of 
+(   68) !                      PSPVOR,PSPDIV (in the IFS this is the number of levels)
+(   69) !                      PGPUV need to be dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   70) !                      IFLDS is the number of 'variables' (u,v)
+(   71) !     PGP3A(:,:,:,:) - grid-point array directly connected with PSPSC3A
+(   72) !                      dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   73) !                      IFLDS is the number of 'variables' (the same as in
+(   74) !                      PSPSC3A )
+(   75) !     PGP3B(:,:,:,:) - grid-point array directly connected with PSPSC3B
+(   76) !                      dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   77) !                      IFLDS is the number of 'variables' (the same as in
+(   78) !                      PSPSC3B)
+(   79) !     PGP2(:,:,:)    - grid-point array directly connected with PSPSC2
+(   80) !                      dimensioned(NPROMA,IFLDS,NGPBLKS)
+(   81) !                      IFLDS is the number of 'variables' (the same as in
+(   82) !                      PSPSC2 )
+(   83) ! 
+(   84) !     Method.
+(   85) !     -------
+(   86) # 87 ".D[18]/dir_trans.h"
+(   87) !     Externals.  SET_RESOL   - set resolution
+(   88) !     ----------  LTDIR_CTL   - control of Legendre transform
+(   89) !                 FTDIR_CTL   - control of Fourier transform
+(   90) # 91 ".D[18]/dir_trans.h"
+(   91) !     Author.
+(   92) !     -------
+(   93) !        Mats Hamrud *ECMWF*
+(   94) # 95 ".D[18]/dir_trans.h"
+(   95) !     Modifications.
+(   96) !     --------------
+(   97) !        Original : 00-03-03
+(   98) # 99 ".D[18]/dir_trans.h"
+(   99) !     ------------------------------------------------------------------
+(  100) # 101 ".D[18]/dir_trans.h"
+(  101) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(  102) # 104 ".D[18]/dir_trans.h"
+(  104) IMPLICIT NONE
+(  105) # 106 ".D[18]/dir_trans.h"
+(  106) ! Declaration of arguments
+(  107) # 108 ".D[18]/dir_trans.h"
+(  108) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPVOR(:,:)
+(  109) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPDIV(:,:)
+(  110) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSCALAR(:,:)
+(  111) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSC3A(:,:,:)
+(  112) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSC3B(:,:,:)
+(  113) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSC2(:,:)
+(  114) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KPROMA
+(  115) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETUV(:)
+(  116) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC(:)
+(  117) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3A(:)
+(  118) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3B(:)
+(  119) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC2(:)
+(  120) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KRESOL
+(  121) LOGICAL   ,OPTIONAL, INTENT(IN) :: LDLATLON
+(  122) # 123 ".D[18]/dir_trans.h"
+(  123) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGP(:,:,:)
+(  124) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGPUV(:,:,:,:)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 18
+
+(  125) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGP3A(:,:,:,:)
+(  126) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGP3B(:,:,:,:)
+(  127) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGP2(:,:,:)
+(  128) # 130 ".D[18]/dir_trans.h"
+(  130) END SUBROUTINE DIR_TRANS
+(  131) # 132 ".D[18]/dir_trans.h"
+(  132) END INTERFACE
+(  133) # 40 "test_adjoint.F90"
+(   40) # 40 "test_adjoint.F90"
+(   40) # 1 ".D[18]/inv_trans.h"
+(    1) INTERFACE
+(    2) SUBROUTINE INV_TRANS(PSPVOR,PSPDIV,PSPSCALAR,PSPSC3A,PSPSC3B,PSPSC2,&
+(    3)  & FSPGL_PROC,&
+(    4)  & LDSCDERS,LDVORGP,LDDIVGP,LDUVDER,LDLATLON,KPROMA,KVSETUV,KVSETSC,KRESOL,&
+(    5)  & KVSETSC3A,KVSETSC3B,KVSETSC2,&
+(    6)  & PGP,PGPUV,PGP3A,PGP3B,PGP2)
+(    7) # 8 ".D[18]/inv_trans.h"
+(    8) !**** *INV_TRANS* - Inverse spectral transform.
+(    9) # 10 ".D[18]/inv_trans.h"
+(   10) !     Purpose.
+(   11) !     --------
+(   12) !        Interface routine for the inverse spectral transform
+(   13) # 14 ".D[18]/inv_trans.h"
+(   14) !**   Interface.
+(   15) !     ----------
+(   16) !     CALL INV_TRANS(...)
+(   17) # 18 ".D[18]/inv_trans.h"
+(   18) !     Explicit arguments : All arguments are optional.
+(   19) !     -------------------- 
+(   20) !     PSPVOR(:,:) - spectral vorticity (input)
+(   21) !     PSPDIV(:,:) - spectral divergence (input)
+(   22) !     PSPSCALAR(:,:) - spectral scalarvalued fields (input)
+(   23) !     PSPSC3A(:,:,:) - alternative to use of PSPSCALAR, see PGP3A below (input)
+(   24) !     PSPSC3B(:,:,:) - alternative to use of PSPSCALAR, see PGP3B below (input)
+(   25) !     PSPSC2(:,:)  - alternative to use of PSPSCALAR, see PGP2 below (input)
+(   26) !     FSPGL_PROC  - external procedure to be executed in fourier space
+(   27) !                   before transposition  
+(   28) !     LDSCDERS    - indicating if derivatives of scalar variables are req.
+(   29) !     LDVORGP     - indicating if grid-point vorticity is req.
+(   30) !     LDDIVGP     - indicating if grid-point divergence is req.
+(   31) !     LDUVDER     - indicating if E-W derivatives of u and v are req.
+(   32) !     LDLATLON   - indicating if regular lat-lon output requested
+(   33) !     KPROMA      - required blocking factor for gridpoint output
+(   34) !     KVSETUV(:)  - indicating which 'b-set' in spectral space owns a 
+(   35) !                   vor/div field. Equivalant to NBSETLEV in the IFS.
+(   36) !                   The length of KVSETUV should be the GLOBAL number
+(   37) !                   of u/v fields which is the dimension of u and v releated
+(   38) !                   fields in grid-point space. 
+(   39) !     KVESETSC(:) - indicating which 'b-set' in spectral space owns a
+(   40) !                   scalar field. As for KVSETUV this argument is required
+(   41) !                   if the total number of processors is greater than
+(   42) !                   the number of processors used for distribution in
+(   43) !                   spectral wave space.
+(   44) !     KVSETSC3A(:) - as KVESETSC for PSPSC3A (distribution on first dimension)
+(   45) !     KVSETSC3B(:) - as KVESETSC for PSPSC3B (distribution on first dimension)
+(   46) !     KVSETSC2(:) - as KVESETSC for PSPSC2 (distribution on first dimension)
+(   47) !     KRESOL   - resolution tag  which is required ,default is the
+(   48) !                first defined resulution (input)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 19
+
+(   49) !     PGP(:,:,:) - gridpoint fields (output)
+(   50) !                  PGP need to  dimensioned (NPROMA,IF_GP,NGPBLKS) where
+(   51) !                  NPROMA is the blocking factor, IF_GP the total number
+(   52) !                  of output fields and NGPBLKS the number of NPROMA blocks.
+(   53) !                  The ordering of the output fields is as follows (all 
+(   54) !                  parts are optional depending on the input switches):
+(   55) !
+(   56) !       vorticity     : IF_UV_G fields (if psvor present and LDVORGP)
+(   57) !       divergence    : IF_UV_G fields (if psvor present and LDDIVGP)
+(   58) !       u             : IF_UV_G fields (if psvor present)
+(   59) !       v             : IF_UV_G fields (if psvor present)
+(   60) !       scalar fields : IF_SCALARS_G fields (if pspscalar present)
+(   61) !       N-S derivative of scalar fields : IF_SCALARS_G fields (if pspscalar
+(   62) !                                         present and LDSCDERS)
+(   63) !       E-W derivative of u : IF_UV_G fields (if psvor present and and LDUVDER)
+(   64) !       E-W derivative of v : IF_UV_G fields (if psvor present and and LDUVDER)
+(   65) !       E-W derivative of scalar fields : IF_SCALARS_G fields (if pspscalar
+(   66) !                                         present and LDSCDERS)
+(   67) !   
+(   68) !       Here IF_UV_G is the GLOBAL number of u/v fields as given by the length
+(   69) !       of KVSETUV (or by PSPVOR if no split in spectral 'b-set' direction
+(   70) !       IF_SCALARS_G is the GLOBAL number of scalar fields as giben by the 
+(   71) !       length of KVESETSC (or by number of fields in PSPSCALAR if no spectral
+(   72) !       'b-set' split
+(   73) # 74 ".D[18]/inv_trans.h"
+(   74) !     As an alternative to using PGP you can also use a combination of the
+(   75) !     following arrays. The reason for introducing these alternative ways
+(   76) !     of calling INV_TRANS is to avoid uneccessary copies where your data
+(   77) !     structures don't fit in to the 'PSPVOR,PSPDIV, PSPSCALAR, PGP' layout.
+(   78) !     The use of any of these precludes the use of PGP and vice versa.
+(   79) # 80 ".D[18]/inv_trans.h"
+(   80) !     PGPUV(:,:,:,:) - the 'u-v' related grid-point variables in the order
+(   81) !                      described for PGP. The second dimension of PGPUV should
+(   82) !                      be the same as the "global" first dimension of 
+(   83) !                      PSPVOR,PSPDIV (in the IFS this is the number of levels)
+(   84) !                      PGPUV need to be dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   85) !                      IFLDS is the number of 'variables' (u,v,vor,div ...)
+(   86) !     PGP3A(:,:,:,:) - grid-point array directly connected with PSPSC3A
+(   87) !                      dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   88) !                      IFLDS is the number of 'variables' (the same as in
+(   89) !                      PSPSC3A if no derivatives, 3 times that with der.)
+(   90) !     PGP3B(:,:,:,:) - grid-point array directly connected with PSPSC3B
+(   91) !                      dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   92) !                      IFLDS is the number of 'variables' (the same as in
+(   93) !                      PSPSC3B if no derivatives, 3 times that with der.)
+(   94) !     PGP2(:,:,:)    - grid-point array directly connected with PSPSC2
+(   95) !                      dimensioned(NPROMA,IFLDS,NGPBLKS)
+(   96) !                      IFLDS is the number of 'variables' (the same as in
+(   97) !                      PSPSC2 if no derivatives, 3 times that with der.)
+(   98) !     Method.
+(   99) !     -------
+(  100) # 101 ".D[18]/inv_trans.h"
+(  101) !     Externals.  SET_RESOL   - set resolution
+(  102) !     ----------  LTINV_CTL   - control of Legendre transform
+(  103) !                 FTINV_CTL   - control of Fourier transform
+(  104) # 105 ".D[18]/inv_trans.h"
+(  105) !     Author.
+(  106) !     -------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 20
+
+(  107) !        Mats Hamrud *ECMWF*
+(  108) # 109 ".D[18]/inv_trans.h"
+(  109) !     Modifications.
+(  110) !     --------------
+(  111) !        Original : 00-03-03
+(  112) !        26-02-03 Mats Hamrud & Gabor Radnoti : modified condition for scalar fields
+(  113) !                                               and derivatives (IF_SCALARS_G)
+(  114) # 115 ".D[18]/inv_trans.h"
+(  115) !     ------------------------------------------------------------------
+(  116) # 117 ".D[18]/inv_trans.h"
+(  117) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(  118) # 120 ".D[18]/inv_trans.h"
+(  120) IMPLICIT NONE
+(  121) # 122 ".D[18]/inv_trans.h"
+(  122) ! Declaration of arguments
+(  123) # 124 ".D[18]/inv_trans.h"
+(  124) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPVOR(:,:)
+(  125) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPDIV(:,:)
+(  126) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPSCALAR(:,:)
+(  127) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPSC3A(:,:,:)
+(  128) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPSC3B(:,:,:)
+(  129) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPSC2(:,:)
+(  130) LOGICAL   ,OPTIONAL, INTENT(IN) :: LDSCDERS
+(  131) LOGICAL   ,OPTIONAL, INTENT(IN) :: LDVORGP
+(  132) LOGICAL   ,OPTIONAL, INTENT(IN) :: LDDIVGP
+(  133) LOGICAL   ,OPTIONAL, INTENT(IN) :: LDUVDER
+(  134) LOGICAL   ,OPTIONAL, INTENT(IN) :: LDLATLON
+(  135) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KPROMA
+(  136) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETUV(:)
+(  137) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC(:)
+(  138) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3A(:)
+(  139) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3B(:)
+(  140) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC2(:)
+(  141) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KRESOL
+(  142) EXTERNAL  FSPGL_PROC
+(  143) OPTIONAL  FSPGL_PROC
+(  144) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGP(:,:,:)
+(  145) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGPUV(:,:,:,:)
+(  146) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGP3A(:,:,:,:)
+(  147) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGP3B(:,:,:,:)
+(  148) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGP2(:,:,:)
+(  149) # 151 ".D[18]/inv_trans.h"
+(  151) END SUBROUTINE INV_TRANS
+(  152) # 153 ".D[18]/inv_trans.h"
+(  153) END INTERFACE
+(  154) # 41 "test_adjoint.F90"
+(   41) # 41 "test_adjoint.F90"
+(   41) # 1 ".D[18]/dir_transad.h"
+(    1) INTERFACE
+(    2) SUBROUTINE DIR_TRANSAD(PSPVOR,PSPDIV,PSPSCALAR,PSPSC3A,PSPSC3B,PSPSC2,&
+(    3) & KPROMA,KVSETUV,KVSETSC,KRESOL,KVSETSC3A,KVSETSC3B,KVSETSC2,&
+(    4) & PGP,PGPUV,PGP3A,PGP3B,PGP2)
+(    5) # 7 ".D[18]/dir_transad.h"
+(    7) !**** *DIR_TRANSAD* - Direct spectral transform - adjoint.
+(    8) # 9 ".D[18]/dir_transad.h"
+(    9) !     Purpose.
+(   10) !     --------
+(   11) !        Interface routine for the direct spectral transform - adjoint
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 21
+
+(   12) # 13 ".D[18]/dir_transad.h"
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !     CALL DIR_TRANSAD(...)
+(   16) # 17 ".D[18]/dir_transad.h"
+(   17) !     Explicit arguments : All arguments except from PGP are optional.
+(   18) !     -------------------- 
+(   19) !     PSPVOR(:,:) - spectral vorticity (output)
+(   20) !     PSPDIV(:,:) - spectral divergence (output)
+(   21) !     PSPSCALAR(:,:) - spectral scalarvalued fields (output)
+(   22) !     PSPSC3A(:,:,:) - alternative to use of PSPSCALAR, see PGP3A below (input)
+(   23) !     PSPSC3B(:,:,:) - alternative to use of PSPSCALAR, see PGP3B below (input)
+(   24) !     PSPSC2(:,:)  - alternative to use of PSPSCALAR, see PGP2 below (input)
+(   25) !     KPROMA      - required blocking factor for gridpoint output
+(   26) !     KVSETUV(:)  - indicating which 'b-set' in spectral space owns a 
+(   27) !                   vor/div field. Equivalant to NBSETLEV in the IFS.
+(   28) !                   The length of KVSETUV should be the GLOBAL number
+(   29) !                   of u/v fields which is the dimension of u and v releated
+(   30) !                   fields in grid-point space. 
+(   31) !     KVESETSC(:) - indicating which 'b-set' in spectral space owns a
+(   32) !                   scalar field. As for KVSETUV this argument is required
+(   33) !                   if the total number of processors is greater than
+(   34) !                   the number of processors used for distribution in
+(   35) !                   spectral wave space.  
+(   36) !     KVSETSC3A(:) - as KVESETSC for PSPSC3A (distribution on first dimension)
+(   37) !     KVSETSC3B(:) - as KVESETSC for PSPSC3B (distribution on first dimension)
+(   38) !     KVSETSC2(:) - as KVESETSC for PSPSC2 (distribution on first dimension)
+(   39) !     KRESOL   - resolution tag  which is required ,default is the
+(   40) !                first defined resulution (input)
+(   41) !     PGP(:,:,:) - gridpoint fields (input)
+(   42) !                  PGP need to  dimensioned (NPROMA,IF_GP,NGPBLKS) where
+(   43) !                  NPROMA is the blocking factor, IF_GP the total number
+(   44) !                  of output fields and NGPBLKS the number of NPROMA blocks.
+(   45) !                  The ordering of the output fields is as follows (all 
+(   46) !                  parts are optional depending on the input switches):
+(   47) !
+(   48) !     u             : IF_UV_G fields (if psvor present)
+(   49) !     v             : IF_UV_G fields (if psvor present)
+(   50) !     scalar fields : IF_SCALARS_G fields (if pspscalar present)
+(   51) !   
+(   52) !     Here IF_UV_G is the GLOBAL number of u/v fields as given by the length
+(   53) !     of KVSETUV (or by PSPVOR if no split in spectral 'b-set' direction
+(   54) !     IF_SCALARS_G is the GLOBAL number of scalar fields as giben by the 
+(   55) !     length of KVESETSC (or by number of fields in PSPSCALAR if no spectral
+(   56) !     'b-set' split
+(   57) ! 
+(   58) !     As an alternative to using PGP you can also use a combination of the
+(   59) !     following arrays. The reason for introducing these alternative ways
+(   60) !     of calling DIR_TRANS is to avoid uneccessary copies where your data
+(   61) !     structures don't fit in to the 'PSPVOR,PSPDIV, PSPSCALAR, PGP' layout.
+(   62) !     The use of any of these precludes the use of PGP and vice versa.
+(   63) # 64 ".D[18]/dir_transad.h"
+(   64) !     PGPUV(:,:,:,:) - the 'u-v' related grid-point variables in the order
+(   65) !                      described for PGP. The second dimension of PGPUV should
+(   66) !                      be the same as the "global" first dimension of 
+(   67) !                      PSPVOR,PSPDIV (in the IFS this is the number of levels)
+(   68) !                      PGPUV need to be dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   69) !                      IFLDS is the number of 'variables' (u,v)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 22
+
+(   70) !     PGP3A(:,:,:,:) - grid-point array directly connected with PSPSC3A
+(   71) !                      dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   72) !                      IFLDS is the number of 'variables' (the same as in
+(   73) !                      PSPSC3A )
+(   74) !     PGP3B(:,:,:,:) - grid-point array directly connected with PSPSC3B
+(   75) !                      dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   76) !                      IFLDS is the number of 'variables' (the same as in
+(   77) !                      PSPSC3B)
+(   78) !     PGP2(:,:,:)    - grid-point array directly connected with PSPSC2
+(   79) !                      dimensioned(NPROMA,IFLDS,NGPBLKS)
+(   80) !                      IFLDS is the number of 'variables' (the same as in
+(   81) !                      PSPSC2 )
+(   82) ! 
+(   83) !     Method.
+(   84) !     -------
+(   85) # 86 ".D[18]/dir_transad.h"
+(   86) !     Externals.  SET_RESOL   - set resolution
+(   87) !     ----------  DIR_TRANS_CTLAD - control routine
+(   88) !                 
+(   89) # 90 ".D[18]/dir_transad.h"
+(   90) !     Author.
+(   91) !     -------
+(   92) !        Mats Hamrud *ECMWF*
+(   93) # 94 ".D[18]/dir_transad.h"
+(   94) !     Modifications.
+(   95) !     --------------
+(   96) !        Original : 00-03-03
+(   97) # 98 ".D[18]/dir_transad.h"
+(   98) !     ------------------------------------------------------------------
+(   99) # 100 ".D[18]/dir_transad.h"
+(  100) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(  101) # 103 ".D[18]/dir_transad.h"
+(  103) IMPLICIT NONE
+(  104) # 105 ".D[18]/dir_transad.h"
+(  105) ! Declaration of arguments
+(  106) # 107 ".D[18]/dir_transad.h"
+(  107) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPVOR(:,:)
+(  108) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPDIV(:,:)
+(  109) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPSCALAR(:,:)
+(  110) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPSC3A(:,:,:)
+(  111) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPSC3B(:,:,:)
+(  112) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPSC2(:,:)
+(  113) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KPROMA
+(  114) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETUV(:)
+(  115) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC(:)
+(  116) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3A(:)
+(  117) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3B(:)
+(  118) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC2(:)
+(  119) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KRESOL
+(  120) # 121 ".D[18]/dir_transad.h"
+(  121) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGP(:,:,:)
+(  122) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGPUV(:,:,:,:)
+(  123) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGP3A(:,:,:,:)
+(  124) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGP3B(:,:,:,:)
+(  125) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGP2(:,:,:)
+(  126) # 128 ".D[18]/dir_transad.h"
+(  128) END SUBROUTINE DIR_TRANSAD
+(  129) # 131 ".D[18]/dir_transad.h"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 23
+
+(  131) END INTERFACE
+(  132) # 42 "test_adjoint.F90"
+(   42) # 42 "test_adjoint.F90"
+(   42) # 1 ".D[18]/inv_transad.h"
+(    1) INTERFACE
+(    2) SUBROUTINE INV_TRANSAD(PSPVOR,PSPDIV,PSPSCALAR,PSPSC3A,PSPSC3B,PSPSC2,&
+(    3)  & FSPGL_PROC,&
+(    4)  & LDSCDERS,LDVORGP,LDDIVGP,LDUVDER,KPROMA,KVSETUV,KVSETSC,KRESOL,&
+(    5)  & KVSETSC3A,KVSETSC3B,KVSETSC2,&
+(    6)  & PGP,PGPUV,PGP3A,PGP3B,PGP2)
+(    7) # 8 ".D[18]/inv_transad.h"
+(    8) !**** *INV_TRANSAD* - Inverse spectral transform - adjoint.
+(    9) # 10 ".D[18]/inv_transad.h"
+(   10) !     Purpose.
+(   11) !     --------
+(   12) !        Interface routine for the inverse spectral transform - adjoint
+(   13) # 14 ".D[18]/inv_transad.h"
+(   14) !**   Interface.
+(   15) !     ----------
+(   16) !     CALL INV_TRANSAD(...)
+(   17) # 18 ".D[18]/inv_transad.h"
+(   18) !     Explicit arguments : All arguments except from PGP are optional.
+(   19) !     -------------------- 
+(   20) !     PSPVOR(:,:) - spectral vorticity (input)
+(   21) !     PSPDIV(:,:) - spectral divergence (input)
+(   22) !     PSPSCALAR(:,:) - spectral scalarvalued fields (input)
+(   23) !     PSPSC3A(:,:,:) - alternative to use of PSPSCALAR, see PGP3A below (input)
+(   24) !     PSPSC3B(:,:,:) - alternative to use of PSPSCALAR, see PGP3B below (input)
+(   25) !     PSPSC2(:,:)  - alternative to use of PSPSCALAR, see PGP2 below (input)
+(   26) !     FSPGL_PROC  - external procedure to be executed in fourier space
+(   27) !                   before transposition  
+(   28) !     LDSCDERS    - indicating if derivatives of scalar variables are req.
+(   29) !     LDVORGP     - indicating if grid-point vorticity is req.
+(   30) !     LDDIVGP     - indicating if grid-point divergence is req.
+(   31) !     LDUVDER     - indicating if E-W derivatives of u and v are req.
+(   32) !     KPROMA      - required blocking factor for gridpoint output
+(   33) !     KVSETUV(:)  - indicating which 'b-set' in spectral space owns a 
+(   34) !                   vor/div field. Equivalant to NBSETLEV in the IFS.
+(   35) !                   The length of KVSETUV should be the GLOBAL number
+(   36) !                   of u/v fields which is the dimension of u and v releated
+(   37) !                   fields in grid-point space. 
+(   38) !     KVESETSC(:) - indicating which 'b-set' in spectral space owns a
+(   39) !                   scalar field. As for KVSETUV this argument is required
+(   40) !                   if the total number of processors is greater than
+(   41) !                   the number of processors used for distribution in
+(   42) !                   spectral wave space.  
+(   43) !     KVSETSC3A(:) - as KVESETSC for PSPSC3A (distribution on first dimension)
+(   44) !     KVSETSC3B(:) - as KVESETSC for PSPSC3B (distribution on first dimension)
+(   45) !     KVSETSC2(:) - as KVESETSC for PSPSC2 (distribution on first dimension)
+(   46) !     KRESOL   - resolution tag  which is required ,default is the
+(   47) !                first defined resulution (input)
+(   48) !     PGP(:,:,:) - gridpoint fields (output)
+(   49) !                  PGP need to  dimensioned (NPROMA,IF_GP,NGPBLKS) where
+(   50) !                  NPROMA is the blocking factor, IF_GP the total number
+(   51) !                  of output fields and NGPBLKS the number of NPROMA blocks.
+(   52) !                  The ordering of the output fields is as follows (all 
+(   53) !                  parts are optional depending on the input switches):
+(   54) !
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 24
+
+(   55) !       vorticity     : IF_UV_G fields (if psvor present and LDVORGP)
+(   56) !       divergence    : IF_UV_G fields (if psvor present and LDDIVGP)
+(   57) !       u             : IF_UV_G fields (if psvor present)
+(   58) !       v             : IF_UV_G fields (if psvor present)
+(   59) !       scalar fields : IF_SCALARS_G fields (if pspscalar present)
+(   60) !       N-S derivative of scalar fields : IF_SCALARS_G fields (if pspscalar
+(   61) !                                         present and LDSCDERS)
+(   62) !       E-W derivative of u : IF_UV_G fields (if psvor present and and LDUVDER)
+(   63) !       E-W derivative of v : IF_UV_G fields (if psvor present and and LDUVDER)
+(   64) !       E-W derivative of scalar fields : IF_SCALARS_G fields (if pspscalar
+(   65) !                                         present and LDSCDERS)
+(   66) !   
+(   67) !       Here IF_UV_G is the GLOBAL number of u/v fields as given by the length
+(   68) !       of KVSETUV (or by PSPVOR if no split in spectral 'b-set' direction
+(   69) !       IF_SCALARS_G is the GLOBAL number of scalar fields as giben by the 
+(   70) !       length of KVESETSC (or by number of fields in PSPSCALAR if no spectral
+(   71) !       'b-set' split
+(   72) # 73 ".D[18]/inv_transad.h"
+(   73) !     As an alternative to using PGP you can also use a combination of the
+(   74) !     following arrays. The reason for introducing these alternative ways
+(   75) !     of calling INV_TRANS is to avoid uneccessary copies where your data
+(   76) !     structures don't fit in to the 'PSPVOR,PSPDIV, PSPSCALAR, PGP' layout.
+(   77) !     The use of any of these precludes the use of PGP and vice versa.
+(   78) ! 
+(   79) !     PGPUV(:,:,:,:) - the 'u-v' related grid-point variables in the order
+(   80) !                      described for PGP. The second dimension of PGPUV should
+(   81) !                      be the same as the "global" first dimension of 
+(   82) !                      PSPVOR,PSPDIV (in the IFS this is the number of levels)
+(   83) !                      PGPUV need to be dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   84) !                      IFLDS is the number of 'variables' (u,v,vor,div ...)
+(   85) !     PGP3A(:,:,:,:) - grid-point array directly connected with PSPSC3A
+(   86) !                      dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   87) !                      IFLDS is the number of 'variables' (the same as in
+(   88) !                      PSPSC3A if no derivatives, 3 times that with der.)
+(   89) !     PGP3B(:,:,:,:) - grid-point array directly connected with PSPSC3B
+(   90) !                      dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   91) !                      IFLDS is the number of 'variables' (the same as in
+(   92) !                      PSPSC3B if no derivatives, 3 times that with der.)
+(   93) !     PGP2(:,:,:)    - grid-point array directly connected with PSPSC2
+(   94) !                      dimensioned(NPROMA,IFLDS,NGPBLKS)
+(   95) !                      IFLDS is the number of 'variables' (the same as in
+(   96) !                      PSPSC2 if no derivatives, 3 times that with der.)
+(   97) # 98 ".D[18]/inv_transad.h"
+(   98) !     Method.
+(   99) !     -------
+(  100) # 101 ".D[18]/inv_transad.h"
+(  101) !     Externals.  SET_RESOL   - set resolution
+(  102) !     ----------  LTDIR_CTLAD   - control of Legendre transform
+(  103) !                 FTDIR_CTLAD   - control of Fourier transform
+(  104) # 105 ".D[18]/inv_transad.h"
+(  105) !     Author.
+(  106) !     -------
+(  107) !        Mats Hamrud *ECMWF*
+(  108) # 109 ".D[18]/inv_transad.h"
+(  109) !     Modifications.
+(  110) !     --------------
+(  111) !        Original : 00-03-03
+(  112) # 113 ".D[18]/inv_transad.h"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 25
+
+(  113) !     ------------------------------------------------------------------
+(  114) # 115 ".D[18]/inv_transad.h"
+(  115) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(  116) # 118 ".D[18]/inv_transad.h"
+(  118) IMPLICIT NONE
+(  119) # 120 ".D[18]/inv_transad.h"
+(  120) ! Declaration of arguments
+(  121) # 122 ".D[18]/inv_transad.h"
+(  122) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPVOR(:,:)
+(  123) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPDIV(:,:)
+(  124) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSCALAR(:,:)
+(  125) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSC3A(:,:,:)
+(  126) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSC3B(:,:,:)
+(  127) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSC2(:,:)
+(  128) LOGICAL   ,OPTIONAL, INTENT(IN)  :: LDSCDERS
+(  129) LOGICAL   ,OPTIONAL, INTENT(IN)  :: LDVORGP
+(  130) LOGICAL   ,OPTIONAL, INTENT(IN)  :: LDDIVGP
+(  131) LOGICAL   ,OPTIONAL, INTENT(IN)  :: LDUVDER
+(  132) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KPROMA
+(  133) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSETUV(:)
+(  134) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSETSC(:)
+(  135) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSETSC3A(:)
+(  136) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSETSC3B(:)
+(  137) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSETSC2(:)
+(  138) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(  139) EXTERNAL  FSPGL_PROC
+(  140) OPTIONAL  FSPGL_PROC
+(  141) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN)  :: PGP(:,:,:)
+(  142) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN)  :: PGPUV(:,:,:,:)
+(  143) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN)  :: PGP3A(:,:,:,:)
+(  144) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN)  :: PGP3B(:,:,:,:)
+(  145) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN)  :: PGP2(:,:,:)
+(  146) # 148 ".D[18]/inv_transad.h"
+(  148) END SUBROUTINE INV_TRANSAD
+(  149) # 150 ".D[18]/inv_transad.h"
+(  150) END INTERFACE
+(  151) # 43 "test_adjoint.F90"
+(   43) # 43 "test_adjoint.F90"
+(   43) # 1 ".D[18]/dist_grid.h"
+(    1) INTERFACE
+(    2) SUBROUTINE DIST_GRID(PGPG,KPROMA,KFDISTG,KFROM,KRESOL,PGP,KSORT)
+(    3) # 4 ".D[18]/dist_grid.h"
+(    4) !**** *DIST_GRID* - Distribute global gridpoint array among processors
+(    5) # 6 ".D[18]/dist_grid.h"
+(    6) !     Purpose.
+(    7) !     --------
+(    8) !        Interface routine for distributing gridpoint array
+(    9) # 10 ".D[18]/dist_grid.h"
+(   10) !**   Interface.
+(   11) !     ----------
+(   12) !     CALL DIST_GRID(...)
+(   13) # 14 ".D[18]/dist_grid.h"
+(   14) !     Explicit arguments : 
+(   15) !     -------------------- 
+(   16) !     PGPG(:,:) - Global spectral array
+(   17) !     KFDISTG     - Global number of fields to be distributed
+(   18) !     KPROMA      - required blocking factor for gridpoint input
+(   19) !     KFROM(:)    - Processor resposible for distributing each field
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 26
+
+(   20) !     KRESOL      - resolution tag  which is required ,default is the
+(   21) !                   first defined resulution (input)
+(   22) !     PGP(:,:)  - Local spectral array
+(   23) !
+(   24) !     Method.
+(   25) !     -------
+(   26) # 27 ".D[18]/dist_grid.h"
+(   27) !     Externals.  SET_RESOL      - set resolution
+(   28) !     ----------  DIST_GRID_CTL  - control routine
+(   29) # 30 ".D[18]/dist_grid.h"
+(   30) !     Author.
+(   31) !     -------
+(   32) !        Mats Hamrud *ECMWF*
+(   33) # 34 ".D[18]/dist_grid.h"
+(   34) !     Modifications.
+(   35) !     --------------
+(   36) !        Original : 00-03-03
+(   37) # 38 ".D[18]/dist_grid.h"
+(   38) !     ------------------------------------------------------------------
+(   39) # 40 ".D[18]/dist_grid.h"
+(   40) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   41) # 43 ".D[18]/dist_grid.h"
+(   43) IMPLICIT NONE
+(   44) # 45 ".D[18]/dist_grid.h"
+(   45) ! Declaration of arguments
+(   46) # 47 ".D[18]/dist_grid.h"
+(   47) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PGPG(:,:)
+(   48) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KPROMA
+(   49) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFDISTG
+(   50) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFROM(:)
+(   51) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   52) REAL(KIND=JPRB)             , INTENT(OUT) :: PGP(:,:,:)
+(   53) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KSORT (:)
+(   54) # 56 ".D[18]/dist_grid.h"
+(   56) !     ------------------------------------------------------------------
+(   57) # 58 ".D[18]/dist_grid.h"
+(   58) END SUBROUTINE DIST_GRID
+(   59) # 60 ".D[18]/dist_grid.h"
+(   60) END INTERFACE
+(   61) # 44 "test_adjoint.F90"
+(   44) # 44 "test_adjoint.F90"
+(   44) # 1 ".D[18]/gath_spec.h"
+(    1) INTERFACE
+(    2) SUBROUTINE GATH_SPEC(PSPECG,KFGATHG,KTO,KVSET,KRESOL,PSPEC,LDIM1_IS_FLD,KSMAX,LDZA0IP)
+(    3) # 4 ".D[18]/gath_spec.h"
+(    4) !**** *GATH_SPEC* - Gather global spectral array from processors
+(    5) # 6 ".D[18]/gath_spec.h"
+(    6) !     Purpose.
+(    7) !     --------
+(    8) !        Interface routine for gathering spectral array
+(    9) # 10 ".D[18]/gath_spec.h"
+(   10) !**   Interface.
+(   11) !     ----------
+(   12) !     CALL GATH_SPEC(...)
+(   13) # 14 ".D[18]/gath_spec.h"
+(   14) !     Explicit arguments : 
+(   15) !     -------------------- 
+(   16) !     PSPECG(:,:) - Global spectral array
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 27
+
+(   17) !     KFGATHG     - Global number of fields to be gathered
+(   18) !     KTO(:)      - Processor responsible for gathering each field
+(   19) !     KVSET(:)    - "B-Set" for each field
+(   20) !     KRESOL      - resolution tag  which is required ,default is the
+(   21) !                   first defined resulution (input)
+(   22) !     PSPEC(:,:)  - Local spectral array
+(   23) !     LDIM1_IS_FLD - If TRUE first dimension of PSCPEC and PSPECG is the field dimension [.T.]
+(   24) !
+(   25) !     Method.
+(   26) !     -------
+(   27) # 28 ".D[18]/gath_spec.h"
+(   28) !     Externals.  SET_RESOL   - set resolution
+(   29) !     ----------  GATH_SPEC_CONTROL - control routine
+(   30) # 31 ".D[18]/gath_spec.h"
+(   31) !     Author.
+(   32) !     -------
+(   33) !        Mats Hamrud *ECMWF*
+(   34) # 35 ".D[18]/gath_spec.h"
+(   35) !     Modifications.
+(   36) !     --------------
+(   37) !        Original : 00-03-03
+(   38) # 39 ".D[18]/gath_spec.h"
+(   39) !     ------------------------------------------------------------------
+(   40) # 41 ".D[18]/gath_spec.h"
+(   41) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   42) # 44 ".D[18]/gath_spec.h"
+(   44) IMPLICIT NONE
+(   45) # 46 ".D[18]/gath_spec.h"
+(   46) ! Declaration of arguments
+(   47) # 48 ".D[18]/gath_spec.h"
+(   48) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPECG(:,:)
+(   49) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFGATHG
+(   50) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KTO(:)
+(   51) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSET(:)
+(   52) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   53) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPEC(:,:)
+(   54) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDIM1_IS_FLD
+(   55) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KSMAX
+(   56) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDZA0IP
+(   57) # 59 ".D[18]/gath_spec.h"
+(   59) !     ------------------------------------------------------------------
+(   60) # 61 ".D[18]/gath_spec.h"
+(   61) END SUBROUTINE GATH_SPEC
+(   62) # 63 ".D[18]/gath_spec.h"
+(   63) END INTERFACE
+(   64) # 45 "test_adjoint.F90"
+(   45) # 45 "test_adjoint.F90"
+(   45) # 1 ".D[18]/dist_spec.h"
+(    1) INTERFACE
+(    2) SUBROUTINE DIST_SPEC(PSPECG,KFDISTG,KFROM,KVSET,KRESOL,PSPEC,&
+(    3)  & LDIM1_IS_FLD,KSMAX,KSORT)
+(    4) # 5 ".D[18]/dist_spec.h"
+(    5) !**** *DIST_SPEC* - Distribute global spectral array among processors
+(    6) # 7 ".D[18]/dist_spec.h"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Interface routine for distributing spectral array
+(   10) # 11 ".D[18]/dist_spec.h"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 28
+
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !     CALL DIST__SPEC(...)
+(   14) # 15 ".D[18]/dist_spec.h"
+(   15) !     Explicit arguments : 
+(   16) !     -------------------- 
+(   17) !     PSPECG(:,:) - Global spectral array
+(   18) !     KFDISTG     - Global number of fields to be distributed
+(   19) !     KFROM(:)    - Processor resposible for distributing each field
+(   20) !     KVSET(:)    - "B-Set" for each field
+(   21) !     KRESOL      - resolution tag  which is required ,default is the
+(   22) !                   first defined resulution (input)
+(   23) !     PSPEC(:,:)  - Local spectral array
+(   24) !
+(   25) !     Method.
+(   26) !     -------
+(   27) # 28 ".D[18]/dist_spec.h"
+(   28) !     Externals.  SET_RESOL   - set resolution
+(   29) !     ----------  DIST_SPEC_CONTROL - control routine
+(   30) # 31 ".D[18]/dist_spec.h"
+(   31) !     Author.
+(   32) !     -------
+(   33) !        Mats Hamrud *ECMWF*
+(   34) # 35 ".D[18]/dist_spec.h"
+(   35) !     Modifications.
+(   36) !     --------------
+(   37) !        Original : 00-03-03
+(   38) # 39 ".D[18]/dist_spec.h"
+(   39) !     ------------------------------------------------------------------
+(   40) # 41 ".D[18]/dist_spec.h"
+(   41) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   42) # 44 ".D[18]/dist_spec.h"
+(   44) IMPLICIT NONE
+(   45) # 46 ".D[18]/dist_spec.h"
+(   46) ! Declaration of arguments
+(   47) # 48 ".D[18]/dist_spec.h"
+(   48) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPECG(:,:)
+(   49) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFDISTG
+(   50) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFROM(:)
+(   51) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSET(:)
+(   52) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   53) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPEC(:,:)
+(   54) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDIM1_IS_FLD
+(   55) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KSMAX
+(   56) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KSORT (:)
+(   57) # 59 ".D[18]/dist_spec.h"
+(   59) !     ------------------------------------------------------------------
+(   60) # 61 ".D[18]/dist_spec.h"
+(   61) END SUBROUTINE DIST_SPEC
+(   62) # 63 ".D[18]/dist_spec.h"
+(   63) END INTERFACE
+(   64) # 46 "test_adjoint.F90"
+(   46) # 46 "test_adjoint.F90"
+(   46) # 1 ".D[18]/gath_grid.h"
+(    1) INTERFACE
+(    2) SUBROUTINE GATH_GRID(PGPG,KPROMA,KFGATHG,KTO,KRESOL,PGP)
+(    3) # 4 ".D[18]/gath_grid.h"
+(    4) !**** *GATH_GRID* - Gather global gridpoint array from processors
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 29
+
+(    5) # 6 ".D[18]/gath_grid.h"
+(    6) !     Purpose.
+(    7) !     --------
+(    8) !        Interface routine for gathering gripoint array
+(    9) # 10 ".D[18]/gath_grid.h"
+(   10) !**   Interface.
+(   11) !     ----------
+(   12) !     CALL GATH_GRID(...)
+(   13) # 14 ".D[18]/gath_grid.h"
+(   14) !     Explicit arguments : 
+(   15) !     -------------------- 
+(   16) !     PGPG(:,:)   - Global gridpoint array
+(   17) !     KFGATHG     - Global number of fields to be gathered
+(   18) !     KPROMA      - blocking factor for gridpoint input
+(   19) !     KTO(:)      - Processor responsible for gathering each field
+(   20) !     KRESOL      - resolution tag  which is required ,default is the
+(   21) !                   first defined resulution (input)
+(   22) !     PGP(:,:,:)  - Local spectral array
+(   23) !
+(   24) !     Method.
+(   25) !     -------
+(   26) # 27 ".D[18]/gath_grid.h"
+(   27) !     Externals.  SET_RESOL   - set resolution
+(   28) !     ----------  GATH_GRID_CTL -  control routine
+(   29) # 30 ".D[18]/gath_grid.h"
+(   30) !     Author.
+(   31) !     -------
+(   32) !        Mats Hamrud *ECMWF*
+(   33) # 34 ".D[18]/gath_grid.h"
+(   34) !     Modifications.
+(   35) !     --------------
+(   36) !        Original : 00-03-03
+(   37) # 38 ".D[18]/gath_grid.h"
+(   38) !     ------------------------------------------------------------------
+(   39) # 40 ".D[18]/gath_grid.h"
+(   40) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   41) # 43 ".D[18]/gath_grid.h"
+(   43) IMPLICIT NONE
+(   44) # 45 ".D[18]/gath_grid.h"
+(   45) ! Declaration of arguments
+(   46) # 47 ".D[18]/gath_grid.h"
+(   47) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PGPG(:,:)
+(   48) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KPROMA
+(   49) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFGATHG
+(   50) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KTO(:)
+(   51) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   52) REAL(KIND=JPRB)             , INTENT(IN)  :: PGP(:,:,:)
+(   53) # 55 ".D[18]/gath_grid.h"
+(   55) !     ------------------------------------------------------------------
+(   56) # 57 ".D[18]/gath_grid.h"
+(   57) END SUBROUTINE GATH_GRID
+(   58) # 59 ".D[18]/gath_grid.h"
+(   59) END INTERFACE
+(   60) # 47 "test_adjoint.F90"
+(   47) # 48 "test_adjoint.F90"
+(   48) NDGL = 32
+(   49) NFLEVG = 9
+(   50) NPROMA = 8
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 30
+
+(   51) # 52 "test_adjoint.F90"
+(   52) NPRGPNS = 1
+(   53) NPRGPEW = 1
+(   54) NPRTRW = 1
+(   55) NPRTRV = 1
+(   56) NREP = 1
+(   57) # 58 "test_adjoint.F90"
+(   58) LSTATS = .TRUE.
+(   59) LSTATSCPU = .FALSE.
+(   60) LSYNCSTATS = .TRUE.
+(   61) LDETAILED_STATS = .FALSE.
+(   62) LTRACE_STATS = .FALSE.
+(   63) NTRACE_STATS = 0
+(   64) READ(4,NAMCTL)
+(   65) NPROC = NPRGPNS*NPRGPEW
+(   66) IF(NPROC /= NPRTRW*NPRTRV) THEN
+(   67)   PRINT *,'NPRGPNS,NPRGPEW,NPRTRW,NPRTRV ',NPRGPNS,NPRGPEW,NPRTRW,NPRTRV
+(   68)   CALL ABORT_TRANS('NPRGPNS*NPRGPEW /= NPRTRW*NPRTRV')
+(   69) ENDIF
+(   70) NSMAX = (2*NDGL-1)/3
+(   71) NSPECG = (NSMAX+1)*(NSMAX+2)/2
+(   72) NSPEC2G = NSPECG*2
+(   73) IF(NPROC > 1 ) THEN
+(   74)   CALL MPL_INIT
+(   75)   MYPROC = MPL_MYRANK()
+(   76)   NOUT = 20
+(   77)   WRITE(CLNAME,'(A,I2.2)') 'OUT.',MYPROC
+(   78)   OPEN(NOUT,FILE=CLNAME)
+(   79) ELSE
+(   80)   NOUT = 6
+(   81)   MYPROC = 1
+(   82) ENDIF
+(   83) ALLOCATE(IPRCIDS(NPROC))
+(   84) DO JROC=1,NPROC
+(   85)   IPRCIDS(JROC) = JROC
+(   86) ENDDO
+(   87) # 88 "test_adjoint.F90"
+(   88) WRITE(NOUT,*) ' NSMAX= ',NSMAX,' NDGL=',NDGL
+(   89) MYSETV = MOD(MYPROC-1,NPRTRV)+1
+(   90) ALLOCATE(ZSPECYG(NFLEVG,NSPEC2G))
+(   91) ALLOCATE(ZSPECXG(NFLEVG,NSPEC2G))
+(   92) ALLOCATE(ZRANDSP(NSPEC2G))
+(   93) ALLOCATE(NLOEN(NDGL))
+(   94) ALLOCATE(ZNORM(NFLEVG))
+(   95) ALLOCATE(ITO(NFLEVG))
+(   96) NLOEN(:) = 2*NDGL
+(   97) CALL SETUP_TRANS0(KOUT=NOUT,KERR=0,KPRINTLEV=0,KMAX_RESOL=1,&
+(   98)  & KPRGPNS=NPRGPNS,KPRGPEW=NPRGPEW,KPRTRW=NPRTRW)
+(   99) CALL SETUP_TRANS(KSMAX=NSMAX,KDGL=NDGL,KLOEN=NLOEN,LDSPLIT=.TRUE.)
+(  100) CALL TRANS_INQ(KSPEC2=NSPEC2,KGPTOT=NGPTOT,KGPTOTG=NGPTOTG,KNUMP=NUMP)
+(  101) # 102 "test_adjoint.F90"
+(  102) ALLOCATE(MYMS(NUMP))
+(  103) ALLOCATE(NASM0(0:NSMAX))
+(  104) ALLOCATE(GW(NDGL))
+(  105) ALLOCATE(ZRANDGP(NGPTOTG,1))
+(  106) CALL TRANS_INQ(KMYMS=MYMS,KASM0=NASM0,PGW=GW)
+(  107) NGPBLKS = (NGPTOT-1)/NPROMA+1
+(  108) WRITE(NOUT,*) 'NSPEC2=',NSPEC2,' NGPTOT=',NGPTOT
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 31
+
+(  109) WRITE(NOUT,*) 'SETUP FINISHED'
+(  110) CALL FLUSH(NOUT)
+(  111) # 112 "test_adjoint.F90"
+(  112) NFLEV = 0
+(  113) DO JLEV=1,NFLEVG
+(  114)   IVSET(JLEV) = MOD(JLEV,NPRTRV)+1
+(  115)   IF(IVSET(JLEV) == MYSETV) NFLEV = NFLEV+1
+(  116) ENDDO
+(  117) WRITE(NOUT,*)' NFLEV=',NFLEV
+(  118) ALLOCATE(ZSPECX(NFLEV,NSPEC2))
+(  119) ALLOCATE(ZSPECY(NFLEV,NSPEC2))
+(  120) ALLOCATE(ZSPECP(NFLEV,NSPEC2))
+(  121) ALLOCATE(ZVORX(NFLEV,NSPEC2))
+(  122) ALLOCATE(ZVORY(NFLEV,NSPEC2))
+(  123) ALLOCATE(ZVORP(NFLEV,NSPEC2))
+(  124) ALLOCATE(ZDIVX(NFLEV,NSPEC2))
+(  125) ALLOCATE(ZDIVY(NFLEV,NSPEC2))
+(  126) ALLOCATE(ZDIVP(NFLEV,NSPEC2))
+(  127) ALLOCATE(ZGX(NPROMA,3*NFLEVG,NGPBLKS))
+(  128) ALLOCATE(ZPERT(NPROMA,1,NGPBLKS))
+(  129) # 130 "test_adjoint.F90"
+(  130) ! Prepare perturbations
+(  131) # 132 "test_adjoint.F90"
+(  132) IF(MYPROC == 1) THEN
+(  133)   DO JLEV=1,NFLEVG
+(  134)     CALL RANDOM_NUMBER(ZRANDSP)
+(  135)     ZSPECYG(JLEV,:) = (1.0_JPRBT-2.0_JPRBT*ZRANDSP(:))
+(  136)     CALL RANDOM_NUMBER(ZRANDSP)
+(  137)     ZSPECXG(JLEV,:) = (1.0_JPRBT-2.0_JPRBT*ZRANDSP(:))
+(  138)   ENDDO
+(  139) ENDIF
+(  140) CALL RANDOM_NUMBER(ZRANDGP)
+(  141) ZRANDGP(:,:) = (1.0_JPRBT-2.0_JPRBT*ZRANDGP(:,:))
+(  142) ITO(:) = 1
+(  143) ZVORX = 0.0_JPRBT
+(  144) ZVORY = 0.0_JPRBT
+(  145) ZVORP = 0.0_JPRBT
+(  146) ZDIVX = 0.0_JPRBT
+(  147) ZDIVY = 0.0_JPRBT
+(  148) ZDIVP = 0.0_JPRBT
+(  149) # 150 "test_adjoint.F90"
+(  150) ! Distribute perturbations
+(  151) # 152 "test_adjoint.F90"
+(  152) CALL DIST_GRID(PGPG=ZRANDGP,KFDISTG=1,KFROM=ITO,PGP=ZPERT,KPROMA=NPROMA)
+(  153) CALL DIST_SPEC(PSPECG=ZSPECXG,KFDISTG=NFLEVG,KFROM=ITO,PSPEC=ZSPECX,&
+(  154)  & KVSET=IVSET(1:NFLEVG))
+(  155) # 156 "test_adjoint.F90"
+(  156) !ZWALL=TIMEF()
+(  157) !ZWALL0=ZWALL
+(  158) CALL GSTATS(0,0)
+(  159) CALL GSTATS_SETUP(NPROC,MYPROC,IPRCIDS,&
+(  160)  &LSTATS,LSTATSCPU,LSYNCSTATS,LDETAILED_STATS,&
+(  161)  &LSTATS_OMP,LSTATS_COMMS,&
+(  162)  &LTRACE_STATS,NTRACE_STATS)
+(  163) CALL GSTATS_PSUT
+(  164) DO JREP=1,NREP
+(  165) # 166 "test_adjoint.F90"
+(  166)   CALL DIST_SPEC(PSPECG=ZSPECYG,KFDISTG=NFLEVG,KFROM=ITO,PSPEC=ZSPECY,&
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 32
+
+(  167)    & KVSET=IVSET(1:NFLEVG))
+(  168) ! Direct caclulations
+(  169) # 170 "test_adjoint.F90"
+(  170)   CALL INV_TRANS(PSPSCALAR=ZSPECX,PSPVOR=ZVORX,PSPDIV=ZDIVX,PGP=ZGX,&
+(  171)    & KPROMA=NPROMA,KVSETSC=IVSET(1:NFLEVG), KVSETUV=IVSET(1:NFLEVG))
+(  172)   CALL GPC(ZGX)
+(  173)   CALL DIR_TRANS(PSPSCALAR=ZSPECP,PSPVOR=ZVORP,PSPDIV=ZDIVP,PGP=ZGX,&
+(  174)    &KPROMA=NPROMA,KVSETSC=IVSET(1:NFLEVG), KVSETUV=IVSET(1:NFLEVG))
+(  175)   CALL SCALPRODSP(ZSPECP,ZSPECY,ZSC)
+(  176)   IF(JREP == NREP) WRITE(NOUT,*)'<Fx,y> ',ZSC
+(  177) # 178 "test_adjoint.F90"
+(  178) ! Adjoint
+(  179) # 180 "test_adjoint.F90"
+(  180)   ZSPECP = 0.0_JPRBT
+(  181)   CALL DIR_TRANSAD(PSPSCALAR=ZSPECY,PSPVOR=ZVORY,PSPDIV=ZDIVY,PGP=ZGX,&
+(  182)    &KPROMA=NPROMA, KVSETSC=IVSET(1:NFLEVG), KVSETUV=IVSET(1:NFLEVG))
+(  183)   CALL GPCAD(ZGX)
+(  184)   CALL INV_TRANSAD(PSPSCALAR=ZSPECP,PSPVOR=ZVORP,PSPDIV=ZDIVP,PGP=ZGX,&
+(  185)    & KPROMA=NPROMA,KVSETSC=IVSET(1:NFLEVG),KVSETUV=IVSET(1:NFLEVG))
+(  186) # 187 "test_adjoint.F90"
+(  187)   CALL SCALPRODSP(ZSPECX,ZSPECP,ZSC)
+(  188)   IF(JREP == NREP) WRITE(NOUT,*)'<x,F*y> ',ZSC
+(  189) !  ZWALL=TIMEF()
+(  190) !  IF(MYPROC == 1) WRITE(0,*) 'Time spent in loop(i)=',jrep,(zwall-zwall0)*0.001
+(  191) !  ZWALL0 = ZWALL
+(  192) ENDDO
+(  193) CALL GSTATS(0,1)
+(  194) # 195 "test_adjoint.F90"
+(  195) !ZWALL=TIMEF()
+(  196) !WRITE(NOUT,*) 'Time spent in main loop=',zwall*0.001
+(  197) !IF(MYPROC == 1) WRITE(0,*) 'Time spent in main loop=',zwall*0.001
+(  198) # 199 "test_adjoint.F90"
+(  199) CALL GSTATS_PRINT(NOUT,ZAVEAVE,200)
+(  200) IF(NPROC > 1 ) THEN
+(  201)  CALL MPL_BARRIER()
+(  202)  CALL MPL_END
+(  203) ENDIF
+(  204) # 205 "test_adjoint.F90"
+(  205) CONTAINS
+(  206) # 207 "test_adjoint.F90"
+(  207) SUBROUTINE GPC(PGP)
+(  208) # 209 "test_adjoint.F90"
+(  209) ! Grid-point computations
+(  210) # 211 "test_adjoint.F90"
+(  211) REAL(KIND=JPRBT) :: PGP(:,:,:)
+(  212) # 213 "test_adjoint.F90"
+(  213) INTEGER(KIND=JPIM) :: JLEV,JKGLO,JROF,IEND,IBL,IOFF,IROF,JGL,JL
+(  214) # 215 "test_adjoint.F90"
+(  215) CALL GSTATS(108,0)
+(  216) !$OMP PARALLEL DO SCHEDULE(STATIC,1) PRIVATE(JLEV,JKGLO,IEND,IOFF,IBL,JROF)
+(  217) DO JLEV=1,NFLEVG
+(  218)   DO JKGLO=1,NGPTOT,NPROMA
+(  219)     IEND = MIN(NPROMA,NGPTOT-JKGLO+1)
+(  220)     IOFF = JKGLO-1
+(  221)     IBL  = (JKGLO-1)/NPROMA+1
+(  222)     DO JROF=1,IEND
+(  223)       PGP(JROF,JLEV,IBL) = PGP(JROF,JLEV,IBL)*ZPERT(JROF,1,IBL)
+(  224)     ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 33
+
+(  225)   ENDDO
+(  226) ENDDO
+(  227) !$OMP END PARALLEL DO
+(  228) CALL GSTATS(108,1)
+(  229) # 231 "test_adjoint.F90"
+(  231) END SUBROUTINE GPC
+(  232) # 233 "test_adjoint.F90"
+(  233) SUBROUTINE GPCAD(PGP)
+(  234) # 235 "test_adjoint.F90"
+(  235) ! Adjoint of GPC
+(  236) # 237 "test_adjoint.F90"
+(  237) REAL(KIND=JPRBT) :: PGP(:,:,:)
+(  238) INTEGER(KIND=JPIM) :: JLEV,JKGLO,JROF,IEND,IBL,IOFF,IROF,JGL,JL
+(  239) # 240 "test_adjoint.F90"
+(  240) CALL GSTATS(135,0)
+(  241) !$OMP PARALLEL DO SCHEDULE(STATIC,1) PRIVATE(JLEV,JKGLO,IEND,IOFF,IBL,JROF)
+(  242) DO JLEV=1,NFLEVG
+(  243)   DO JKGLO=1,NGPTOT,NPROMA
+(  244)     IEND = MIN(NPROMA,NGPTOT-JKGLO+1)
+(  245)     IOFF = JKGLO-1
+(  246)     IBL  = (JKGLO-1)/NPROMA+1
+(  247)     DO JROF=1,IEND
+(  248)       PGP(JROF,JLEV,IBL) = PGP(JROF,JLEV,IBL)*ZPERT(JROF,1,IBL)
+(  249)     ENDDO
+(  250)   ENDDO
+(  251) ENDDO
+(  252) !$OMP END PARALLEL DO
+(  253) CALL GSTATS(135,1)
+(  254) # 256 "test_adjoint.F90"
+(  256) END SUBROUTINE GPCAD
+(  257) # 258 "test_adjoint.F90"
+(  258) SUBROUTINE SCALPRODSP(PSP1,PSP2,PSC)
+(  259) # 260 "test_adjoint.F90"
+(  260) ! Scalar product in spectral space
+(  261) REAL(KIND=JPRBT) :: PSP1(:,:),PSP2(:,:)
+(  262) REAL(KIND=JPRBT) :: PSC
+(  263) # 264 "test_adjoint.F90"
+(  264) INTEGER(KIND=JPIM) :: JMLOC,IM,JIR,JN,INM,JLEV
+(  265) REAL(KIND=JPRBT) :: ZMFACT,ZSP(NFLEV,NSPEC2),ZSPG(NFLEVG,NSPEC2G)
+(  266) # 267 "test_adjoint.F90"
+(  267) PSC = 0.0_JPRBT
+(  268) ZSP(:,:) = 0.0_JPRBT
+(  269) # 270 "test_adjoint.F90"
+(  270) CALL GSTATS(110,0)
+(  271) !$OMP PARALLEL DO SCHEDULE(STATIC,1) PRIVATE(JLEV,JMLOC,IM,ZMFACT,JIR,JN,INM)
+(  272) DO JLEV=1,NFLEV
+(  273)   DO JMLOC=1,NUMP
+(  274)     IM = MYMS(JMLOC)
+(  275)     ZMFACT=1.0_JPRBT+REAL(MIN(1,IM),JPRBT)
+(  276)     DO JIR=0,MIN(1,IM)
+(  277)       DO JN=IM,NSMAX
+(  278)         INM = NASM0(IM)+(JN-IM)*2+JIR
+(  279)         ZSP(JLEV,INM) = PSP1(JLEV,INM)*PSP2(JLEV,INM)*ZMFACT/2.0_JPRBT
+(  280)       ENDDO
+(  281)     ENDDO
+(  282)   ENDDO
+(  283) ENDDO
+(  284) !$OMP END PARALLEL DO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 34
+
+(  285) # 286 "test_adjoint.F90"
+(  286) CALL GATH_SPEC(PSPECG=ZSPG,KFGATHG=NFLEVG,KTO=ITO,PSPEC=ZSP,&
+(  287)  & KVSET=IVSET(1:NFLEVG))
+(  288) # 289 "test_adjoint.F90"
+(  289) IF(MYPROC == 1) THEN
+(  290)   PSC = SUM(ZSPG)
+(  291) ELSE
+(  292)   PSC = 0.0_JPRBT
+(  293) ENDIF
+(  294) CALL GSTATS(110,1)
+(  295) # 296 "test_adjoint.F90"
+(  296) END SUBROUTINE SCALPRODSP
+(  297) # 298 "test_adjoint.F90"
+(  298) SUBROUTINE SCALPRODGP(PGP1,PGP2,PSC)
+(  299) # 300 "test_adjoint.F90"
+(  300) !Scalar product in gridpoint space
+(  301) # 302 "test_adjoint.F90"
+(  302) REAL(KIND=JPRBT) :: PGP1(:,:,:),PGP2(:,:,:)
+(  303) REAL(KIND=JPRBT) :: PSC
+(  304) # 305 "test_adjoint.F90"
+(  305) INTEGER(KIND=JPIM) :: JLEV,JKGLO,JROF,IEND,IBL,IOFF,IROF,JGL,JL
+(  306) REAL(KIND=JPRBT) :: ZGP(NPROMA,NFLEVG,NGPBLKS),ZGPG(NGPTOTG,NFLEVG),ZWTG(NGPTOTG,1),ZWT(NPROMA,1,NGPBLKS)
+(  307) # 308 "test_adjoint.F90"
+(  308) PSC = 0.0_JPRBT
+(  309) ZGP(:,:,:) = 0.0_JPRBT
+(  310) # 311 "test_adjoint.F90"
+(  311) IROF=0
+(  312) DO JGL=1,NDGL
+(  313)   DO JL=1,NLOEN(JGL)
+(  314)     IROF=IROF+1
+(  315)     ZWTG(IROF,1) = 1.0_JPRBT
+(  316)   ENDDO
+(  317) ENDDO
+(  318) CALL DIST_GRID(PGPG=ZWTG,KFDISTG=1,KFROM=ITO,PGP=ZWT,KPROMA=NPROMA)
+(  319) # 320 "test_adjoint.F90"
+(  320) DO JLEV=1,NFLEV
+(  321)   DO JKGLO=1,NGPTOT,NPROMA
+(  322)     IEND = MIN(NPROMA,NGPTOT-JKGLO+1)
+(  323)     IOFF = JKGLO-1
+(  324)     IBL  = (JKGLO-1)/NPROMA+1
+(  325)     DO JROF=1,IEND
+(  326)       ZGP(JROF,JLEV,IBL) = PGP1(JROF,JLEV,IBL)*PGP2(JROF,JLEV,IBL)*&
+(  327)        &ZWT(JROF,1,IBL)
+(  328)     ENDDO
+(  329)   ENDDO
+(  330) ENDDO
+(  331) # 332 "test_adjoint.F90"
+(  332) CALL GATH_GRID(PGPG=ZGPG,KFGATHG=NFLEVG,KTO=ITO,PGP=ZGP,KPROMA=NPROMA)
+(  333) # 334 "test_adjoint.F90"
+(  334) PSC = SUM(ZGPG)
+(  335) # 336 "test_adjoint.F90"
+(  336) END SUBROUTINE SCALPRODGP
+(  337) # 338 "test_adjoint.F90"
+(  338) END PROGRAM TEST_ADJOINT

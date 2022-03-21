@@ -1,0 +1,342 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:59      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: efscad_mod.F90
+
+(    1) MODULE EFSCAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EFSCAD(KGL,KF_UV,KF_SCALARS,KF_SCDERS,&
+(    4)  & PUV,PSCALAR,PNSDERS,PEWDERS,PUVDERS)
+(    5) 
+(    6) !**** *EFSCAD - Division by a*cos(theta), east-west derivatives - adjoint
+(    7) 
+(    8) !     Purpose.
+(    9) !     --------
+(   10) !        In Fourier space divide u and v and all north-south
+(   11) !        derivatives by a*cos(theta). Also compute east-west derivatives
+(   12) !        of u,v,thermodynamic, passiv scalar variables and surface
+(   13) !        pressure.
+(   14) 
+(   15) !**   Interface.
+(   16) !     ----------
+(   17) !        CALL EFSCAD(..)
+(   18) !        Explicit arguments :  PUV     - u and v
+(   19) !        --------------------  PSCALAR - scalar valued varaibles
+(   20) !                              PNSDERS - N-S derivative of S.V.V.
+(   21) !                              PEWDERS - E-W derivative of S.V.V.
+(   22) !                              PUVDERS - E-W derivative of u and v
+(   23) !     Method.
+(   24) !     -------
+(   25) 
+(   26) !     Externals.   None.
+(   27) !     ----------
+(   28) 
+(   29) !     Author.
+(   30) !     -------
+(   31) !        Mats Hamrud *ECMWF*
+(   32) 
+(   33) !     Modifications.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:59      page 2
+
+(   34) !     --------------
+(   35) !        Original : 00-03-03 (From SC2FSC)
+(   36) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   37) 
+(   38) !     ------------------------------------------------------------------
+(   39) 
+(   40) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   41) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   42) 
+(   43) USE TPM_TRANS       ,ONLY : LUVDER
+(   44) USE TPM_DISTR       ,ONLY : D, MYSETW
+(   45) !USE TPM_FIELDS
+(   46) USE TPM_GEOMETRY    ,ONLY : G
+(   47) 
+(   48) USE TPMALD_GEO      ,ONLY : GALD
+(   49) 
+(   50) IMPLICIT NONE
+(   51) 
+(   52) INTEGER(KIND=JPIM) , INTENT(IN) :: KGL,KF_UV,KF_SCALARS,KF_SCDERS
+(   53) REAL(KIND=JPRB) , INTENT(INOUT) :: PUV(:,:)
+(   54) REAL(KIND=JPRB) , INTENT(INOUT) :: PSCALAR(:,:)
+(   55) REAL(KIND=JPRB) , INTENT(INOUT) :: PNSDERS(:,:)
+(   56) REAL(KIND=JPRB) , INTENT(INOUT) :: PEWDERS(:,:)
+(   57) REAL(KIND=JPRB) , INTENT(INOUT) :: PUVDERS(:,:)
+(   58) 
+(   59) INTEGER(KIND=JPIM) :: IMEN,ISTAGTF
+(   60) 
+(   61) INTEGER(KIND=JPIM) :: JF,IGLG,II,IR,JM
+(   62) 
+(   63) REAL(KIND=JPRB) :: ZIM
+(   64) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   65) 
+(   66) !     ------------------------------------------------------------------
+(   67) 
+(   68) IF (LHOOK) CALL DR_HOOK('EFSCAD_MOD:EFSCAD',0,ZHOOK_HANDLE)
+(   69) IGLG = D%NPTRLS(MYSETW)+KGL-1
+(   70) IMEN    = G%NMEN(IGLG)
+(   71) ISTAGTF = D%NSTAGTF(KGL)
+(   72) 
+(   73) !     ------------------------------------------------------------------
+(   74) 
+(   75) !*       2.    EAST-WEST DERIVATIVES
+(   76) !              ---------------------
+(   77) 
+(   78) !*       2.1      U AND V.
+(   79) 
+(   80) IF(LUVDER)THEN
+(   81)   DO JM=0,IMEN
+(   82) 
+(   83)     ZIM=REAL(JM,JPRB)*GALD%EXWN
+(   84) 
+(   85)     IR = ISTAGTF+2*JM+1
+(   86)     II = IR+1
+(   87)     DO JF=1,2*KF_UV
+(   88) 
+(   89)       PUV(JF,II) = PUV(JF,II) - ZIM*PUVDERS(JF,IR)
+(   90)       PUV(JF,IR) = PUV(JF,IR) + ZIM*PUVDERS(JF,II)
+(   91) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:59      page 3
+
+(   92)       PUVDERS(JF,IR) = 0.0_JPRB
+(   93)       PUVDERS(JF,II) = 0.0_JPRB
+(   94)     ENDDO
+(   95)   ENDDO
+(   96) ENDIF
+(   97) 
+(   98) !*       2.2     SCALAR VARIABLES
+(   99) 
+(  100) IF(KF_SCDERS > 0)THEN
+(  101)   DO JM=0,IMEN
+(  102) 
+(  103)     ZIM=REAL(JM,JPRB)*GALD%EXWN
+(  104) 
+(  105)     IR = ISTAGTF+2*JM+1
+(  106)     II = IR+1
+(  107)     DO JF=1,KF_SCALARS
+(  108) 
+(  109)       PSCALAR(JF,II) = PSCALAR(JF,II) - ZIM* PEWDERS(JF,IR)
+(  110)       PSCALAR(JF,IR) = PSCALAR(JF,IR) + ZIM* PEWDERS(JF,II)
+(  111) 
+(  112)       PEWDERS(JF,IR) = 0.0_JPRB
+(  113)       PEWDERS(JF,II) = 0.0_JPRB
+(  114)     ENDDO
+(  115)   ENDDO
+(  116) ENDIF
+(  117) IF (LHOOK) CALL DR_HOOK('EFSCAD_MOD:EFSCAD',1,ZHOOK_HANDLE)
+(  118) !     ------------------------------------------------------------------
+(  119) 
+(  120) END SUBROUTINE EFSCAD
+(  121) END MODULE EFSCAD_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:59      page 4
+
+(    1) # 1 "efscad_mod.F90"
+(    1) MODULE EFSCAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EFSCAD(KGL,KF_UV,KF_SCALARS,KF_SCDERS,&
+(    4)  & PUV,PSCALAR,PNSDERS,PEWDERS,PUVDERS)
+(    5) # 6 "efscad_mod.F90"
+(    6) !**** *EFSCAD - Division by a*cos(theta), east-west derivatives - adjoint
+(    7) # 8 "efscad_mod.F90"
+(    8) !     Purpose.
+(    9) !     --------
+(   10) !        In Fourier space divide u and v and all north-south
+(   11) !        derivatives by a*cos(theta). Also compute east-west derivatives
+(   12) !        of u,v,thermodynamic, passiv scalar variables and surface
+(   13) !        pressure.
+(   14) # 15 "efscad_mod.F90"
+(   15) !**   Interface.
+(   16) !     ----------
+(   17) !        CALL EFSCAD(..)
+(   18) !        Explicit arguments :  PUV     - u and v
+(   19) !        --------------------  PSCALAR - scalar valued varaibles
+(   20) !                              PNSDERS - N-S derivative of S.V.V.
+(   21) !                              PEWDERS - E-W derivative of S.V.V.
+(   22) !                              PUVDERS - E-W derivative of u and v
+(   23) !     Method.
+(   24) !     -------
+(   25) # 26 "efscad_mod.F90"
+(   26) !     Externals.   None.
+(   27) !     ----------
+(   28) # 29 "efscad_mod.F90"
+(   29) !     Author.
+(   30) !     -------
+(   31) !        Mats Hamrud *ECMWF*
+(   32) # 33 "efscad_mod.F90"
+(   33) !     Modifications.
+(   34) !     --------------
+(   35) !        Original : 00-03-03 (From SC2FSC)
+(   36) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   37) # 38 "efscad_mod.F90"
+(   38) !     ------------------------------------------------------------------
+(   39) # 40 "efscad_mod.F90"
+(   40) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   41) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   42) # 43 "efscad_mod.F90"
+(   43) USE TPM_TRANS       ,ONLY : LUVDER
+(   44) USE TPM_DISTR       ,ONLY : D, MYSETW
+(   45) !USE TPM_FIELDS
+(   46) USE TPM_GEOMETRY    ,ONLY : G
+(   47) # 48 "efscad_mod.F90"
+(   48) USE TPMALD_GEO      ,ONLY : GALD
+(   49) # 50 "efscad_mod.F90"
+(   50) IMPLICIT NONE
+(   51) # 52 "efscad_mod.F90"
+(   52) INTEGER(KIND=JPIM) , INTENT(IN) :: KGL,KF_UV,KF_SCALARS,KF_SCDERS
+(   53) REAL(KIND=JPRB) , INTENT(INOUT) :: PUV(:,:)
+(   54) REAL(KIND=JPRB) , INTENT(INOUT) :: PSCALAR(:,:)
+(   55) REAL(KIND=JPRB) , INTENT(INOUT) :: PNSDERS(:,:)
+(   56) REAL(KIND=JPRB) , INTENT(INOUT) :: PEWDERS(:,:)
+(   57) REAL(KIND=JPRB) , INTENT(INOUT) :: PUVDERS(:,:)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:59      page 5
+
+(   58) # 59 "efscad_mod.F90"
+(   59) INTEGER(KIND=JPIM) :: IMEN,ISTAGTF
+(   60) # 61 "efscad_mod.F90"
+(   61) INTEGER(KIND=JPIM) :: JF,IGLG,II,IR,JM
+(   62) # 63 "efscad_mod.F90"
+(   63) REAL(KIND=JPRB) :: ZIM
+(   64) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   65) # 66 "efscad_mod.F90"
+(   66) !     ------------------------------------------------------------------
+(   67) # 68 "efscad_mod.F90"
+(   68) IF (LHOOK) CALL DR_HOOK('EFSCAD_MOD:EFSCAD',0,ZHOOK_HANDLE)
+(   69) IGLG = D%NPTRLS(MYSETW)+KGL-1
+(   70) IMEN    = G%NMEN(IGLG)
+(   71) ISTAGTF = D%NSTAGTF(KGL)
+(   72) # 73 "efscad_mod.F90"
+(   73) !     ------------------------------------------------------------------
+(   74) # 75 "efscad_mod.F90"
+(   75) !*       2.    EAST-WEST DERIVATIVES
+(   76) !              ---------------------
+(   77) # 78 "efscad_mod.F90"
+(   78) !*       2.1      U AND V.
+(   79) # 80 "efscad_mod.F90"
+(   80) IF(LUVDER)THEN
+(   81)   DO JM=0,IMEN
+(   82) # 83 "efscad_mod.F90"
+(   83)     ZIM=REAL(JM,JPRB)*GALD%EXWN
+(   84) # 85 "efscad_mod.F90"
+(   85)     IR = ISTAGTF+2*JM+1
+(   86)     II = IR+1
+(   87)     DO JF=1,2*KF_UV
+(   88) # 89 "efscad_mod.F90"
+(   89)       PUV(JF,II) = PUV(JF,II) - ZIM*PUVDERS(JF,IR)
+(   90)       PUV(JF,IR) = PUV(JF,IR) + ZIM*PUVDERS(JF,II)
+(   91) # 92 "efscad_mod.F90"
+(   92)       PUVDERS(JF,IR) = 0.0_JPRB
+(   93)       PUVDERS(JF,II) = 0.0_JPRB
+(   94)     ENDDO
+(   95)   ENDDO
+(   96) ENDIF
+(   97) # 98 "efscad_mod.F90"
+(   98) !*       2.2     SCALAR VARIABLES
+(   99) # 100 "efscad_mod.F90"
+(  100) IF(KF_SCDERS > 0)THEN
+(  101)   DO JM=0,IMEN
+(  102) # 103 "efscad_mod.F90"
+(  103)     ZIM=REAL(JM,JPRB)*GALD%EXWN
+(  104) # 105 "efscad_mod.F90"
+(  105)     IR = ISTAGTF+2*JM+1
+(  106)     II = IR+1
+(  107)     DO JF=1,KF_SCALARS
+(  108) # 109 "efscad_mod.F90"
+(  109)       PSCALAR(JF,II) = PSCALAR(JF,II) - ZIM* PEWDERS(JF,IR)
+(  110)       PSCALAR(JF,IR) = PSCALAR(JF,IR) + ZIM* PEWDERS(JF,II)
+(  111) # 112 "efscad_mod.F90"
+(  112)       PEWDERS(JF,IR) = 0.0_JPRB
+(  113)       PEWDERS(JF,II) = 0.0_JPRB
+(  114)     ENDDO
+(  115)   ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:59      page 6
+
+(  116) ENDIF
+(  117) IF (LHOOK) CALL DR_HOOK('EFSCAD_MOD:EFSCAD',1,ZHOOK_HANDLE)
+(  118) !     ------------------------------------------------------------------
+(  119) # 120 "efscad_mod.F90"
+(  120) END SUBROUTINE EFSCAD
+(  121) END MODULE EFSCAD_MOD

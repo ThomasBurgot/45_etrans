@@ -1,0 +1,1150 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:08      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: gpnorm_trans.F90
+
+(    1) SUBROUTINE GPNORM_TRANS(PGP,KFIELDS,KPROMA,PAVE,PMIN,PMAX,LDAVE_ONLY,KRESOL)
+(    2) 
+(    3) 
+(    4) !**** *GPNORM_TRANS* - calculate grid-point norms
+(    5) 
+(    6) !     Purpose.
+(    7) !     --------
+(    8) !        calculate grid-point norms using a 2 stage (NPRTRV,NPRTRW) communication rather
+(    9) !        than an approach using a more expensive global gather collective communication
+(   10) 
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !     CALL GPNORM_TRANS(...)
+(   14) 
+(   15) !     Explicit arguments :
+(   16) !     --------------------
+(   17) !     PGP(:,:,:) - gridpoint fields (input)
+(   18) !                  PGP is  dimensioned (NPROMA,KFIELDS,NGPBLKS) where
+(   19) !                  NPROMA is the blocking factor, KFIELDS the total number
+(   20) !                  of fields and NGPBLKS the number of NPROMA blocks.
+(   21) !     KFIELDS     - number of fields (input)
+(   22) !                   (these do not have to be just levels)
+(   23) !     KPROMA      - required blocking factor (input)
+(   24) !     PAVE        - average (output)
+(   25) !     PMIN        - minimum (input/output)
+(   26) !     PMAX        - maximum (input/output)
+(   27) !     LDAVE_ONLY  - T : PMIN and PMAX already contain local MIN and MAX
+(   28) !     KRESOL      -  resolution tag (optional)
+(   29) !                    default assumes first defined resolution
+(   30) !
+(   31) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:08      page 2
+
+(   32) !     Author.
+(   33) !     -------
+(   34) !        George Mozdzynski *ECMWF*
+(   35) 
+(   36) !     Modifications.
+(   37) !     --------------
+(   38) !        Original : 19th Sept 2008
+(   39) !        R. El Khatib 07-08-2009 Optimisation directive for NEC
+(   40) 
+(   41) !     ------------------------------------------------------------------
+(   42) 
+(   43) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB , JPRD
+(   44) 
+(   45) !ifndef INTERFACE
+(   46) 
+(   47) USE TPM_GEN         ,ONLY : NOUT
+(   48) USE TPM_DIM         ,ONLY : R
+(   49) USE TPM_TRANS       ,ONLY : LGPNORM, NGPBLKS, NPROMA, ZGTF, ZAVE, ZMINGL, ZMAXGL, ZMINGPN, ZMAXGPN
+(   50) USE TPM_DISTR       ,ONLY : D, NPRCIDS, NPRTRV, NPRTRW, MYSETV, MYSETW, NPROC, D_NSTAGTF,D_NPTRLS, MYPROC
+(   51) USE TPM_GEOMETRY    ,ONLY : G,G_NLOEN,G_NLOEN_MAX
+(   52) USE TPM_FIELDS      ,ONLY : F
+(   53) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(   54) USE TRGTOL_MOD      ,ONLY : TRGTOL
+(   55) USE SET2PE_MOD      ,ONLY : SET2PE
+(   56) USE MPL_MODULE      ,ONLY : MPL_RECV, MPL_SEND, JP_BLOCKING_STANDARD
+(   57) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   58) USE YOMHOOK         ,ONLY : LHOOK,   DR_HOOK
+(   59) 
+(   60) !endif INTERFACE
+(   61) 
+(   62) IMPLICIT NONE
+(   63) 
+(   64) ! Declaration of arguments
+(   65) 
+(   66) REAL(KIND=JPRB)   ,INTENT(IN)    :: PGP(:,:,:)
+(   67) REAL(KIND=JPRB)   ,INTENT(OUT)   :: PAVE(:)
+(   68) REAL(KIND=JPRB)   ,INTENT(INOUT) :: PMIN(:)
+(   69) REAL(KIND=JPRB)   ,INTENT(INOUT) :: PMAX(:)
+(   70) INTEGER(KIND=JPIM),INTENT(IN)    :: KFIELDS
+(   71) INTEGER(KIND=JPIM),INTENT(IN)    :: KPROMA
+(   72) LOGICAL           ,INTENT(IN)    :: LDAVE_ONLY
+(   73) INTEGER(KIND=JPIM),OPTIONAL, INTENT(IN)  :: KRESOL
+(   74) 
+(   75) !ifndef INTERFACE
+(   76) 
+(   77) ! Local variables
+(   78) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   79) INTEGER(KIND=JPIM) :: IUBOUND(4)
+(   80) INTEGER(KIND=JPIM) :: IVSET(KFIELDS)
+(   81) INTEGER(KIND=JPIM),ALLOCATABLE :: IVSETS(:)
+(   82) INTEGER(KIND=JPIM),ALLOCATABLE :: IVSETG(:,:)
+(   83) !GPU
+(   84) !REAL(KIND=JPRBT),ALLOCATABLE :: ZGTF(:,:)
+(   85) !REAL(KIND=JPRD),ALLOCATABLE :: ZAVE(:,:)
+(   86) !REAL(KIND=JPRBT),ALLOCATABLE :: ZMINGL(:,:)
+(   87) !REAL(KIND=JPRBT),ALLOCATABLE :: ZMAXGL(:,:)
+(   88) !REAL(KIND=JPRBT),ALLOCATABLE :: ZMIN(:)
+(   89) !REAL(KIND=JPRBT),ALLOCATABLE :: ZMAX(:)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:08      page 3
+
+(   90) REAL(KIND=JPRD),ALLOCATABLE :: ZAVEG(:,:)
+(   91) REAL(KIND=JPRBT),ALLOCATABLE :: ZMING(:)
+(   92) REAL(KIND=JPRBT),ALLOCATABLE :: ZMAXG(:)
+(   93) REAL(KIND=JPRD),ALLOCATABLE :: ZSND(:)
+(   94) REAL(KIND=JPRD),ALLOCATABLE :: ZRCV(:)
+(   95) INTEGER(KIND=JPIM) :: J,JGL,IGL,JL,JF,IF_GP,IF_SCALARS_G,IF_FS,JSETV,JSETW,IWLATS,JMAX
+(   96) INTEGER(KIND=JPIM) :: IPROC,ITAG,ILEN,ILENR,IBEG,IEND,IND
+(   97) !INTEGER(KIND=JPIM) :: iunit
+(   98) 
+(   99) !     ------------------------------------------------------------------
+(  100) IF (LHOOK) CALL DR_HOOK('GPNORM_TRANS',0,ZHOOK_HANDLE)
+(  101) 
+(  102) ! Set current resolution
+(  103) CALL SET_RESOL(KRESOL)
+(  104) 
+(  105) ! Set defaults
+(  106) 
+(  107) NPROMA = KPROMA
+(  108) NGPBLKS = (D%NGPTOT-1)/NPROMA+1
+(  109) 
+(  110) ! Consistency checks
+(  111) 
+(  112) IUBOUND(1:3)=UBOUND(PGP)
+(  113) IF(IUBOUND(1) < NPROMA) THEN
+(  114)   WRITE(NOUT,*)'GPNORM_TRANS:FIRST DIM. OF PGP TOO SMALL ',IUBOUND(1),NPROMA
+(  115)   CALL ABORT_TRANS('GPNORM_TRANS:FIRST DIMENSION OF PGP TOO SMALL ')
+(  116) ENDIF
+(  117) IF(IUBOUND(2) < KFIELDS) THEN
+(  118)   WRITE(NOUT,*)'GPNORM_TRANS:SEC. DIM. OF PGP TOO SMALL ',IUBOUND(2),KFIELDS
+(  119)   CALL ABORT_TRANS('GPNORM_TRANS:SECOND DIMENSION OF PGP TOO SMALL ')
+(  120) ENDIF
+(  121) IF(IUBOUND(3) < NGPBLKS) THEN
+(  122)   WRITE(NOUT,*)'GPNORM_TRANS:THIRD DIM. OF PGP TOO SMALL ',IUBOUND(3),NGPBLKS
+(  123)   CALL ABORT_TRANS('GPNORM_TRANS:THIRD DIMENSION OF PGP TOO SMALL ')
+(  124) ENDIF
+(  125) 
+(  126) 
+(  127) IF_GP=KFIELDS
+(  128) IF_SCALARS_G=0
+(  129) 
+(  130) IF_FS=0
+(  131) DO J=1,KFIELDS
+(  132)   IVSET(J)=MOD(J-1,NPRTRV)+1
+(  133)   IF(IVSET(J)==MYSETV)THEN
+(  134)     IF_FS=IF_FS+1
+(  135)   ENDIF
+(  136) ENDDO
+(  137) 
+(  138) ALLOCATE(IVSETS(NPRTRV))
+(  139) IVSETS(:)=0
+(  140) DO J=1,KFIELDS
+(  141)   IVSETS(IVSET(J))=IVSETS(IVSET(J))+1
+(  142) ENDDO
+(  143) ALLOCATE(IVSETG(NPRTRV,MAXVAL(IVSETS(:))))
+(  144) IVSETG(:,:)=0
+(  145) IVSETS(:)=0
+(  146) DO J=1,KFIELDS
+(  147)   IVSETS(IVSET(J))=IVSETS(IVSET(J))+1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:08      page 4
+
+(  148)   IVSETG(IVSET(J),IVSETS(IVSET(J)))=J
+(  149) ENDDO
+(  150) 
+(  151) 
+(  152) !iunit=300+myproc
+(  153) !DO JF=1,IF_GP
+(  154) !  write(iunit,*) 'PGP field=',JF,PGP(1,JF,1),PGP(NPROMA,JF,1),PGP(1,JF,NGPBLKS)
+(  155) !ENDDO
+(  156) 
+(  157) ! done in setup_trans
+(  158) !!!!ALLOCATE(ZGTF(IF_FS,D%NLENGTF))
+(  159) LGPNORM=.TRUE.
+(  160) CALL TRGTOL(ZGTF,IF_FS,IF_GP,IF_SCALARS_G,IVSET,PGP=PGP)
+(  161) LGPNORM=.FALSE.
+(  162) 
+(  163) ! ZGTF is now on GPU
+(  164) 
+(  165) IBEG=1
+(  166) IEND=D%NDGL_FS
+(  167) 
+(  168) !debug
+(  169) !!$ACC update host(ZGTF)
+(  170) !iunit=300+myproc
+(  171) !DO JGL=IBEG,IEND
+(  172) ! IGL = D_NPTRLS(MYSETW) + JGL - 1
+(  173) ! DO JF=1,IF_FS
+(  174) !   ZAVE(JF,JGL)=0.0_JPRBT
+(  175) !   DO JL=1,G_NLOEN(IGL)
+(  176) !     ZAVE(JF,JGL)=ZAVE(JF,JGL)+ZGTF(JF,D%NSTAGTF(JGL)+JL)
+(  177) !   ENDDO
+(  178) !   write(iunit,*) 'aver before ',JF,IF_FS,IGL,ZAVE(JF,JGL),ZGTF(JF,D%NSTAGTF(JGL)+1)
+(  179) ! ENDDO
+(  180) !ENDDO
+(  181) 
+(  182) ! GPU setup trans
+(  183) !ALLOCATE(ZAVE(IF_FS,IBEG:IEND))
+(  184) !IF(.NOT.LDAVE_ONLY)THEN
+(  185) !  ALLOCATE(ZMINGL(IF_FS,IBEG:IEND))
+(  186) !  ALLOCATE(ZMAXGL(IF_FS,IBEG:IEND))
+(  187) !ENDIF
+(  188) !ALLOCATE(ZMIN(IF_FS))
+(  189) !ALLOCATE(ZMAX(IF_FS))
+(  190) 
+(  191) CALL GSTATS(1429,0)
+(  192) IF( IF_FS > 0 )THEN
+(  193) 
+(  194)  !$ACC data &
+(  195)  !$ACC& COPY(F,F%RW) &
+(  196)  !$ACC& COPY(D,D_NSTAGTF,D_NPTRLS,G_NLOEN,G_NLOEN_MAX) &
+(  197)  !$ACC& present(ZGTF,ZAVE,ZMINGL,ZMAXGL,ZMINGPN,ZMAXGPN)
+(  198) 
+(  199)     !$ACC KERNELS
+(  200)     DO JF=1,IF_FS
+(  201)       ZMINGL(JF,IBEG:IEND)=ZGTF(JF,D_NSTAGTF(1)+1)
+(  202)       ZMAXGL(JF,IBEG:IEND)=ZGTF(JF,D_NSTAGTF(1)+1)
+(  203)     ENDDO
+(  204)     !$ACC END KERNELS
+(  205) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:08      page 5
+
+(  206) ! FIRST DO SUMS IN EACH FULL LATITUDE
+(  207) 
+(  208)   !$ACC KERNELS
+(  209)   DO JGL=IBEG,IEND
+(  210)     IGL = D_NPTRLS(MYSETW) + JGL - 1
+(  211)     DO JF=1,IF_FS
+(  212)       ZAVE(JF,JGL)=0.0_JPRBT
+(  213)       !$ACC loop
+(  214)       DO JL=1,G_NLOEN(IGL)
+(  215)         ZAVE(JF,JGL)=ZAVE(JF,JGL)+ZGTF(JF,D_NSTAGTF(JGL)+JL)
+(  216)         ZMINGL(JF,JGL)=MIN(ZMINGL(JF,JGL),ZGTF(JF,D_NSTAGTF(JGL)+JL))
+(  217)         ZMAXGL(JF,JGL)=MAX(ZMAXGL(JF,JGL),ZGTF(JF,D_NSTAGTF(JGL)+JL))
+(  218)       ENDDO
+(  219)     ENDDO
+(  220)   ENDDO
+(  221)   !$ACC END KERNELS
+(  222) 
+(  223)   !$ACC KERNELS
+(  224)   DO JF=1,IF_FS
+(  225)     ZMINGPN(JF)=MINVAL(ZMINGL(JF,IBEG:IEND))
+(  226)     ZMAXGPN(JF)=MAXVAL(ZMAXGL(JF,IBEG:IEND))
+(  227)   ENDDO
+(  228)   !$ACC END KERNELS
+(  229) 
+(  230)   !$ACC KERNELS
+(  231)   DO JGL=IBEG,IEND
+(  232)     IGL = D_NPTRLS(MYSETW) + JGL - 1
+(  233)     DO JF=1,IF_FS
+(  234)       ZAVE(JF,JGL)=ZAVE(JF,JGL)*F%RW(IGL)/G_NLOEN(IGL)
+(  235)       !write(iunit,*) 'aver inside ',JF,IF_FS,IGL,ZAVE(JF,JGL), F%RW(IGL), G_NLOEN(IGL),ZMINGPN(JF),ZMAXGPN(JF)
+(  236)     ENDDO
+(  237)   ENDDO
+(  238)   !$ACC END KERNELS
+(  239) 
+(  240) !$ACC end data
+(  241) 
+(  242) !$ACC update host(ZAVE)
+(  243) !$ACC update host(ZMINGPN)
+(  244) !$ACC update host(ZMAXGPN)
+(  245) !$ACC wait
+(  246) 
+(  247) !iunit=300+myproc
+(  248) !DO JGL=IBEG,IEND
+(  249) ! IGL = D_NPTRLS(MYSETW) + JGL - 1
+(  250) ! DO JF=1,IF_FS
+(  251) !   write(iunit,*) 'aver final ',JF,IF_FS,IGL,ZAVE(JF,JGL),ZMINGPN(JF),ZMAXGPN(JF)
+(  252) ! ENDDO
+(  253) !ENDDO
+(  254) 
+(  255) ENDIF
+(  256) CALL GSTATS(1429,1)
+(  257) 
+(  258) ! from here rest on CPU
+(  259) 
+(  260) ! IT IS IMPORTANT THAT SUMS ARE NOW DONE IN LATITUDE ORDER
+(  261) ALLOCATE(ZAVEG(R%NDGL,KFIELDS))
+(  262) ALLOCATE(ZMING(KFIELDS))
+(  263) ALLOCATE(ZMAXG(KFIELDS))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:08      page 6
+
+(  264) 
+(  265) ZAVEG(:,:)=0.0_JPRD
+(  266) DO JF=1,IF_FS
+(  267)   DO JGL=IBEG,IEND
+(  268)     IGL = D%NPTRLS(MYSETW) + JGL - 1
+(  269)     ZAVEG(IGL,IVSETG(MYSETV,JF))=ZAVEG(IGL,IVSETG(MYSETV,JF))+ZAVE(JF,JGL)
+(  270)   ENDDO
+(  271) ENDDO
+(  272) 
+(  273) IF(LDAVE_ONLY)THEN
+(  274)   ZMING(:)=PMIN(:)
+(  275)   ZMAXG(:)=PMAX(:)
+(  276) ELSE
+(  277)   DO JF=1,IF_FS
+(  278)     ZMING(IVSETG(MYSETV,JF))=ZMINGPN(JF)
+(  279)     ZMAXG(IVSETG(MYSETV,JF))=ZMAXGPN(JF)
+(  280)   ENDDO
+(  281) ENDIF
+(  282) 
+(  283) ! RECEIVE ABOVE FROM OTHER NPRTRV SETS FOR SAME LATS BUT DIFFERENT FIELDS
+(  284) ITAG=123
+(  285) 
+(  286) CALL GSTATS(815,0)
+(  287) 
+(  288) IF( MYSETV==1 )THEN
+(  289) 
+(  290)   DO JSETV=2,NPRTRV
+(  291)     IF(LDAVE_ONLY)THEN
+(  292)       ILEN=D%NDGL_FS*IVSETS(JSETV)+2*KFIELDS
+(  293)     ELSE
+(  294)       ILEN=(D%NDGL_FS+2)*IVSETS(JSETV)
+(  295)     ENDIF
+(  296)     IF(ILEN > 0)THEN
+(  297)       ALLOCATE(ZRCV(ILEN))
+(  298)       CALL SET2PE(IPROC,0,0,MYSETW,JSETV)
+(  299)       CALL MPL_RECV(ZRCV(:),KSOURCE=NPRCIDS(IPROC),KTAG=ITAG,&
+(  300)         &KMP_TYPE=JP_BLOCKING_STANDARD,KOUNT=ILENR,CDSTRING='GPNORM_TRANS:V')
+(  301)       IF(ILENR /= ILEN)THEN
+(  302)         CALL ABOR1('GPNORM_TRANS:ILENR /= ILEN')
+(  303)       ENDIF
+(  304)       IND=0
+(  305)       DO JF=1,IVSETS(JSETV)
+(  306)         DO JGL=IBEG,IEND
+(  307)           IGL = D%NPTRLS(MYSETW) + JGL - 1
+(  308)           IND=IND+1
+(  309)           ZAVEG(IGL,IVSETG(JSETV,JF))=ZRCV(IND)
+(  310)         ENDDO
+(  311)         IF(.NOT.LDAVE_ONLY)THEN
+(  312)           IND=IND+1
+(  313)           ZMING(IVSETG(JSETV,JF))=ZRCV(IND)
+(  314)           IND=IND+1
+(  315)           ZMAXG(IVSETG(JSETV,JF))=ZRCV(IND)
+(  316)         ENDIF
+(  317)       ENDDO
+(  318)       IF(LDAVE_ONLY)THEN
+(  319)         DO JF=1,KFIELDS
+(  320)           IND=IND+1
+(  321)           ZMING(JF)=MIN(ZMING(JF),REAL(ZRCV(IND),JPRBT))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:08      page 7
+
+(  322)           IND=IND+1
+(  323)           ZMAXG(JF)=MAX(ZMAXG(JF),REAL(ZRCV(IND),JPRBT))
+(  324)         ENDDO
+(  325)       ENDIF
+(  326)       DEALLOCATE(ZRCV)
+(  327)     ENDIF
+(  328)   ENDDO
+(  329) 
+(  330) ELSE
+(  331) 
+(  332)   IF(LDAVE_ONLY)THEN
+(  333)     ILEN=D%NDGL_FS*IVSETS(MYSETV)+2*KFIELDS
+(  334)   ELSE
+(  335)     ILEN=(D%NDGL_FS+2)*IVSETS(MYSETV)
+(  336)   ENDIF
+(  337)   IF(ILEN > 0)THEN
+(  338)     CALL SET2PE(IPROC,0,0,MYSETW,1)
+(  339)     ALLOCATE(ZSND(ILEN))
+(  340)     IND=0
+(  341)     DO JF=1,IF_FS
+(  342)       DO JGL=IBEG,IEND
+(  343)         IGL = D%NPTRLS(MYSETW) + JGL - 1
+(  344)         IND=IND+1
+(  345)         ZSND(IND)=ZAVEG(IGL,IVSETG(MYSETV,JF))
+(  346)        ENDDO
+(  347)       IF(.NOT.LDAVE_ONLY)THEN
+(  348)         IND=IND+1
+(  349)         ZSND(IND)=ZMING(IVSETG(MYSETV,JF))
+(  350)         IND=IND+1
+(  351)         ZSND(IND)=ZMAXG(IVSETG(MYSETV,JF))
+(  352)       ENDIF
+(  353)     ENDDO
+(  354)     IF(LDAVE_ONLY)THEN
+(  355)       DO JF=1,KFIELDS
+(  356)         IND=IND+1
+(  357)         ZSND(IND)=PMIN(JF)
+(  358)         IND=IND+1
+(  359)         ZSND(IND)=PMAX(JF)
+(  360)       ENDDO
+(  361)     ENDIF
+(  362)     CALL MPL_SEND(ZSND(:),KDEST=NPRCIDS(IPROC),KTAG=ITAG,&
+(  363)       &KMP_TYPE=JP_BLOCKING_STANDARD,CDSTRING='GPNORM_TRANS:V')
+(  364)     DEALLOCATE(ZSND)
+(  365)   ENDIF
+(  366) 
+(  367) ENDIF
+(  368) 
+(  369) ! FINALLY RECEIVE CONTRIBUTIONS FROM OTHER NPRTRW SETS
+(  370) 
+(  371) IF( MYSETV == 1 )THEN
+(  372) 
+(  373)   IF( MYSETW == 1 )THEN
+(  374) 
+(  375)     DO JSETW=2,NPRTRW
+(  376)       IWLATS=D%NULTPP(JSETW)
+(  377)       IBEG=1
+(  378)       IEND=IWLATS
+(  379)       IF(LDAVE_ONLY)THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:08      page 8
+
+(  380)         ILEN=IWLATS*KFIELDS+2*KFIELDS
+(  381)       ELSE
+(  382)         ILEN=(IWLATS+2)*KFIELDS
+(  383)       ENDIF
+(  384)       IF(ILEN > 0 )THEN
+(  385)         ALLOCATE(ZRCV(ILEN))
+(  386)         CALL SET2PE(IPROC,0,0,JSETW,1)
+(  387)         CALL MPL_RECV(ZRCV(:),KSOURCE=NPRCIDS(IPROC),KTAG=ITAG,&
+(  388)           &KMP_TYPE=JP_BLOCKING_STANDARD,KOUNT=ILENR,CDSTRING='GPNORM_TRANS:W')
+(  389)         IF(ILENR /= ILEN)THEN
+(  390)           CALL ABOR1('GPNORM_TRANS:ILENR /= ILEN')
+(  391)         ENDIF
+(  392)         IND=0
+(  393)         DO JF=1,KFIELDS
+(  394)           DO JGL=IBEG,IEND
+(  395)             IGL = D%NPTRLS(JSETW) + JGL - 1
+(  396)             IND=IND+1
+(  397)             ZAVEG(IGL,JF)=ZRCV(IND)
+(  398)           ENDDO
+(  399)           IF(.NOT.LDAVE_ONLY)THEN
+(  400)             IND=IND+1
+(  401)             ZMING(JF)=MIN(ZMING(JF),ZRCV(IND))
+(  402)             IND=IND+1
+(  403)             ZMAXG(JF)=MAX(ZMAXG(JF),ZRCV(IND))
+(  404)           ENDIF
+(  405)         ENDDO
+(  406)         IF(LDAVE_ONLY)THEN
+(  407)           DO JF=1,KFIELDS
+(  408)             IND=IND+1
+(  409)             ZMING(JF)=MIN(ZMING(JF),ZRCV(IND))
+(  410)             IND=IND+1
+(  411)             ZMAXG(JF)=MAX(ZMAXG(JF),ZRCV(IND))
+(  412)           ENDDO
+(  413)         ENDIF
+(  414)         DEALLOCATE(ZRCV)
+(  415)       ENDIF
+(  416)     ENDDO
+(  417) 
+(  418)   ELSE
+(  419) 
+(  420)     IF(LDAVE_ONLY)THEN
+(  421)       ILEN=D%NDGL_FS*KFIELDS+2*KFIELDS
+(  422)     ELSE
+(  423)       ILEN=(D%NDGL_FS+2)*KFIELDS
+(  424)     ENDIF
+(  425)     IF(ILEN > 0)THEN
+(  426)       CALL SET2PE(IPROC,0,0,1,1)
+(  427)       ALLOCATE(ZSND(ILEN))
+(  428)       IND=0
+(  429)       DO JF=1,KFIELDS
+(  430)         DO JGL=IBEG,IEND
+(  431)           IGL = D%NPTRLS(MYSETW) + JGL - 1
+(  432)           IND=IND+1
+(  433)           ZSND(IND)=ZAVEG(IGL,JF)
+(  434)         ENDDO
+(  435)         IF(.NOT.LDAVE_ONLY)THEN
+(  436)           IND=IND+1
+(  437)           ZSND(IND)=ZMING(JF)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:08      page 9
+
+(  438)           IND=IND+1
+(  439)           ZSND(IND)=ZMAXG(JF)
+(  440)         ENDIF
+(  441)       ENDDO
+(  442)       IF(LDAVE_ONLY)THEN
+(  443)         DO JF=1,KFIELDS
+(  444)           IND=IND+1
+(  445)           ZSND(IND)=ZMING(JF)
+(  446)           IND=IND+1
+(  447)           ZSND(IND)=ZMAXG(JF)
+(  448)         ENDDO
+(  449)       ENDIF
+(  450)       CALL MPL_SEND(ZSND(:),KDEST=NPRCIDS(IPROC),KTAG=ITAG,&
+(  451)         &KMP_TYPE=JP_BLOCKING_STANDARD,CDSTRING='GPNORM_TRANS:V')
+(  452)       DEALLOCATE(ZSND)
+(  453)     ENDIF
+(  454) 
+(  455)   ENDIF
+(  456) 
+(  457) ENDIF
+(  458) 
+(  459) CALL GSTATS(815,1)
+(  460) 
+(  461) IF( MYSETW == 1 .AND. MYSETV == 1 )THEN
+(  462) 
+(  463)   PAVE(:)=0.0_JPRB
+(  464)   DO JGL=1,R%NDGL
+(  465)     PAVE(:)=PAVE(:)+REAL(ZAVEG(JGL,:),JPRB)
+(  466)   ENDDO
+(  467) 
+(  468)   PMIN(:)=ZMING(:)
+(  469)   PMAX(:)=ZMAXG(:)
+(  470) 
+(  471) ENDIF
+(  472) 
+(  473) !DEALLOCATE(ZGTF)
+(  474) !DEALLOCATE(ZAVE)
+(  475) !DEALLOCATE(ZMIN)
+(  476) !DEALLOCATE(ZMAX)
+(  477) DEALLOCATE(ZAVEG)
+(  478) DEALLOCATE(ZMING)
+(  479) DEALLOCATE(ZMAXG)
+(  480) DEALLOCATE(IVSETS)
+(  481) DEALLOCATE(IVSETG)
+(  482) 
+(  483) IF (LHOOK) CALL DR_HOOK('GPNORM_TRANS',1,ZHOOK_HANDLE)
+(  484) 
+(  485) !     ------------------------------------------------------------------
+(  486) 
+(  487) !endif INTERFACE
+(  488) 
+(  489) 
+(  490) END SUBROUTINE GPNORM_TRANS
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:08      page 10
+
+(    1) # 1 "gpnorm_trans.F90"
+(    1) SUBROUTINE GPNORM_TRANS(PGP,KFIELDS,KPROMA,PAVE,PMIN,PMAX,LDAVE_ONLY,KRESOL)
+(    2) # 4 "gpnorm_trans.F90"
+(    4) !**** *GPNORM_TRANS* - calculate grid-point norms
+(    5) # 6 "gpnorm_trans.F90"
+(    6) !     Purpose.
+(    7) !     --------
+(    8) !        calculate grid-point norms using a 2 stage (NPRTRV,NPRTRW) communication rather
+(    9) !        than an approach using a more expensive global gather collective communication
+(   10) # 11 "gpnorm_trans.F90"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !     CALL GPNORM_TRANS(...)
+(   14) # 15 "gpnorm_trans.F90"
+(   15) !     Explicit arguments :
+(   16) !     --------------------
+(   17) !     PGP(:,:,:) - gridpoint fields (input)
+(   18) !                  PGP is  dimensioned (NPROMA,KFIELDS,NGPBLKS) where
+(   19) !                  NPROMA is the blocking factor, KFIELDS the total number
+(   20) !                  of fields and NGPBLKS the number of NPROMA blocks.
+(   21) !     KFIELDS     - number of fields (input)
+(   22) !                   (these do not have to be just levels)
+(   23) !     KPROMA      - required blocking factor (input)
+(   24) !     PAVE        - average (output)
+(   25) !     PMIN        - minimum (input/output)
+(   26) !     PMAX        - maximum (input/output)
+(   27) !     LDAVE_ONLY  - T : PMIN and PMAX already contain local MIN and MAX
+(   28) !     KRESOL      -  resolution tag (optional)
+(   29) !                    default assumes first defined resolution
+(   30) !
+(   31) # 32 "gpnorm_trans.F90"
+(   32) !     Author.
+(   33) !     -------
+(   34) !        George Mozdzynski *ECMWF*
+(   35) # 36 "gpnorm_trans.F90"
+(   36) !     Modifications.
+(   37) !     --------------
+(   38) !        Original : 19th Sept 2008
+(   39) !        R. El Khatib 07-08-2009 Optimisation directive for NEC
+(   40) # 41 "gpnorm_trans.F90"
+(   41) !     ------------------------------------------------------------------
+(   42) # 43 "gpnorm_trans.F90"
+(   43) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB , JPRD
+(   44) # 45 "gpnorm_trans.F90"
+(   45) !ifndef INTERFACE
+(   46) # 47 "gpnorm_trans.F90"
+(   47) USE TPM_GEN         ,ONLY : NOUT
+(   48) USE TPM_DIM         ,ONLY : R
+(   49) USE TPM_TRANS       ,ONLY : LGPNORM, NGPBLKS, NPROMA, ZGTF, ZAVE, ZMINGL, ZMAXGL, ZMINGPN, ZMAXGPN
+(   50) USE TPM_DISTR       ,ONLY : D, NPRCIDS, NPRTRV, NPRTRW, MYSETV, MYSETW, NPROC, D_NSTAGTF,D_NPTRLS, MYPROC
+(   51) USE TPM_GEOMETRY    ,ONLY : G,G_NLOEN,G_NLOEN_MAX
+(   52) USE TPM_FIELDS      ,ONLY : F
+(   53) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(   54) USE TRGTOL_MOD      ,ONLY : TRGTOL
+(   55) USE SET2PE_MOD      ,ONLY : SET2PE
+(   56) USE MPL_MODULE      ,ONLY : MPL_RECV, MPL_SEND, JP_BLOCKING_STANDARD
+(   57) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   58) USE YOMHOOK         ,ONLY : LHOOK,   DR_HOOK
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:08      page 11
+
+(   59) # 60 "gpnorm_trans.F90"
+(   60) !endif INTERFACE
+(   61) # 62 "gpnorm_trans.F90"
+(   62) IMPLICIT NONE
+(   63) # 64 "gpnorm_trans.F90"
+(   64) ! Declaration of arguments
+(   65) # 66 "gpnorm_trans.F90"
+(   66) REAL(KIND=JPRB)   ,INTENT(IN)    :: PGP(:,:,:)
+(   67) REAL(KIND=JPRB)   ,INTENT(OUT)   :: PAVE(:)
+(   68) REAL(KIND=JPRB)   ,INTENT(INOUT) :: PMIN(:)
+(   69) REAL(KIND=JPRB)   ,INTENT(INOUT) :: PMAX(:)
+(   70) INTEGER(KIND=JPIM),INTENT(IN)    :: KFIELDS
+(   71) INTEGER(KIND=JPIM),INTENT(IN)    :: KPROMA
+(   72) LOGICAL           ,INTENT(IN)    :: LDAVE_ONLY
+(   73) INTEGER(KIND=JPIM),OPTIONAL, INTENT(IN)  :: KRESOL
+(   74) # 75 "gpnorm_trans.F90"
+(   75) !ifndef INTERFACE
+(   76) # 77 "gpnorm_trans.F90"
+(   77) ! Local variables
+(   78) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   79) INTEGER(KIND=JPIM) :: IUBOUND(4)
+(   80) INTEGER(KIND=JPIM) :: IVSET(KFIELDS)
+(   81) INTEGER(KIND=JPIM),ALLOCATABLE :: IVSETS(:)
+(   82) INTEGER(KIND=JPIM),ALLOCATABLE :: IVSETG(:,:)
+(   83) !GPU
+(   84) !REAL(KIND=JPRBT),ALLOCATABLE :: ZGTF(:,:)
+(   85) !REAL(KIND=JPRD),ALLOCATABLE :: ZAVE(:,:)
+(   86) !REAL(KIND=JPRBT),ALLOCATABLE :: ZMINGL(:,:)
+(   87) !REAL(KIND=JPRBT),ALLOCATABLE :: ZMAXGL(:,:)
+(   88) !REAL(KIND=JPRBT),ALLOCATABLE :: ZMIN(:)
+(   89) !REAL(KIND=JPRBT),ALLOCATABLE :: ZMAX(:)
+(   90) REAL(KIND=JPRD),ALLOCATABLE :: ZAVEG(:,:)
+(   91) REAL(KIND=JPRBT),ALLOCATABLE :: ZMING(:)
+(   92) REAL(KIND=JPRBT),ALLOCATABLE :: ZMAXG(:)
+(   93) REAL(KIND=JPRD),ALLOCATABLE :: ZSND(:)
+(   94) REAL(KIND=JPRD),ALLOCATABLE :: ZRCV(:)
+(   95) INTEGER(KIND=JPIM) :: J,JGL,IGL,JL,JF,IF_GP,IF_SCALARS_G,IF_FS,JSETV,JSETW,IWLATS,JMAX
+(   96) INTEGER(KIND=JPIM) :: IPROC,ITAG,ILEN,ILENR,IBEG,IEND,IND
+(   97) !INTEGER(KIND=JPIM) :: iunit
+(   98) # 99 "gpnorm_trans.F90"
+(   99) !     ------------------------------------------------------------------
+(  100) IF (LHOOK) CALL DR_HOOK('GPNORM_TRANS',0,ZHOOK_HANDLE)
+(  101) # 102 "gpnorm_trans.F90"
+(  102) ! Set current resolution
+(  103) CALL SET_RESOL(KRESOL)
+(  104) # 105 "gpnorm_trans.F90"
+(  105) ! Set defaults
+(  106) # 107 "gpnorm_trans.F90"
+(  107) NPROMA = KPROMA
+(  108) NGPBLKS = (D%NGPTOT-1)/NPROMA+1
+(  109) # 110 "gpnorm_trans.F90"
+(  110) ! Consistency checks
+(  111) # 112 "gpnorm_trans.F90"
+(  112) IUBOUND(1:3)=UBOUND(PGP)
+(  113) IF(IUBOUND(1) < NPROMA) THEN
+(  114)   WRITE(NOUT,*)'GPNORM_TRANS:FIRST DIM. OF PGP TOO SMALL ',IUBOUND(1),NPROMA
+(  115)   CALL ABORT_TRANS('GPNORM_TRANS:FIRST DIMENSION OF PGP TOO SMALL ')
+(  116) ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:08      page 12
+
+(  117) IF(IUBOUND(2) < KFIELDS) THEN
+(  118)   WRITE(NOUT,*)'GPNORM_TRANS:SEC. DIM. OF PGP TOO SMALL ',IUBOUND(2),KFIELDS
+(  119)   CALL ABORT_TRANS('GPNORM_TRANS:SECOND DIMENSION OF PGP TOO SMALL ')
+(  120) ENDIF
+(  121) IF(IUBOUND(3) < NGPBLKS) THEN
+(  122)   WRITE(NOUT,*)'GPNORM_TRANS:THIRD DIM. OF PGP TOO SMALL ',IUBOUND(3),NGPBLKS
+(  123)   CALL ABORT_TRANS('GPNORM_TRANS:THIRD DIMENSION OF PGP TOO SMALL ')
+(  124) ENDIF
+(  125) # 127 "gpnorm_trans.F90"
+(  127) IF_GP=KFIELDS
+(  128) IF_SCALARS_G=0
+(  129) # 130 "gpnorm_trans.F90"
+(  130) IF_FS=0
+(  131) DO J=1,KFIELDS
+(  132)   IVSET(J)=MOD(J-1,NPRTRV)+1
+(  133)   IF(IVSET(J)==MYSETV)THEN
+(  134)     IF_FS=IF_FS+1
+(  135)   ENDIF
+(  136) ENDDO
+(  137) # 138 "gpnorm_trans.F90"
+(  138) ALLOCATE(IVSETS(NPRTRV))
+(  139) IVSETS(:)=0
+(  140) DO J=1,KFIELDS
+(  141)   IVSETS(IVSET(J))=IVSETS(IVSET(J))+1
+(  142) ENDDO
+(  143) ALLOCATE(IVSETG(NPRTRV,MAXVAL(IVSETS(:))))
+(  144) IVSETG(:,:)=0
+(  145) IVSETS(:)=0
+(  146) DO J=1,KFIELDS
+(  147)   IVSETS(IVSET(J))=IVSETS(IVSET(J))+1
+(  148)   IVSETG(IVSET(J),IVSETS(IVSET(J)))=J
+(  149) ENDDO
+(  150) # 152 "gpnorm_trans.F90"
+(  152) !iunit=300+myproc
+(  153) !DO JF=1,IF_GP
+(  154) !  write(iunit,*) 'PGP field=',JF,PGP(1,JF,1),PGP(NPROMA,JF,1),PGP(1,JF,NGPBLKS)
+(  155) !ENDDO
+(  156) # 157 "gpnorm_trans.F90"
+(  157) ! done in setup_trans
+(  158) !!!!ALLOCATE(ZGTF(IF_FS,D%NLENGTF))
+(  159) LGPNORM=.TRUE.
+(  160) CALL TRGTOL(ZGTF,IF_FS,IF_GP,IF_SCALARS_G,IVSET,PGP=PGP)
+(  161) LGPNORM=.FALSE.
+(  162) # 163 "gpnorm_trans.F90"
+(  163) ! ZGTF is now on GPU
+(  164) # 165 "gpnorm_trans.F90"
+(  165) IBEG=1
+(  166) IEND=D%NDGL_FS
+(  167) # 168 "gpnorm_trans.F90"
+(  168) !debug
+(  169) !!$ACC update host(ZGTF)
+(  170) !iunit=300+myproc
+(  171) !DO JGL=IBEG,IEND
+(  172) ! IGL = D_NPTRLS(MYSETW) + JGL - 1
+(  173) ! DO JF=1,IF_FS
+(  174) !   ZAVE(JF,JGL)=0.0_JPRBT
+(  175) !   DO JL=1,G_NLOEN(IGL)
+(  176) !     ZAVE(JF,JGL)=ZAVE(JF,JGL)+ZGTF(JF,D%NSTAGTF(JGL)+JL)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:08      page 13
+
+(  177) !   ENDDO
+(  178) !   write(iunit,*) 'aver before ',JF,IF_FS,IGL,ZAVE(JF,JGL),ZGTF(JF,D%NSTAGTF(JGL)+1)
+(  179) ! ENDDO
+(  180) !ENDDO
+(  181) # 182 "gpnorm_trans.F90"
+(  182) ! GPU setup trans
+(  183) !ALLOCATE(ZAVE(IF_FS,IBEG:IEND))
+(  184) !IF(.NOT.LDAVE_ONLY)THEN
+(  185) !  ALLOCATE(ZMINGL(IF_FS,IBEG:IEND))
+(  186) !  ALLOCATE(ZMAXGL(IF_FS,IBEG:IEND))
+(  187) !ENDIF
+(  188) !ALLOCATE(ZMIN(IF_FS))
+(  189) !ALLOCATE(ZMAX(IF_FS))
+(  190) # 191 "gpnorm_trans.F90"
+(  191) CALL GSTATS(1429,0)
+(  192) IF( IF_FS > 0 )THEN
+(  193) # 194 "gpnorm_trans.F90"
+(  195)  !$ACC& COPY(F,F%RW) &
+(  196)  !$ACC& COPY(D,D_NSTAGTF,D_NPTRLS,G_NLOEN,G_NLOEN_MAX) &
+(  197)  !$ACC& present(ZGTF,ZAVE,ZMINGL,ZMAXGL,ZMINGPN,ZMAXGPN)
+(  198) # 199 "gpnorm_trans.F90"
+(  199)     !$ACC KERNELS
+(  200)     DO JF=1,IF_FS
+(  201)       ZMINGL(JF,IBEG:IEND)=ZGTF(JF,D_NSTAGTF(1)+1)
+(  202)       ZMAXGL(JF,IBEG:IEND)=ZGTF(JF,D_NSTAGTF(1)+1)
+(  203)     ENDDO
+(  204)     !$ACC END KERNELS
+(  205) # 206 "gpnorm_trans.F90"
+(  206) ! FIRST DO SUMS IN EACH FULL LATITUDE
+(  207) # 208 "gpnorm_trans.F90"
+(  208)   !$ACC KERNELS
+(  209)   DO JGL=IBEG,IEND
+(  210)     IGL = D_NPTRLS(MYSETW) + JGL - 1
+(  211)     DO JF=1,IF_FS
+(  212)       ZAVE(JF,JGL)=0.0_JPRBT
+(  213)       !$ACC loop
+(  214)       DO JL=1,G_NLOEN(IGL)
+(  215)         ZAVE(JF,JGL)=ZAVE(JF,JGL)+ZGTF(JF,D_NSTAGTF(JGL)+JL)
+(  216)         ZMINGL(JF,JGL)=MIN(ZMINGL(JF,JGL),ZGTF(JF,D_NSTAGTF(JGL)+JL))
+(  217)         ZMAXGL(JF,JGL)=MAX(ZMAXGL(JF,JGL),ZGTF(JF,D_NSTAGTF(JGL)+JL))
+(  218)       ENDDO
+(  219)     ENDDO
+(  220)   ENDDO
+(  221)   !$ACC END KERNELS
+(  222) # 223 "gpnorm_trans.F90"
+(  223)   !$ACC KERNELS
+(  224)   DO JF=1,IF_FS
+(  225)     ZMINGPN(JF)=MINVAL(ZMINGL(JF,IBEG:IEND))
+(  226)     ZMAXGPN(JF)=MAXVAL(ZMAXGL(JF,IBEG:IEND))
+(  227)   ENDDO
+(  228)   !$ACC END KERNELS
+(  229) # 230 "gpnorm_trans.F90"
+(  230)   !$ACC KERNELS
+(  231)   DO JGL=IBEG,IEND
+(  232)     IGL = D_NPTRLS(MYSETW) + JGL - 1
+(  233)     DO JF=1,IF_FS
+(  234)       ZAVE(JF,JGL)=ZAVE(JF,JGL)*F%RW(IGL)/G_NLOEN(IGL)
+(  235)       !write(iunit,*) 'aver inside ',JF,IF_FS,IGL,ZAVE(JF,JGL), F%RW(IGL), G_NLOEN(IGL),ZMINGPN(JF),ZMAXGPN(JF)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:08      page 14
+
+(  236)     ENDDO
+(  237)   ENDDO
+(  238)   !$ACC END KERNELS
+(  239) # 240 "gpnorm_trans.F90"
+(  240) !$ACC end data
+(  241) # 242 "gpnorm_trans.F90"
+(  242) !$ACC update host(ZAVE)
+(  243) !$ACC update host(ZMINGPN)
+(  244) !$ACC update host(ZMAXGPN)
+(  245) !$ACC wait
+(  246) # 247 "gpnorm_trans.F90"
+(  247) !iunit=300+myproc
+(  248) !DO JGL=IBEG,IEND
+(  249) ! IGL = D_NPTRLS(MYSETW) + JGL - 1
+(  250) ! DO JF=1,IF_FS
+(  251) !   write(iunit,*) 'aver final ',JF,IF_FS,IGL,ZAVE(JF,JGL),ZMINGPN(JF),ZMAXGPN(JF)
+(  252) ! ENDDO
+(  253) !ENDDO
+(  254) # 255 "gpnorm_trans.F90"
+(  255) ENDIF
+(  256) CALL GSTATS(1429,1)
+(  257) # 258 "gpnorm_trans.F90"
+(  258) ! from here rest on CPU
+(  259) # 260 "gpnorm_trans.F90"
+(  260) ! IT IS IMPORTANT THAT SUMS ARE NOW DONE IN LATITUDE ORDER
+(  261) ALLOCATE(ZAVEG(R%NDGL,KFIELDS))
+(  262) ALLOCATE(ZMING(KFIELDS))
+(  263) ALLOCATE(ZMAXG(KFIELDS))
+(  264) # 265 "gpnorm_trans.F90"
+(  265) ZAVEG(:,:)=0.0_JPRD
+(  266) DO JF=1,IF_FS
+(  267)   DO JGL=IBEG,IEND
+(  268)     IGL = D%NPTRLS(MYSETW) + JGL - 1
+(  269)     ZAVEG(IGL,IVSETG(MYSETV,JF))=ZAVEG(IGL,IVSETG(MYSETV,JF))+ZAVE(JF,JGL)
+(  270)   ENDDO
+(  271) ENDDO
+(  272) # 273 "gpnorm_trans.F90"
+(  273) IF(LDAVE_ONLY)THEN
+(  274)   ZMING(:)=PMIN(:)
+(  275)   ZMAXG(:)=PMAX(:)
+(  276) ELSE
+(  277)   DO JF=1,IF_FS
+(  278)     ZMING(IVSETG(MYSETV,JF))=ZMINGPN(JF)
+(  279)     ZMAXG(IVSETG(MYSETV,JF))=ZMAXGPN(JF)
+(  280)   ENDDO
+(  281) ENDIF
+(  282) # 283 "gpnorm_trans.F90"
+(  283) ! RECEIVE ABOVE FROM OTHER NPRTRV SETS FOR SAME LATS BUT DIFFERENT FIELDS
+(  284) ITAG=123
+(  285) # 286 "gpnorm_trans.F90"
+(  286) CALL GSTATS(815,0)
+(  287) # 288 "gpnorm_trans.F90"
+(  288) IF( MYSETV==1 )THEN
+(  289) # 290 "gpnorm_trans.F90"
+(  290)   DO JSETV=2,NPRTRV
+(  291)     IF(LDAVE_ONLY)THEN
+(  292)       ILEN=D%NDGL_FS*IVSETS(JSETV)+2*KFIELDS
+(  293)     ELSE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:08      page 15
+
+(  294)       ILEN=(D%NDGL_FS+2)*IVSETS(JSETV)
+(  295)     ENDIF
+(  296)     IF(ILEN > 0)THEN
+(  297)       ALLOCATE(ZRCV(ILEN))
+(  298)       CALL SET2PE(IPROC,0,0,MYSETW,JSETV)
+(  299)       CALL MPL_RECV(ZRCV(:),KSOURCE=NPRCIDS(IPROC),KTAG=ITAG,&
+(  300)         &KMP_TYPE=JP_BLOCKING_STANDARD,KOUNT=ILENR,CDSTRING='GPNORM_TRANS:V')
+(  301)       IF(ILENR /= ILEN)THEN
+(  302)         CALL ABOR1('GPNORM_TRANS:ILENR /= ILEN')
+(  303)       ENDIF
+(  304)       IND=0
+(  305)       DO JF=1,IVSETS(JSETV)
+(  306)         DO JGL=IBEG,IEND
+(  307)           IGL = D%NPTRLS(MYSETW) + JGL - 1
+(  308)           IND=IND+1
+(  309)           ZAVEG(IGL,IVSETG(JSETV,JF))=ZRCV(IND)
+(  310)         ENDDO
+(  311)         IF(.NOT.LDAVE_ONLY)THEN
+(  312)           IND=IND+1
+(  313)           ZMING(IVSETG(JSETV,JF))=ZRCV(IND)
+(  314)           IND=IND+1
+(  315)           ZMAXG(IVSETG(JSETV,JF))=ZRCV(IND)
+(  316)         ENDIF
+(  317)       ENDDO
+(  318)       IF(LDAVE_ONLY)THEN
+(  319)         DO JF=1,KFIELDS
+(  320)           IND=IND+1
+(  321)           ZMING(JF)=MIN(ZMING(JF),REAL(ZRCV(IND),JPRBT))
+(  322)           IND=IND+1
+(  323)           ZMAXG(JF)=MAX(ZMAXG(JF),REAL(ZRCV(IND),JPRBT))
+(  324)         ENDDO
+(  325)       ENDIF
+(  326)       DEALLOCATE(ZRCV)
+(  327)     ENDIF
+(  328)   ENDDO
+(  329) # 330 "gpnorm_trans.F90"
+(  330) ELSE
+(  331) # 332 "gpnorm_trans.F90"
+(  332)   IF(LDAVE_ONLY)THEN
+(  333)     ILEN=D%NDGL_FS*IVSETS(MYSETV)+2*KFIELDS
+(  334)   ELSE
+(  335)     ILEN=(D%NDGL_FS+2)*IVSETS(MYSETV)
+(  336)   ENDIF
+(  337)   IF(ILEN > 0)THEN
+(  338)     CALL SET2PE(IPROC,0,0,MYSETW,1)
+(  339)     ALLOCATE(ZSND(ILEN))
+(  340)     IND=0
+(  341)     DO JF=1,IF_FS
+(  342)       DO JGL=IBEG,IEND
+(  343)         IGL = D%NPTRLS(MYSETW) + JGL - 1
+(  344)         IND=IND+1
+(  345)         ZSND(IND)=ZAVEG(IGL,IVSETG(MYSETV,JF))
+(  346)        ENDDO
+(  347)       IF(.NOT.LDAVE_ONLY)THEN
+(  348)         IND=IND+1
+(  349)         ZSND(IND)=ZMING(IVSETG(MYSETV,JF))
+(  350)         IND=IND+1
+(  351)         ZSND(IND)=ZMAXG(IVSETG(MYSETV,JF))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:08      page 16
+
+(  352)       ENDIF
+(  353)     ENDDO
+(  354)     IF(LDAVE_ONLY)THEN
+(  355)       DO JF=1,KFIELDS
+(  356)         IND=IND+1
+(  357)         ZSND(IND)=PMIN(JF)
+(  358)         IND=IND+1
+(  359)         ZSND(IND)=PMAX(JF)
+(  360)       ENDDO
+(  361)     ENDIF
+(  362)     CALL MPL_SEND(ZSND(:),KDEST=NPRCIDS(IPROC),KTAG=ITAG,&
+(  363)       &KMP_TYPE=JP_BLOCKING_STANDARD,CDSTRING='GPNORM_TRANS:V')
+(  364)     DEALLOCATE(ZSND)
+(  365)   ENDIF
+(  366) # 367 "gpnorm_trans.F90"
+(  367) ENDIF
+(  368) # 369 "gpnorm_trans.F90"
+(  369) ! FINALLY RECEIVE CONTRIBUTIONS FROM OTHER NPRTRW SETS
+(  370) # 371 "gpnorm_trans.F90"
+(  371) IF( MYSETV == 1 )THEN
+(  372) # 373 "gpnorm_trans.F90"
+(  373)   IF( MYSETW == 1 )THEN
+(  374) # 375 "gpnorm_trans.F90"
+(  375)     DO JSETW=2,NPRTRW
+(  376)       IWLATS=D%NULTPP(JSETW)
+(  377)       IBEG=1
+(  378)       IEND=IWLATS
+(  379)       IF(LDAVE_ONLY)THEN
+(  380)         ILEN=IWLATS*KFIELDS+2*KFIELDS
+(  381)       ELSE
+(  382)         ILEN=(IWLATS+2)*KFIELDS
+(  383)       ENDIF
+(  384)       IF(ILEN > 0 )THEN
+(  385)         ALLOCATE(ZRCV(ILEN))
+(  386)         CALL SET2PE(IPROC,0,0,JSETW,1)
+(  387)         CALL MPL_RECV(ZRCV(:),KSOURCE=NPRCIDS(IPROC),KTAG=ITAG,&
+(  388)           &KMP_TYPE=JP_BLOCKING_STANDARD,KOUNT=ILENR,CDSTRING='GPNORM_TRANS:W')
+(  389)         IF(ILENR /= ILEN)THEN
+(  390)           CALL ABOR1('GPNORM_TRANS:ILENR /= ILEN')
+(  391)         ENDIF
+(  392)         IND=0
+(  393)         DO JF=1,KFIELDS
+(  394)           DO JGL=IBEG,IEND
+(  395)             IGL = D%NPTRLS(JSETW) + JGL - 1
+(  396)             IND=IND+1
+(  397)             ZAVEG(IGL,JF)=ZRCV(IND)
+(  398)           ENDDO
+(  399)           IF(.NOT.LDAVE_ONLY)THEN
+(  400)             IND=IND+1
+(  401)             ZMING(JF)=MIN(ZMING(JF),ZRCV(IND))
+(  402)             IND=IND+1
+(  403)             ZMAXG(JF)=MAX(ZMAXG(JF),ZRCV(IND))
+(  404)           ENDIF
+(  405)         ENDDO
+(  406)         IF(LDAVE_ONLY)THEN
+(  407)           DO JF=1,KFIELDS
+(  408)             IND=IND+1
+(  409)             ZMING(JF)=MIN(ZMING(JF),ZRCV(IND))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:08      page 17
+
+(  410)             IND=IND+1
+(  411)             ZMAXG(JF)=MAX(ZMAXG(JF),ZRCV(IND))
+(  412)           ENDDO
+(  413)         ENDIF
+(  414)         DEALLOCATE(ZRCV)
+(  415)       ENDIF
+(  416)     ENDDO
+(  417) # 418 "gpnorm_trans.F90"
+(  418)   ELSE
+(  419) # 420 "gpnorm_trans.F90"
+(  420)     IF(LDAVE_ONLY)THEN
+(  421)       ILEN=D%NDGL_FS*KFIELDS+2*KFIELDS
+(  422)     ELSE
+(  423)       ILEN=(D%NDGL_FS+2)*KFIELDS
+(  424)     ENDIF
+(  425)     IF(ILEN > 0)THEN
+(  426)       CALL SET2PE(IPROC,0,0,1,1)
+(  427)       ALLOCATE(ZSND(ILEN))
+(  428)       IND=0
+(  429)       DO JF=1,KFIELDS
+(  430)         DO JGL=IBEG,IEND
+(  431)           IGL = D%NPTRLS(MYSETW) + JGL - 1
+(  432)           IND=IND+1
+(  433)           ZSND(IND)=ZAVEG(IGL,JF)
+(  434)         ENDDO
+(  435)         IF(.NOT.LDAVE_ONLY)THEN
+(  436)           IND=IND+1
+(  437)           ZSND(IND)=ZMING(JF)
+(  438)           IND=IND+1
+(  439)           ZSND(IND)=ZMAXG(JF)
+(  440)         ENDIF
+(  441)       ENDDO
+(  442)       IF(LDAVE_ONLY)THEN
+(  443)         DO JF=1,KFIELDS
+(  444)           IND=IND+1
+(  445)           ZSND(IND)=ZMING(JF)
+(  446)           IND=IND+1
+(  447)           ZSND(IND)=ZMAXG(JF)
+(  448)         ENDDO
+(  449)       ENDIF
+(  450)       CALL MPL_SEND(ZSND(:),KDEST=NPRCIDS(IPROC),KTAG=ITAG,&
+(  451)         &KMP_TYPE=JP_BLOCKING_STANDARD,CDSTRING='GPNORM_TRANS:V')
+(  452)       DEALLOCATE(ZSND)
+(  453)     ENDIF
+(  454) # 455 "gpnorm_trans.F90"
+(  455)   ENDIF
+(  456) # 457 "gpnorm_trans.F90"
+(  457) ENDIF
+(  458) # 459 "gpnorm_trans.F90"
+(  459) CALL GSTATS(815,1)
+(  460) # 461 "gpnorm_trans.F90"
+(  461) IF( MYSETW == 1 .AND. MYSETV == 1 )THEN
+(  462) # 463 "gpnorm_trans.F90"
+(  463)   PAVE(:)=0.0_JPRB
+(  464)   DO JGL=1,R%NDGL
+(  465)     PAVE(:)=PAVE(:)+REAL(ZAVEG(JGL,:),JPRB)
+(  466)   ENDDO
+(  467) # 468 "gpnorm_trans.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:08      page 18
+
+(  468)   PMIN(:)=ZMING(:)
+(  469)   PMAX(:)=ZMAXG(:)
+(  470) # 471 "gpnorm_trans.F90"
+(  471) ENDIF
+(  472) # 473 "gpnorm_trans.F90"
+(  473) !DEALLOCATE(ZGTF)
+(  474) !DEALLOCATE(ZAVE)
+(  475) !DEALLOCATE(ZMIN)
+(  476) !DEALLOCATE(ZMAX)
+(  477) DEALLOCATE(ZAVEG)
+(  478) DEALLOCATE(ZMING)
+(  479) DEALLOCATE(ZMAXG)
+(  480) DEALLOCATE(IVSETS)
+(  481) DEALLOCATE(IVSETG)
+(  482) # 483 "gpnorm_trans.F90"
+(  483) IF (LHOOK) CALL DR_HOOK('GPNORM_TRANS',1,ZHOOK_HANDLE)
+(  484) # 485 "gpnorm_trans.F90"
+(  485) !     ------------------------------------------------------------------
+(  486) # 487 "gpnorm_trans.F90"
+(  487) !endif INTERFACE
+(  488) # 490 "gpnorm_trans.F90"
+(  490) END SUBROUTINE GPNORM_TRANS

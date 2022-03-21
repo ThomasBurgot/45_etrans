@@ -1,0 +1,191 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:46      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: spnorm_ctl_mod.F90
+
+(    1) MODULE SPNORM_CTL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SPNORM_CTL(PSPEC,KFLD,KFLD_G,KVSET,KMASTER,PMET,PNORM)
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(    6) 
+(    7) USE TPM_DIM         ,ONLY : R
+(    8) USE TPM_DISTR       ,ONLY : D, MYPROC, MYSETV
+(    9) 
+(   10) USE SPNORMD_MOD     ,ONLY : SPNORMD
+(   11) USE SPNORMC_MOD     ,ONLY : SPNORMC
+(   12) !
+(   13) 
+(   14) IMPLICIT NONE
+(   15) 
+(   16) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPEC(:,:)
+(   17) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSET(:)
+(   18) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KMASTER
+(   19) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PMET(:)
+(   20) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PNORM(:)
+(   21) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFLD,KFLD_G
+(   22) INTEGER(KIND=JPIM) :: IVSET(KFLD_G)
+(   23) REAL(KIND=JPRBT)    :: ZMET(0:R%NSMAX)
+(   24) REAL(KIND=JPRBT)    :: ZSM(KFLD,D%NUMP)
+(   25) REAL(KIND=JPRBT)    :: ZGM(KFLD_G,0:R%NSMAX)
+(   26) 
+(   27) !     ------------------------------------------------------------------
+(   28) 
+(   29) IF(PRESENT(KVSET)) THEN
+(   30)   IVSET(:) = KVSET(:)
+(   31) ELSE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:46      page 2
+
+(   32)   IVSET(:) = MYSETV
+(   33) ENDIF
+(   34) 
+(   35) IF(PRESENT(PMET)) THEN
+(   36)   ZMET(:) = PMET(:)
+(   37) ELSE
+(   38)   ZMET(:) = 1.0_JPRBT
+(   39) ENDIF
+(   40) 
+(   41) CALL SPNORMD(PSPEC,KFLD,ZMET,ZSM)
+(   42) 
+(   43) CALL SPNORMC(ZSM,KFLD_G,IVSET,KMASTER,ZGM)
+(   44) 
+(   45) IF(MYPROC == KMASTER) THEN
+(   46)   PNORM(1:KFLD_G) = SQRT(SUM(ZGM(1:KFLD_G,:),DIM=2))
+(   47) !  PNORM(1:KFLD_G) = SQRT(PNORM(1:KFLD_G))
+(   48) ENDIF
+(   49) !     ------------------------------------------------------------------
+(   50) 
+(   51) END SUBROUTINE SPNORM_CTL
+(   52) END MODULE SPNORM_CTL_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:46      page 3
+
+(    1) # 1 "spnorm_ctl_mod.F90"
+(    1) MODULE SPNORM_CTL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SPNORM_CTL(PSPEC,KFLD,KFLD_G,KVSET,KMASTER,PMET,PNORM)
+(    4) # 5 "spnorm_ctl_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(    6) # 7 "spnorm_ctl_mod.F90"
+(    7) USE TPM_DIM         ,ONLY : R
+(    8) USE TPM_DISTR       ,ONLY : D, MYPROC, MYSETV
+(    9) # 10 "spnorm_ctl_mod.F90"
+(   10) USE SPNORMD_MOD     ,ONLY : SPNORMD
+(   11) USE SPNORMC_MOD     ,ONLY : SPNORMC
+(   12) !
+(   13) # 14 "spnorm_ctl_mod.F90"
+(   14) IMPLICIT NONE
+(   15) # 16 "spnorm_ctl_mod.F90"
+(   16) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPEC(:,:)
+(   17) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSET(:)
+(   18) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KMASTER
+(   19) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PMET(:)
+(   20) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PNORM(:)
+(   21) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFLD,KFLD_G
+(   22) INTEGER(KIND=JPIM) :: IVSET(KFLD_G)
+(   23) REAL(KIND=JPRBT)    :: ZMET(0:R%NSMAX)
+(   24) REAL(KIND=JPRBT)    :: ZSM(KFLD,D%NUMP)
+(   25) REAL(KIND=JPRBT)    :: ZGM(KFLD_G,0:R%NSMAX)
+(   26) # 27 "spnorm_ctl_mod.F90"
+(   27) !     ------------------------------------------------------------------
+(   28) # 29 "spnorm_ctl_mod.F90"
+(   29) IF(PRESENT(KVSET)) THEN
+(   30)   IVSET(:) = KVSET(:)
+(   31) ELSE
+(   32)   IVSET(:) = MYSETV
+(   33) ENDIF
+(   34) # 35 "spnorm_ctl_mod.F90"
+(   35) IF(PRESENT(PMET)) THEN
+(   36)   ZMET(:) = PMET(:)
+(   37) ELSE
+(   38)   ZMET(:) = 1.0_JPRBT
+(   39) ENDIF
+(   40) # 41 "spnorm_ctl_mod.F90"
+(   41) CALL SPNORMD(PSPEC,KFLD,ZMET,ZSM)
+(   42) # 43 "spnorm_ctl_mod.F90"
+(   43) CALL SPNORMC(ZSM,KFLD_G,IVSET,KMASTER,ZGM)
+(   44) # 45 "spnorm_ctl_mod.F90"
+(   45) IF(MYPROC == KMASTER) THEN
+(   46)   PNORM(1:KFLD_G) = SQRT(SUM(ZGM(1:KFLD_G,:),DIM=2))
+(   47) !  PNORM(1:KFLD_G) = SQRT(PNORM(1:KFLD_G))
+(   48) ENDIF
+(   49) !     ------------------------------------------------------------------
+(   50) # 51 "spnorm_ctl_mod.F90"
+(   51) END SUBROUTINE SPNORM_CTL
+(   52) END MODULE SPNORM_CTL_MOD

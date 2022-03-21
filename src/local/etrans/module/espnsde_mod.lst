@@ -1,0 +1,320 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:53      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: espnsde_mod.F90
+
+(    1) MODULE ESPNSDE_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ESPNSDE(KF_SCALARS,PF,PNSD)
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) 
+(    8) USE TPM_DISTR       ,ONLY : D, D_NUMP, D_MYMS
+(    9) USE TPMALD_DISTR    ,ONLY : DALD, DALD_NCPL2M
+(   10) USE TPMALD_GEO      ,ONLY : GALD
+(   11) 
+(   12) 
+(   13) !**** *SPNSDE* - Compute North-South derivative in spectral space
+(   14) 
+(   15) !     Purpose.
+(   16) !     --------
+(   17) !        In Laplace space compute the the North-south derivative
+(   18) 
+(   19) !**   Interface.
+(   20) !     ----------
+(   21) !        CALL SPNSDE(...)
+(   22) 
+(   23) !        Explicit arguments :
+(   24) !        --------------------
+(   25) !        KM -zonal wavenumber (input-c)
+(   26) !        PEPSNM - REPSNM for wavenumber KM (input-c)
+(   27) !        PF  (NLEI1,2*KF_SCALARS) - input field (input)
+(   28) !        PNSD(NLEI1,2*KF_SCALARS) - N-S derivative (output)
+(   29) 
+(   30) !        Organisation within NLEI1:
+(   31) !        NLEI1 = NSMAX+4+mod(NSMAX+4+1,2)
+(   32) !                        overdimensioning
+(   33) !        1        : n=NSMAX+2
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:53      page 2
+
+(   34) !        2        : n=NSMAX+1
+(   35) !        3        : n=NSMAX
+(   36) !        .        :
+(   37) !        .        :
+(   38) !        NSMAX+3  : n=0
+(   39) !        NSMAX+4  : n=-1
+(   40) 
+(   41) !        Implicit arguments :  YOMLAP
+(   42) !        --------------------
+(   43) 
+(   44) !     Method.
+(   45) !     -------
+(   46) 
+(   47) !     Externals.   None.
+(   48) !     ----------
+(   49) 
+(   50) !     Reference.
+(   51) !     ----------
+(   52) !        ECMWF Research Department documentation of the IFS
+(   53) !        Temperton, 1991, MWR 119 p1303
+(   54) 
+(   55) !     Author.
+(   56) !     -------
+(   57) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   58) 
+(   59) !     Modifications.
+(   60) !     --------------
+(   61) !        Original : 00-02-01 From SPNSDE in IFS CY22R1
+(   62) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   63) 
+(   64) !     ------------------------------------------------------------------
+(   65) 
+(   66) IMPLICIT NONE
+(   67) 
+(   68) INTEGER(KIND=JPIM), INTENT(IN)  :: KF_SCALARS
+(   69) REAL(KIND=JPRB),    INTENT(IN)  :: PF(:,:,:)
+(   70) REAL(KIND=JPRB),    INTENT(OUT) :: PNSD(:,:,:)
+(   71) 
+(   72) INTEGER(KIND=JPIM) :: J, JN,IN, JM, IM, JNMAX
+(   73) REAL(KIND=JPRB)    :: ZIN
+(   74) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   75) 
+(   76) !     ------------------------------------------------------------------
+(   77) 
+(   78) !*       1.    COMPUTE NORTH SOUTH DERIVATIVE.
+(   79) !              -------------------------------
+(   80) 
+(   81) !*       1.1      COMPUTE
+(   82) 
+(   83) IF (LHOOK) CALL DR_HOOK('ESPNSDE_MOD:ESPNSDE',0,ZHOOK_HANDLE)
+(   84) 
+(   85) JNMAX = MAXVAL (DALD%NCPL2M)
+(   86) 
+(   87) !$acc parallel loop collapse (3) private (JM, J, JN, IM, IN, ZIN) &
+(   88) !$acc & present (D_NUMP, D_MYMS, DALD_NCPL2M, PNSD, PF)
+(   89) DO J=1,2*KF_SCALARS
+(   90)   DO JM = 1, D_NUMP
+(   91)     DO JN=1,JNMAX,2
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:53      page 3
+
+(   92)       IM = D_MYMS(JM)
+(   93)       IF (JN <= DALD_NCPL2M(IM)) THEN
+(   94)         IN =(JN-1)/2
+(   95)         ZIN = REAL(IN,JPRB)*GALD%EYWN
+(   96)         PNSD(JN  ,JM,J) = -ZIN*PF(JN+1,JM,J)
+(   97)         PNSD(JN+1,JM,J) =  ZIN*PF(JN  ,JM,J)
+(   98)       ENDIF
+(   99)     ENDDO
+(  100)   ENDDO
+(  101) ENDDO
+(  102) !$acc end parallel loop
+(  103) 
+(  104) IF (LHOOK) CALL DR_HOOK('ESPNSDE_MOD:ESPNSDE',1,ZHOOK_HANDLE)
+(  105) 
+(  106) !     ------------------------------------------------------------------
+(  107) 
+(  108) END SUBROUTINE ESPNSDE
+(  109) END MODULE ESPNSDE_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:53      page 4
+
+(    1) # 1 "espnsde_mod.F90"
+(    1) MODULE ESPNSDE_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ESPNSDE(KF_SCALARS,PF,PNSD)
+(    4) # 5 "espnsde_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) # 8 "espnsde_mod.F90"
+(    8) USE TPM_DISTR       ,ONLY : D, D_NUMP, D_MYMS
+(    9) USE TPMALD_DISTR    ,ONLY : DALD, DALD_NCPL2M
+(   10) USE TPMALD_GEO      ,ONLY : GALD
+(   11) # 13 "espnsde_mod.F90"
+(   13) !**** *SPNSDE* - Compute North-South derivative in spectral space
+(   14) # 15 "espnsde_mod.F90"
+(   15) !     Purpose.
+(   16) !     --------
+(   17) !        In Laplace space compute the the North-south derivative
+(   18) # 19 "espnsde_mod.F90"
+(   19) !**   Interface.
+(   20) !     ----------
+(   21) !        CALL SPNSDE(...)
+(   22) # 23 "espnsde_mod.F90"
+(   23) !        Explicit arguments :
+(   24) !        --------------------
+(   25) !        KM -zonal wavenumber (input-c)
+(   26) !        PEPSNM - REPSNM for wavenumber KM (input-c)
+(   27) !        PF  (NLEI1,2*KF_SCALARS) - input field (input)
+(   28) !        PNSD(NLEI1,2*KF_SCALARS) - N-S derivative (output)
+(   29) # 30 "espnsde_mod.F90"
+(   30) !        Organisation within NLEI1:
+(   31) !        NLEI1 = NSMAX+4+mod(NSMAX+4+1,2)
+(   32) !                        overdimensioning
+(   33) !        1        : n=NSMAX+2
+(   34) !        2        : n=NSMAX+1
+(   35) !        3        : n=NSMAX
+(   36) !        .        :
+(   37) !        .        :
+(   38) !        NSMAX+3  : n=0
+(   39) !        NSMAX+4  : n=-1
+(   40) # 41 "espnsde_mod.F90"
+(   41) !        Implicit arguments :  YOMLAP
+(   42) !        --------------------
+(   43) # 44 "espnsde_mod.F90"
+(   44) !     Method.
+(   45) !     -------
+(   46) # 47 "espnsde_mod.F90"
+(   47) !     Externals.   None.
+(   48) !     ----------
+(   49) # 50 "espnsde_mod.F90"
+(   50) !     Reference.
+(   51) !     ----------
+(   52) !        ECMWF Research Department documentation of the IFS
+(   53) !        Temperton, 1991, MWR 119 p1303
+(   54) # 55 "espnsde_mod.F90"
+(   55) !     Author.
+(   56) !     -------
+(   57) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   58) # 59 "espnsde_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:53      page 5
+
+(   59) !     Modifications.
+(   60) !     --------------
+(   61) !        Original : 00-02-01 From SPNSDE in IFS CY22R1
+(   62) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   63) # 64 "espnsde_mod.F90"
+(   64) !     ------------------------------------------------------------------
+(   65) # 66 "espnsde_mod.F90"
+(   66) IMPLICIT NONE
+(   67) # 68 "espnsde_mod.F90"
+(   68) INTEGER(KIND=JPIM), INTENT(IN)  :: KF_SCALARS
+(   69) REAL(KIND=JPRB),    INTENT(IN)  :: PF(:,:,:)
+(   70) REAL(KIND=JPRB),    INTENT(OUT) :: PNSD(:,:,:)
+(   71) # 72 "espnsde_mod.F90"
+(   72) INTEGER(KIND=JPIM) :: J, JN,IN, JM, IM, JNMAX
+(   73) REAL(KIND=JPRB)    :: ZIN
+(   74) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   75) # 76 "espnsde_mod.F90"
+(   76) !     ------------------------------------------------------------------
+(   77) # 78 "espnsde_mod.F90"
+(   78) !*       1.    COMPUTE NORTH SOUTH DERIVATIVE.
+(   79) !              -------------------------------
+(   80) # 81 "espnsde_mod.F90"
+(   81) !*       1.1      COMPUTE
+(   82) # 83 "espnsde_mod.F90"
+(   83) IF (LHOOK) CALL DR_HOOK('ESPNSDE_MOD:ESPNSDE',0,ZHOOK_HANDLE)
+(   84) # 85 "espnsde_mod.F90"
+(   85) JNMAX = MAXVAL (DALD%NCPL2M)
+(   86) # 87 "espnsde_mod.F90"
+(   88) !$acc & present (D_NUMP, D_MYMS, DALD_NCPL2M, PNSD, PF)
+(   89) DO J=1,2*KF_SCALARS
+(   90)   DO JM = 1, D_NUMP
+(   91)     DO JN=1,JNMAX,2
+(   92)       IM = D_MYMS(JM)
+(   93)       IF (JN <= DALD_NCPL2M(IM)) THEN
+(   94)         IN =(JN-1)/2
+(   95)         ZIN = REAL(IN,JPRB)*GALD%EYWN
+(   96)         PNSD(JN  ,JM,J) = -ZIN*PF(JN+1,JM,J)
+(   97)         PNSD(JN+1,JM,J) =  ZIN*PF(JN  ,JM,J)
+(   98)       ENDIF
+(   99)     ENDDO
+(  100)   ENDDO
+(  101) ENDDO
+(  102) !$acc end parallel loop
+(  103) # 104 "espnsde_mod.F90"
+(  104) IF (LHOOK) CALL DR_HOOK('ESPNSDE_MOD:ESPNSDE',1,ZHOOK_HANDLE)
+(  105) # 106 "espnsde_mod.F90"
+(  106) !     ------------------------------------------------------------------
+(  107) # 108 "espnsde_mod.F90"
+(  108) END SUBROUTINE ESPNSDE
+(  109) END MODULE ESPNSDE_MOD

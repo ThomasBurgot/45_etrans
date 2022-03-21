@@ -1,0 +1,313 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:09      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: setup_geom_mod.F90
+
+(    1) MODULE SETUP_GEOM_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SETUP_GEOM
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPRD, JPIM
+(    6) 
+(    7) USE TPM_GEN         ,ONLY : NOUT, NPRINTLEV
+(    8) USE TPM_DIM         ,ONLY : R
+(    9) USE TPM_DISTR       ,ONLY : D
+(   10) USE TPM_FIELDS      ,ONLY : F
+(   11) USE TPM_GEOMETRY    ,ONLY : G
+(   12) !
+(   13) 
+(   14) IMPLICIT NONE
+(   15) 
+(   16) REAL(KIND=JPRD) :: ZSQM2(R%NDGL)
+(   17) INTEGER(KIND=JPIM) :: IDGLU(0:R%NSMAX,R%NDGNH)
+(   18) INTEGER(KIND=JPIM) :: JGL,JM,NSMAXLIN
+(   19) 
+(   20) LOGICAL    :: LLP1,LLP2
+(   21) 
+(   22) !     ------------------------------------------------------------------
+(   23) 
+(   24) IF(.NOT.D%LGRIDONLY) THEN
+(   25) 
+(   26)   LLP1 = NPRINTLEV>0
+(   27)   LLP2 = NPRINTLEV>1
+(   28) 
+(   29)   IF(LLP1) WRITE(NOUT,*) '=== ENTER ROUTINE SETUP_GEOM ==='
+(   30) 
+(   31)   ALLOCATE (G%NMEN(R%NDGL))
+(   32)   IF(LLP2)WRITE(NOUT,9) 'G%NMEN   ',SIZE(G%NMEN   ),SHAPE(G%NMEN   )
+(   33) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:09      page 2
+
+(   34)   NSMAXLIN = R%NDGL-1
+(   35)   IF (R%NSMAX>=NSMAXLIN .OR. .NOT. G%LREDUCED_GRID) THEN
+(   36)     ! linear or full grid
+(   37)     DO JGL=1,R%NDGL
+(   38)       G%NMEN(JGL) = MIN(R%NSMAX,(G%NLOEN(JGL)-1)/2)
+(   39)     ENDDO
+(   40)   ELSEIF (R%NSMAX>=R%NDGL*2/3-1) THEN
+(   41)     ! quadratic grid
+(   42)     ZSQM2(:) = 3*(NSMAXLIN-R%NSMAX)/R%NDGL*F%R1MU2(:)
+(   43)     G%NMEN(1) = MIN(R%NSMAX,INT(REAL(G%NLOEN(1)-1,JPRD)/(2.0_JPRD+ZSQM2(1))))
+(   44)     DO JGL=2,R%NDGNH
+(   45)       G%NMEN(JGL) = MIN(R%NSMAX,MAX(G%NMEN(JGL-1),&
+(   46)        &INT(REAL(G%NLOEN(JGL)-1,JPRD)/(2.0_JPRD+ ZSQM2(JGL)))))
+(   47)     ENDDO
+(   48)     !       * SOUTHERN HEMISPHERE :
+(   49)     G%NMEN(R%NDGL) = MIN(R%NSMAX,INT(REAL(G%NLOEN(R%NDGL)-1,JPRD)/(2.0_JPRD+ZSQM2(R%NDGL))))
+(   50)     DO JGL=R%NDGL-1, R%NDGNH+1, -1
+(   51)       G%NMEN(JGL) = MIN(R%NSMAX,MAX(G%NMEN(JGL+1),&
+(   52)        &INT(REAL(G%NLOEN(JGL)-1,JPRD)/(2.0_JPRD+ ZSQM2(JGL)))))
+(   53)     ENDDO
+(   54)   ELSE
+(   55)     ! cubic grid
+(   56)     ZSQM2(:) = F%R1MU2(:)
+(   57)     G%NMEN(1) = MIN(R%NSMAX,INT(REAL(G%NLOEN(1)-1,JPRD)/(2.0_JPRD+ZSQM2(1)))-1)
+(   58)     DO JGL=2,R%NDGNH
+(   59)       G%NMEN(JGL) = MIN(R%NSMAX,MAX(G%NMEN(JGL-1),&
+(   60)        &INT(REAL(G%NLOEN(JGL)-1,JPRD)/(2.0_JPRD+ ZSQM2(JGL)))-1))
+(   61)     ENDDO
+(   62)     !       * SOUTHERN HEMISPHERE :
+(   63)     G%NMEN(R%NDGL) = MIN(R%NSMAX,INT(REAL(G%NLOEN(R%NDGL)-1,JPRD)/(2.0_JPRD+ZSQM2(R%NDGL)))-1)
+(   64)     DO JGL=R%NDGL-1, R%NDGNH+1, -1
+(   65)       G%NMEN(JGL) = MIN(R%NSMAX,MAX(G%NMEN(JGL+1),&
+(   66)        &INT(REAL(G%NLOEN(JGL)-1,JPRD)/(2.0_JPRD+ ZSQM2(JGL)))-1))
+(   67)     ENDDO
+(   68)   ENDIF
+(   69)   IF(LLP1) THEN
+(   70)     WRITE(NOUT,FMT='('' (JGL,G%NLOEN,G%NMEN) '')')
+(   71)     WRITE(NOUT,FMT='(8(1X,''('',I4,I4,I4,'')''))')&
+(   72)      &(JGL,G%NLOEN(JGL),G%NMEN(JGL),JGL=1,R%NDGL)
+(   73)   ENDIF
+(   74)   ALLOCATE(G%NDGLU(0:R%NSMAX))
+(   75)   IF(LLP2)WRITE(NOUT,9) 'G%NDGLU   ',SIZE(G%NDGLU   ),SHAPE(G%NDGLU   )
+(   76)   IDGLU(:,:) = 0
+(   77)   G%NDGLU(:) = 0
+(   78)   DO JGL=1,R%NDGNH
+(   79)     DO JM=0,G%NMEN(JGL)
+(   80)       IDGLU(JM,JGL) = 1
+(   81)     ENDDO
+(   82)   ENDDO
+(   83)   DO JM=0,R%NSMAX
+(   84)     DO JGL=1,R%NDGNH
+(   85)       G%NDGLU(JM) = G%NDGLU(JM)+IDGLU(JM,JGL)
+(   86)     ENDDO
+(   87)   ENDDO
+(   88)   IF(LLP1) THEN
+(   89)       WRITE(NOUT,FMT='('' (JM,G%NDGLU) '')')
+(   90)     WRITE(NOUT,FMT='(10(1X,''('',I4,I4,'')''))')&
+(   91)      &(JM,G%NDGLU(JM),JM=0,R%NSMAX)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:09      page 3
+
+(   92)   ENDIF
+(   93) 
+(   94) ENDIF
+(   95) 
+(   96) !     ------------------------------------------------------------------
+(   97) 9 FORMAT(1X,'ARRAY ',A10,' ALLOCATED ',8I8)
+(   98) 
+(   99) END SUBROUTINE SETUP_GEOM
+(  100) END MODULE SETUP_GEOM_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:09      page 4
+
+(    1) # 1 "setup_geom_mod.F90"
+(    1) MODULE SETUP_GEOM_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SETUP_GEOM
+(    4) # 5 "setup_geom_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPRD, JPIM
+(    6) # 7 "setup_geom_mod.F90"
+(    7) USE TPM_GEN         ,ONLY : NOUT, NPRINTLEV
+(    8) USE TPM_DIM         ,ONLY : R
+(    9) USE TPM_DISTR       ,ONLY : D
+(   10) USE TPM_FIELDS      ,ONLY : F
+(   11) USE TPM_GEOMETRY    ,ONLY : G
+(   12) !
+(   13) # 14 "setup_geom_mod.F90"
+(   14) IMPLICIT NONE
+(   15) # 16 "setup_geom_mod.F90"
+(   16) REAL(KIND=JPRD) :: ZSQM2(R%NDGL)
+(   17) INTEGER(KIND=JPIM) :: IDGLU(0:R%NSMAX,R%NDGNH)
+(   18) INTEGER(KIND=JPIM) :: JGL,JM,NSMAXLIN
+(   19) # 20 "setup_geom_mod.F90"
+(   20) LOGICAL    :: LLP1,LLP2
+(   21) # 22 "setup_geom_mod.F90"
+(   22) !     ------------------------------------------------------------------
+(   23) # 24 "setup_geom_mod.F90"
+(   24) IF(.NOT.D%LGRIDONLY) THEN
+(   25) # 26 "setup_geom_mod.F90"
+(   26)   LLP1 = NPRINTLEV>0
+(   27)   LLP2 = NPRINTLEV>1
+(   28) # 29 "setup_geom_mod.F90"
+(   29)   IF(LLP1) WRITE(NOUT,*) '=== ENTER ROUTINE SETUP_GEOM ==='
+(   30) # 31 "setup_geom_mod.F90"
+(   31)   ALLOCATE (G%NMEN(R%NDGL))
+(   32)   IF(LLP2)WRITE(NOUT,9) 'G%NMEN   ',SIZE(G%NMEN   ),SHAPE(G%NMEN   )
+(   33) # 34 "setup_geom_mod.F90"
+(   34)   NSMAXLIN = R%NDGL-1
+(   35)   IF (R%NSMAX>=NSMAXLIN .OR. .NOT. G%LREDUCED_GRID) THEN
+(   36)     ! linear or full grid
+(   37)     DO JGL=1,R%NDGL
+(   38)       G%NMEN(JGL) = MIN(R%NSMAX,(G%NLOEN(JGL)-1)/2)
+(   39)     ENDDO
+(   40)   ELSEIF (R%NSMAX>=R%NDGL*2/3-1) THEN
+(   41)     ! quadratic grid
+(   42)     ZSQM2(:) = 3*(NSMAXLIN-R%NSMAX)/R%NDGL*F%R1MU2(:)
+(   43)     G%NMEN(1) = MIN(R%NSMAX,INT(REAL(G%NLOEN(1)-1,JPRD)/(2.0_JPRD+ZSQM2(1))))
+(   44)     DO JGL=2,R%NDGNH
+(   45)       G%NMEN(JGL) = MIN(R%NSMAX,MAX(G%NMEN(JGL-1),&
+(   46)        &INT(REAL(G%NLOEN(JGL)-1,JPRD)/(2.0_JPRD+ ZSQM2(JGL)))))
+(   47)     ENDDO
+(   48)     !       * SOUTHERN HEMISPHERE :
+(   49)     G%NMEN(R%NDGL) = MIN(R%NSMAX,INT(REAL(G%NLOEN(R%NDGL)-1,JPRD)/(2.0_JPRD+ZSQM2(R%NDGL))))
+(   50)     DO JGL=R%NDGL-1, R%NDGNH+1, -1
+(   51)       G%NMEN(JGL) = MIN(R%NSMAX,MAX(G%NMEN(JGL+1),&
+(   52)        &INT(REAL(G%NLOEN(JGL)-1,JPRD)/(2.0_JPRD+ ZSQM2(JGL)))))
+(   53)     ENDDO
+(   54)   ELSE
+(   55)     ! cubic grid
+(   56)     ZSQM2(:) = F%R1MU2(:)
+(   57)     G%NMEN(1) = MIN(R%NSMAX,INT(REAL(G%NLOEN(1)-1,JPRD)/(2.0_JPRD+ZSQM2(1)))-1)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:09      page 5
+
+(   58)     DO JGL=2,R%NDGNH
+(   59)       G%NMEN(JGL) = MIN(R%NSMAX,MAX(G%NMEN(JGL-1),&
+(   60)        &INT(REAL(G%NLOEN(JGL)-1,JPRD)/(2.0_JPRD+ ZSQM2(JGL)))-1))
+(   61)     ENDDO
+(   62)     !       * SOUTHERN HEMISPHERE :
+(   63)     G%NMEN(R%NDGL) = MIN(R%NSMAX,INT(REAL(G%NLOEN(R%NDGL)-1,JPRD)/(2.0_JPRD+ZSQM2(R%NDGL)))-1)
+(   64)     DO JGL=R%NDGL-1, R%NDGNH+1, -1
+(   65)       G%NMEN(JGL) = MIN(R%NSMAX,MAX(G%NMEN(JGL+1),&
+(   66)        &INT(REAL(G%NLOEN(JGL)-1,JPRD)/(2.0_JPRD+ ZSQM2(JGL)))-1))
+(   67)     ENDDO
+(   68)   ENDIF
+(   69)   IF(LLP1) THEN
+(   70)     WRITE(NOUT,FMT='('' (JGL,G%NLOEN,G%NMEN) '')')
+(   71)     WRITE(NOUT,FMT='(8(1X,''('',I4,I4,I4,'')''))')&
+(   72)      &(JGL,G%NLOEN(JGL),G%NMEN(JGL),JGL=1,R%NDGL)
+(   73)   ENDIF
+(   74)   ALLOCATE(G%NDGLU(0:R%NSMAX))
+(   75)   IF(LLP2)WRITE(NOUT,9) 'G%NDGLU   ',SIZE(G%NDGLU   ),SHAPE(G%NDGLU   )
+(   76)   IDGLU(:,:) = 0
+(   77)   G%NDGLU(:) = 0
+(   78)   DO JGL=1,R%NDGNH
+(   79)     DO JM=0,G%NMEN(JGL)
+(   80)       IDGLU(JM,JGL) = 1
+(   81)     ENDDO
+(   82)   ENDDO
+(   83)   DO JM=0,R%NSMAX
+(   84)     DO JGL=1,R%NDGNH
+(   85)       G%NDGLU(JM) = G%NDGLU(JM)+IDGLU(JM,JGL)
+(   86)     ENDDO
+(   87)   ENDDO
+(   88)   IF(LLP1) THEN
+(   89)       WRITE(NOUT,FMT='('' (JM,G%NDGLU) '')')
+(   90)     WRITE(NOUT,FMT='(10(1X,''('',I4,I4,'')''))')&
+(   91)      &(JM,G%NDGLU(JM),JM=0,R%NSMAX)
+(   92)   ENDIF
+(   93) # 94 "setup_geom_mod.F90"
+(   94) ENDIF
+(   95) # 96 "setup_geom_mod.F90"
+(   96) !     ------------------------------------------------------------------
+(   97) 9 FORMAT(1X,'ARRAY ',A10,' ALLOCATED ',8I8)
+(   98) # 99 "setup_geom_mod.F90"
+(   99) END SUBROUTINE SETUP_GEOM
+(  100) END MODULE SETUP_GEOM_MOD

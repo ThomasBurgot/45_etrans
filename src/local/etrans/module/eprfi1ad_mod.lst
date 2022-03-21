@@ -1,0 +1,316 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:24      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eprfi1ad_mod.F90
+
+(    1) MODULE EPRFI1AD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EPRFI1AD(KM,KF_UV,KF_SCALARS,PIA,PSPVOR,PSPDIV,PSPSCALAR,&
+(    4)  & KFLDPTRUV,KFLDPTRSC)
+(    5) 
+(    6) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    7) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    8) 
+(    9) !USE TPM_DISTR
+(   10) !USE TPM_TRANS
+(   11) 
+(   12) USE EPRFI1BAD_MOD   ,ONLY : EPRFI1BAD
+(   13) 
+(   14) !**** *EPRFI1AD* - Prepare spectral fields for inverse Legendre transform
+(   15) 
+(   16) !     Purpose.
+(   17) !     --------
+(   18) !        To extract the spectral fields for a specific zonal wavenumber
+(   19) !        and put them in an order suitable for the inverse Legendre           .
+(   20) !        tranforms.The ordering is from NSMAX to KM for better conditioning.
+(   21) !        Elements 1,2 and NLCM(KM)+1 are zeroed in preparation for computing
+(   22) !        u,v and derivatives in spectral space.
+(   23) 
+(   24) !**   Interface.
+(   25) !     ----------
+(   26) !        *CALL* *EPRFI1AD(KM,PIA,PSPVOR,PSPDIV,PSPSCALAR
+(   27) 
+(   28) !        Explicit arguments :  KM     - zonal wavenumber
+(   29) !        ------------------    PIA    - spectral components for transform
+(   30) !                              PSPVOR - vorticity
+(   31) !                              PSPDIV - divergence
+(   32) !                              PSPSCALAR - scalar variables
+(   33) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:24      page 2
+
+(   34) !        Implicit arguments :  None.
+(   35) !        --------------------
+(   36) 
+(   37) !     Method.
+(   38) !     -------
+(   39) 
+(   40) !     Externals.   None.
+(   41) !     ----------
+(   42) 
+(   43) !     Reference.
+(   44) !     ----------
+(   45) !        ECMWF Research Department documentation of the IFS
+(   46) 
+(   47) !     Author.
+(   48) !     -------
+(   49) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   50) 
+(   51) !     Modifications.
+(   52) !     --------------
+(   53) !        Original : 00-02-01 From PRFI1AD in IFS CY22R1
+(   54) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   55) 
+(   56) !     ------------------------------------------------------------------
+(   57) !
+(   58) IMPLICIT NONE
+(   59) !
+(   60) !
+(   61) INTEGER(KIND=JPIM),INTENT(IN) :: KM,KF_UV,KF_SCALARS
+(   62) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT)  :: PSPVOR(:,:)
+(   63) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT)  :: PSPDIV(:,:)
+(   64) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT)  :: PSPSCALAR(:,:)
+(   65) REAL(KIND=JPRB) ,          INTENT(IN)     :: PIA(:,:)
+(   66) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRUV(:)
+(   67) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRSC(:)
+(   68) 
+(   69) INTEGER(KIND=JPIM) :: IDIV, IFIRST, ILAST, IVOR
+(   70) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   71) 
+(   72) !     ------------------------------------------------------------------
+(   73) 
+(   74) !*       1.    EXTRACT FIELDS FROM SPECTRAL ARRAYS.
+(   75) !              ------------------------------------
+(   76) 
+(   77) IF (LHOOK) CALL DR_HOOK('EPRFI1AD_MOD:EPRFI1AD',0,ZHOOK_HANDLE)
+(   78) IFIRST = 1
+(   79) ILAST  = 4*KF_UV
+(   80) 
+(   81) !*       1.1      VORTICITY AND DIVERGENCE.
+(   82) 
+(   83) IF(KF_UV > 0)THEN
+(   84)   IVOR = 1
+(   85)   IDIV = 2*KF_UV+1
+(   86)   CALL EPRFI1BAD(KM,PIA(:,IVOR:IDIV-1),PSPVOR,KF_UV,KFLDPTRUV)
+(   87)   CALL EPRFI1BAD(KM,PIA(:,IDIV:ILAST) ,PSPDIV,KF_UV,KFLDPTRUV)
+(   88)   ILAST = ILAST+4*KF_UV
+(   89) ENDIF
+(   90) 
+(   91) !*       1.2    SCALAR VARIABLES.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:24      page 3
+
+(   92) 
+(   93) IF(KF_SCALARS > 0)THEN
+(   94)   IFIRST = ILAST+1
+(   95)   ILAST  = IFIRST - 1 + 2*KF_SCALARS
+(   96)   CALL EPRFI1BAD(KM,PIA(:,IFIRST:ILAST),PSPSCALAR(:,:),KF_SCALARS,KFLDPTRSC)
+(   97) ENDIF
+(   98) IF (LHOOK) CALL DR_HOOK('EPRFI1AD_MOD:EPRFI1AD',1,ZHOOK_HANDLE)
+(   99) 
+(  100) !     ------------------------------------------------------------------
+(  101) 
+(  102) END SUBROUTINE EPRFI1AD
+(  103) END MODULE EPRFI1AD_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:24      page 4
+
+(    1) # 1 "eprfi1ad_mod.F90"
+(    1) MODULE EPRFI1AD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EPRFI1AD(KM,KF_UV,KF_SCALARS,PIA,PSPVOR,PSPDIV,PSPSCALAR,&
+(    4)  & KFLDPTRUV,KFLDPTRSC)
+(    5) # 6 "eprfi1ad_mod.F90"
+(    6) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    7) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    8) # 9 "eprfi1ad_mod.F90"
+(    9) !USE TPM_DISTR
+(   10) !USE TPM_TRANS
+(   11) # 12 "eprfi1ad_mod.F90"
+(   12) USE EPRFI1BAD_MOD   ,ONLY : EPRFI1BAD
+(   13) # 14 "eprfi1ad_mod.F90"
+(   14) !**** *EPRFI1AD* - Prepare spectral fields for inverse Legendre transform
+(   15) # 16 "eprfi1ad_mod.F90"
+(   16) !     Purpose.
+(   17) !     --------
+(   18) !        To extract the spectral fields for a specific zonal wavenumber
+(   19) !        and put them in an order suitable for the inverse Legendre           .
+(   20) !        tranforms.The ordering is from NSMAX to KM for better conditioning.
+(   21) !        Elements 1,2 and NLCM(KM)+1 are zeroed in preparation for computing
+(   22) !        u,v and derivatives in spectral space.
+(   23) # 24 "eprfi1ad_mod.F90"
+(   24) !**   Interface.
+(   25) !     ----------
+(   26) !        *CALL* *EPRFI1AD(KM,PIA,PSPVOR,PSPDIV,PSPSCALAR
+(   27) # 28 "eprfi1ad_mod.F90"
+(   28) !        Explicit arguments :  KM     - zonal wavenumber
+(   29) !        ------------------    PIA    - spectral components for transform
+(   30) !                              PSPVOR - vorticity
+(   31) !                              PSPDIV - divergence
+(   32) !                              PSPSCALAR - scalar variables
+(   33) # 34 "eprfi1ad_mod.F90"
+(   34) !        Implicit arguments :  None.
+(   35) !        --------------------
+(   36) # 37 "eprfi1ad_mod.F90"
+(   37) !     Method.
+(   38) !     -------
+(   39) # 40 "eprfi1ad_mod.F90"
+(   40) !     Externals.   None.
+(   41) !     ----------
+(   42) # 43 "eprfi1ad_mod.F90"
+(   43) !     Reference.
+(   44) !     ----------
+(   45) !        ECMWF Research Department documentation of the IFS
+(   46) # 47 "eprfi1ad_mod.F90"
+(   47) !     Author.
+(   48) !     -------
+(   49) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   50) # 51 "eprfi1ad_mod.F90"
+(   51) !     Modifications.
+(   52) !     --------------
+(   53) !        Original : 00-02-01 From PRFI1AD in IFS CY22R1
+(   54) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   55) # 56 "eprfi1ad_mod.F90"
+(   56) !     ------------------------------------------------------------------
+(   57) !
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:24      page 5
+
+(   58) IMPLICIT NONE
+(   59) !
+(   60) !
+(   61) INTEGER(KIND=JPIM),INTENT(IN) :: KM,KF_UV,KF_SCALARS
+(   62) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT)  :: PSPVOR(:,:)
+(   63) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT)  :: PSPDIV(:,:)
+(   64) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT)  :: PSPSCALAR(:,:)
+(   65) REAL(KIND=JPRB) ,          INTENT(IN)     :: PIA(:,:)
+(   66) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRUV(:)
+(   67) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRSC(:)
+(   68) # 69 "eprfi1ad_mod.F90"
+(   69) INTEGER(KIND=JPIM) :: IDIV, IFIRST, ILAST, IVOR
+(   70) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   71) # 72 "eprfi1ad_mod.F90"
+(   72) !     ------------------------------------------------------------------
+(   73) # 74 "eprfi1ad_mod.F90"
+(   74) !*       1.    EXTRACT FIELDS FROM SPECTRAL ARRAYS.
+(   75) !              ------------------------------------
+(   76) # 77 "eprfi1ad_mod.F90"
+(   77) IF (LHOOK) CALL DR_HOOK('EPRFI1AD_MOD:EPRFI1AD',0,ZHOOK_HANDLE)
+(   78) IFIRST = 1
+(   79) ILAST  = 4*KF_UV
+(   80) # 81 "eprfi1ad_mod.F90"
+(   81) !*       1.1      VORTICITY AND DIVERGENCE.
+(   82) # 83 "eprfi1ad_mod.F90"
+(   83) IF(KF_UV > 0)THEN
+(   84)   IVOR = 1
+(   85)   IDIV = 2*KF_UV+1
+(   86)   CALL EPRFI1BAD(KM,PIA(:,IVOR:IDIV-1),PSPVOR,KF_UV,KFLDPTRUV)
+(   87)   CALL EPRFI1BAD(KM,PIA(:,IDIV:ILAST) ,PSPDIV,KF_UV,KFLDPTRUV)
+(   88)   ILAST = ILAST+4*KF_UV
+(   89) ENDIF
+(   90) # 91 "eprfi1ad_mod.F90"
+(   91) !*       1.2    SCALAR VARIABLES.
+(   92) # 93 "eprfi1ad_mod.F90"
+(   93) IF(KF_SCALARS > 0)THEN
+(   94)   IFIRST = ILAST+1
+(   95)   ILAST  = IFIRST - 1 + 2*KF_SCALARS
+(   96)   CALL EPRFI1BAD(KM,PIA(:,IFIRST:ILAST),PSPSCALAR(:,:),KF_SCALARS,KFLDPTRSC)
+(   97) ENDIF
+(   98) IF (LHOOK) CALL DR_HOOK('EPRFI1AD_MOD:EPRFI1AD',1,ZHOOK_HANDLE)
+(   99) # 100 "eprfi1ad_mod.F90"
+(  100) !     ------------------------------------------------------------------
+(  101) # 102 "eprfi1ad_mod.F90"
+(  102) END SUBROUTINE EPRFI1AD
+(  103) END MODULE EPRFI1AD_MOD

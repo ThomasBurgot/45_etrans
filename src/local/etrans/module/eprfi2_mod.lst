@@ -1,0 +1,229 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:51      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eprfi2_mod.F90
+
+(    1) MODULE EPRFI2_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EPRFI2(KF_FS,PFFT)
+(    4) 
+(    5) !**** *EPRFI2* - Prepare input work arrays for direct transform
+(    6) 
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        To extract the Fourier fields for a specific zonal wavenumber
+(   10) !        and put them in an order suitable for the direct Legendre
+(   11) !        tranforms, i.e. split into symmetric and anti-symmetric part.
+(   12) 
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !        *CALL* *EPRFI2(..)
+(   16) 
+(   17) !        Explicit arguments :
+(   18) !        --------------------  KM - zonal wavenumber
+(   19) !                              KMLOC - local zonal wavenumber
+(   20) !                              PAIA - antisymmetric part of Fourier
+(   21) !                              components for KM  (output)
+(   22) !                              PSIA - symmetric part of Fourier
+(   23) !                              components for KM  (output)
+(   24) 
+(   25) !        Implicit arguments :  The Grid point arrays of the model.
+(   26) !        --------------------
+(   27) 
+(   28) !     Method.
+(   29) !     -------
+(   30) 
+(   31) !     Externals.   PRFI2B   - basic copying routine
+(   32) !     ----------
+(   33) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:51      page 2
+
+(   34) !     Reference.
+(   35) !     ----------
+(   36) !        ECMWF Research Department documentation of the IFS
+(   37) 
+(   38) !     Author.
+(   39) !     -------
+(   40) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   41) 
+(   42) !     Modifications.
+(   43) !     --------------
+(   44) !        Original : 87-11-25
+(   45) !        Modified : 91-07-01 Philippe Courtier/Mats Hamrud - Rewrite
+(   46) !                            for uv formulation
+(   47) !        Modified : 93-03-19 D. Giard - CDCONF='T'
+(   48) !        Modified : 93-??-?? ???????? - CDCONF='C'--> bug if CDCONF='T'
+(   49) !        Modified : 93-05-13 D. Giard - correction of the previous bug
+(   50) !        Modified : 93-11-18 M. Hamrud - use only one Fourier buffer
+(   51) !        Modified : 94-04-06 R. El Khatib - Full-POS configuration 'P'
+(   52) !        M.Hamrud : 94-11-01 New conf 'G' - vor,div->vor,div
+(   53) !                            instead of u,v->vor,div
+(   54) !        MPP Group: 95-10-01 Support for Distributed Memory version
+(   55) !        Modified : 04/06/99 D.Salmond : change order of AIA and SIA
+(   56) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   57) !     ------------------------------------------------------------------
+(   58) 
+(   59) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   60) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   61) 
+(   62) !USE TPM_TRANS
+(   63) 
+(   64) USE EPRFI2B_MOD     ,ONLY : EPRFI2B
+(   65) !
+(   66) 
+(   67) IMPLICIT NONE
+(   68) 
+(   69) INTEGER(KIND=JPIM) , INTENT(IN)  :: KF_FS
+(   70) REAL(KIND=JPRBT)   , INTENT(OUT) :: PFFT(:,:,:)
+(   71) 
+(   72) !     ------------------------------------------------------------------
+(   73) 
+(   74) !*       2.    EXTRACT SYM./ANTISYM. FIELDS FROM TIME T+1.
+(   75) !              -------------------------------------------
+(   76) 
+(   77) CALL EPRFI2B(KF_FS,PFFT)
+(   78) 
+(   79) !     ------------------------------------------------------------------
+(   80) 
+(   81) END SUBROUTINE EPRFI2
+(   82) END MODULE EPRFI2_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:51      page 3
+
+(    1) # 1 "eprfi2_mod.F90"
+(    1) MODULE EPRFI2_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EPRFI2(KF_FS,PFFT)
+(    4) # 5 "eprfi2_mod.F90"
+(    5) !**** *EPRFI2* - Prepare input work arrays for direct transform
+(    6) # 7 "eprfi2_mod.F90"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        To extract the Fourier fields for a specific zonal wavenumber
+(   10) !        and put them in an order suitable for the direct Legendre
+(   11) !        tranforms, i.e. split into symmetric and anti-symmetric part.
+(   12) # 13 "eprfi2_mod.F90"
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !        *CALL* *EPRFI2(..)
+(   16) # 17 "eprfi2_mod.F90"
+(   17) !        Explicit arguments :
+(   18) !        --------------------  KM - zonal wavenumber
+(   19) !                              KMLOC - local zonal wavenumber
+(   20) !                              PAIA - antisymmetric part of Fourier
+(   21) !                              components for KM  (output)
+(   22) !                              PSIA - symmetric part of Fourier
+(   23) !                              components for KM  (output)
+(   24) # 25 "eprfi2_mod.F90"
+(   25) !        Implicit arguments :  The Grid point arrays of the model.
+(   26) !        --------------------
+(   27) # 28 "eprfi2_mod.F90"
+(   28) !     Method.
+(   29) !     -------
+(   30) # 31 "eprfi2_mod.F90"
+(   31) !     Externals.   PRFI2B   - basic copying routine
+(   32) !     ----------
+(   33) # 34 "eprfi2_mod.F90"
+(   34) !     Reference.
+(   35) !     ----------
+(   36) !        ECMWF Research Department documentation of the IFS
+(   37) # 38 "eprfi2_mod.F90"
+(   38) !     Author.
+(   39) !     -------
+(   40) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   41) # 42 "eprfi2_mod.F90"
+(   42) !     Modifications.
+(   43) !     --------------
+(   44) !        Original : 87-11-25
+(   45) !        Modified : 91-07-01 Philippe Courtier/Mats Hamrud - Rewrite
+(   46) !                            for uv formulation
+(   47) !        Modified : 93-03-19 D. Giard - CDCONF='T'
+(   48) !        Modified : 93-??-?? ???????? - CDCONF='C'--> bug if CDCONF='T'
+(   49) !        Modified : 93-05-13 D. Giard - correction of the previous bug
+(   50) !        Modified : 93-11-18 M. Hamrud - use only one Fourier buffer
+(   51) !        Modified : 94-04-06 R. El Khatib - Full-POS configuration 'P'
+(   52) !        M.Hamrud : 94-11-01 New conf 'G' - vor,div->vor,div
+(   53) !                            instead of u,v->vor,div
+(   54) !        MPP Group: 95-10-01 Support for Distributed Memory version
+(   55) !        Modified : 04/06/99 D.Salmond : change order of AIA and SIA
+(   56) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   57) !     ------------------------------------------------------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:51      page 4
+
+(   58) # 59 "eprfi2_mod.F90"
+(   59) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   60) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   61) # 62 "eprfi2_mod.F90"
+(   62) !USE TPM_TRANS
+(   63) # 64 "eprfi2_mod.F90"
+(   64) USE EPRFI2B_MOD     ,ONLY : EPRFI2B
+(   65) !
+(   66) # 67 "eprfi2_mod.F90"
+(   67) IMPLICIT NONE
+(   68) # 69 "eprfi2_mod.F90"
+(   69) INTEGER(KIND=JPIM) , INTENT(IN)  :: KF_FS
+(   70) REAL(KIND=JPRBT)   , INTENT(OUT) :: PFFT(:,:,:)
+(   71) # 72 "eprfi2_mod.F90"
+(   72) !     ------------------------------------------------------------------
+(   73) # 74 "eprfi2_mod.F90"
+(   74) !*       2.    EXTRACT SYM./ANTISYM. FIELDS FROM TIME T+1.
+(   75) !              -------------------------------------------
+(   76) # 77 "eprfi2_mod.F90"
+(   77) CALL EPRFI2B(KF_FS,PFFT)
+(   78) # 79 "eprfi2_mod.F90"
+(   79) !     ------------------------------------------------------------------
+(   80) # 81 "eprfi2_mod.F90"
+(   81) END SUBROUTINE EPRFI2
+(   82) END MODULE EPRFI2_MOD

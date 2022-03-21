@@ -1,0 +1,578 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:15      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eltdir_mod.F90
+
+(    1) MODULE ELTDIR_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ELTDIR(KF_FS,KF_UV,KF_SCALARS,KLED2,&
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,PSPSC3A,PSPSC3B,PSPSC2,&
+(    5)  & KFLDPTRUV,KFLDPTRSC,PSPMEANU,PSPMEANV)
+(    6) 
+(    7) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    8) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    9) 
+(   10) USE TPM_DIM         ,ONLY : R
+(   11) USE TPM_DISTR       ,ONLY : D
+(   12) USE TPMALD_DIM      ,ONLY : RALD
+(   13) USE TPM_GEN          ,ONLY : LALLOPERM2
+(   14) USE ELTDATA_MOD      ,ONLY : ZFFT_PERM, ZVODI_PERM
+(   15) 
+(   16) 
+(   17) 
+(   18) USE EPRFI2_MOD      ,ONLY : EPRFI2
+(   19) USE ELEDIR_MOD      ,ONLY : ELEDIR
+(   20) USE EUVTVD_MOD
+(   21) USE EUPDSP_MOD      ,ONLY : EUPDSP
+(   22) USE EUVTVD_COMM_MOD 
+(   23) USE EXTPER_MOD      ,ONLY : EXTPER
+(   24) 
+(   25) USE TPM_DISTR       ,ONLY : D_NUMP
+(   26) USE TPM_DIM         ,ONLY : R_NDGL
+(   27) 
+(   28) !
+(   29) !**** *ELTDIR* - Control of Direct Legendre transform step
+(   30) 
+(   31) !     Purpose.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:15      page 2
+
+(   32) !     --------
+(   33) !        Tranform from Fourier space to spectral space, compute
+(   34) !        vorticity and divergence.
+(   35) 
+(   36) !**   Interface.
+(   37) !     ----------
+(   38) !        *CALL* *ELTDIR(...)*
+(   39) 
+(   40) !        Explicit arguments :
+(   41) !        --------------------  IM     - zonal wavenumber
+(   42) !                              JM  - local zonal wavenumber
+(   43) 
+(   44) !        Implicit arguments :  None
+(   45) !        --------------------
+(   46) 
+(   47) !     Method.
+(   48) !     -------
+(   49) 
+(   50) !     Externals.
+(   51) !     ----------
+(   52) !         EPRFI2      - prepares the Fourier work arrays for model variables
+(   53) !         ELEDIR      - direct Legendre transform
+(   54) !         EUVTVD      -
+(   55) !         EUPDSP      - updating of spectral arrays (fields)
+(   56) !         EUVTVD_COMM -
+(   57) !         EXTPER      -
+(   58) 
+(   59) 
+(   60) !     Reference.
+(   61) !     ----------
+(   62) !        ECMWF Research Department documentation of the IFS
+(   63) 
+(   64) !     Author.
+(   65) !     -------
+(   66) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   67) 
+(   68) !     Modifications.
+(   69) !     --------------
+(   70) !        Original : 87-11-24
+(   71) !        Modified : 91-07-01 Philippe Courtier/Mats Hamrud - Rewrite
+(   72) !                            for uv formulation
+(   73) !        Modified 93-03-19 D. Giard - CDCONF='T' for tendencies
+(   74) !        Modified 93-11-18 M. Hamrud - use only one Fourier buffer
+(   75) !        Modified 94-04-06 R. El khatib Full-POS implementation
+(   76) !        M.Hamrud  : 94-11-01 New conf 'G' - vor,div->vor,div
+(   77) !                             instead of u,v->vor,div
+(   78) !        MPP Group : 95-10-01 Support for Distributed Memory version
+(   79) !        K. YESSAD (AUGUST 1996):
+(   80) !               - Legendre transforms for transmission coefficients.
+(   81) !        Modified : 04/06/99 D.Salmond : change order of AIA and SIA
+(   82) !            01-03-14 G. Radnoti aladin version
+(   83) !     01-08-27 : R. El Khatib Fix for NPROMATR /= 0
+(   84) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   85) !        F. Vana + NEC 28-Apr-2009 MPI-OpenMP fix
+(   86) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   87) !        N. Lopes & R. El Khatib 15-Jun-2012 Scalability enhancement
+(   88) !     ------------------------------------------------------------------
+(   89) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:15      page 3
+
+(   90) IMPLICIT NONE
+(   91) 
+(   92) INTEGER(KIND=JPIM),INTENT(IN)   :: KF_FS,KF_UV,KF_SCALARS,KLED2
+(   93) 
+(   94) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPVOR(:,:)
+(   95) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPDIV(:,:)
+(   96) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSCALAR(:,:)
+(   97) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC2(:,:)
+(   98) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC3A(:,:,:)
+(   99) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC3B(:,:,:)
+(  100) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRUV(:)
+(  101) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRSC(:)
+(  102) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPMEANU(:)
+(  103) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPMEANV(:)
+(  104) 
+(  105) REAL(KIND=JPRB), POINTER    :: ZFFT(:,:,:)
+(  106) INTEGER(KIND=JPIM) :: IINDEX(2*KF_FS), JF, JDIM
+(  107) INTEGER(KIND=JPIM) :: IM
+(  108) INTEGER(KIND=JPIM) :: JM
+(  109) INTEGER(KIND=JPIM) :: IUS,IUE,IVS,IVE,IVORS,IVORE,IDIVS,IDIVE,IFC
+(  110) REAL(KIND=JPRB), POINTER    :: ZVODI(:,:,:)
+(  111) INTEGER(KIND=JPIM) :: JGL, IJR, IJI
+(  112) 
+(  113) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  114) 
+(  115) !     ------------------------------------------------------------------
+(  116) 
+(  117) IF (LHOOK) CALL DR_HOOK('ELTDIR_MOD:ELTDIR',0,ZHOOK_HANDLE)
+(  118) 
+(  119) 
+(  120) !*     1.    PREPARE WORK ARRAYS.
+(  121) !            --------------------
+(  122) 
+(  123) IF (ALLOCATED (ZFFT_PERM)) THEN
+(  124)   IF ((UBOUND (ZFFT_PERM, 1) /= RALD%NDGLSUR+R%NNOEXTZG) &
+(  125) & .OR. (UBOUND (ZFFT_PERM, 2) /= D%NUMP) &
+(  126) & .OR. (UBOUND (ZFFT_PERM, 3) < KLED2)) THEN
+(  127)     !$acc exit data delete (ZFFT_PERM)
+(  128)     DEALLOCATE (ZFFT_PERM)
+(  129)   ENDIF
+(  130) ENDIF
+(  131) 
+(  132) IF (.NOT. ALLOCATED (ZFFT_PERM)) THEN
+(  133)   ALLOCATE (ZFFT_PERM (RALD%NDGLSUR+R%NNOEXTZG,D%NUMP,KLED2))
+(  134)   !$acc enter data create (ZFFT_PERM)
+(  135) ENDIF
+(  136) 
+(  137) 
+(  138) IF (ALLOCATED (ZVODI_PERM)) THEN
+(  139)   IF ((UBOUND (ZVODI_PERM, 1) /= RALD%NDGLSUR+R%NNOEXTZG) &
+(  140) & .OR. (UBOUND (ZVODI_PERM, 2) /= D%NUMP) &
+(  141) & .OR. (UBOUND (ZVODI_PERM, 3) < MAX(4*KF_UV,1))) THEN
+(  142)     !$acc exit data delete (ZVODI_PERM)
+(  143)     DEALLOCATE (ZVODI_PERM)
+(  144)   ENDIF
+(  145) ENDIF
+(  146) 
+(  147) IF (.NOT. ALLOCATED (ZVODI_PERM)) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:15      page 4
+
+(  148)   ALLOCATE (ZVODI_PERM (RALD%NDGLSUR+R%NNOEXTZG,D%NUMP,MAX(4*KF_UV,1)))
+(  149)   !$acc enter data create (ZVODI_PERM)
+(  150) ENDIF
+(  151) 
+(  152) ZFFT => ZFFT_PERM (:,:,1:KLED2)
+(  153) ZVODI => ZVODI_PERM (:,:,1:MAX(4*KF_UV,1))
+(  154) 
+(  155) !$acc kernels present (ZVODI, ZFFT)
+(  156) ZVODI = 0._JPRB
+(  157) ZFFT = 0._JPRB
+(  158) !$acc end kernels
+(  159) 
+(  160) 
+(  161) IFC = 2 * KF_FS
+(  162) 
+(  163) CALL EPRFI2(KF_FS,ZFFT)
+(  164) 
+(  165) !*     2.    PERIODICIZATION IN Y DIRECTION
+(  166) !            ------------------------------
+(  167) 
+(  168) IF(R%NNOEXTZG>0) THEN
+(  169)   CALL ABOR1 ('ELTDIR: BIPERIODICIZATION NOT SUPPORTED')
+(  170) ENDIF
+(  171) 
+(  172) !*     3.    DIRECT LEGENDRE TRANSFORM.
+(  173) !            --------------------------
+(  174) 
+(  175) CALL ELEDIR(IFC,KLED2,ZFFT)
+(  176) 
+(  177) 
+(  178) !*     4.    COMPUTE VORTICITY AND DIVERGENCE.
+(  179) !            ---------------------------------
+(  180) 
+(  181) IF( KF_UV > 0 ) THEN
+(  182)   IUS = 1
+(  183)   IUE = 2*KF_UV
+(  184)   IVS = 2*KF_UV+1
+(  185)   IVE = 4*KF_UV
+(  186)   IVORS = 1
+(  187)   IVORE = 2*KF_UV
+(  188)   IDIVS = 2*KF_UV+1
+(  189)   IDIVE = 4*KF_UV
+(  190) 
+(  191)   CALL EUVTVD(KF_UV,ZFFT(:,:,IUS:IUE),ZFFT(:,:,IVS:IVE),&
+(  192)    & ZVODI(:,:,IVORS:IVORE),ZVODI(:,:,IDIVS:IDIVE))
+(  193) 
+(  194) !*     5.    COMMUNICATION OF MEAN WIND
+(  195) !            --------------------------
+(  196) 
+(  197) 
+(  198)   DO JM=1,D%NUMP
+(  199)     IM = D%MYMS(JM)
+(  200) 
+(  201)     CALL EUVTVD_COMM(IM,JM,KF_UV,KFLDPTRUV,ZFFT(:,JM,IUS:IUE), &
+(  202)      & ZFFT(:,JM,IVS:IVE),ZVODI(:,JM,IVORS:IVORE),ZVODI(:,JM,IDIVS:IDIVE), &
+(  203)      & PSPMEANU,PSPMEANV)
+(  204) 
+(  205)   ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:15      page 5
+
+(  206) 
+(  207) ENDIF
+(  208) 
+(  209) 
+(  210) !*       6.    UPDATE SPECTRAL ARRAYS.
+(  211) !              -----------------------
+(  212) 
+(  213) CALL EUPDSP(KF_UV,KF_SCALARS,ZFFT,ZVODI, &
+(  214)  & PSPVOR,PSPDIV,PSPSCALAR,PSPSC3A,PSPSC3B,PSPSC2,KFLDPTRUV,KFLDPTRSC)
+(  215) 
+(  216) IF (.NOT. LALLOPERM2) THEN
+(  217)   !$acc exit data delete (ZFFT_PERM, ZVODI_PERM)
+(  218)   DEALLOCATE (ZFFT_PERM)
+(  219)   DEALLOCATE (ZVODI_PERM)
+(  220) ENDIF
+(  221) 
+(  222) IF (LHOOK) CALL DR_HOOK('ELTDIR_MOD:ELTDIR',1,ZHOOK_HANDLE)
+(  223) !     ------------------------------------------------------------------
+(  224) 
+(  225) END SUBROUTINE ELTDIR
+(  226) END MODULE ELTDIR_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:15      page 6
+
+(    1) # 1 "eltdir_mod.F90"
+(    1) MODULE ELTDIR_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ELTDIR(KF_FS,KF_UV,KF_SCALARS,KLED2,&
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,PSPSC3A,PSPSC3B,PSPSC2,&
+(    5)  & KFLDPTRUV,KFLDPTRSC,PSPMEANU,PSPMEANV)
+(    6) # 7 "eltdir_mod.F90"
+(    7) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    8) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    9) # 10 "eltdir_mod.F90"
+(   10) USE TPM_DIM         ,ONLY : R
+(   11) USE TPM_DISTR       ,ONLY : D
+(   12) USE TPMALD_DIM      ,ONLY : RALD
+(   13) USE TPM_GEN          ,ONLY : LALLOPERM2
+(   14) USE ELTDATA_MOD      ,ONLY : ZFFT_PERM, ZVODI_PERM
+(   15) # 18 "eltdir_mod.F90"
+(   18) USE EPRFI2_MOD      ,ONLY : EPRFI2
+(   19) USE ELEDIR_MOD      ,ONLY : ELEDIR
+(   20) USE EUVTVD_MOD
+(   21) USE EUPDSP_MOD      ,ONLY : EUPDSP
+(   22) USE EUVTVD_COMM_MOD 
+(   23) USE EXTPER_MOD      ,ONLY : EXTPER
+(   24) # 25 "eltdir_mod.F90"
+(   25) USE TPM_DISTR       ,ONLY : D_NUMP
+(   26) USE TPM_DIM         ,ONLY : R_NDGL
+(   27) # 28 "eltdir_mod.F90"
+(   28) !
+(   29) !**** *ELTDIR* - Control of Direct Legendre transform step
+(   30) # 31 "eltdir_mod.F90"
+(   31) !     Purpose.
+(   32) !     --------
+(   33) !        Tranform from Fourier space to spectral space, compute
+(   34) !        vorticity and divergence.
+(   35) # 36 "eltdir_mod.F90"
+(   36) !**   Interface.
+(   37) !     ----------
+(   38) !        *CALL* *ELTDIR(...)*
+(   39) # 40 "eltdir_mod.F90"
+(   40) !        Explicit arguments :
+(   41) !        --------------------  IM     - zonal wavenumber
+(   42) !                              JM  - local zonal wavenumber
+(   43) # 44 "eltdir_mod.F90"
+(   44) !        Implicit arguments :  None
+(   45) !        --------------------
+(   46) # 47 "eltdir_mod.F90"
+(   47) !     Method.
+(   48) !     -------
+(   49) # 50 "eltdir_mod.F90"
+(   50) !     Externals.
+(   51) !     ----------
+(   52) !         EPRFI2      - prepares the Fourier work arrays for model variables
+(   53) !         ELEDIR      - direct Legendre transform
+(   54) !         EUVTVD      -
+(   55) !         EUPDSP      - updating of spectral arrays (fields)
+(   56) !         EUVTVD_COMM -
+(   57) !         EXTPER      -
+(   58) # 60 "eltdir_mod.F90"
+(   60) !     Reference.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:15      page 7
+
+(   61) !     ----------
+(   62) !        ECMWF Research Department documentation of the IFS
+(   63) # 64 "eltdir_mod.F90"
+(   64) !     Author.
+(   65) !     -------
+(   66) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   67) # 68 "eltdir_mod.F90"
+(   68) !     Modifications.
+(   69) !     --------------
+(   70) !        Original : 87-11-24
+(   71) !        Modified : 91-07-01 Philippe Courtier/Mats Hamrud - Rewrite
+(   72) !                            for uv formulation
+(   73) !        Modified 93-03-19 D. Giard - CDCONF='T' for tendencies
+(   74) !        Modified 93-11-18 M. Hamrud - use only one Fourier buffer
+(   75) !        Modified 94-04-06 R. El khatib Full-POS implementation
+(   76) !        M.Hamrud  : 94-11-01 New conf 'G' - vor,div->vor,div
+(   77) !                             instead of u,v->vor,div
+(   78) !        MPP Group : 95-10-01 Support for Distributed Memory version
+(   79) !        K. YESSAD (AUGUST 1996):
+(   80) !               - Legendre transforms for transmission coefficients.
+(   81) !        Modified : 04/06/99 D.Salmond : change order of AIA and SIA
+(   82) !            01-03-14 G. Radnoti aladin version
+(   83) !     01-08-27 : R. El Khatib Fix for NPROMATR /= 0
+(   84) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   85) !        F. Vana + NEC 28-Apr-2009 MPI-OpenMP fix
+(   86) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   87) !        N. Lopes & R. El Khatib 15-Jun-2012 Scalability enhancement
+(   88) !     ------------------------------------------------------------------
+(   89) # 90 "eltdir_mod.F90"
+(   90) IMPLICIT NONE
+(   91) # 92 "eltdir_mod.F90"
+(   92) INTEGER(KIND=JPIM),INTENT(IN)   :: KF_FS,KF_UV,KF_SCALARS,KLED2
+(   93) # 94 "eltdir_mod.F90"
+(   94) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPVOR(:,:)
+(   95) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPDIV(:,:)
+(   96) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSCALAR(:,:)
+(   97) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC2(:,:)
+(   98) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC3A(:,:,:)
+(   99) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC3B(:,:,:)
+(  100) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRUV(:)
+(  101) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRSC(:)
+(  102) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPMEANU(:)
+(  103) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPMEANV(:)
+(  104) # 105 "eltdir_mod.F90"
+(  105) REAL(KIND=JPRB), POINTER    :: ZFFT(:,:,:)
+(  106) INTEGER(KIND=JPIM) :: IINDEX(2*KF_FS), JF, JDIM
+(  107) INTEGER(KIND=JPIM) :: IM
+(  108) INTEGER(KIND=JPIM) :: JM
+(  109) INTEGER(KIND=JPIM) :: IUS,IUE,IVS,IVE,IVORS,IVORE,IDIVS,IDIVE,IFC
+(  110) REAL(KIND=JPRB), POINTER    :: ZVODI(:,:,:)
+(  111) INTEGER(KIND=JPIM) :: JGL, IJR, IJI
+(  112) # 113 "eltdir_mod.F90"
+(  113) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  114) # 115 "eltdir_mod.F90"
+(  115) !     ------------------------------------------------------------------
+(  116) # 117 "eltdir_mod.F90"
+(  117) IF (LHOOK) CALL DR_HOOK('ELTDIR_MOD:ELTDIR',0,ZHOOK_HANDLE)
+(  118) # 120 "eltdir_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:15      page 8
+
+(  120) !*     1.    PREPARE WORK ARRAYS.
+(  121) !            --------------------
+(  122) # 123 "eltdir_mod.F90"
+(  123) IF (ALLOCATED (ZFFT_PERM)) THEN
+(  124)   IF ((UBOUND (ZFFT_PERM, 1) /= RALD%NDGLSUR+R%NNOEXTZG) &
+(  125) & .OR. (UBOUND (ZFFT_PERM, 2) /= D%NUMP) &
+(  126) & .OR. (UBOUND (ZFFT_PERM, 3) < KLED2)) THEN
+(  127)     !$acc exit data delete (ZFFT_PERM)
+(  128)     DEALLOCATE (ZFFT_PERM)
+(  129)   ENDIF
+(  130) ENDIF
+(  131) # 132 "eltdir_mod.F90"
+(  132) IF (.NOT. ALLOCATED (ZFFT_PERM)) THEN
+(  133)   ALLOCATE (ZFFT_PERM (RALD%NDGLSUR+R%NNOEXTZG,D%NUMP,KLED2))
+(  134)   !$acc enter data create (ZFFT_PERM)
+(  135) ENDIF
+(  136) # 138 "eltdir_mod.F90"
+(  138) IF (ALLOCATED (ZVODI_PERM)) THEN
+(  139)   IF ((UBOUND (ZVODI_PERM, 1) /= RALD%NDGLSUR+R%NNOEXTZG) &
+(  140) & .OR. (UBOUND (ZVODI_PERM, 2) /= D%NUMP) &
+(  141) & .OR. (UBOUND (ZVODI_PERM, 3) < MAX(4*KF_UV,1))) THEN
+(  142)     !$acc exit data delete (ZVODI_PERM)
+(  143)     DEALLOCATE (ZVODI_PERM)
+(  144)   ENDIF
+(  145) ENDIF
+(  146) # 147 "eltdir_mod.F90"
+(  147) IF (.NOT. ALLOCATED (ZVODI_PERM)) THEN
+(  148)   ALLOCATE (ZVODI_PERM (RALD%NDGLSUR+R%NNOEXTZG,D%NUMP,MAX(4*KF_UV,1)))
+(  149)   !$acc enter data create (ZVODI_PERM)
+(  150) ENDIF
+(  151) # 152 "eltdir_mod.F90"
+(  152) ZFFT => ZFFT_PERM (:,:,1:KLED2)
+(  153) ZVODI => ZVODI_PERM (:,:,1:MAX(4*KF_UV,1))
+(  154) # 155 "eltdir_mod.F90"
+(  155) !$acc kernels present (ZVODI, ZFFT)
+(  156) ZVODI = 0._JPRB
+(  157) ZFFT = 0._JPRB
+(  158) !$acc end kernels
+(  159) # 161 "eltdir_mod.F90"
+(  161) IFC = 2 * KF_FS
+(  162) # 163 "eltdir_mod.F90"
+(  163) CALL EPRFI2(KF_FS,ZFFT)
+(  164) # 165 "eltdir_mod.F90"
+(  165) !*     2.    PERIODICIZATION IN Y DIRECTION
+(  166) !            ------------------------------
+(  167) # 168 "eltdir_mod.F90"
+(  168) IF(R%NNOEXTZG>0) THEN
+(  169)   CALL ABOR1 ('ELTDIR: BIPERIODICIZATION NOT SUPPORTED')
+(  170) ENDIF
+(  171) # 172 "eltdir_mod.F90"
+(  172) !*     3.    DIRECT LEGENDRE TRANSFORM.
+(  173) !            --------------------------
+(  174) # 175 "eltdir_mod.F90"
+(  175) CALL ELEDIR(IFC,KLED2,ZFFT)
+(  176) # 178 "eltdir_mod.F90"
+(  178) !*     4.    COMPUTE VORTICITY AND DIVERGENCE.
+(  179) !            ---------------------------------
+(  180) # 181 "eltdir_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:15      page 9
+
+(  181) IF( KF_UV > 0 ) THEN
+(  182)   IUS = 1
+(  183)   IUE = 2*KF_UV
+(  184)   IVS = 2*KF_UV+1
+(  185)   IVE = 4*KF_UV
+(  186)   IVORS = 1
+(  187)   IVORE = 2*KF_UV
+(  188)   IDIVS = 2*KF_UV+1
+(  189)   IDIVE = 4*KF_UV
+(  190) # 191 "eltdir_mod.F90"
+(  191)   CALL EUVTVD(KF_UV,ZFFT(:,:,IUS:IUE),ZFFT(:,:,IVS:IVE),&
+(  192)    & ZVODI(:,:,IVORS:IVORE),ZVODI(:,:,IDIVS:IDIVE))
+(  193) # 194 "eltdir_mod.F90"
+(  194) !*     5.    COMMUNICATION OF MEAN WIND
+(  195) !            --------------------------
+(  196) # 198 "eltdir_mod.F90"
+(  198)   DO JM=1,D%NUMP
+(  199)     IM = D%MYMS(JM)
+(  200) # 201 "eltdir_mod.F90"
+(  201)     CALL EUVTVD_COMM(IM,JM,KF_UV,KFLDPTRUV,ZFFT(:,JM,IUS:IUE), &
+(  202)      & ZFFT(:,JM,IVS:IVE),ZVODI(:,JM,IVORS:IVORE),ZVODI(:,JM,IDIVS:IDIVE), &
+(  203)      & PSPMEANU,PSPMEANV)
+(  204) # 205 "eltdir_mod.F90"
+(  205)   ENDDO
+(  206) # 207 "eltdir_mod.F90"
+(  207) ENDIF
+(  208) # 210 "eltdir_mod.F90"
+(  210) !*       6.    UPDATE SPECTRAL ARRAYS.
+(  211) !              -----------------------
+(  212) # 213 "eltdir_mod.F90"
+(  213) CALL EUPDSP(KF_UV,KF_SCALARS,ZFFT,ZVODI, &
+(  214)  & PSPVOR,PSPDIV,PSPSCALAR,PSPSC3A,PSPSC3B,PSPSC2,KFLDPTRUV,KFLDPTRSC)
+(  215) # 216 "eltdir_mod.F90"
+(  216) IF (.NOT. LALLOPERM2) THEN
+(  217)   !$acc exit data delete (ZFFT_PERM, ZVODI_PERM)
+(  218)   DEALLOCATE (ZFFT_PERM)
+(  219)   DEALLOCATE (ZVODI_PERM)
+(  220) ENDIF
+(  221) # 222 "eltdir_mod.F90"
+(  222) IF (LHOOK) CALL DR_HOOK('ELTDIR_MOD:ELTDIR',1,ZHOOK_HANDLE)
+(  223) !     ------------------------------------------------------------------
+(  224) # 225 "eltdir_mod.F90"
+(  225) END SUBROUTINE ELTDIR
+(  226) END MODULE ELTDIR_MOD

@@ -1,0 +1,349 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:59      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: euvtvdad_mod.F90
+
+(    1) MODULE EUVTVDAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EUVTVDAD(KM,KMLOC,KFIELD,KFLDPTR,PU,PV,PVOR,PDIV,PSPMEANU,PSPMEANV)
+(    4) 
+(    5) !**** *EUVTVDAD* - Compute vor/div from u and v in spectral space
+(    6) 
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        To compute vorticity and divergence from u and v in spectral
+(   10) !       space. Input u and v from KM to NTMAX+1, output vorticity and
+(   11) !       divergence from KM to NTMAX.
+(   12) 
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !        CALL EUVTVDAD()
+(   16) 
+(   17) !        Explicit arguments :  KM - zonal wave-number
+(   18) !        --------------------  KFIELD - number of fields (levels)
+(   19) !                              KFLDPTR - fields pointers
+(   20) !                              PEPSNM - REPSNM for wavenumber KM
+(   21) !                              PU - u wind component for zonal
+(   22) !                                   wavenumber KM
+(   23) !                              PV - v wind component for zonal
+(   24) !                                   wavenumber KM
+(   25) !                              PVOR - vorticity for zonal
+(   26) !                                     wavenumber KM
+(   27) !                              PDIV - divergence for zonal
+(   28) !                                     wavenumber KM
+(   29) 
+(   30) !     Method.  See ref.
+(   31) !     -------
+(   32) 
+(   33) !     Externals.  None.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:59      page 2
+
+(   34) !     ----------
+(   35) 
+(   36) !     Reference.
+(   37) !     ----------
+(   38) !        ECMWF Research Department documentation of the IFS
+(   39) 
+(   40) !     Author.
+(   41) !     -------
+(   42) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   43) 
+(   44) !     Modifications.
+(   45) !     --------------
+(   46) !        Original : 91-07-01
+(   47) !        D. Giard : NTMAX instead of NSMAX
+(   48) !        01-08-27 : R. El Khatib Fix for NPROMATR /= 0
+(   49) !        03-03-03   G. Radnoti: b-level conform mean wind distribution
+(   50) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   51) !        01-Dec-2004   A. Deckmyn    removed erasing of mean wind 
+(   52) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   53) !     ------------------------------------------------------------------
+(   54) 
+(   55) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   56) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   57) 
+(   58) USE TPM_DIM         ,ONLY : R
+(   59) !USE TPM_FIELDS
+(   60) 
+(   61) USE TPMALD_GEO      ,ONLY : GALD
+(   62) USE TPMALD_DISTR    ,ONLY : DALD
+(   63) !
+(   64) 
+(   65) IMPLICIT NONE
+(   66) 
+(   67) INTEGER(KIND=JPIM), INTENT(IN) :: KFIELD, KM, KMLOC
+(   68) REAL(KIND=JPRB), INTENT(IN)    :: PVOR(:,:),PDIV(:,:)
+(   69) REAL(KIND=JPRB), INTENT(INOUT) :: PU  (:,:),PV  (:,:)
+(   70) 
+(   71) INTEGER(KIND=JPIM), OPTIONAL, INTENT(IN) :: KFLDPTR(:)
+(   72) REAL(KIND=JPRB),    OPTIONAL, INTENT(INOUT) :: PSPMEANU(:),PSPMEANV(:)
+(   73) 
+(   74) INTEGER(KIND=JPIM) :: II, IN, IR, J, JN, IFLD
+(   75) 
+(   76) REAL(KIND=JPRB) :: ZKM
+(   77) REAL(KIND=JPRB) :: ZIN
+(   78) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   79) 
+(   80) !     ------------------------------------------------------------------
+(   81) 
+(   82) IF (LHOOK) CALL DR_HOOK('EUVTVDAD_MOD:EUVTVDAD',0,ZHOOK_HANDLE)
+(   83) 
+(   84) IF (KM == 0) THEN
+(   85)   IF (PRESENT(KFLDPTR)) THEN
+(   86)     DO J=1,KFIELD
+(   87)       IR=2*J-1
+(   88)       IFLD=KFLDPTR(J)
+(   89)       PU(1,IR)=PSPMEANU(IFLD)
+(   90)       PV(1,IR)=PSPMEANV(IFLD)
+(   91)     ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:59      page 3
+
+(   92)   ELSE
+(   93)     DO J=1,KFIELD
+(   94)       IR=2*J-1
+(   95)       PU(1,IR)=PSPMEANU(J)
+(   96)       PV(1,IR)=PSPMEANV(J)
+(   97)     ENDDO
+(   98)   ENDIF
+(   99) ENDIF
+(  100) 
+(  101) DO J=1,2*KFIELD
+(  102)   DO JN=1,DALD%NCPL2M(KM),2
+(  103)     IN=(JN-1)/2
+(  104)     ZIN=REAL(IN,JPRB)*GALD%EYWN
+(  105)     PU(JN+1,J) =  PU(JN+1,J) + ZIN * PVOR(JN  ,J)
+(  106)     PU(JN  ,J) =  PU(JN  ,J) - ZIN * PVOR(JN+1,J)
+(  107)     PV(JN+1,J) =  PV(JN+1,J) - ZIN * PDIV(JN  ,J)
+(  108)     PV(JN  ,J) =  PV(JN  ,J) + ZIN * PDIV(JN+1,J)
+(  109)   ENDDO
+(  110) ENDDO
+(  111) 
+(  112) ZKM=REAL(KM,JPRB)*GALD%EXWN
+(  113) DO J=1,KFIELD
+(  114)   IR=2*J-1
+(  115)   II=IR+1
+(  116)   DO JN=1,R%NDGL+R%NNOEXTZG
+(  117)     PU(JN,II) = PU(JN,II) - ZKM * PDIV(JN,IR)
+(  118)     PU(JN,IR) = PU(JN,IR) + ZKM * PDIV(JN,II)
+(  119)     PV(JN,II) = PV(JN,II) - ZKM * PVOR(JN,IR)
+(  120)     PV(JN,IR) = PV(JN,IR) + ZKM * PVOR(JN,II)
+(  121)   ENDDO
+(  122) ENDDO
+(  123) IF (LHOOK) CALL DR_HOOK('EUVTVDAD_MOD:EUVTVDAD',1,ZHOOK_HANDLE)
+(  124) 
+(  125) !     ------------------------------------------------------------------
+(  126) 
+(  127) END SUBROUTINE EUVTVDAD
+(  128) END MODULE EUVTVDAD_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:59      page 4
+
+(    1) # 1 "euvtvdad_mod.F90"
+(    1) MODULE EUVTVDAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EUVTVDAD(KM,KMLOC,KFIELD,KFLDPTR,PU,PV,PVOR,PDIV,PSPMEANU,PSPMEANV)
+(    4) # 5 "euvtvdad_mod.F90"
+(    5) !**** *EUVTVDAD* - Compute vor/div from u and v in spectral space
+(    6) # 7 "euvtvdad_mod.F90"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        To compute vorticity and divergence from u and v in spectral
+(   10) !       space. Input u and v from KM to NTMAX+1, output vorticity and
+(   11) !       divergence from KM to NTMAX.
+(   12) # 13 "euvtvdad_mod.F90"
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !        CALL EUVTVDAD()
+(   16) # 17 "euvtvdad_mod.F90"
+(   17) !        Explicit arguments :  KM - zonal wave-number
+(   18) !        --------------------  KFIELD - number of fields (levels)
+(   19) !                              KFLDPTR - fields pointers
+(   20) !                              PEPSNM - REPSNM for wavenumber KM
+(   21) !                              PU - u wind component for zonal
+(   22) !                                   wavenumber KM
+(   23) !                              PV - v wind component for zonal
+(   24) !                                   wavenumber KM
+(   25) !                              PVOR - vorticity for zonal
+(   26) !                                     wavenumber KM
+(   27) !                              PDIV - divergence for zonal
+(   28) !                                     wavenumber KM
+(   29) # 30 "euvtvdad_mod.F90"
+(   30) !     Method.  See ref.
+(   31) !     -------
+(   32) # 33 "euvtvdad_mod.F90"
+(   33) !     Externals.  None.
+(   34) !     ----------
+(   35) # 36 "euvtvdad_mod.F90"
+(   36) !     Reference.
+(   37) !     ----------
+(   38) !        ECMWF Research Department documentation of the IFS
+(   39) # 40 "euvtvdad_mod.F90"
+(   40) !     Author.
+(   41) !     -------
+(   42) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   43) # 44 "euvtvdad_mod.F90"
+(   44) !     Modifications.
+(   45) !     --------------
+(   46) !        Original : 91-07-01
+(   47) !        D. Giard : NTMAX instead of NSMAX
+(   48) !        01-08-27 : R. El Khatib Fix for NPROMATR /= 0
+(   49) !        03-03-03   G. Radnoti: b-level conform mean wind distribution
+(   50) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   51) !        01-Dec-2004   A. Deckmyn    removed erasing of mean wind 
+(   52) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   53) !     ------------------------------------------------------------------
+(   54) # 55 "euvtvdad_mod.F90"
+(   55) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   56) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   57) # 58 "euvtvdad_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:59      page 5
+
+(   58) USE TPM_DIM         ,ONLY : R
+(   59) !USE TPM_FIELDS
+(   60) # 61 "euvtvdad_mod.F90"
+(   61) USE TPMALD_GEO      ,ONLY : GALD
+(   62) USE TPMALD_DISTR    ,ONLY : DALD
+(   63) !
+(   64) # 65 "euvtvdad_mod.F90"
+(   65) IMPLICIT NONE
+(   66) # 67 "euvtvdad_mod.F90"
+(   67) INTEGER(KIND=JPIM), INTENT(IN) :: KFIELD, KM, KMLOC
+(   68) REAL(KIND=JPRB), INTENT(IN)    :: PVOR(:,:),PDIV(:,:)
+(   69) REAL(KIND=JPRB), INTENT(INOUT) :: PU  (:,:),PV  (:,:)
+(   70) # 71 "euvtvdad_mod.F90"
+(   71) INTEGER(KIND=JPIM), OPTIONAL, INTENT(IN) :: KFLDPTR(:)
+(   72) REAL(KIND=JPRB),    OPTIONAL, INTENT(INOUT) :: PSPMEANU(:),PSPMEANV(:)
+(   73) # 74 "euvtvdad_mod.F90"
+(   74) INTEGER(KIND=JPIM) :: II, IN, IR, J, JN, IFLD
+(   75) # 76 "euvtvdad_mod.F90"
+(   76) REAL(KIND=JPRB) :: ZKM
+(   77) REAL(KIND=JPRB) :: ZIN
+(   78) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   79) # 80 "euvtvdad_mod.F90"
+(   80) !     ------------------------------------------------------------------
+(   81) # 82 "euvtvdad_mod.F90"
+(   82) IF (LHOOK) CALL DR_HOOK('EUVTVDAD_MOD:EUVTVDAD',0,ZHOOK_HANDLE)
+(   83) # 84 "euvtvdad_mod.F90"
+(   84) IF (KM == 0) THEN
+(   85)   IF (PRESENT(KFLDPTR)) THEN
+(   86)     DO J=1,KFIELD
+(   87)       IR=2*J-1
+(   88)       IFLD=KFLDPTR(J)
+(   89)       PU(1,IR)=PSPMEANU(IFLD)
+(   90)       PV(1,IR)=PSPMEANV(IFLD)
+(   91)     ENDDO
+(   92)   ELSE
+(   93)     DO J=1,KFIELD
+(   94)       IR=2*J-1
+(   95)       PU(1,IR)=PSPMEANU(J)
+(   96)       PV(1,IR)=PSPMEANV(J)
+(   97)     ENDDO
+(   98)   ENDIF
+(   99) ENDIF
+(  100) # 101 "euvtvdad_mod.F90"
+(  101) DO J=1,2*KFIELD
+(  102)   DO JN=1,DALD%NCPL2M(KM),2
+(  103)     IN=(JN-1)/2
+(  104)     ZIN=REAL(IN,JPRB)*GALD%EYWN
+(  105)     PU(JN+1,J) =  PU(JN+1,J) + ZIN * PVOR(JN  ,J)
+(  106)     PU(JN  ,J) =  PU(JN  ,J) - ZIN * PVOR(JN+1,J)
+(  107)     PV(JN+1,J) =  PV(JN+1,J) - ZIN * PDIV(JN  ,J)
+(  108)     PV(JN  ,J) =  PV(JN  ,J) + ZIN * PDIV(JN+1,J)
+(  109)   ENDDO
+(  110) ENDDO
+(  111) # 112 "euvtvdad_mod.F90"
+(  112) ZKM=REAL(KM,JPRB)*GALD%EXWN
+(  113) DO J=1,KFIELD
+(  114)   IR=2*J-1
+(  115)   II=IR+1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:59      page 6
+
+(  116)   DO JN=1,R%NDGL+R%NNOEXTZG
+(  117)     PU(JN,II) = PU(JN,II) - ZKM * PDIV(JN,IR)
+(  118)     PU(JN,IR) = PU(JN,IR) + ZKM * PDIV(JN,II)
+(  119)     PV(JN,II) = PV(JN,II) - ZKM * PVOR(JN,IR)
+(  120)     PV(JN,IR) = PV(JN,IR) + ZKM * PVOR(JN,II)
+(  121)   ENDDO
+(  122) ENDDO
+(  123) IF (LHOOK) CALL DR_HOOK('EUVTVDAD_MOD:EUVTVDAD',1,ZHOOK_HANDLE)
+(  124) # 125 "euvtvdad_mod.F90"
+(  125) !     ------------------------------------------------------------------
+(  126) # 127 "euvtvdad_mod.F90"
+(  127) END SUBROUTINE EUVTVDAD
+(  128) END MODULE EUVTVDAD_MOD

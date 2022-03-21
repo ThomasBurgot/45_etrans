@@ -1,0 +1,314 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:50      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: etibihie.F90
+
+(    1) SUBROUTINE ETIBIHIE(KDLON,KDGL,KNUBI,KDLUX,KDGUX,&
+(    2)  & KSTART,KDLSM,PGPBI,LDBIX,LDBIY,KDADD)  
+(    3) 
+(    4) !****   tool  ETIBIHIE : Doubly-periodicisation : isotropic spline
+(    5) !       -------------   method.
+(    6) 
+(    7) !   purpose  :
+(    8) !   --------
+(    9) !     KNUBI  horizontal fields which are known on C U I,
+(   10) !     are extended over E, in order to obtain  doubly-periodic
+(   11) !     fields.
+(   12) !     IF LDBIX is equal .TRUE. , then the fields are periodicise
+(   13) !     in the x ( or longitude ) direction.  If it is not the case,
+(   14) !     KDLUX must be equal to KDLON.
+(   15) !     IF LDBIY is equal .TRUE. , then the fields are periodicise
+(   16) !     in the y ( or latitude ) direction.   If it is not the case,
+(   17) !     KDGUX must be equal to KDGL.
+(   18) 
+(   19) !*     *CALL* *ETIBIHIE*(...)
+(   20) 
+(   21) !      externals :
+(   22) !      ----------
+(   23) !      ESPLIN  spline extension
+(   24) !      ESMOOTH smoothing across to get isotropy.
+(   25) 
+(   26) !      explicit arguments :
+(   27) !      ------------------
+(   28) !     KDLON : upper bound for the x (or longitude) dimension
+(   29) !             of the gridpoint array on C U I U E
+(   30) !     KDGL : upper bound for the y (or latitude) dimension
+(   31) !             of the gridpoint array on C U I U E
+(   32) !     KNUBI : number of horizontal fields to doubly-periodicise.
+(   33) !     KDLUX : upper bound for the x (or longitude) dimension
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:50      page 2
+
+(   34) !             of  C U I.
+(   35) !     KDGUX : upper bound for the y (or latitude) dimension
+(   36) !             of  C U I.
+(   37) !     KSTART : first  dimension in x direction of g-p array
+(   38) !     KDLSM  : second dimension in x direction of g-p array
+(   39) !     PGPBI : gridpoint array on C U I U E.
+(   40) !     LDBIX  : logical to periodicize or not
+(   41) !             in the x ( or longitude ) direction.
+(   42) !     LDBIY  : logical to periodicize  or not
+(   43) !             in the y ( or latitude ) direction.
+(   44) !     KDADD : 1 to test biperiodiz.
+(   45) 
+(   46) !      references :
+(   47) !      ----------
+(   48) 
+(   49) !      author :
+(   50) !      ------
+(   51) !          V. Ducrocq
+(   52) 
+(   53) !      modification :
+(   54) !      ------------
+(   55) !          A. Stanesic  28/03/2008: KDADD - test of externalized biper.
+(   56) ! -------------------------------------------------------------------------
+(   57) 
+(   58) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   59) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   60) 
+(   61) USE ESPLINE_MOD
+(   62) USE ESMOOTHE_MOD
+(   63) 
+(   64) ! -------------------------------------------------------------------------
+(   65) 
+(   66) IMPLICIT NONE
+(   67) 
+(   68) INTEGER(KIND=JPIM),INTENT(IN)               :: KNUBI
+(   69) INTEGER(KIND=JPIM),INTENT(IN)               :: KSTART
+(   70) INTEGER(KIND=JPIM),INTENT(IN)               :: KDLSM 
+(   71) INTEGER(KIND=JPIM),INTENT(IN)               :: KDLON 
+(   72) INTEGER(KIND=JPIM),INTENT(IN)               :: KDGL 
+(   73) INTEGER(KIND=JPIM),INTENT(IN)               :: KDLUX 
+(   74) INTEGER(KIND=JPIM),INTENT(IN)               :: KDGUX 
+(   75) INTEGER(KIND=JPIM),INTENT(IN)               :: KDADD
+(   76) REAL(KIND=JPRB),INTENT(INOUT)               :: PGPBI(KSTART:KDLSM+KDADD,KNUBI,1:KDGL+KDADD) 
+(   77) LOGICAL,INTENT(IN)                          :: LDBIX 
+(   78) LOGICAL,INTENT(IN)                          :: LDBIY 
+(   79) 
+(   80) ! -------------------------------------------------------------------------
+(   81) 
+(   82) REAL(KIND=JPRB) :: ZALFA
+(   83) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   84) 
+(   85) ! -------------------------------------------------------------------------
+(   86) IF (LHOOK) CALL DR_HOOK('ETIBIHIE',0,ZHOOK_HANDLE)
+(   87) ! -------------------------------------------------------------------------
+(   88) 
+(   89) !*         1. DOUBLY-PERIODICISE :
+(   90) !             ------------------
+(   91) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:50      page 3
+
+(   92) ZALFA = 0.0_JPRB
+(   93) 
+(   94) CALL ESPLINE(1,KDLON,1,KDGL,KDLUX,KDGUX,KSTART,&
+(   95)  & KDLSM+KDADD,1,KDGL+KDADD,KNUBI,PGPBI,ZALFA,LDBIX,LDBIY,KDADD)
+(   96) CALL ESMOOTHE(1,KDLON,1,KDGL,KDLUX,KDGUX,KSTART,&
+(   97)  & KDLSM+KDADD,1,KDGL+KDADD,KNUBI,PGPBI,LDBIX,LDBIY)  
+(   98) 
+(   99) ! -------------------------------------------------------------------------
+(  100) IF (LHOOK) CALL DR_HOOK('ETIBIHIE',1,ZHOOK_HANDLE)
+(  101) END SUBROUTINE ETIBIHIE
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:50      page 4
+
+(    1) # 1 "etibihie.F90"
+(    1) SUBROUTINE ETIBIHIE(KDLON,KDGL,KNUBI,KDLUX,KDGUX,&
+(    2)  & KSTART,KDLSM,PGPBI,LDBIX,LDBIY,KDADD)  
+(    3) # 4 "etibihie.F90"
+(    4) !****   tool  ETIBIHIE : Doubly-periodicisation : isotropic spline
+(    5) !       -------------   method.
+(    6) # 7 "etibihie.F90"
+(    7) !   purpose  :
+(    8) !   --------
+(    9) !     KNUBI  horizontal fields which are known on C U I,
+(   10) !     are extended over E, in order to obtain  doubly-periodic
+(   11) !     fields.
+(   12) !     IF LDBIX is equal .TRUE. , then the fields are periodicise
+(   13) !     in the x ( or longitude ) direction.  If it is not the case,
+(   14) !     KDLUX must be equal to KDLON.
+(   15) !     IF LDBIY is equal .TRUE. , then the fields are periodicise
+(   16) !     in the y ( or latitude ) direction.   If it is not the case,
+(   17) !     KDGUX must be equal to KDGL.
+(   18) # 19 "etibihie.F90"
+(   19) !*     *CALL* *ETIBIHIE*(...)
+(   20) # 21 "etibihie.F90"
+(   21) !      externals :
+(   22) !      ----------
+(   23) !      ESPLIN  spline extension
+(   24) !      ESMOOTH smoothing across to get isotropy.
+(   25) # 26 "etibihie.F90"
+(   26) !      explicit arguments :
+(   27) !      ------------------
+(   28) !     KDLON : upper bound for the x (or longitude) dimension
+(   29) !             of the gridpoint array on C U I U E
+(   30) !     KDGL : upper bound for the y (or latitude) dimension
+(   31) !             of the gridpoint array on C U I U E
+(   32) !     KNUBI : number of horizontal fields to doubly-periodicise.
+(   33) !     KDLUX : upper bound for the x (or longitude) dimension
+(   34) !             of  C U I.
+(   35) !     KDGUX : upper bound for the y (or latitude) dimension
+(   36) !             of  C U I.
+(   37) !     KSTART : first  dimension in x direction of g-p array
+(   38) !     KDLSM  : second dimension in x direction of g-p array
+(   39) !     PGPBI : gridpoint array on C U I U E.
+(   40) !     LDBIX  : logical to periodicize or not
+(   41) !             in the x ( or longitude ) direction.
+(   42) !     LDBIY  : logical to periodicize  or not
+(   43) !             in the y ( or latitude ) direction.
+(   44) !     KDADD : 1 to test biperiodiz.
+(   45) # 46 "etibihie.F90"
+(   46) !      references :
+(   47) !      ----------
+(   48) # 49 "etibihie.F90"
+(   49) !      author :
+(   50) !      ------
+(   51) !          V. Ducrocq
+(   52) # 53 "etibihie.F90"
+(   53) !      modification :
+(   54) !      ------------
+(   55) !          A. Stanesic  28/03/2008: KDADD - test of externalized biper.
+(   56) ! -------------------------------------------------------------------------
+(   57) # 58 "etibihie.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:50      page 5
+
+(   58) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   59) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   60) # 61 "etibihie.F90"
+(   61) USE ESPLINE_MOD
+(   62) USE ESMOOTHE_MOD
+(   63) # 64 "etibihie.F90"
+(   64) ! -------------------------------------------------------------------------
+(   65) # 66 "etibihie.F90"
+(   66) IMPLICIT NONE
+(   67) # 68 "etibihie.F90"
+(   68) INTEGER(KIND=JPIM),INTENT(IN)               :: KNUBI
+(   69) INTEGER(KIND=JPIM),INTENT(IN)               :: KSTART
+(   70) INTEGER(KIND=JPIM),INTENT(IN)               :: KDLSM 
+(   71) INTEGER(KIND=JPIM),INTENT(IN)               :: KDLON 
+(   72) INTEGER(KIND=JPIM),INTENT(IN)               :: KDGL 
+(   73) INTEGER(KIND=JPIM),INTENT(IN)               :: KDLUX 
+(   74) INTEGER(KIND=JPIM),INTENT(IN)               :: KDGUX 
+(   75) INTEGER(KIND=JPIM),INTENT(IN)               :: KDADD
+(   76) REAL(KIND=JPRB),INTENT(INOUT)               :: PGPBI(KSTART:KDLSM+KDADD,KNUBI,1:KDGL+KDADD) 
+(   77) LOGICAL,INTENT(IN)                          :: LDBIX 
+(   78) LOGICAL,INTENT(IN)                          :: LDBIY 
+(   79) # 80 "etibihie.F90"
+(   80) ! -------------------------------------------------------------------------
+(   81) # 82 "etibihie.F90"
+(   82) REAL(KIND=JPRB) :: ZALFA
+(   83) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   84) # 85 "etibihie.F90"
+(   85) ! -------------------------------------------------------------------------
+(   86) IF (LHOOK) CALL DR_HOOK('ETIBIHIE',0,ZHOOK_HANDLE)
+(   87) ! -------------------------------------------------------------------------
+(   88) # 89 "etibihie.F90"
+(   89) !*         1. DOUBLY-PERIODICISE :
+(   90) !             ------------------
+(   91) # 92 "etibihie.F90"
+(   92) ZALFA = 0.0_JPRB
+(   93) # 94 "etibihie.F90"
+(   94) CALL ESPLINE(1,KDLON,1,KDGL,KDLUX,KDGUX,KSTART,&
+(   95)  & KDLSM+KDADD,1,KDGL+KDADD,KNUBI,PGPBI,ZALFA,LDBIX,LDBIY,KDADD)
+(   96) CALL ESMOOTHE(1,KDLON,1,KDGL,KDLUX,KDGUX,KSTART,&
+(   97)  & KDLSM+KDADD,1,KDGL+KDADD,KNUBI,PGPBI,LDBIX,LDBIY)  
+(   98) # 99 "etibihie.F90"
+(   99) ! -------------------------------------------------------------------------
+(  100) IF (LHOOK) CALL DR_HOOK('ETIBIHIE',1,ZHOOK_HANDLE)
+(  101) END SUBROUTINE ETIBIHIE

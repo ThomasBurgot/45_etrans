@@ -1,0 +1,361 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: vd2uv_mod.F90
+
+(    1) MODULE VD2UV_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE VD2UV(KM,KMLOC,KF_UV,KLEI2,PSPVOR,PSPDIV,PU,PV)
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) 
+(    8) USE TPM_CONSTANTS
+(    9) USE TPM_DIM         ,ONLY : R
+(   10) USE TPM_DISTR       ,ONLY : D
+(   11) 
+(   12) USE PREPSNM_MOD     ,ONLY : PREPSNM
+(   13) USE PRFI1B_MOD      ,ONLY : PRFI1B
+(   14) USE VDTUV_MOD       ,ONLY : VDTUV
+(   15) 
+(   16) 
+(   17) !**** *VD2UV* - U and V from Vor/div
+(   18) !
+(   19) !     Purpose.
+(   20) !     --------
+(   21) !       
+(   22) !**   Interface.
+(   23) !     ----------
+(   24) !        *CALL* *VD2UV(...)
+(   25) 
+(   26) !        Explicit arguments :
+(   27) !        --------------------
+(   28) !          KM        - zonal wavenumber
+(   29) !          KMLOC     - local zonal wavenumber
+(   30) !          PSPVOR    - spectral vorticity
+(   31) !          PSPDIV    - spectral divergence
+(   32) !          PU(:,:)   - spectral U (out)
+(   33) !          PV(:,:)   - spectral V (out)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 2
+
+(   34) 
+(   35) 
+(   36) !        Implicit arguments :  
+(   37) 
+(   38) !     Method.
+(   39) !     -------
+(   40) 
+(   41) !     Externals.
+(   42) !     ----------
+(   43) 
+(   44) !         PREPSNM - prepare REPSNM for wavenumber KM
+(   45) !         PRFI1B  - prepares the spectral fields
+(   46) !         VDTUV   - compute u and v from vorticity and divergence
+(   47) 
+(   48) !     Reference.
+(   49) !     ----------
+(   50) !        ECMWF Research Department documentation of the IFS
+(   51) !        Temperton, 1991, MWR 119 p1303
+(   52) 
+(   53) !     Author.
+(   54) !     -------
+(   55) !        Mats Hamrud  *ECMWF*
+(   56) 
+(   57) !     Modifications.
+(   58) !     --------------
+(   59) !        Original : July 2015
+(   60) !       
+(   61) !     ------------------------------------------------------------------
+(   62) 
+(   63) IMPLICIT NONE
+(   64) 
+(   65) INTEGER(KIND=JPIM), INTENT(IN) :: KM
+(   66) INTEGER(KIND=JPIM), INTENT(IN) :: KMLOC
+(   67) INTEGER(KIND=JPIM), INTENT(IN) :: KF_UV
+(   68) INTEGER(KIND=JPIM), INTENT(IN) :: KLEI2
+(   69) 
+(   70) REAL(KIND=JPRB)   , INTENT(IN)  :: PSPVOR(:,:)
+(   71) REAL(KIND=JPRB)   , INTENT(IN)  :: PSPDIV(:,:)
+(   72) REAL(KIND=JPRB)   , INTENT(OUT) :: PU(:,:)
+(   73) REAL(KIND=JPRB)   , INTENT(OUT) :: PV(:,:)
+(   74) 
+(   75) REAL(KIND=JPRB) :: ZIA(R%NLEI1,KLEI2)
+(   76) REAL(KIND=JPRBT) :: ZEPSNM(0:R%NTMAX+2),ZA_R
+(   77) 
+(   78) INTEGER(KIND=JPIM) :: IFC, ISTA, IIFC, IDGLU, JGL, JFLD,ILCM
+(   79) INTEGER(KIND=JPIM) :: IVORL,IVORU,IDIVL,IDIVU,IUL,IUU,IVL,IVU,ISL,II,IR,INM,J
+(   80) INTEGER(KIND=JPIM) :: IFIRST, ILAST, IOFF
+(   81) 
+(   82) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   83) 
+(   84) !     ------------------------------------------------------------------
+(   85) 
+(   86) !*       1.       PERFORM LEGENDRE TRANFORM.
+(   87) !                 --------------------------
+(   88) 
+(   89) IF (LHOOK) CALL DR_HOOK('VD2UV_MOD',0,ZHOOK_HANDLE)
+(   90) 
+(   91) !     ------------------------------------------------------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 3
+
+(   92) 
+(   93) !*       1.    PREPARE ZEPSNM.
+(   94) !              ---------------
+(   95) 
+(   96) stop 'Error: code path not (yet) supported in GPU version'
+(   97) !CALL PREPSNM(KM,KMLOC,ZEPSNM)
+(   98) 
+(   99) !     ------------------------------------------------------------------
+(  100) 
+(  101) 
+(  102) !*       3.    SPECTRAL COMPUTATIONS FOR U,V AND DERIVATIVES.
+(  103) !              ----------------------------------------------
+(  104) 
+(  105) IFIRST = 1
+(  106) ILAST  = 4*KF_UV
+(  107) 
+(  108) IF (KF_UV > 0) THEN
+(  109)   IVORL = 1
+(  110)   IVORU = 2*KF_UV
+(  111)   IDIVL = 2*KF_UV+1
+(  112)   IDIVU = 4*KF_UV
+(  113)   IUL   = 4*KF_UV+1
+(  114)   IUU   = 6*KF_UV
+(  115)   IVL   = 6*KF_UV+1
+(  116)   IVU   = 8*KF_UV
+(  117)   stop 'Error: code path not (yet) supported in GPU version'
+(  118)   !CALL PRFI1B(KM,ZIA(:,IVORL:IVORU),PSPVOR,KF_UV)
+(  119)   !CALL PRFI1B(KM,ZIA(:,IDIVL:IDIVU),PSPDIV,KF_UV)
+(  120) 
+(  121)   !CALL VDTUV(KM,KF_UV,ZEPSNM,ZIA(:,IVORL:IVORU),ZIA(:,IDIVL:IDIVU),&
+(  122)   !         & ZIA(:,IUL:IUU),ZIA(:,IVL:IVU))
+(  123)   ILCM = R%NSMAX+1-KM
+(  124)   IOFF = D%NASM0(KM)
+(  125)   ZA_R = 1.0_JPRBT/RA
+(  126)   DO J=1,ILCM
+(  127)     INM = IOFF+(ILCM-J)*2
+(  128)     DO JFLD=1,KF_UV
+(  129)       IR = 2*(JFLD-1)+1
+(  130)       II = IR+1
+(  131)       PU(JFLD,INM  ) = ZIA(J+2,IR+IUL-1)*ZA_R
+(  132)       PU(JFLD,INM+1) = ZIA(J+2,II+IUL-1)*ZA_R
+(  133)       PV(JFLD,INM  ) = ZIA(J+2,IR+IVL-1)*ZA_R
+(  134)       PV(JFLD,INM+1) = ZIA(J+2,II+IVL-1)*ZA_R
+(  135)     ENDDO
+(  136)   ENDDO
+(  137) ENDIF
+(  138) 
+(  139) IF (LHOOK) CALL DR_HOOK('VD2UV_MOD',1,ZHOOK_HANDLE)
+(  140) !     ------------------------------------------------------------------
+(  141) 
+(  142) END SUBROUTINE VD2UV
+(  143) END MODULE VD2UV_MOD
+(  144) 
+(  145) 
+(  146) 
+(  147) 
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 4
+
+(    1) # 1 "vd2uv_mod.F90"
+(    1) MODULE VD2UV_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE VD2UV(KM,KMLOC,KF_UV,KLEI2,PSPVOR,PSPDIV,PU,PV)
+(    4) # 5 "vd2uv_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) # 8 "vd2uv_mod.F90"
+(    8) USE TPM_CONSTANTS
+(    9) USE TPM_DIM         ,ONLY : R
+(   10) USE TPM_DISTR       ,ONLY : D
+(   11) # 12 "vd2uv_mod.F90"
+(   12) USE PREPSNM_MOD     ,ONLY : PREPSNM
+(   13) USE PRFI1B_MOD      ,ONLY : PRFI1B
+(   14) USE VDTUV_MOD       ,ONLY : VDTUV
+(   15) # 17 "vd2uv_mod.F90"
+(   17) !**** *VD2UV* - U and V from Vor/div
+(   18) !
+(   19) !     Purpose.
+(   20) !     --------
+(   21) !       
+(   22) !**   Interface.
+(   23) !     ----------
+(   24) !        *CALL* *VD2UV(...)
+(   25) # 26 "vd2uv_mod.F90"
+(   26) !        Explicit arguments :
+(   27) !        --------------------
+(   28) !          KM        - zonal wavenumber
+(   29) !          KMLOC     - local zonal wavenumber
+(   30) !          PSPVOR    - spectral vorticity
+(   31) !          PSPDIV    - spectral divergence
+(   32) !          PU(:,:)   - spectral U (out)
+(   33) !          PV(:,:)   - spectral V (out)
+(   34) # 36 "vd2uv_mod.F90"
+(   36) !        Implicit arguments :  
+(   37) # 38 "vd2uv_mod.F90"
+(   38) !     Method.
+(   39) !     -------
+(   40) # 41 "vd2uv_mod.F90"
+(   41) !     Externals.
+(   42) !     ----------
+(   43) # 44 "vd2uv_mod.F90"
+(   44) !         PREPSNM - prepare REPSNM for wavenumber KM
+(   45) !         PRFI1B  - prepares the spectral fields
+(   46) !         VDTUV   - compute u and v from vorticity and divergence
+(   47) # 48 "vd2uv_mod.F90"
+(   48) !     Reference.
+(   49) !     ----------
+(   50) !        ECMWF Research Department documentation of the IFS
+(   51) !        Temperton, 1991, MWR 119 p1303
+(   52) # 53 "vd2uv_mod.F90"
+(   53) !     Author.
+(   54) !     -------
+(   55) !        Mats Hamrud  *ECMWF*
+(   56) # 57 "vd2uv_mod.F90"
+(   57) !     Modifications.
+(   58) !     --------------
+(   59) !        Original : July 2015
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 5
+
+(   60) !       
+(   61) !     ------------------------------------------------------------------
+(   62) # 63 "vd2uv_mod.F90"
+(   63) IMPLICIT NONE
+(   64) # 65 "vd2uv_mod.F90"
+(   65) INTEGER(KIND=JPIM), INTENT(IN) :: KM
+(   66) INTEGER(KIND=JPIM), INTENT(IN) :: KMLOC
+(   67) INTEGER(KIND=JPIM), INTENT(IN) :: KF_UV
+(   68) INTEGER(KIND=JPIM), INTENT(IN) :: KLEI2
+(   69) # 70 "vd2uv_mod.F90"
+(   70) REAL(KIND=JPRB)   , INTENT(IN)  :: PSPVOR(:,:)
+(   71) REAL(KIND=JPRB)   , INTENT(IN)  :: PSPDIV(:,:)
+(   72) REAL(KIND=JPRB)   , INTENT(OUT) :: PU(:,:)
+(   73) REAL(KIND=JPRB)   , INTENT(OUT) :: PV(:,:)
+(   74) # 75 "vd2uv_mod.F90"
+(   75) REAL(KIND=JPRB) :: ZIA(R%NLEI1,KLEI2)
+(   76) REAL(KIND=JPRBT) :: ZEPSNM(0:R%NTMAX+2),ZA_R
+(   77) # 78 "vd2uv_mod.F90"
+(   78) INTEGER(KIND=JPIM) :: IFC, ISTA, IIFC, IDGLU, JGL, JFLD,ILCM
+(   79) INTEGER(KIND=JPIM) :: IVORL,IVORU,IDIVL,IDIVU,IUL,IUU,IVL,IVU,ISL,II,IR,INM,J
+(   80) INTEGER(KIND=JPIM) :: IFIRST, ILAST, IOFF
+(   81) # 82 "vd2uv_mod.F90"
+(   82) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   83) # 84 "vd2uv_mod.F90"
+(   84) !     ------------------------------------------------------------------
+(   85) # 86 "vd2uv_mod.F90"
+(   86) !*       1.       PERFORM LEGENDRE TRANFORM.
+(   87) !                 --------------------------
+(   88) # 89 "vd2uv_mod.F90"
+(   89) IF (LHOOK) CALL DR_HOOK('VD2UV_MOD',0,ZHOOK_HANDLE)
+(   90) # 91 "vd2uv_mod.F90"
+(   91) !     ------------------------------------------------------------------
+(   92) # 93 "vd2uv_mod.F90"
+(   93) !*       1.    PREPARE ZEPSNM.
+(   94) !              ---------------
+(   95) # 96 "vd2uv_mod.F90"
+(   96) stop 'Error: code path not (yet) supported in GPU version'
+(   97) !CALL PREPSNM(KM,KMLOC,ZEPSNM)
+(   98) # 99 "vd2uv_mod.F90"
+(   99) !     ------------------------------------------------------------------
+(  100) # 102 "vd2uv_mod.F90"
+(  102) !*       3.    SPECTRAL COMPUTATIONS FOR U,V AND DERIVATIVES.
+(  103) !              ----------------------------------------------
+(  104) # 105 "vd2uv_mod.F90"
+(  105) IFIRST = 1
+(  106) ILAST  = 4*KF_UV
+(  107) # 108 "vd2uv_mod.F90"
+(  108) IF (KF_UV > 0) THEN
+(  109)   IVORL = 1
+(  110)   IVORU = 2*KF_UV
+(  111)   IDIVL = 2*KF_UV+1
+(  112)   IDIVU = 4*KF_UV
+(  113)   IUL   = 4*KF_UV+1
+(  114)   IUU   = 6*KF_UV
+(  115)   IVL   = 6*KF_UV+1
+(  116)   IVU   = 8*KF_UV
+(  117)   stop 'Error: code path not (yet) supported in GPU version'
+(  118)   !CALL PRFI1B(KM,ZIA(:,IVORL:IVORU),PSPVOR,KF_UV)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 6
+
+(  119)   !CALL PRFI1B(KM,ZIA(:,IDIVL:IDIVU),PSPDIV,KF_UV)
+(  120) # 121 "vd2uv_mod.F90"
+(  121)   !CALL VDTUV(KM,KF_UV,ZEPSNM,ZIA(:,IVORL:IVORU),ZIA(:,IDIVL:IDIVU),&
+(  122)   !         & ZIA(:,IUL:IUU),ZIA(:,IVL:IVU))
+(  123)   ILCM = R%NSMAX+1-KM
+(  124)   IOFF = D%NASM0(KM)
+(  125)   ZA_R = 1.0_JPRBT/RA
+(  126)   DO J=1,ILCM
+(  127)     INM = IOFF+(ILCM-J)*2
+(  128)     DO JFLD=1,KF_UV
+(  129)       IR = 2*(JFLD-1)+1
+(  130)       II = IR+1
+(  131)       PU(JFLD,INM  ) = ZIA(J+2,IR+IUL-1)*ZA_R
+(  132)       PU(JFLD,INM+1) = ZIA(J+2,II+IUL-1)*ZA_R
+(  133)       PV(JFLD,INM  ) = ZIA(J+2,IR+IVL-1)*ZA_R
+(  134)       PV(JFLD,INM+1) = ZIA(J+2,II+IVL-1)*ZA_R
+(  135)     ENDDO
+(  136)   ENDDO
+(  137) ENDIF
+(  138) # 139 "vd2uv_mod.F90"
+(  139) IF (LHOOK) CALL DR_HOOK('VD2UV_MOD',1,ZHOOK_HANDLE)
+(  140) !     ------------------------------------------------------------------
+(  141) # 142 "vd2uv_mod.F90"
+(  142) END SUBROUTINE VD2UV
+(  143) END MODULE VD2UV_MOD

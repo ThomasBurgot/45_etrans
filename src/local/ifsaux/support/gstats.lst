@@ -1,0 +1,1076 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:51      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: gstats.F90
+
+(    1) SUBROUTINE GSTATS(KNUM,KSWITCH)
+(    2) 
+(    3) !**** *GSTATS*  - Gather timing statistics
+(    4) 
+(    5) !     PURPOSE.
+(    6) !     --------
+(    7) !       To gather timings for subsequent output by routine STATS_OUTPUT 
+(    8) 
+(    9) 
+(   10) !**   INTERFACE.
+(   11) !     ----------
+(   12) !       *CALL* *GSTATS(KNUM,KSWITCH)
+(   13) 
+(   14) !        EXPLICIT ARGUMENTS
+(   15) !        --------------------
+(   16) !        KNUM - timing event number (for list of already defined events
+(   17) !               see routine STATS_OUTPUT)
+(   18) !        KSWITCH  - KSWITCH=0 - switch on timer
+(   19) !                   KSWITCH=1 - switch off timer
+(   20) !                   KSWITCH=2 - suspend timer
+(   21) !                   KSWITCH=3 - resume  timer
+(   22) 
+(   23) !        IMPLICIT ARGUMENTS
+(   24) !        --------------------
+(   25) !        Module YOMSTATS
+(   26) 
+(   27) !     METHOD.
+(   28) !     -------
+(   29) 
+(   30) 
+(   31) !     EXTERNALS.   USER_CLOCK - timing routine
+(   32) !     ----------   MPL_BARRIER - syncronization of processors
+(   33) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:51      page 2
+
+(   34) !     REFERENCE.
+(   35) !     ----------
+(   36) !        ECMWF Research Department documentation of the IFS
+(   37) 
+(   38) !     AUTHOR.
+(   39) !     -------
+(   40) !        Mats Hamrud ECMWF
+(   41) 
+(   42) !     MODIFICATIONS.
+(   43) !     --------------
+(   44) !        ORIGINAL : 98-11-15
+(   45) !        D.Salmond: 02-02-25  Return if not master thread when called from a 
+(   46) !                             parallel region. 
+(   47) !        J.Hague:   03-06-11  Memory tracing (for NSTATS_MEM MPI tasks)
+(   48) !        G.Mozdzynski: 18 Apr 2008 Many corrections to gstats,
+(   49) !                             see LLFINDSUMB - when set is used detect gstat counter problems.
+(   50) !        G.Mozdzynski: 20 Jan 2010 Further corrections to gstats to get timed sections and
+(   51) !                             SUMB to 100 percent of the total time.
+(   52) !      F. Vana  05-Mar-2015  Support for single precision
+(   53) !     ------------------------------------------------------------------
+(   54) 
+(   55) USE PARKIND1  ,ONLY : JPRD, JPIM     ,JPRB     ,JPIB
+(   56) USE YOMHOOK   ,ONLY : LHOOK, DR_HOOK
+(   57) 
+(   58) USE YOMGSTATS  
+(   59) USE MPL_MODULE
+(   60) USE MPL_STATS_MOD
+(   61) USE OML_MOD
+(   62) 
+(   63) IMPLICIT NONE
+(   64) 
+(   65) INTEGER(KIND=JPIM),INTENT(IN) :: KNUM
+(   66) INTEGER(KIND=JPIM),INTENT(IN) :: KSWITCH
+(   67) 
+(   68) INTEGER(KIND=JPIM) :: IMOD,ICALL
+(   69) INTEGER(KIND=JPIM) :: IIMEM, IIPAG, IIMEMC
+(   70) INTEGER(KIND=JPIB) :: IMEM, IMEMH, IMEMS, IMEMC, IPAG, INUM
+(   71) INTEGER(KIND=JPIB) :: GETMAXRSS, GETHWM, GETSTK, GETCURHEAP, GETPAG
+(   72) EXTERNAL GETMAXRSS, GETHWM, GETSTK, GETCURHEAP, GETPAG
+(   73) REAL(KIND=JPRD) :: ZTIMED,ZCLOCK,ZCLOCK1,ZTIME,ZTCPU,ZVCPU
+(   74) LOGICAL :: LLFIRST=.TRUE.
+(   75) LOGICAL :: LLMFIRST=.TRUE.
+(   76)   CHARACTER(LEN=32), SAVE :: CCDESC_DRHOOK(JPMAXSTAT)
+(   77)   CHARACTER(LEN=32), SAVE :: CCDESC_BARR(JPMAXSTAT)
+(   78) SAVE IIMEM, IIPAG, IIMEMC
+(   79) 
+(   80) INTEGER(KIND=JPIM),SAVE :: NUM_THREADS
+(   81) REAL(KIND=JPRB),ALLOCATABLE,SAVE :: ZHOOK_HANDLE(:)
+(   82) REAL(KIND=JPRB),SAVE :: ZHOOK_HANDLE_COMMS, ZHOOK_HANDLE_COMMS1
+(   83) REAL(KIND=JPRB),SAVE :: ZHOOK_HANDLE_TRANS
+(   84) REAL(KIND=JPRB),SAVE :: ZHOOK_HANDLE_BARR
+(   85) CHARACTER*4 CC
+(   86) 
+(   87) CHARACTER (LEN = 10) ::  CLDATEOD,CLZONEOD
+(   88) INTEGER(KIND=JPIM) :: IVALUES(8)
+(   89) 
+(   90) INTEGER(KIND=JPIM) :: NMAX_STATS, KULNAM
+(   91) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:51      page 3
+
+(   92) ! Change LLFINDSUMB to TRUE to add diagnostics to help find SUMB times
+(   93) ! Note that a similar setting exists in dr_hook_util for the same objective
+(   94) LOGICAL :: LLFINDSUMB=.FALSE.
+(   95) INTEGER(KIND=JPIM),SAVE :: ISUMBSTACK(10)
+(   96) INTEGER(KIND=JPIM) :: J
+(   97) REAL(KIND=JPRB) :: ZSUM,ZSUMB,ZTOT
+(   98) REAL(KIND=JPRD)    :: SBYTES,RBYTES
+(   99) INTEGER(KIND=JPIM) :: NSEND,NRECV
+(  100) 
+(  101) #include "user_clock.h"
+(  102) 
+(  103) ! write(0,*) "GSTATS:LSTATS,JPMAXSTAT,LGSTATS_LABEL,KNUM=",LSTATS,JPMAXSTAT,LGSTATS_LABEL,KNUM
+(  104) 
+(  105) IF(LSTATS) THEN
+(  106) 
+(  107) ! only process gstats calls for master thread
+(  108) 
+(  109)   IF(OML_MY_THREAD() > 1)GOTO 99999
+(  110) 
+(  111)   IF(.NOT.ALLOCATED(ZHOOK_HANDLE))THEN
+(  112)     NUM_THREADS=OML_MAX_THREADS()
+(  113)     ALLOCATE(ZHOOK_HANDLE(NUM_THREADS))
+(  114)   ENDIF
+(  115) 
+(  116)   IF(LGSTATS_LABEL)THEN
+(  117)     DO INUM=1,JPMAXSTAT
+(  118)       WRITE(CC,'(I4)')INUM
+(  119)       CCDESC_BARR(INUM)='>BAR-'//CCDESC(INUM)(1:21)//'('//CC//')'
+(  120)     ENDDO
+(  121)     DO INUM=1,JPMAXSTAT
+(  122)       WRITE(CC,'(I4)')INUM
+(  123) !     write(6,*) inum,cctype(inum)
+(  124)       IF(CCTYPE(INUM).EQ."TRS".OR.CCTYPE(INUM).EQ.'MP-'.OR.CCTYPE(INUM).EQ.'MPL'&
+(  125)                             & .OR.CCTYPE(INUM).EQ.'BAR'.OR.CCTYPE(INUM).EQ.'OMP') THEN
+(  126)         CCDESC_DRHOOK(INUM)='>'//CCTYPE(INUM)//'-'//CCDESC(INUM)(1:21)//'('//CC//')'
+(  127)       ENDIF
+(  128)     ENDDO
+(  129)     LGSTATS_LABEL=.FALSE.
+(  130)   ENDIF
+(  131) !     ------------------------------------------------------------------
+(  132) 
+(  133) !J  IF(KNUM/=0) THEN
+(  134) !J    IF(LSYNCSTATS .AND.(KSWITCH==0.OR. KSWITCH==2)) THEN
+(  135) !J      IF(.NOT.OML_IN_PARALLEL().AND. KNUM < 500 )THEN
+(  136) !J        IF(LHOOK)CALL DR_HOOK(CCDESC_BARR(KNUM),0,ZHOOK_HANDLE_BARR)
+(  137) !J        CALL MPL_BARRIER(CDSTRING='GSTATS:')
+(  138) !J        IF(LHOOK)CALL DR_HOOK(CCDESC_BARR(KNUM),1,ZHOOK_HANDLE_BARR)
+(  139) !J      ENDIF
+(  140) !J    ENDIF
+(  141) !J  ENDIF
+(  142) 
+(  143)   CALL USER_CLOCK(PELAPSED_TIME=ZCLOCK)
+(  144)   IF (LSTATSCPU.OR.KNUM==0) THEN
+(  145)     CALL USER_CLOCK(PTOTAL_CP=ZTCPU,PVECTOR_CP=ZVCPU)
+(  146)   ELSE
+(  147)     ZTCPU = 0.0_JPRD
+(  148)     ZVCPU = 0.0_JPRD
+(  149)   ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:51      page 4
+
+(  150) 
+(  151)   IF (LLFIRST) THEN
+(  152)     TIMESUM(:) = 0.0_JPRD
+(  153)     NCALLS(:) = 0
+(  154)   ENDIF
+(  155) 
+(  156)   IF (LHOOK .AND. (KSWITCH == 0 .OR. KSWITCH == 1)) THEN
+(  157) !   write(0,*) "KNUM,SWITCH=",KNUM,KSWITCH
+(  158) !   write(0,*) "CCTYPE=",CCTYPE(KNUM)
+(  159) !   write(0,*) "CCDESC_DRHOOK=",CCDESC_DRHOOK(KNUM)
+(  160)     IF(CCTYPE(KNUM).EQ."TRS")THEN
+(  161)       CALL DR_HOOK(CCDESC_DRHOOK(KNUM),KSWITCH,ZHOOK_HANDLE_TRANS)
+(  162)     ELSEIF(CCTYPE(KNUM).EQ.'MP-')THEN
+(  163)       CALL DR_HOOK(CCDESC_DRHOOK(KNUM),KSWITCH,ZHOOK_HANDLE_COMMS)
+(  164)     ELSEIF(CCTYPE(KNUM).EQ.'MPL'.AND.KNUM.NE.682)THEN
+(  165)       CALL DR_HOOK(CCDESC_DRHOOK(KNUM),KSWITCH,ZHOOK_HANDLE_COMMS1)
+(  166)     ELSEIF(CCTYPE(KNUM).EQ.'OMP')THEN
+(  167)       CALL DR_HOOK(CCDESC_DRHOOK(KNUM),KSWITCH,ZHOOK_HANDLE)
+(  168)     ELSEIF(CCTYPE(KNUM).EQ.'BAR')THEN
+(  169)       CALL DR_HOOK(CCDESC_DRHOOK(KNUM),KSWITCH,ZHOOK_HANDLE_BARR)
+(  170)     ENDIF
+(  171) ! measure GSTATS HOOK overhead
+(  172)     CALL USER_CLOCK(PELAPSED_TIME=ZCLOCK1)
+(  173)     TIMESUM(401) = TIMESUM(401)+ZCLOCK1-ZCLOCK
+(  174)     NCALLS(401) = NCALLS(401)+1
+(  175)     ZCLOCK=ZCLOCK1
+(  176)   ENDIF
+(  177) 
+(  178)   IF (LLFIRST) THEN
+(  179) 
+(  180) !   write(0,*) "JPMAXSTAT:2=",JPMAXSTAT
+(  181) 
+(  182)     NSWITCHVAL(:) = -1
+(  183)     TIMESQSUM(:) = 0.0_JPRD
+(  184)     TIMEMAX(:) = 0.0_JPRD
+(  185)     TIMESUMB(:) = 0.0_JPRD
+(  186)     IF( LLFINDSUMB )THEN
+(  187)       ISUMBSTACK(:)=0
+(  188)     ENDIF
+(  189)     TTCPUSUM(:) = 0.0_JPRD
+(  190)     TVCPUSUM(:) = 0.0_JPRD
+(  191)     TIMELCALL(:) = ZCLOCK
+(  192)     CCDESC=""
+(  193)     CCTYPE=""
+(  194)     NTMEM      = 0
+(  195)     NTMEM(:,5) = 99999999
+(  196)     IIMEM=0
+(  197)     IIPAG=0
+(  198)     IIMEMC=0
+(  199)     TIME_LAST_CALL = ZCLOCK
+(  200)     LLFIRST = .FALSE.
+(  201)   ENDIF
+(  202) 
+(  203)   IF(KNUM < 0.OR. KNUM > JPMAXSTAT) CALL ABOR1('GSTATS')
+(  204)   IF(KSWITCH == 0.OR. KSWITCH == 1) THEN
+(  205)     NCALLS(KNUM) = NCALLS(KNUM)+1
+(  206)   ENDIF
+(  207)   IMOD = MOD(NCALLS(KNUM),2)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:51      page 5
+
+(  208)   IF(.NOT.((KSWITCH == 0.AND. IMOD == 1) .OR.&
+(  209)    &(KSWITCH == 2.AND. IMOD == 1) .OR.&
+(  210)    &(KSWITCH == 3.AND. IMOD == 1) .OR.&
+(  211)    &(KSWITCH == 1.AND. IMOD == 0))) THEN
+(  212)     WRITE(JPERR,*) 'KNUM,KSWITCH,IMOD,NCALLS(KNUM)',&
+(  213)      &KNUM,KSWITCH,IMOD,NCALLS(KNUM)
+(  214)     CALL ABOR1('GSTATS')
+(  215)   ENDIF
+(  216) 
+(  217) ! WRITE(0,'("GSTATS(SUMB): ",I4,2X,I1,2X,A40)') KNUM,KSWITCH,CCDESC(KNUM)
+(  218) 
+(  219)   NSWITCHVAL(KNUM)=KSWITCH
+(  220) 
+(  221)   IF( KSWITCH == 0 ) THEN
+(  222) ! Start timing event
+(  223)     IF(KNUM>=500)THEN
+(  224)       ZTIMED = ZCLOCK-TIME_LAST_CALL
+(  225)       TIMESUMB(KNUM) = TIMESUMB(KNUM)+ZTIMED
+(  226)     ELSE
+(  227)       ZTIMED = 0.0_JPRD
+(  228)     ENDIF
+(  229) 
+(  230)     IF( LLFINDSUMB .AND. MYPROC_STATS <= 2 )THEN
+(  231) !     diagnostic code to find source of sumb (this should only be activated temporarily)
+(  232)       DO J=9,1,-1
+(  233)         ISUMBSTACK(J+1)=ISUMBSTACK(J)
+(  234)       ENDDO
+(  235)       ISUMBSTACK(1)=KNUM
+(  236)       IF( ZTIMED > 0.1_JPRD .AND. (TIMESUMB(KNUM) > 1.0_JPRD) )THEN
+(  237)         WRITE(0,'("GSTATS(SUMB): KNUM=",I4," ZTIMED=",F10.6," TIMESUMB=",F10.6)')&
+(  238)         & KNUM,ZTIMED,TIMESUMB(KNUM)
+(  239)         DO J=1,10
+(  240)           IF( ISUMBSTACK(J) > 0 )THEN
+(  241)             WRITE(0,'("GSTATS(SUMB): ",I4,2X,I8,2X,A40)')ISUMBSTACK(J),&
+(  242)              & NCALLS(ISUMBSTACK(J)),CCDESC(ISUMBSTACK(J))
+(  243)           ENDIF
+(  244)         ENDDO
+(  245)       ENDIF
+(  246) !     check if grouped counters are overlapping
+(  247)       DO J=0,JPMAXSTAT
+(  248)         IF( J /= KNUM )THEN
+(  249)           IF( CCTYPE(J   )/='   '.AND.CCTYPE(J   )/='TRS'.AND.CCTYPE(J   )/='MP-' .AND.&
+(  250)            &  CCTYPE(KNUM)/='   '.AND.CCTYPE(KNUM)/='TRS'.AND.CCTYPE(KNUM)/='MP-' )THEN
+(  251)             IF( NSWITCHVAL(J)==0.OR.NSWITCHVAL(J)==3 )THEN
+(  252)               WRITE(0,'("GSTATS(SUMB): OVERLAPPING COUNTERS ",I4,2X,I4)')KNUM,J
+(  253)             ENDIF
+(  254)           ENDIF
+(  255)         ENDIF
+(  256)       ENDDO
+(  257)     ENDIF
+(  258) 
+(  259)     THISTIME(KNUM) = 0.0_JPRD
+(  260)     TIMELCALL(KNUM) = ZCLOCK
+(  261)     TTCPULCALL(KNUM) = ZTCPU
+(  262)     TVCPULCALL(KNUM) = ZVCPU
+(  263)     THISTCPU(KNUM) = 0.0_JPRD
+(  264)     THISVCPU(KNUM) = 0.0_JPRD
+(  265)     IF(MYPROC_STATS.LE.NSTATS_MEM.AND.MYPROC_STATS.NE.0) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:51      page 6
+
+(  266)       IMEM = GETMAXRSS()/1024
+(  267)       IPAG = GETPAG()
+(  268)       IMEMH = GETHWM()/1024
+(  269)       IMEMS = GETSTK()/1024
+(  270)       IMEMC = 0
+(  271)       IF(LSTATS_ALLOC) IMEMC = GETCURHEAP()/1024
+(  272)       IF(IMEM > IIMEM.OR.IPAG > IIPAG.OR.(LSTATS_ALLOC.AND.(IMEMC.NE.IIMEMC))) THEN
+(  273)         IF(LLMFIRST) THEN
+(  274)           WRITE(0,*) ".---------------------------------------------------------"
+(  275)           WRITE(0,*) "| Memory trace details"
+(  276)           WRITE(0,*) "| --------------------"
+(  277)           WRITE(0,*) "| Memory examined at each GSTATS call if NSTATS_MEM>0."
+(  278)           WRITE(0,*) "| Header for each trace line is:"    
+(  279)           WRITE(0,*) "|"
+(  280)           WRITE(0,*) "|   RSS_INC: Increase in RSS_MAX (KB)"
+(  281)           WRITE(0,*) "|   RSS_MAX: Maximum real working set so far (KB)"
+(  282)           WRITE(0,*) "|   HEAP_MX: High Water Mark for heap so far (KB)"
+(  283)           WRITE(0,*) "|   STK:     Current Stack usage (KB)"
+(  284)           WRITE(0,*) "|   PGS:     Page faults w I/O since last trace line"
+(  285)           WRITE(0,*) "|   CALL:    Number of gstats call"
+(  286)           WRITE(0,*) "|   HEAP:    Current malloc'd total (KB)"
+(  287)           WRITE(0,*) "|" 
+(  288)           WRITE(0,*) "| Trace line written for NSTATS_MEM MPI tasks if RSS_MAX"
+(  289)           WRITE(0,*) "| RSS_MAX increases, PGS>0, or HEAP changed"
+(  290)           WRITE(0,*) "| (if LTATS_ALLOC=.TRUE.)"
+(  291)           WRITE(0,*) "`---------------------------------------------------------"
+(  292)           WRITE(0,*) ""
+(  293)           WRITE(0,'(A10,A5,21X,A7,2A8,A7,A5,A5,A8)') &
+(  294)            & "MEMORY    "," KNUM","RSS_INC"," RSS_MAX"," HEAP_MX","    STK", &
+(  295)            & "  PGS"," CALL","    HEAP"
+(  296)           LLMFIRST=.FALSE.
+(  297)         ENDIF
+(  298)         WRITE(0,'(A10,I5,1X,A20,1X,I6,2(1X,I7),1X,I6,1X,I4,1X,I4,1X,I7)') &
+(  299)              & "MEMORY bfr",KNUM,CCDESC(KNUM),IMEM-IIMEM,IMEM,IMEMH,IMEMS, &
+(  300)              & IPAG-IIPAG,(NCALLS(KNUM)+1)/2,IMEMC
+(  301)       ENDIF
+(  302)       NTMEM(KNUM,2)=IMEM
+(  303)       IIMEM=IMEM
+(  304)       IIPAG=IPAG
+(  305)       IIMEMC=IMEMC
+(  306)     ENDIF
+(  307)     IF(LSTATS_MPL.AND.CCTYPE(KNUM) .EQ. 'MPL') THEN
+(  308)       CALL MPL_STATSON(NSEND,SBYTES,NRECV,RBYTES)
+(  309)       UNKNOWN_NUMSEND(KNUM)=UNKNOWN_NUMSEND(KNUM)+NSEND
+(  310)       UNKNOWN_NUMRECV(KNUM)=UNKNOWN_NUMRECV(KNUM)+NRECV
+(  311)       UNKNOWN_SENDBYTES(KNUM)=UNKNOWN_SENDBYTES(KNUM)+SBYTES
+(  312)       UNKNOWN_RECVBYTES(KNUM)=UNKNOWN_RECVBYTES(KNUM)+RBYTES
+(  313)     ENDIF
+(  314)   ELSEIF( KSWITCH == 1 ) THEN
+(  315) ! Finish timing event
+(  316)     ZTIME = THISTIME(KNUM)+(ZCLOCK-TIMELCALL(KNUM))
+(  317)     IF(LSTATS_MPL.AND.CCTYPE(KNUM) .EQ. 'MPL') THEN
+(  318)       CALL MPL_STATSREAD(NSEND,SBYTES,NRECV,RBYTES)
+(  319)       NUMSEND(KNUM)=NUMSEND(KNUM)+NSEND
+(  320)       NUMRECV(KNUM)=NUMRECV(KNUM)+NRECV
+(  321)       SENDBYTES(KNUM)=SENDBYTES(KNUM)+SBYTES
+(  322)       RECVBYTES(KNUM)=RECVBYTES(KNUM)+RBYTES
+(  323)     ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:51      page 7
+
+(  324)     TIMESUM(KNUM) = TIMESUM(KNUM)+ZTIME
+(  325)     TIMESQSUM(KNUM) = TIMESQSUM(KNUM)+ZTIME**2
+(  326)     TIMEMAX(KNUM) = MAX(TIMEMAX(KNUM),ZTIME)
+(  327)     TTCPUSUM(KNUM) = TTCPUSUM(KNUM)+THISTCPU(KNUM)+ZTCPU-TTCPULCALL(KNUM)
+(  328)     TVCPUSUM(KNUM) = TVCPUSUM(KNUM)+THISVCPU(KNUM)+ZVCPU-TVCPULCALL(KNUM)
+(  329)     IF(MYPROC_STATS.LE.NSTATS_MEM.AND.MYPROC_STATS.NE.0) THEN
+(  330)       IMEM = GETMAXRSS()/1024
+(  331)       IPAG = GETPAG()
+(  332)       IMEMH = GETHWM()/1024
+(  333)       IMEMS = GETSTK()/1024
+(  334)       IMEMC = 0
+(  335)       IF(LSTATS_ALLOC) IMEMC = GETCURHEAP()/1024
+(  336)       IF(IMEM > IIMEM.OR.IPAG > IIPAG.OR.(LSTATS_ALLOC.AND.(IMEMC.NE.IIMEMC))) THEN
+(  337)         WRITE(0,'(A10,I5,1X,A20,1X,I6,2(1X,I7),1X,I6,1X,I4,1X,I4,1X,I7)') &
+(  338)              & "MEMORY aft ",KNUM,CCDESC(KNUM),IMEM-IIMEM,IMEM,IMEMH,IMEMS, &
+(  339)              & IPAG-IIPAG,NCALLS(KNUM)/2,IMEMC
+(  340)       ENDIF
+(  341)       IIMEM=IMEM
+(  342)       IIPAG=IPAG
+(  343)       IIMEMC=IMEMC 
+(  344)       IMEM=IMEM-NTMEM(KNUM,2)
+(  345)       NTMEM(KNUM,4)=NTMEM(KNUM,4)+IMEM
+(  346)       IF(IMEM > NTMEM(KNUM,1)) THEN
+(  347)         NTMEM(KNUM,1)=IMEM
+(  348)         NTMEM(KNUM,3)=NCALLS(KNUM)
+(  349)       ENDIF
+(  350)       IF(IMEM < NTMEM(KNUM,5)) NTMEM(KNUM,5)=IMEM
+(  351)     ENDIF
+(  352) ! Save counters that result in large delays
+(  353)     IF( KNUM >= 500 .AND. NCALLS(KNUM)/2 > 10 )THEN
+(  354)       IF( ZTIME > TIMESUM(KNUM)/FLOAT(NCALLS(KNUM)/2) + 0.2_JPRD )THEN
+(  355)         ! ignore counters 1007 and 1013 due to NFRLW frequency LW radiation calls 
+(  356)         ! in ec_phys_tl and ec_phys_ad call trees
+(  357)         ! also ignore 635 and 636 due to increasing sujbwavallo matrix sizes
+(  358)         IF( KNUM /= 1007 .AND. KNUM /= 1013 .AND. KNUM /= 635 .AND. KNUM /= 636 )THEN
+(  359)           IF( NDELAY_INDEX < JPMAXDELAYS )THEN
+(  360)             NDELAY_INDEX=NDELAY_INDEX+1
+(  361)             NDELAY_COUNTER(NDELAY_INDEX)=KNUM
+(  362)             TDELAY_VALUE(NDELAY_INDEX)=ZTIME-TIMESUM(KNUM)/FLOAT(NCALLS(KNUM)/2)
+(  363)             CALL DATE_AND_TIME(CLDATEOD,CDELAY_TIME(NDELAY_INDEX),CLZONEOD,IVALUES)
+(  364)           ENDIF
+(  365)         ENDIF
+(  366)       ENDIF
+(  367)     ENDIF
+(  368)   ELSEIF( KSWITCH == 2 ) THEN
+(  369) ! Suspend timing event
+(  370)     ZTIMED = ZCLOCK-TIMELCALL(KNUM)
+(  371)     THISTIME(KNUM) = THISTIME(KNUM)+ZTIMED
+(  372)     THISTCPU(KNUM) = THISTCPU(KNUM)+ZTCPU-TTCPULCALL(KNUM)
+(  373)     THISVCPU(KNUM) = THISVCPU(KNUM)+ZVCPU-TVCPULCALL(KNUM)
+(  374)     IF(LSTATS_MPL.AND.CCTYPE(KNUM) .EQ. 'MPL') THEN
+(  375)       CALL MPL_STATSREAD(NSEND,SBYTES,NRECV,RBYTES)
+(  376)       NUMSEND(KNUM)=NUMSEND(KNUM)+NSEND
+(  377)       NUMRECV(KNUM)=NUMRECV(KNUM)+NRECV
+(  378)       SENDBYTES(KNUM)=SENDBYTES(KNUM)+SBYTES
+(  379)       RECVBYTES(KNUM)=RECVBYTES(KNUM)+RBYTES
+(  380)     ENDIF
+(  381)   ELSEIF( KSWITCH == 3 ) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:51      page 8
+
+(  382) ! Resume timing event
+(  383)     TIMELCALL(KNUM) = ZCLOCK
+(  384)     TTCPULCALL(KNUM) = ZTCPU
+(  385)     TVCPULCALL(KNUM) = ZVCPU
+(  386)     IF(LSTATS_MPL.AND.CCTYPE(KNUM) .EQ. 'MPL') THEN
+(  387)       CALL MPL_STATSON(NSEND,SBYTES,NRECV,RBYTES)
+(  388)       UNKNOWN_NUMSEND(KNUM)=UNKNOWN_NUMSEND(KNUM)+NSEND
+(  389)       UNKNOWN_NUMRECV(KNUM)=UNKNOWN_NUMRECV(KNUM)+NRECV
+(  390)       UNKNOWN_SENDBYTES(KNUM)=UNKNOWN_SENDBYTES(KNUM)+SBYTES
+(  391)       UNKNOWN_RECVBYTES(KNUM)=UNKNOWN_RECVBYTES(KNUM)+RBYTES
+(  392)     ENDIF
+(  393)     IF(KNUM>=500)THEN
+(  394)       ZTIMED = ZCLOCK-TIME_LAST_CALL
+(  395)       TIMESUMB(KNUM) = TIMESUMB(KNUM)+ZTIMED
+(  396)     ENDIF
+(  397)   ENDIF
+(  398)   IF(KNUM >= 500)THEN
+(  399)     TIME_LAST_CALL = ZCLOCK
+(  400)   ENDIF
+(  401) 
+(  402) !   Trace stats
+(  403)   NCALLS_TOTAL = NCALLS_TOTAL+1
+(  404)   IF (LTRACE_STATS .AND. NCALLS_TOTAL <= NTRACE_STATS) THEN
+(  405)     ICALL = NCALLS_TOTAL
+(  406)     TIME_TRACE(ICALL) = ZCLOCK
+(  407)     NCALL_TRACE(ICALL) = (JPMAXSTAT+1)*KSWITCH+KNUM
+(  408)   ENDIF
+(  409) 
+(  410) ! measure gstats overhead
+(  411)   CALL USER_CLOCK(PELAPSED_TIME=ZCLOCK1)
+(  412)   TIMESUM(400) = TIMESUM(400)+ZCLOCK1-ZCLOCK
+(  413)   NCALLS(400) = NCALLS(400)+1
+(  414)   LAST_KSWITCH=KSWITCH
+(  415)   LAST_KNUM=KNUM
+(  416) 
+(  417) ! ZSUM=SUM(TIMESUM(500:JPMAXSTAT))
+(  418) ! ZSUMB=SUM(TIMESUMB(500:JPMAXSTAT))
+(  419) ! ZTOT=ZCLOCK1-TIMELCALL(0)
+(  420) ! IF( (ZSUM+ZSUMB)/ZTOT >1.0_JPRB )THEN
+(  421) !   write(0,'("GSTATS_DEBUG: KNUM=",I6," KSWITCH=",I1," (zsum+zsumb)/ztot=",F10.6)')&
+(  422) !    &KNUM,KSWITCH,(zsum+zsumb)/ztot
+(  423) ! ENDIF
+(  424)   
+(  425) ENDIF
+(  426) 
+(  427) 99999 CONTINUE
+(  428) END SUBROUTINE GSTATS
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:51      page 9
+
+(    1) # 1 "gstats.F90"
+(    1) SUBROUTINE GSTATS(KNUM,KSWITCH)
+(    2) # 3 "gstats.F90"
+(    3) !**** *GSTATS*  - Gather timing statistics
+(    4) # 5 "gstats.F90"
+(    5) !     PURPOSE.
+(    6) !     --------
+(    7) !       To gather timings for subsequent output by routine STATS_OUTPUT 
+(    8) # 10 "gstats.F90"
+(   10) !**   INTERFACE.
+(   11) !     ----------
+(   12) !       *CALL* *GSTATS(KNUM,KSWITCH)
+(   13) # 14 "gstats.F90"
+(   14) !        EXPLICIT ARGUMENTS
+(   15) !        --------------------
+(   16) !        KNUM - timing event number (for list of already defined events
+(   17) !               see routine STATS_OUTPUT)
+(   18) !        KSWITCH  - KSWITCH=0 - switch on timer
+(   19) !                   KSWITCH=1 - switch off timer
+(   20) !                   KSWITCH=2 - suspend timer
+(   21) !                   KSWITCH=3 - resume  timer
+(   22) # 23 "gstats.F90"
+(   23) !        IMPLICIT ARGUMENTS
+(   24) !        --------------------
+(   25) !        Module YOMSTATS
+(   26) # 27 "gstats.F90"
+(   27) !     METHOD.
+(   28) !     -------
+(   29) # 31 "gstats.F90"
+(   31) !     EXTERNALS.   USER_CLOCK - timing routine
+(   32) !     ----------   MPL_BARRIER - syncronization of processors
+(   33) # 34 "gstats.F90"
+(   34) !     REFERENCE.
+(   35) !     ----------
+(   36) !        ECMWF Research Department documentation of the IFS
+(   37) # 38 "gstats.F90"
+(   38) !     AUTHOR.
+(   39) !     -------
+(   40) !        Mats Hamrud ECMWF
+(   41) # 42 "gstats.F90"
+(   42) !     MODIFICATIONS.
+(   43) !     --------------
+(   44) !        ORIGINAL : 98-11-15
+(   45) !        D.Salmond: 02-02-25  Return if not master thread when called from a 
+(   46) !                             parallel region. 
+(   47) !        J.Hague:   03-06-11  Memory tracing (for NSTATS_MEM MPI tasks)
+(   48) !        G.Mozdzynski: 18 Apr 2008 Many corrections to gstats,
+(   49) !                             see LLFINDSUMB - when set is used detect gstat counter problems.
+(   50) !        G.Mozdzynski: 20 Jan 2010 Further corrections to gstats to get timed sections and
+(   51) !                             SUMB to 100 percent of the total time.
+(   52) !      F. Vana  05-Mar-2015  Support for single precision
+(   53) !     ------------------------------------------------------------------
+(   54) # 55 "gstats.F90"
+(   55) USE PARKIND1  ,ONLY : JPRD, JPIM     ,JPRB     ,JPIB
+(   56) USE YOMHOOK   ,ONLY : LHOOK, DR_HOOK
+(   57) # 58 "gstats.F90"
+(   58) USE YOMGSTATS  
+(   59) USE MPL_MODULE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:51      page 10
+
+(   60) USE MPL_STATS_MOD
+(   61) USE OML_MOD
+(   62) # 63 "gstats.F90"
+(   63) IMPLICIT NONE
+(   64) # 65 "gstats.F90"
+(   65) INTEGER(KIND=JPIM),INTENT(IN) :: KNUM
+(   66) INTEGER(KIND=JPIM),INTENT(IN) :: KSWITCH
+(   67) # 68 "gstats.F90"
+(   68) INTEGER(KIND=JPIM) :: IMOD,ICALL
+(   69) INTEGER(KIND=JPIM) :: IIMEM, IIPAG, IIMEMC
+(   70) INTEGER(KIND=JPIB) :: IMEM, IMEMH, IMEMS, IMEMC, IPAG, INUM
+(   71) INTEGER(KIND=JPIB) :: GETMAXRSS, GETHWM, GETSTK, GETCURHEAP, GETPAG
+(   72) EXTERNAL GETMAXRSS, GETHWM, GETSTK, GETCURHEAP, GETPAG
+(   73) REAL(KIND=JPRD) :: ZTIMED,ZCLOCK,ZCLOCK1,ZTIME,ZTCPU,ZVCPU
+(   74) LOGICAL :: LLFIRST=.TRUE.
+(   75) LOGICAL :: LLMFIRST=.TRUE.
+(   76)   CHARACTER(LEN=32), SAVE :: CCDESC_DRHOOK(JPMAXSTAT)
+(   77)   CHARACTER(LEN=32), SAVE :: CCDESC_BARR(JPMAXSTAT)
+(   78) SAVE IIMEM, IIPAG, IIMEMC
+(   79) # 80 "gstats.F90"
+(   80) INTEGER(KIND=JPIM),SAVE :: NUM_THREADS
+(   81) REAL(KIND=JPRB),ALLOCATABLE,SAVE :: ZHOOK_HANDLE(:)
+(   82) REAL(KIND=JPRB),SAVE :: ZHOOK_HANDLE_COMMS, ZHOOK_HANDLE_COMMS1
+(   83) REAL(KIND=JPRB),SAVE :: ZHOOK_HANDLE_TRANS
+(   84) REAL(KIND=JPRB),SAVE :: ZHOOK_HANDLE_BARR
+(   85) CHARACTER*4 CC
+(   86) # 87 "gstats.F90"
+(   87) CHARACTER (LEN = 10) ::  CLDATEOD,CLZONEOD
+(   88) INTEGER(KIND=JPIM) :: IVALUES(8)
+(   89) # 90 "gstats.F90"
+(   90) INTEGER(KIND=JPIM) :: NMAX_STATS, KULNAM
+(   91) # 92 "gstats.F90"
+(   92) ! Change LLFINDSUMB to TRUE to add diagnostics to help find SUMB times
+(   93) ! Note that a similar setting exists in dr_hook_util for the same objective
+(   94) LOGICAL :: LLFINDSUMB=.FALSE.
+(   95) INTEGER(KIND=JPIM),SAVE :: ISUMBSTACK(10)
+(   96) INTEGER(KIND=JPIM) :: J
+(   97) REAL(KIND=JPRB) :: ZSUM,ZSUMB,ZTOT
+(   98) REAL(KIND=JPRD)    :: SBYTES,RBYTES
+(   99) INTEGER(KIND=JPIM) :: NSEND,NRECV
+(  100) # 101 "gstats.F90"
+(  101) # 1 ".D[15]/user_clock.h"
+(    1) INTERFACE
+(    2) SUBROUTINE USER_CLOCK(PELAPSED_TIME,PELAPSED_TIME_SINCE,PVECTOR_CP,PTOTAL_CP)
+(    3) # 4 ".D[15]/user_clock.h"
+(    4) !**** *USER_CLOCK* - interface to system dependent timer routines
+(    5) # 6 ".D[15]/user_clock.h"
+(    6) !     Purpose.
+(    7) !     --------
+(    8) !        Returns elapsed and CP from the start of execution.
+(    9) !        Elapsed time is made relative to the first call to USER_CLOCK.
+(   10) # 11 ".D[15]/user_clock.h"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        ZTIME=USER_CLOCK(PELAPSED_TIME,PELAPSED_TIME_SINCE,
+(   14) !                         PVECTOR_CP,PTOTAL_CP)
+(   15) # 16 ".D[15]/user_clock.h"
+(   16) !        Explicit arguments: (All are optional arguments)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:51      page 11
+
+(   17) !                           PELAPSED_TIME=wall clock time (seconds)
+(   18) !                           PELAPSED_TIME_SINCE=wall clock time (seconds)
+(   19) !                             change from input value of this parameter
+(   20) !                           PVECTOR_CP=CP vector time  (seconds)
+(   21) !                           PTOTAL_CP=total CP time   (seconds)
+(   22) # 23 ".D[15]/user_clock.h"
+(   23) !     Author.
+(   24) !     -------
+(   25) !        D.Dent      *ECMWF*
+(   26) # 27 ".D[15]/user_clock.h"
+(   27) !     External References:
+(   28) !     -------------------
+(   29) # 30 ".D[15]/user_clock.h"
+(   30) !        TIMEF,CPTIME
+(   31) # 32 ".D[15]/user_clock.h"
+(   32) !     Modifications.
+(   33) !     --------------
+(   34) !        Original  : 97-09-25
+(   35) !      F. Vana  05-Mar-2015  Support for single precision
+(   36) !     ----------------------------------------------------------
+(   37) # 39 ".D[15]/user_clock.h"
+(   39) USE PARKIND1  ,ONLY : JPRD, JPIM
+(   40) # 41 ".D[15]/user_clock.h"
+(   41) IMPLICIT NONE
+(   42) # 43 ".D[15]/user_clock.h"
+(   43) REAL(KIND=JPRD),INTENT(OUT) :: PELAPSED_TIME,PVECTOR_CP,PTOTAL_CP
+(   44) REAL(KIND=JPRD),INTENT(INOUT) :: PELAPSED_TIME_SINCE
+(   45) OPTIONAL            PELAPSED_TIME,PELAPSED_TIME_SINCE
+(   46) OPTIONAL            PVECTOR_CP,PTOTAL_CP
+(   47) REAL(KIND=JPRD)      :: ZVECTOR_CP,ZTOTAL_CP,ZWALL
+(   48) REAL(KIND=JPRD),EXTERNAL :: TIMEF
+(   49) # 51 ".D[15]/user_clock.h"
+(   51) END SUBROUTINE USER_CLOCK
+(   52) END INTERFACE
+(   53) # 102 "gstats.F90"
+(  102) # 103 "gstats.F90"
+(  103) ! write(0,*) "GSTATS:LSTATS,JPMAXSTAT,LGSTATS_LABEL,KNUM=",LSTATS,JPMAXSTAT,LGSTATS_LABEL,KNUM
+(  104) # 105 "gstats.F90"
+(  105) IF(LSTATS) THEN
+(  106) # 107 "gstats.F90"
+(  107) ! only process gstats calls for master thread
+(  108) # 109 "gstats.F90"
+(  109)   IF(OML_MY_THREAD() > 1)GOTO 99999
+(  110) # 111 "gstats.F90"
+(  111)   IF(.NOT.ALLOCATED(ZHOOK_HANDLE))THEN
+(  112)     NUM_THREADS=OML_MAX_THREADS()
+(  113)     ALLOCATE(ZHOOK_HANDLE(NUM_THREADS))
+(  114)   ENDIF
+(  115) # 116 "gstats.F90"
+(  116)   IF(LGSTATS_LABEL)THEN
+(  117)     DO INUM=1,JPMAXSTAT
+(  118)       WRITE(CC,'(I4)')INUM
+(  119)       CCDESC_BARR(INUM)='>BAR-'//CCDESC(INUM)(1:21)//'('//CC//')'
+(  120)     ENDDO
+(  121)     DO INUM=1,JPMAXSTAT
+(  122)       WRITE(CC,'(I4)')INUM
+(  123) !     write(6,*) inum,cctype(inum)
+(  124)       IF(CCTYPE(INUM).EQ."TRS".OR.CCTYPE(INUM).EQ.'MP-'.OR.CCTYPE(INUM).EQ.'MPL'&
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:51      page 12
+
+(  125)                             & .OR.CCTYPE(INUM).EQ.'BAR'.OR.CCTYPE(INUM).EQ.'OMP') THEN
+(  126)         CCDESC_DRHOOK(INUM)='>'//CCTYPE(INUM)//'-'//CCDESC(INUM)(1:21)//'('//CC//')'
+(  127)       ENDIF
+(  128)     ENDDO
+(  129)     LGSTATS_LABEL=.FALSE.
+(  130)   ENDIF
+(  131) !     ------------------------------------------------------------------
+(  132) # 133 "gstats.F90"
+(  133) !J  IF(KNUM/=0) THEN
+(  134) !J    IF(LSYNCSTATS .AND.(KSWITCH==0.OR. KSWITCH==2)) THEN
+(  135) !J      IF(.NOT.OML_IN_PARALLEL().AND. KNUM < 500 )THEN
+(  136) !J        IF(LHOOK)CALL DR_HOOK(CCDESC_BARR(KNUM),0,ZHOOK_HANDLE_BARR)
+(  137) !J        CALL MPL_BARRIER(CDSTRING='GSTATS:')
+(  138) !J        IF(LHOOK)CALL DR_HOOK(CCDESC_BARR(KNUM),1,ZHOOK_HANDLE_BARR)
+(  139) !J      ENDIF
+(  140) !J    ENDIF
+(  141) !J  ENDIF
+(  142) # 143 "gstats.F90"
+(  143)   CALL USER_CLOCK(PELAPSED_TIME=ZCLOCK)
+(  144)   IF (LSTATSCPU.OR.KNUM==0) THEN
+(  145)     CALL USER_CLOCK(PTOTAL_CP=ZTCPU,PVECTOR_CP=ZVCPU)
+(  146)   ELSE
+(  147)     ZTCPU = 0.0_JPRD
+(  148)     ZVCPU = 0.0_JPRD
+(  149)   ENDIF
+(  150) # 151 "gstats.F90"
+(  151)   IF (LLFIRST) THEN
+(  152)     TIMESUM(:) = 0.0_JPRD
+(  153)     NCALLS(:) = 0
+(  154)   ENDIF
+(  155) # 156 "gstats.F90"
+(  156)   IF (LHOOK .AND. (KSWITCH == 0 .OR. KSWITCH == 1)) THEN
+(  157) !   write(0,*) "KNUM,SWITCH=",KNUM,KSWITCH
+(  158) !   write(0,*) "CCTYPE=",CCTYPE(KNUM)
+(  159) !   write(0,*) "CCDESC_DRHOOK=",CCDESC_DRHOOK(KNUM)
+(  160)     IF(CCTYPE(KNUM).EQ."TRS")THEN
+(  161)       CALL DR_HOOK(CCDESC_DRHOOK(KNUM),KSWITCH,ZHOOK_HANDLE_TRANS)
+(  162)     ELSEIF(CCTYPE(KNUM).EQ.'MP-')THEN
+(  163)       CALL DR_HOOK(CCDESC_DRHOOK(KNUM),KSWITCH,ZHOOK_HANDLE_COMMS)
+(  164)     ELSEIF(CCTYPE(KNUM).EQ.'MPL'.AND.KNUM.NE.682)THEN
+(  165)       CALL DR_HOOK(CCDESC_DRHOOK(KNUM),KSWITCH,ZHOOK_HANDLE_COMMS1)
+(  166)     ELSEIF(CCTYPE(KNUM).EQ.'OMP')THEN
+(  167)       CALL DR_HOOK(CCDESC_DRHOOK(KNUM),KSWITCH,ZHOOK_HANDLE)
+(  168)     ELSEIF(CCTYPE(KNUM).EQ.'BAR')THEN
+(  169)       CALL DR_HOOK(CCDESC_DRHOOK(KNUM),KSWITCH,ZHOOK_HANDLE_BARR)
+(  170)     ENDIF
+(  171) ! measure GSTATS HOOK overhead
+(  172)     CALL USER_CLOCK(PELAPSED_TIME=ZCLOCK1)
+(  173)     TIMESUM(401) = TIMESUM(401)+ZCLOCK1-ZCLOCK
+(  174)     NCALLS(401) = NCALLS(401)+1
+(  175)     ZCLOCK=ZCLOCK1
+(  176)   ENDIF
+(  177) # 178 "gstats.F90"
+(  178)   IF (LLFIRST) THEN
+(  179) # 180 "gstats.F90"
+(  180) !   write(0,*) "JPMAXSTAT:2=",JPMAXSTAT
+(  181) # 182 "gstats.F90"
+(  182)     NSWITCHVAL(:) = -1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:51      page 13
+
+(  183)     TIMESQSUM(:) = 0.0_JPRD
+(  184)     TIMEMAX(:) = 0.0_JPRD
+(  185)     TIMESUMB(:) = 0.0_JPRD
+(  186)     IF( LLFINDSUMB )THEN
+(  187)       ISUMBSTACK(:)=0
+(  188)     ENDIF
+(  189)     TTCPUSUM(:) = 0.0_JPRD
+(  190)     TVCPUSUM(:) = 0.0_JPRD
+(  191)     TIMELCALL(:) = ZCLOCK
+(  192)     CCDESC=""
+(  193)     CCTYPE=""
+(  194)     NTMEM      = 0
+(  195)     NTMEM(:,5) = 99999999
+(  196)     IIMEM=0
+(  197)     IIPAG=0
+(  198)     IIMEMC=0
+(  199)     TIME_LAST_CALL = ZCLOCK
+(  200)     LLFIRST = .FALSE.
+(  201)   ENDIF
+(  202) # 203 "gstats.F90"
+(  203)   IF(KNUM < 0.OR. KNUM > JPMAXSTAT) CALL ABOR1('GSTATS')
+(  204)   IF(KSWITCH == 0.OR. KSWITCH == 1) THEN
+(  205)     NCALLS(KNUM) = NCALLS(KNUM)+1
+(  206)   ENDIF
+(  207)   IMOD = MOD(NCALLS(KNUM),2)
+(  208)   IF(.NOT.((KSWITCH == 0.AND. IMOD == 1) .OR.&
+(  209)    &(KSWITCH == 2.AND. IMOD == 1) .OR.&
+(  210)    &(KSWITCH == 3.AND. IMOD == 1) .OR.&
+(  211)    &(KSWITCH == 1.AND. IMOD == 0))) THEN
+(  212)     WRITE(JPERR,*) 'KNUM,KSWITCH,IMOD,NCALLS(KNUM)',&
+(  213)      &KNUM,KSWITCH,IMOD,NCALLS(KNUM)
+(  214)     CALL ABOR1('GSTATS')
+(  215)   ENDIF
+(  216) # 217 "gstats.F90"
+(  217) ! WRITE(0,'("GSTATS(SUMB): ",I4,2X,I1,2X,A40)') KNUM,KSWITCH,CCDESC(KNUM)
+(  218) # 219 "gstats.F90"
+(  219)   NSWITCHVAL(KNUM)=KSWITCH
+(  220) # 221 "gstats.F90"
+(  221)   IF( KSWITCH == 0 ) THEN
+(  222) ! Start timing event
+(  223)     IF(KNUM>=500)THEN
+(  224)       ZTIMED = ZCLOCK-TIME_LAST_CALL
+(  225)       TIMESUMB(KNUM) = TIMESUMB(KNUM)+ZTIMED
+(  226)     ELSE
+(  227)       ZTIMED = 0.0_JPRD
+(  228)     ENDIF
+(  229) # 230 "gstats.F90"
+(  230)     IF( LLFINDSUMB .AND. MYPROC_STATS <= 2 )THEN
+(  231) !     diagnostic code to find source of sumb (this should only be activated temporarily)
+(  232)       DO J=9,1,-1
+(  233)         ISUMBSTACK(J+1)=ISUMBSTACK(J)
+(  234)       ENDDO
+(  235)       ISUMBSTACK(1)=KNUM
+(  236)       IF( ZTIMED > 0.1_JPRD .AND. (TIMESUMB(KNUM) > 1.0_JPRD) )THEN
+(  237)         WRITE(0,'("GSTATS(SUMB): KNUM=",I4," ZTIMED=",F10.6," TIMESUMB=",F10.6)')&
+(  238)         & KNUM,ZTIMED,TIMESUMB(KNUM)
+(  239)         DO J=1,10
+(  240)           IF( ISUMBSTACK(J) > 0 )THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:51      page 14
+
+(  241)             WRITE(0,'("GSTATS(SUMB): ",I4,2X,I8,2X,A40)')ISUMBSTACK(J),&
+(  242)              & NCALLS(ISUMBSTACK(J)),CCDESC(ISUMBSTACK(J))
+(  243)           ENDIF
+(  244)         ENDDO
+(  245)       ENDIF
+(  246) !     check if grouped counters are overlapping
+(  247)       DO J=0,JPMAXSTAT
+(  248)         IF( J /= KNUM )THEN
+(  249)           IF( CCTYPE(J   )/='   '.AND.CCTYPE(J   )/='TRS'.AND.CCTYPE(J   )/='MP-' .AND.&
+(  250)            &  CCTYPE(KNUM)/='   '.AND.CCTYPE(KNUM)/='TRS'.AND.CCTYPE(KNUM)/='MP-' )THEN
+(  251)             IF( NSWITCHVAL(J)==0.OR.NSWITCHVAL(J)==3 )THEN
+(  252)               WRITE(0,'("GSTATS(SUMB): OVERLAPPING COUNTERS ",I4,2X,I4)')KNUM,J
+(  253)             ENDIF
+(  254)           ENDIF
+(  255)         ENDIF
+(  256)       ENDDO
+(  257)     ENDIF
+(  258) # 259 "gstats.F90"
+(  259)     THISTIME(KNUM) = 0.0_JPRD
+(  260)     TIMELCALL(KNUM) = ZCLOCK
+(  261)     TTCPULCALL(KNUM) = ZTCPU
+(  262)     TVCPULCALL(KNUM) = ZVCPU
+(  263)     THISTCPU(KNUM) = 0.0_JPRD
+(  264)     THISVCPU(KNUM) = 0.0_JPRD
+(  265)     IF(MYPROC_STATS.LE.NSTATS_MEM.AND.MYPROC_STATS.NE.0) THEN
+(  266)       IMEM = GETMAXRSS()/1024
+(  267)       IPAG = GETPAG()
+(  268)       IMEMH = GETHWM()/1024
+(  269)       IMEMS = GETSTK()/1024
+(  270)       IMEMC = 0
+(  271)       IF(LSTATS_ALLOC) IMEMC = GETCURHEAP()/1024
+(  272)       IF(IMEM > IIMEM.OR.IPAG > IIPAG.OR.(LSTATS_ALLOC.AND.(IMEMC.NE.IIMEMC))) THEN
+(  273)         IF(LLMFIRST) THEN
+(  274)           WRITE(0,*) ".---------------------------------------------------------"
+(  275)           WRITE(0,*) "| Memory trace details"
+(  276)           WRITE(0,*) "| --------------------"
+(  277)           WRITE(0,*) "| Memory examined at each GSTATS call if NSTATS_MEM>0."
+(  278)           WRITE(0,*) "| Header for each trace line is:"    
+(  279)           WRITE(0,*) "|"
+(  280)           WRITE(0,*) "|   RSS_INC: Increase in RSS_MAX (KB)"
+(  281)           WRITE(0,*) "|   RSS_MAX: Maximum real working set so far (KB)"
+(  282)           WRITE(0,*) "|   HEAP_MX: High Water Mark for heap so far (KB)"
+(  283)           WRITE(0,*) "|   STK:     Current Stack usage (KB)"
+(  284)           WRITE(0,*) "|   PGS:     Page faults w I/O since last trace line"
+(  285)           WRITE(0,*) "|   CALL:    Number of gstats call"
+(  286)           WRITE(0,*) "|   HEAP:    Current malloc'd total (KB)"
+(  287)           WRITE(0,*) "|" 
+(  288)           WRITE(0,*) "| Trace line written for NSTATS_MEM MPI tasks if RSS_MAX"
+(  289)           WRITE(0,*) "| RSS_MAX increases, PGS>0, or HEAP changed"
+(  290)           WRITE(0,*) "| (if LTATS_ALLOC=.TRUE.)"
+(  291)           WRITE(0,*) "`---------------------------------------------------------"
+(  292)           WRITE(0,*) ""
+(  293)           WRITE(0,'(A10,A5,21X,A7,2A8,A7,A5,A5,A8)') &
+(  294)            & "MEMORY    "," KNUM","RSS_INC"," RSS_MAX"," HEAP_MX","    STK", &
+(  295)            & "  PGS"," CALL","    HEAP"
+(  296)           LLMFIRST=.FALSE.
+(  297)         ENDIF
+(  298)         WRITE(0,'(A10,I5,1X,A20,1X,I6,2(1X,I7),1X,I6,1X,I4,1X,I4,1X,I7)') &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:51      page 15
+
+(  299)              & "MEMORY bfr",KNUM,CCDESC(KNUM),IMEM-IIMEM,IMEM,IMEMH,IMEMS, &
+(  300)              & IPAG-IIPAG,(NCALLS(KNUM)+1)/2,IMEMC
+(  301)       ENDIF
+(  302)       NTMEM(KNUM,2)=IMEM
+(  303)       IIMEM=IMEM
+(  304)       IIPAG=IPAG
+(  305)       IIMEMC=IMEMC
+(  306)     ENDIF
+(  307)     IF(LSTATS_MPL.AND.CCTYPE(KNUM) .EQ. 'MPL') THEN
+(  308)       CALL MPL_STATSON(NSEND,SBYTES,NRECV,RBYTES)
+(  309)       UNKNOWN_NUMSEND(KNUM)=UNKNOWN_NUMSEND(KNUM)+NSEND
+(  310)       UNKNOWN_NUMRECV(KNUM)=UNKNOWN_NUMRECV(KNUM)+NRECV
+(  311)       UNKNOWN_SENDBYTES(KNUM)=UNKNOWN_SENDBYTES(KNUM)+SBYTES
+(  312)       UNKNOWN_RECVBYTES(KNUM)=UNKNOWN_RECVBYTES(KNUM)+RBYTES
+(  313)     ENDIF
+(  314)   ELSEIF( KSWITCH == 1 ) THEN
+(  315) ! Finish timing event
+(  316)     ZTIME = THISTIME(KNUM)+(ZCLOCK-TIMELCALL(KNUM))
+(  317)     IF(LSTATS_MPL.AND.CCTYPE(KNUM) .EQ. 'MPL') THEN
+(  318)       CALL MPL_STATSREAD(NSEND,SBYTES,NRECV,RBYTES)
+(  319)       NUMSEND(KNUM)=NUMSEND(KNUM)+NSEND
+(  320)       NUMRECV(KNUM)=NUMRECV(KNUM)+NRECV
+(  321)       SENDBYTES(KNUM)=SENDBYTES(KNUM)+SBYTES
+(  322)       RECVBYTES(KNUM)=RECVBYTES(KNUM)+RBYTES
+(  323)     ENDIF
+(  324)     TIMESUM(KNUM) = TIMESUM(KNUM)+ZTIME
+(  325)     TIMESQSUM(KNUM) = TIMESQSUM(KNUM)+ZTIME**2
+(  326)     TIMEMAX(KNUM) = MAX(TIMEMAX(KNUM),ZTIME)
+(  327)     TTCPUSUM(KNUM) = TTCPUSUM(KNUM)+THISTCPU(KNUM)+ZTCPU-TTCPULCALL(KNUM)
+(  328)     TVCPUSUM(KNUM) = TVCPUSUM(KNUM)+THISVCPU(KNUM)+ZVCPU-TVCPULCALL(KNUM)
+(  329)     IF(MYPROC_STATS.LE.NSTATS_MEM.AND.MYPROC_STATS.NE.0) THEN
+(  330)       IMEM = GETMAXRSS()/1024
+(  331)       IPAG = GETPAG()
+(  332)       IMEMH = GETHWM()/1024
+(  333)       IMEMS = GETSTK()/1024
+(  334)       IMEMC = 0
+(  335)       IF(LSTATS_ALLOC) IMEMC = GETCURHEAP()/1024
+(  336)       IF(IMEM > IIMEM.OR.IPAG > IIPAG.OR.(LSTATS_ALLOC.AND.(IMEMC.NE.IIMEMC))) THEN
+(  337)         WRITE(0,'(A10,I5,1X,A20,1X,I6,2(1X,I7),1X,I6,1X,I4,1X,I4,1X,I7)') &
+(  338)              & "MEMORY aft ",KNUM,CCDESC(KNUM),IMEM-IIMEM,IMEM,IMEMH,IMEMS, &
+(  339)              & IPAG-IIPAG,NCALLS(KNUM)/2,IMEMC
+(  340)       ENDIF
+(  341)       IIMEM=IMEM
+(  342)       IIPAG=IPAG
+(  343)       IIMEMC=IMEMC 
+(  344)       IMEM=IMEM-NTMEM(KNUM,2)
+(  345)       NTMEM(KNUM,4)=NTMEM(KNUM,4)+IMEM
+(  346)       IF(IMEM > NTMEM(KNUM,1)) THEN
+(  347)         NTMEM(KNUM,1)=IMEM
+(  348)         NTMEM(KNUM,3)=NCALLS(KNUM)
+(  349)       ENDIF
+(  350)       IF(IMEM < NTMEM(KNUM,5)) NTMEM(KNUM,5)=IMEM
+(  351)     ENDIF
+(  352) ! Save counters that result in large delays
+(  353)     IF( KNUM >= 500 .AND. NCALLS(KNUM)/2 > 10 )THEN
+(  354)       IF( ZTIME > TIMESUM(KNUM)/FLOAT(NCALLS(KNUM)/2) + 0.2_JPRD )THEN
+(  355)         ! ignore counters 1007 and 1013 due to NFRLW frequency LW radiation calls 
+(  356)         ! in ec_phys_tl and ec_phys_ad call trees
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:51      page 16
+
+(  357)         ! also ignore 635 and 636 due to increasing sujbwavallo matrix sizes
+(  358)         IF( KNUM /= 1007 .AND. KNUM /= 1013 .AND. KNUM /= 635 .AND. KNUM /= 636 )THEN
+(  359)           IF( NDELAY_INDEX < JPMAXDELAYS )THEN
+(  360)             NDELAY_INDEX=NDELAY_INDEX+1
+(  361)             NDELAY_COUNTER(NDELAY_INDEX)=KNUM
+(  362)             TDELAY_VALUE(NDELAY_INDEX)=ZTIME-TIMESUM(KNUM)/FLOAT(NCALLS(KNUM)/2)
+(  363)             CALL DATE_AND_TIME(CLDATEOD,CDELAY_TIME(NDELAY_INDEX),CLZONEOD,IVALUES)
+(  364)           ENDIF
+(  365)         ENDIF
+(  366)       ENDIF
+(  367)     ENDIF
+(  368)   ELSEIF( KSWITCH == 2 ) THEN
+(  369) ! Suspend timing event
+(  370)     ZTIMED = ZCLOCK-TIMELCALL(KNUM)
+(  371)     THISTIME(KNUM) = THISTIME(KNUM)+ZTIMED
+(  372)     THISTCPU(KNUM) = THISTCPU(KNUM)+ZTCPU-TTCPULCALL(KNUM)
+(  373)     THISVCPU(KNUM) = THISVCPU(KNUM)+ZVCPU-TVCPULCALL(KNUM)
+(  374)     IF(LSTATS_MPL.AND.CCTYPE(KNUM) .EQ. 'MPL') THEN
+(  375)       CALL MPL_STATSREAD(NSEND,SBYTES,NRECV,RBYTES)
+(  376)       NUMSEND(KNUM)=NUMSEND(KNUM)+NSEND
+(  377)       NUMRECV(KNUM)=NUMRECV(KNUM)+NRECV
+(  378)       SENDBYTES(KNUM)=SENDBYTES(KNUM)+SBYTES
+(  379)       RECVBYTES(KNUM)=RECVBYTES(KNUM)+RBYTES
+(  380)     ENDIF
+(  381)   ELSEIF( KSWITCH == 3 ) THEN
+(  382) ! Resume timing event
+(  383)     TIMELCALL(KNUM) = ZCLOCK
+(  384)     TTCPULCALL(KNUM) = ZTCPU
+(  385)     TVCPULCALL(KNUM) = ZVCPU
+(  386)     IF(LSTATS_MPL.AND.CCTYPE(KNUM) .EQ. 'MPL') THEN
+(  387)       CALL MPL_STATSON(NSEND,SBYTES,NRECV,RBYTES)
+(  388)       UNKNOWN_NUMSEND(KNUM)=UNKNOWN_NUMSEND(KNUM)+NSEND
+(  389)       UNKNOWN_NUMRECV(KNUM)=UNKNOWN_NUMRECV(KNUM)+NRECV
+(  390)       UNKNOWN_SENDBYTES(KNUM)=UNKNOWN_SENDBYTES(KNUM)+SBYTES
+(  391)       UNKNOWN_RECVBYTES(KNUM)=UNKNOWN_RECVBYTES(KNUM)+RBYTES
+(  392)     ENDIF
+(  393)     IF(KNUM>=500)THEN
+(  394)       ZTIMED = ZCLOCK-TIME_LAST_CALL
+(  395)       TIMESUMB(KNUM) = TIMESUMB(KNUM)+ZTIMED
+(  396)     ENDIF
+(  397)   ENDIF
+(  398)   IF(KNUM >= 500)THEN
+(  399)     TIME_LAST_CALL = ZCLOCK
+(  400)   ENDIF
+(  401) # 402 "gstats.F90"
+(  402) !   Trace stats
+(  403)   NCALLS_TOTAL = NCALLS_TOTAL+1
+(  404)   IF (LTRACE_STATS .AND. NCALLS_TOTAL <= NTRACE_STATS) THEN
+(  405)     ICALL = NCALLS_TOTAL
+(  406)     TIME_TRACE(ICALL) = ZCLOCK
+(  407)     NCALL_TRACE(ICALL) = (JPMAXSTAT+1)*KSWITCH+KNUM
+(  408)   ENDIF
+(  409) # 410 "gstats.F90"
+(  410) ! measure gstats overhead
+(  411)   CALL USER_CLOCK(PELAPSED_TIME=ZCLOCK1)
+(  412)   TIMESUM(400) = TIMESUM(400)+ZCLOCK1-ZCLOCK
+(  413)   NCALLS(400) = NCALLS(400)+1
+(  414)   LAST_KSWITCH=KSWITCH
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:51      page 17
+
+(  415)   LAST_KNUM=KNUM
+(  416) # 417 "gstats.F90"
+(  417) ! ZSUM=SUM(TIMESUM(500:JPMAXSTAT))
+(  418) ! ZSUMB=SUM(TIMESUMB(500:JPMAXSTAT))
+(  419) ! ZTOT=ZCLOCK1-TIMELCALL(0)
+(  420) ! IF( (ZSUM+ZSUMB)/ZTOT >1.0_JPRB )THEN
+(  421) !   write(0,'("GSTATS_DEBUG: KNUM=",I6," KSWITCH=",I1," (zsum+zsumb)/ztot=",F10.6)')&
+(  422) !    &KNUM,KSWITCH,(zsum+zsumb)/ztot
+(  423) ! ENDIF
+(  424)   
+(  425) ENDIF
+(  426) # 427 "gstats.F90"
+(  427) 99999 CONTINUE
+(  428) END SUBROUTINE GSTATS

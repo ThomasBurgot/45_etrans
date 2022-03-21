@@ -1,0 +1,213 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: horiz_field.F90
+
+(    1) SUBROUTINE HORIZ_FIELD(KX,KY,PHFIELD)
+(    2) 
+(    3) !   purpose  :
+(    4) !   --------
+(    5) !    To produce test horizontal field of temperature.
+(    6) 
+(    7) !    method  :
+(    8) !   ---------
+(    9) !    Test horizontal input field is on horizontal grid size KXxKY points, and it
+(   10) !    represent's temperature. It is obtained form flollwing expression:
+(   11) !    PHFIELD(i,j)=280*(1+0.1*Sin[PPI*(i+0.5*IMAX)*(j+0.7*IMAX)/IMAX^2+1]) (Pierre Benard) 
+(   12) 
+(   13) !   interface  :
+(   14) !   ---------
+(   15) !    CALL HORIZ_FIELD(KX,KY,PHFIELD)
+(   16)  
+(   17) !   Explicit arguments :
+(   18) !   -------------------
+(   19) !    KX         - number of grid points in x
+(   20) !    KY         - number of grid points in y
+(   21) !    PHFIELD    - simulated 2D temperature horizontal field  
+(   22) 
+(   23) !   externals :
+(   24) !   ----------
+(   25) !    None.
+(   26) 
+(   27) !   references :
+(   28) !   ----------
+(   29) 
+(   30) !    author :
+(   31) !    ------
+(   32) !    23-May-2008   Antonio Stanesic
+(   33) !    ----------------------------------------------------------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 2
+
+(   34) 
+(   35) USE PARKIND1 , ONLY : JPIM     ,JPRB
+(   36) USE YOMHOOK  , ONLY : LHOOK, DR_HOOK
+(   37) 
+(   38) !    ----------------------------------------------------------------------
+(   39) 
+(   40) IMPLICIT NONE
+(   41) 
+(   42) INTEGER(KIND=JPIM),     INTENT(IN)      :: KX
+(   43) INTEGER(KIND=JPIM),     INTENT(IN)      :: KY
+(   44) REAL(KIND=JPRB),        INTENT(OUT)     :: PHFIELD(KX,KY)
+(   45) 
+(   46) !    ----------------------------------------------------------------------
+(   47) 
+(   48) REAL(KIND=JPRB),        PARAMETER       :: PPI=3.141592
+(   49) INTEGER(KIND=JPIM)                      :: JX,JY,IMAX
+(   50) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   51) 
+(   52) !    ----------------------------------------------------------------------
+(   53) IF (LHOOK) CALL DR_HOOK('HORIZ_FIELD',0,ZHOOK_HANDLE)
+(   54) !    ----------------------------------------------------------------------
+(   55) 
+(   56) IMAX=MAX(KX,KY)
+(   57) 
+(   58) DO JY=1,KY
+(   59)  DO JX=1,KX
+(   60)   PHFIELD(JX,JY)=280*(1+0.1*SIN(PPI*(JX+0.5*IMAX)*(JY+0.7*IMAX)/(IMAX**2)+1))
+(   61)  ENDDO
+(   62) ENDDO
+(   63) 
+(   64) !    ----------------------------------------------------------------------
+(   65) IF (LHOOK) CALL DR_HOOK('HORIZ_FIELD',1,ZHOOK_HANDLE)
+(   66) END SUBROUTINE HORIZ_FIELD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 3
+
+(    1) # 1 "horiz_field.F90"
+(    1) SUBROUTINE HORIZ_FIELD(KX,KY,PHFIELD)
+(    2) # 3 "horiz_field.F90"
+(    3) !   purpose  :
+(    4) !   --------
+(    5) !    To produce test horizontal field of temperature.
+(    6) # 7 "horiz_field.F90"
+(    7) !    method  :
+(    8) !   ---------
+(    9) !    Test horizontal input field is on horizontal grid size KXxKY points, and it
+(   10) !    represent's temperature. It is obtained form flollwing expression:
+(   11) !    PHFIELD(i,j)=280*(1+0.1*Sin[PPI*(i+0.5*IMAX)*(j+0.7*IMAX)/IMAX^2+1]) (Pierre Benard) 
+(   12) # 13 "horiz_field.F90"
+(   13) !   interface  :
+(   14) !   ---------
+(   15) !    CALL HORIZ_FIELD(KX,KY,PHFIELD)
+(   16)  
+(   17) !   Explicit arguments :
+(   18) !   -------------------
+(   19) !    KX         - number of grid points in x
+(   20) !    KY         - number of grid points in y
+(   21) !    PHFIELD    - simulated 2D temperature horizontal field  
+(   22) # 23 "horiz_field.F90"
+(   23) !   externals :
+(   24) !   ----------
+(   25) !    None.
+(   26) # 27 "horiz_field.F90"
+(   27) !   references :
+(   28) !   ----------
+(   29) # 30 "horiz_field.F90"
+(   30) !    author :
+(   31) !    ------
+(   32) !    23-May-2008   Antonio Stanesic
+(   33) !    ----------------------------------------------------------------------
+(   34) # 35 "horiz_field.F90"
+(   35) USE PARKIND1 , ONLY : JPIM     ,JPRB
+(   36) USE YOMHOOK  , ONLY : LHOOK, DR_HOOK
+(   37) # 38 "horiz_field.F90"
+(   38) !    ----------------------------------------------------------------------
+(   39) # 40 "horiz_field.F90"
+(   40) IMPLICIT NONE
+(   41) # 42 "horiz_field.F90"
+(   42) INTEGER(KIND=JPIM),     INTENT(IN)      :: KX
+(   43) INTEGER(KIND=JPIM),     INTENT(IN)      :: KY
+(   44) REAL(KIND=JPRB),        INTENT(OUT)     :: PHFIELD(KX,KY)
+(   45) # 46 "horiz_field.F90"
+(   46) !    ----------------------------------------------------------------------
+(   47) # 48 "horiz_field.F90"
+(   48) REAL(KIND=JPRB),        PARAMETER       :: PPI=3.141592
+(   49) INTEGER(KIND=JPIM)                      :: JX,JY,IMAX
+(   50) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   51) # 52 "horiz_field.F90"
+(   52) !    ----------------------------------------------------------------------
+(   53) IF (LHOOK) CALL DR_HOOK('HORIZ_FIELD',0,ZHOOK_HANDLE)
+(   54) !    ----------------------------------------------------------------------
+(   55) # 56 "horiz_field.F90"
+(   56) IMAX=MAX(KX,KY)
+(   57) # 58 "horiz_field.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 4
+
+(   58) DO JY=1,KY
+(   59)  DO JX=1,KX
+(   60)   PHFIELD(JX,JY)=280*(1+0.1*SIN(PPI*(JX+0.5*IMAX)*(JY+0.7*IMAX)/(IMAX**2)+1))
+(   61)  ENDDO
+(   62) ENDDO
+(   63) # 64 "horiz_field.F90"
+(   64) !    ----------------------------------------------------------------------
+(   65) IF (LHOOK) CALL DR_HOOK('HORIZ_FIELD',1,ZHOOK_HANDLE)
+(   66) END SUBROUTINE HORIZ_FIELD

@@ -1,0 +1,208 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:14      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: espnorm_ctl_mod.F90
+
+(    1) MODULE ESPNORM_CTL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ESPNORM_CTL(PSPEC,KFLD,KFLD_G,KVSET,KMASTER,PMET,PNORM)
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) 
+(    8) USE TPM_DIM         ,ONLY : R
+(    9) USE TPM_DISTR       ,ONLY : D, MYSETV, MYPROC
+(   10) 
+(   11) USE ESPNORMD_MOD    ,ONLY : ESPNORMD
+(   12) USE ESPNORMC_MOD    ,ONLY : ESPNORMC
+(   13) 
+(   14) USE TPMALD_DIM      ,ONLY : RALD
+(   15) !
+(   16) 
+(   17) IMPLICIT NONE
+(   18) 
+(   19) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPEC(:,:)
+(   20) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSET(:)
+(   21) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KMASTER
+(   22) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PMET(:)
+(   23) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PNORM(:)
+(   24) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFLD,KFLD_G
+(   25) INTEGER(KIND=JPIM) :: IVSET(KFLD_G)
+(   26) 
+(   27) REAL(KIND=JPRB)    :: ZMET(0:R%NSPEC_G)
+(   28) 
+(   29) REAL(KIND=JPRB)    :: ZSM(KFLD,D%NUMP)
+(   30) 
+(   31) REAL(KIND=JPRB)    :: ZGM(KFLD_G,0:RALD%NMSMAX)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:14      page 2
+
+(   32) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   33) 
+(   34) !     ------------------------------------------------------------------
+(   35) 
+(   36) IF (LHOOK) CALL DR_HOOK('ESPNORM_CTL_MOD:ESPNORM_CTL',0,ZHOOK_HANDLE)
+(   37) IF(PRESENT(KVSET)) THEN
+(   38)   IVSET(:) = KVSET(:)
+(   39) ELSE
+(   40)   IVSET(:) = MYSETV
+(   41) ENDIF
+(   42) 
+(   43) IF(PRESENT(PMET)) THEN
+(   44)   ZMET(:) = PMET(:)
+(   45) ELSE
+(   46)   ZMET(:) = 1.0_JPRB
+(   47) ENDIF
+(   48) 
+(   49) CALL ESPNORMD(PSPEC,KFLD,ZMET,ZSM)
+(   50) 
+(   51) CALL ESPNORMC(ZSM,KFLD_G,IVSET,KMASTER,ZGM)
+(   52) 
+(   53) IF(MYPROC == KMASTER) THEN
+(   54)   PNORM(1:KFLD_G) = SUM(ZGM,DIM=2)
+(   55)   PNORM(1:KFLD_G) = SQRT(PNORM(1:KFLD_G))
+(   56) ENDIF
+(   57) IF (LHOOK) CALL DR_HOOK('ESPNORM_CTL_MOD:ESPNORM_CTL',1,ZHOOK_HANDLE)
+(   58) !     ------------------------------------------------------------------
+(   59) 
+(   60) END SUBROUTINE ESPNORM_CTL
+(   61) END MODULE ESPNORM_CTL_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:14      page 3
+
+(    1) # 1 "espnorm_ctl_mod.F90"
+(    1) MODULE ESPNORM_CTL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ESPNORM_CTL(PSPEC,KFLD,KFLD_G,KVSET,KMASTER,PMET,PNORM)
+(    4) # 5 "espnorm_ctl_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) # 8 "espnorm_ctl_mod.F90"
+(    8) USE TPM_DIM         ,ONLY : R
+(    9) USE TPM_DISTR       ,ONLY : D, MYSETV, MYPROC
+(   10) # 11 "espnorm_ctl_mod.F90"
+(   11) USE ESPNORMD_MOD    ,ONLY : ESPNORMD
+(   12) USE ESPNORMC_MOD    ,ONLY : ESPNORMC
+(   13) # 14 "espnorm_ctl_mod.F90"
+(   14) USE TPMALD_DIM      ,ONLY : RALD
+(   15) !
+(   16) # 17 "espnorm_ctl_mod.F90"
+(   17) IMPLICIT NONE
+(   18) # 19 "espnorm_ctl_mod.F90"
+(   19) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPEC(:,:)
+(   20) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSET(:)
+(   21) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KMASTER
+(   22) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PMET(:)
+(   23) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PNORM(:)
+(   24) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFLD,KFLD_G
+(   25) INTEGER(KIND=JPIM) :: IVSET(KFLD_G)
+(   26) # 27 "espnorm_ctl_mod.F90"
+(   27) REAL(KIND=JPRB)    :: ZMET(0:R%NSPEC_G)
+(   28) # 29 "espnorm_ctl_mod.F90"
+(   29) REAL(KIND=JPRB)    :: ZSM(KFLD,D%NUMP)
+(   30) # 31 "espnorm_ctl_mod.F90"
+(   31) REAL(KIND=JPRB)    :: ZGM(KFLD_G,0:RALD%NMSMAX)
+(   32) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   33) # 34 "espnorm_ctl_mod.F90"
+(   34) !     ------------------------------------------------------------------
+(   35) # 36 "espnorm_ctl_mod.F90"
+(   36) IF (LHOOK) CALL DR_HOOK('ESPNORM_CTL_MOD:ESPNORM_CTL',0,ZHOOK_HANDLE)
+(   37) IF(PRESENT(KVSET)) THEN
+(   38)   IVSET(:) = KVSET(:)
+(   39) ELSE
+(   40)   IVSET(:) = MYSETV
+(   41) ENDIF
+(   42) # 43 "espnorm_ctl_mod.F90"
+(   43) IF(PRESENT(PMET)) THEN
+(   44)   ZMET(:) = PMET(:)
+(   45) ELSE
+(   46)   ZMET(:) = 1.0_JPRB
+(   47) ENDIF
+(   48) # 49 "espnorm_ctl_mod.F90"
+(   49) CALL ESPNORMD(PSPEC,KFLD,ZMET,ZSM)
+(   50) # 51 "espnorm_ctl_mod.F90"
+(   51) CALL ESPNORMC(ZSM,KFLD_G,IVSET,KMASTER,ZGM)
+(   52) # 53 "espnorm_ctl_mod.F90"
+(   53) IF(MYPROC == KMASTER) THEN
+(   54)   PNORM(1:KFLD_G) = SUM(ZGM,DIM=2)
+(   55)   PNORM(1:KFLD_G) = SQRT(PNORM(1:KFLD_G))
+(   56) ENDIF
+(   57) IF (LHOOK) CALL DR_HOOK('ESPNORM_CTL_MOD:ESPNORM_CTL',1,ZHOOK_HANDLE)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:14      page 4
+
+(   58) !     ------------------------------------------------------------------
+(   59) # 60 "espnorm_ctl_mod.F90"
+(   60) END SUBROUTINE ESPNORM_CTL
+(   61) END MODULE ESPNORM_CTL_MOD

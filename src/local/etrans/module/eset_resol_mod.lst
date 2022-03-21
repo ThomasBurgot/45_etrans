@@ -1,0 +1,215 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:06      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eset_resol_mod.F90
+
+(    1) MODULE ESET_RESOL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ESET_RESOL(KRESOL)
+(    4) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    5) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    6) 
+(    7) USE TPM_GEN         ,ONLY : NOUT, MSETUP0, NCUR_RESOL, NMAX_RESOL
+(    8) USE TPM_DIM         ,ONLY : R, DIM_RESOL
+(    9) !USE TPM_TRANS
+(   10) USE TPM_DISTR       ,ONLY : D, DISTR_RESOL
+(   11) USE TPM_GEOMETRY    ,ONLY : G, GEOM_RESOL
+(   12) USE TPM_FIELDS      ,ONLY : F, FIELDS_RESOL
+(   13) USE TPM_FFT         ,ONLY : T, FFT_RESOL, TB, FFTB_RESOL
+(   14) #ifdef WITH_FFTW
+(   15) USE TPM_FFTW        ,ONLY : TW, FFTW_RESOL
+(   16) #endif
+(   17) USE TPM_FFTC        ,ONLY : TC, FFTC_RESOL
+(   18) 
+(   19) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   20) 
+(   21) USE TPMALD_DIM      ,ONLY : RALD, ALDDIM_RESOL
+(   22) USE TPMALD_DISTR    ,ONLY : DALD, ALDDISTR_RESOL
+(   23) USE TPMALD_FFT      ,ONLY : TALD, ALDFFT_RESOL
+(   24) USE TPMALD_FIELDS   ,ONLY : FALD, ALDFIELDS_RESOL
+(   25) USE TPMALD_GEO      ,ONLY : GALD, ALDGEO_RESOL
+(   26) !
+(   27) 
+(   28) IMPLICIT NONE
+(   29) 
+(   30) ! Declaration of arguments
+(   31) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:06      page 2
+
+(   32) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KRESOL
+(   33) 
+(   34) ! Local varaibles
+(   35) INTEGER(KIND=JPIM) :: IRESOL
+(   36) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   37) 
+(   38) !     ------------------------------------------------------------------
+(   39) 
+(   40) IF (LHOOK) CALL DR_HOOK('ESET_RESOL_MOD:ESET_RESOL',0,ZHOOK_HANDLE)
+(   41) IF(MSETUP0 == 0) CALL ABORT_TRANS('ESET_RESOL:TRANS NOT SETUP')
+(   42) IRESOL = 1
+(   43) IF(PRESENT(KRESOL)) THEN
+(   44)   IRESOL = KRESOL
+(   45)  IF(KRESOL < 1 .OR. KRESOL > NMAX_RESOL) THEN
+(   46)     WRITE(NOUT,*)'ESET_RESOL: UNKNOWN RESOLUTION ',KRESOL,NMAX_RESOL
+(   47)     CALL ABORT_TRANS('ESET_RESOL:KRESOL < 1 .OR. KRESOL > NMAX_RESOL')
+(   48)  ENDIF
+(   49) ENDIF
+(   50) IF(IRESOL /= NCUR_RESOL) THEN
+(   51)   NCUR_RESOL = IRESOL
+(   52)   R => DIM_RESOL(NCUR_RESOL)
+(   53)   F => FIELDS_RESOL(NCUR_RESOL)
+(   54)   G => GEOM_RESOL(NCUR_RESOL)
+(   55)   D => DISTR_RESOL(NCUR_RESOL)
+(   56)   T => FFT_RESOL(NCUR_RESOL)
+(   57)   TB => FFTB_RESOL(NCUR_RESOL)
+(   58) #ifdef WITH_FFTW
+(   59)   TW => FFTW_RESOL(NCUR_RESOL)
+(   60) #endif
+(   61)   TC => FFTC_RESOL(NCUR_RESOL)
+(   62)   RALD => ALDDIM_RESOL(NCUR_RESOL)
+(   63)   DALD => ALDDISTR_RESOL(NCUR_RESOL)
+(   64)   TALD => ALDFFT_RESOL(NCUR_RESOL)
+(   65)   FALD => ALDFIELDS_RESOL(NCUR_RESOL)
+(   66)   GALD => ALDGEO_RESOL(NCUR_RESOL)
+(   67) 
+(   68) ENDIF
+(   69) IF (LHOOK) CALL DR_HOOK('ESET_RESOL_MOD:ESET_RESOL',1,ZHOOK_HANDLE)
+(   70) 
+(   71) END SUBROUTINE ESET_RESOL
+(   72) END MODULE ESET_RESOL_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:06      page 3
+
+(    1) # 1 "eset_resol_mod.F90"
+(    1) MODULE ESET_RESOL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ESET_RESOL(KRESOL)
+(    4) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    5) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    6) # 7 "eset_resol_mod.F90"
+(    7) USE TPM_GEN         ,ONLY : NOUT, MSETUP0, NCUR_RESOL, NMAX_RESOL
+(    8) USE TPM_DIM         ,ONLY : R, DIM_RESOL
+(    9) !USE TPM_TRANS
+(   10) USE TPM_DISTR       ,ONLY : D, DISTR_RESOL
+(   11) USE TPM_GEOMETRY    ,ONLY : G, GEOM_RESOL
+(   12) USE TPM_FIELDS      ,ONLY : F, FIELDS_RESOL
+(   13) USE TPM_FFT         ,ONLY : T, FFT_RESOL, TB, FFTB_RESOL
+(   14) # 17 "eset_resol_mod.F90"
+(   17) USE TPM_FFTC        ,ONLY : TC, FFTC_RESOL
+(   18) # 19 "eset_resol_mod.F90"
+(   19) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   20) # 21 "eset_resol_mod.F90"
+(   21) USE TPMALD_DIM      ,ONLY : RALD, ALDDIM_RESOL
+(   22) USE TPMALD_DISTR    ,ONLY : DALD, ALDDISTR_RESOL
+(   23) USE TPMALD_FFT      ,ONLY : TALD, ALDFFT_RESOL
+(   24) USE TPMALD_FIELDS   ,ONLY : FALD, ALDFIELDS_RESOL
+(   25) USE TPMALD_GEO      ,ONLY : GALD, ALDGEO_RESOL
+(   26) !
+(   27) # 28 "eset_resol_mod.F90"
+(   28) IMPLICIT NONE
+(   29) # 30 "eset_resol_mod.F90"
+(   30) ! Declaration of arguments
+(   31) # 32 "eset_resol_mod.F90"
+(   32) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KRESOL
+(   33) # 34 "eset_resol_mod.F90"
+(   34) ! Local varaibles
+(   35) INTEGER(KIND=JPIM) :: IRESOL
+(   36) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   37) # 38 "eset_resol_mod.F90"
+(   38) !     ------------------------------------------------------------------
+(   39) # 40 "eset_resol_mod.F90"
+(   40) IF (LHOOK) CALL DR_HOOK('ESET_RESOL_MOD:ESET_RESOL',0,ZHOOK_HANDLE)
+(   41) IF(MSETUP0 == 0) CALL ABORT_TRANS('ESET_RESOL:TRANS NOT SETUP')
+(   42) IRESOL = 1
+(   43) IF(PRESENT(KRESOL)) THEN
+(   44)   IRESOL = KRESOL
+(   45)  IF(KRESOL < 1 .OR. KRESOL > NMAX_RESOL) THEN
+(   46)     WRITE(NOUT,*)'ESET_RESOL: UNKNOWN RESOLUTION ',KRESOL,NMAX_RESOL
+(   47)     CALL ABORT_TRANS('ESET_RESOL:KRESOL < 1 .OR. KRESOL > NMAX_RESOL')
+(   48)  ENDIF
+(   49) ENDIF
+(   50) IF(IRESOL /= NCUR_RESOL) THEN
+(   51)   NCUR_RESOL = IRESOL
+(   52)   R => DIM_RESOL(NCUR_RESOL)
+(   53)   F => FIELDS_RESOL(NCUR_RESOL)
+(   54)   G => GEOM_RESOL(NCUR_RESOL)
+(   55)   D => DISTR_RESOL(NCUR_RESOL)
+(   56)   T => FFT_RESOL(NCUR_RESOL)
+(   57)   TB => FFTB_RESOL(NCUR_RESOL)
+(   58) # 61 "eset_resol_mod.F90"
+(   61)   TC => FFTC_RESOL(NCUR_RESOL)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:06      page 4
+
+(   62)   RALD => ALDDIM_RESOL(NCUR_RESOL)
+(   63)   DALD => ALDDISTR_RESOL(NCUR_RESOL)
+(   64)   TALD => ALDFFT_RESOL(NCUR_RESOL)
+(   65)   FALD => ALDFIELDS_RESOL(NCUR_RESOL)
+(   66)   GALD => ALDGEO_RESOL(NCUR_RESOL)
+(   67) # 68 "eset_resol_mod.F90"
+(   68) ENDIF
+(   69) IF (LHOOK) CALL DR_HOOK('ESET_RESOL_MOD:ESET_RESOL',1,ZHOOK_HANDLE)
+(   70) # 71 "eset_resol_mod.F90"
+(   71) END SUBROUTINE ESET_RESOL
+(   72) END MODULE ESET_RESOL_MOD

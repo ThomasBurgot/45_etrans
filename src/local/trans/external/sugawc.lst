@@ -1,0 +1,304 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:59      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: sugawc.F90
+
+(    1) SUBROUTINE SUGAWC(KDGLG,PMU,PW)
+(    2) 
+(    3) !**** *SUGAWC* - Compute Gaussian latitudes and weights 
+(    4) 
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !     Compute Gaussian latitudes and weights.
+(    8) 
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL SUGAWC(...)
+(   12) 
+(   13) !     Explicit arguments :
+(   14) !     -------------------- 
+(   15) !      INPUT:
+(   16) !       KDGLG    - number of latitudes.
+(   17) 
+(   18) !      OUTPUT:
+(   19) !       PMU      - sine of Gaussian latitudes.
+(   20) !       PW       - Gaussian weights.
+(   21) 
+(   22) !     Method.
+(   23) !     -------
+(   24) 
+(   25) !     Externals.  SUGAW
+(   26) !     ----------  
+(   27) 
+(   28) !     Author.
+(   29) !     -------
+(   30) !        K. Yessad, from SUGAWA and SULEG (trans)
+(   31) !        Original : May 2012
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:59      page 2
+
+(   32) 
+(   33) !     Modifications.
+(   34) !     --------------
+(   35) !      F. Vana  05-Mar-2015  Support for single precision
+(   36) 
+(   37) !     ------------------------------------------------------------------
+(   38) 
+(   39) USE PARKIND1  ,ONLY : JPRD, JPIM
+(   40) 
+(   41) !ifndef INTERFACE
+(   42) 
+(   43) USE SUGAW_MOD
+(   44) 
+(   45) !endif INTERFACE
+(   46) 
+(   47) !     ------------------------------------------------------------------
+(   48) 
+(   49) IMPLICIT NONE
+(   50) 
+(   51) INTEGER(KIND=JPIM) ,INTENT(IN)  :: KDGLG
+(   52) REAL(KIND=JPRD)    ,INTENT(OUT) :: PMU(:)
+(   53) REAL(KIND=JPRD)    ,INTENT(OUT) :: PW(:)
+(   54) 
+(   55) !ifndef INTERFACE
+(   56) 
+(   57) REAL(KIND=JPRD)    :: ZANM
+(   58) INTEGER(KIND=JPIM) :: ISTART,IK,IODD,JN,JGL
+(   59) REAL(KIND=JPRD) :: ZFN(0:KDGLG,0:KDGLG)
+(   60) REAL(KIND=JPRD) :: ZFNN
+(   61) 
+(   62) !     ------------------------------------------------------------------
+(   63) 
+(   64) ! * preliminary calculations to compute input quantities ZANM and ZFN
+(   65) !   (k.y.: coded after what I found in tfl/module/suleg_mod.F90).
+(   66) ISTART=1
+(   67) ! Belousov, Swarztrauber use ZFN(0,0)=SQRT(2._JPRD)
+(   68) ! IFS normalisation chosen to be 0.5*Integral(Pnm**2) = 1
+(   69) ZFN(0,0)=2._JPRD
+(   70) DO JN=ISTART,KDGLG
+(   71)   ZFNN=ZFN(0,0)
+(   72)   DO JGL=1,JN
+(   73)     ZFNN=ZFNN*SQRT(1._JPRD-0.25_JPRD/REAL(JGL**2,JPRD))
+(   74)   ENDDO
+(   75)   IODD=MOD(JN,2)
+(   76)   ZFN(JN,JN)=ZFNN
+(   77)   DO JGL=2,JN-IODD,2
+(   78)     ZFN(JN,JN-JGL)=ZFN(JN,JN-JGL+2)*REAL((JGL-1)*(2*JN-JGL+2),JPRD)/REAL(JGL*(2*JN-JGL+1),JPRD)
+(   79)   ENDDO
+(   80) ENDDO
+(   81) 
+(   82) ZANM=SQRT(REAL(2*KDGLG+1,JPRD)*REAL(KDGLG**2,JPRD)/REAL(2*KDGLG-1,JPRD))
+(   83) 
+(   84) ! * call to SUGAW (output: PW, PMU):
+(   85) CALL SUGAW(KDGLG,0,KDGLG,PMU,PW,ZANM,ZFN)
+(   86) 
+(   87) !     ------------------------------------------------------------------
+(   88) 
+(   89) !endif INTERFACE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:59      page 3
+
+(   90) 
+(   91) END SUBROUTINE SUGAWC
+(   92) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:59      page 4
+
+(    1) # 1 "sugawc.F90"
+(    1) SUBROUTINE SUGAWC(KDGLG,PMU,PW)
+(    2) # 3 "sugawc.F90"
+(    3) !**** *SUGAWC* - Compute Gaussian latitudes and weights 
+(    4) # 5 "sugawc.F90"
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !     Compute Gaussian latitudes and weights.
+(    8) # 9 "sugawc.F90"
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL SUGAWC(...)
+(   12) # 13 "sugawc.F90"
+(   13) !     Explicit arguments :
+(   14) !     -------------------- 
+(   15) !      INPUT:
+(   16) !       KDGLG    - number of latitudes.
+(   17) # 18 "sugawc.F90"
+(   18) !      OUTPUT:
+(   19) !       PMU      - sine of Gaussian latitudes.
+(   20) !       PW       - Gaussian weights.
+(   21) # 22 "sugawc.F90"
+(   22) !     Method.
+(   23) !     -------
+(   24) # 25 "sugawc.F90"
+(   25) !     Externals.  SUGAW
+(   26) !     ----------  
+(   27) # 28 "sugawc.F90"
+(   28) !     Author.
+(   29) !     -------
+(   30) !        K. Yessad, from SUGAWA and SULEG (trans)
+(   31) !        Original : May 2012
+(   32) # 33 "sugawc.F90"
+(   33) !     Modifications.
+(   34) !     --------------
+(   35) !      F. Vana  05-Mar-2015  Support for single precision
+(   36) # 37 "sugawc.F90"
+(   37) !     ------------------------------------------------------------------
+(   38) # 39 "sugawc.F90"
+(   39) USE PARKIND1  ,ONLY : JPRD, JPIM
+(   40) # 41 "sugawc.F90"
+(   41) !ifndef INTERFACE
+(   42) # 43 "sugawc.F90"
+(   43) USE SUGAW_MOD
+(   44) # 45 "sugawc.F90"
+(   45) !endif INTERFACE
+(   46) # 47 "sugawc.F90"
+(   47) !     ------------------------------------------------------------------
+(   48) # 49 "sugawc.F90"
+(   49) IMPLICIT NONE
+(   50) # 51 "sugawc.F90"
+(   51) INTEGER(KIND=JPIM) ,INTENT(IN)  :: KDGLG
+(   52) REAL(KIND=JPRD)    ,INTENT(OUT) :: PMU(:)
+(   53) REAL(KIND=JPRD)    ,INTENT(OUT) :: PW(:)
+(   54) # 55 "sugawc.F90"
+(   55) !ifndef INTERFACE
+(   56) # 57 "sugawc.F90"
+(   57) REAL(KIND=JPRD)    :: ZANM
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:59      page 5
+
+(   58) INTEGER(KIND=JPIM) :: ISTART,IK,IODD,JN,JGL
+(   59) REAL(KIND=JPRD) :: ZFN(0:KDGLG,0:KDGLG)
+(   60) REAL(KIND=JPRD) :: ZFNN
+(   61) # 62 "sugawc.F90"
+(   62) !     ------------------------------------------------------------------
+(   63) # 64 "sugawc.F90"
+(   64) ! * preliminary calculations to compute input quantities ZANM and ZFN
+(   65) !   (k.y.: coded after what I found in tfl/module/suleg_mod.F90).
+(   66) ISTART=1
+(   67) ! Belousov, Swarztrauber use ZFN(0,0)=SQRT(2._JPRD)
+(   68) ! IFS normalisation chosen to be 0.5*Integral(Pnm**2) = 1
+(   69) ZFN(0,0)=2._JPRD
+(   70) DO JN=ISTART,KDGLG
+(   71)   ZFNN=ZFN(0,0)
+(   72)   DO JGL=1,JN
+(   73)     ZFNN=ZFNN*SQRT(1._JPRD-0.25_JPRD/REAL(JGL**2,JPRD))
+(   74)   ENDDO
+(   75)   IODD=MOD(JN,2)
+(   76)   ZFN(JN,JN)=ZFNN
+(   77)   DO JGL=2,JN-IODD,2
+(   78)     ZFN(JN,JN-JGL)=ZFN(JN,JN-JGL+2)*REAL((JGL-1)*(2*JN-JGL+2),JPRD)/REAL(JGL*(2*JN-JGL+1),JPRD)
+(   79)   ENDDO
+(   80) ENDDO
+(   81) # 82 "sugawc.F90"
+(   82) ZANM=SQRT(REAL(2*KDGLG+1,JPRD)*REAL(KDGLG**2,JPRD)/REAL(2*KDGLG-1,JPRD))
+(   83) # 84 "sugawc.F90"
+(   84) ! * call to SUGAW (output: PW, PMU):
+(   85) CALL SUGAW(KDGLG,0,KDGLG,PMU,PW,ZANM,ZFN)
+(   86) # 87 "sugawc.F90"
+(   87) !     ------------------------------------------------------------------
+(   88) # 89 "sugawc.F90"
+(   89) !endif INTERFACE
+(   90) # 91 "sugawc.F90"
+(   91) END SUBROUTINE SUGAWC

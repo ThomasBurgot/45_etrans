@@ -1,0 +1,231 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:53      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: asre1_mod.F90
+
+(    1) MODULE ASRE1_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ASRE1(KM,KMLOC,KF_OUT_LT,PAOA1,PSOA1)
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    6) USE TPM_DIM   ,ONLY : R
+(    7) 
+(    8) !USE TPM_TRANS
+(    9) 
+(   10) USE ASRE1B_MOD      ,ONLY : ASRE1B
+(   11) 
+(   12) 
+(   13) !**** *ASRE1* - Recombine antisymmetric and symmetric parts
+(   14) 
+(   15) !     Purpose.
+(   16) !     --------
+(   17) !        To recombine the antisymmetric and symmetric parts of the
+(   18) !        Fourier arrays and update the correct parts of the state
+(   19) !        variables.
+(   20) 
+(   21) !**   Interface.
+(   22) !     ----------
+(   23) !       *CALL* *ASRE1(...)
+(   24) 
+(   25) !        Explicit arguments :
+(   26) !        --------------------
+(   27) !                              KM - zonal wavenumber
+(   28) !                              KMLOC - local zonal wavenumber
+(   29) !                              PAOA1 - antisymmetric part of Fourier
+(   30) !                              fields for zonal wavenumber KM (basic
+(   31) !                              variables and N-S derivatives)
+(   32) !                              PSOA1 - symmetric part of Fourier
+(   33) !                              fields for zonal wavenumber KM (basic
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:53      page 2
+
+(   34) !                              variables and N-S derivatives)
+(   35) 
+(   36) !        Implicit arguments :  None
+(   37) !        --------------------
+(   38) 
+(   39) !     Method.
+(   40) !     -------
+(   41) 
+(   42) !     Externals.   ASRE1B - basic recombination routine
+(   43) !     ----------
+(   44) 
+(   45) !     Reference.
+(   46) !     ----------
+(   47) !        ECMWF Research Department documentation of the IFS
+(   48) 
+(   49) !     Author.
+(   50) !     -------
+(   51) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   52) 
+(   53) !     Modifications.
+(   54) !     --------------
+(   55) !        Original : 00-02-01 From ASRE1 in IFS CY22R1
+(   56) 
+(   57) !     ------------------------------------------------------------------
+(   58) 
+(   59) 
+(   60) IMPLICIT NONE
+(   61) 
+(   62) 
+(   63) !     DUMMY INTEGER SCALARS
+(   64) INTEGER(KIND=JPIM) , INTENT(IN) :: KM
+(   65) INTEGER(KIND=JPIM) , INTENT(IN) :: KMLOC
+(   66) INTEGER(KIND=JPIM) , INTENT(IN) :: KF_OUT_LT
+(   67) 
+(   68) REAL(KIND=JPRBT)    , INTENT(IN) :: PSOA1(:,:),       PAOA1(:,:)
+(   69) 
+(   70) !     LOCAL INTEGER SCALARS
+(   71) INTEGER(KIND=JPIM) :: IFLDS
+(   72) 
+(   73) ! WORK ARRAYS FOR ASREL1B
+(   74) INTEGER(KIND=JPIM) :: ISTAN(R%NDGNH),ISTAS(R%NDGNH)
+(   75) 
+(   76) stop 'Error: this code path is not (yet) supported in GPU version'
+(   77) 
+(   78) 
+(   79) !     ------------------------------------------------------------------
+(   80) 
+(   81) IFLDS = KF_OUT_LT
+(   82) 
+(   83) !CALL ASRE1B(IFLDS,KM,KMLOC,PAOA1,PSOA1)
+(   84) 
+(   85) !     ------------------------------------------------------------------
+(   86) 
+(   87) END SUBROUTINE ASRE1
+(   88) END MODULE ASRE1_MOD
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:53      page 3
+
+(    1) # 1 "asre1_mod.F90"
+(    1) MODULE ASRE1_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ASRE1(KM,KMLOC,KF_OUT_LT,PAOA1,PSOA1)
+(    4) # 5 "asre1_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    6) USE TPM_DIM   ,ONLY : R
+(    7) # 8 "asre1_mod.F90"
+(    8) !USE TPM_TRANS
+(    9) # 10 "asre1_mod.F90"
+(   10) USE ASRE1B_MOD      ,ONLY : ASRE1B
+(   11) # 13 "asre1_mod.F90"
+(   13) !**** *ASRE1* - Recombine antisymmetric and symmetric parts
+(   14) # 15 "asre1_mod.F90"
+(   15) !     Purpose.
+(   16) !     --------
+(   17) !        To recombine the antisymmetric and symmetric parts of the
+(   18) !        Fourier arrays and update the correct parts of the state
+(   19) !        variables.
+(   20) # 21 "asre1_mod.F90"
+(   21) !**   Interface.
+(   22) !     ----------
+(   23) !       *CALL* *ASRE1(...)
+(   24) # 25 "asre1_mod.F90"
+(   25) !        Explicit arguments :
+(   26) !        --------------------
+(   27) !                              KM - zonal wavenumber
+(   28) !                              KMLOC - local zonal wavenumber
+(   29) !                              PAOA1 - antisymmetric part of Fourier
+(   30) !                              fields for zonal wavenumber KM (basic
+(   31) !                              variables and N-S derivatives)
+(   32) !                              PSOA1 - symmetric part of Fourier
+(   33) !                              fields for zonal wavenumber KM (basic
+(   34) !                              variables and N-S derivatives)
+(   35) # 36 "asre1_mod.F90"
+(   36) !        Implicit arguments :  None
+(   37) !        --------------------
+(   38) # 39 "asre1_mod.F90"
+(   39) !     Method.
+(   40) !     -------
+(   41) # 42 "asre1_mod.F90"
+(   42) !     Externals.   ASRE1B - basic recombination routine
+(   43) !     ----------
+(   44) # 45 "asre1_mod.F90"
+(   45) !     Reference.
+(   46) !     ----------
+(   47) !        ECMWF Research Department documentation of the IFS
+(   48) # 49 "asre1_mod.F90"
+(   49) !     Author.
+(   50) !     -------
+(   51) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   52) # 53 "asre1_mod.F90"
+(   53) !     Modifications.
+(   54) !     --------------
+(   55) !        Original : 00-02-01 From ASRE1 in IFS CY22R1
+(   56) # 57 "asre1_mod.F90"
+(   57) !     ------------------------------------------------------------------
+(   58) # 60 "asre1_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:53      page 4
+
+(   60) IMPLICIT NONE
+(   61) # 63 "asre1_mod.F90"
+(   63) !     DUMMY INTEGER SCALARS
+(   64) INTEGER(KIND=JPIM) , INTENT(IN) :: KM
+(   65) INTEGER(KIND=JPIM) , INTENT(IN) :: KMLOC
+(   66) INTEGER(KIND=JPIM) , INTENT(IN) :: KF_OUT_LT
+(   67) # 68 "asre1_mod.F90"
+(   68) REAL(KIND=JPRBT)    , INTENT(IN) :: PSOA1(:,:),       PAOA1(:,:)
+(   69) # 70 "asre1_mod.F90"
+(   70) !     LOCAL INTEGER SCALARS
+(   71) INTEGER(KIND=JPIM) :: IFLDS
+(   72) # 73 "asre1_mod.F90"
+(   73) ! WORK ARRAYS FOR ASREL1B
+(   74) INTEGER(KIND=JPIM) :: ISTAN(R%NDGNH),ISTAS(R%NDGNH)
+(   75) # 76 "asre1_mod.F90"
+(   76) stop 'Error: this code path is not (yet) supported in GPU version'
+(   77) # 79 "asre1_mod.F90"
+(   79) !     ------------------------------------------------------------------
+(   80) # 81 "asre1_mod.F90"
+(   81) IFLDS = KF_OUT_LT
+(   82) # 83 "asre1_mod.F90"
+(   83) !CALL ASRE1B(IFLDS,KM,KMLOC,PAOA1,PSOA1)
+(   84) # 85 "asre1_mod.F90"
+(   85) !     ------------------------------------------------------------------
+(   86) # 87 "asre1_mod.F90"
+(   87) END SUBROUTINE ASRE1
+(   88) END MODULE ASRE1_MOD

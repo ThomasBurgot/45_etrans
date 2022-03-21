@@ -1,0 +1,440 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:38      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: evdtuvad_comm_mod.F90
+
+(    1) MODULE EVDTUVAD_COMM_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EVDTUVAD_COMM(KM,KMLOC,KFIELD,KFLDPTR,PSPMEANU,PSPMEANV)
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) 
+(    8) USE TPM_DIM
+(    9) USE TPM_FIELDS
+(   10) USE TPM_DISTR
+(   11) 
+(   12) USE TPMALD_FIELDS
+(   13) USE TPMALD_GEO
+(   14) USE TPMALD_DISTR
+(   15) 
+(   16) USE MPL_MODULE
+(   17) USE ABORT_TRANS_MOD
+(   18) USE SET2PE_MOD
+(   19) 
+(   20) 
+(   21) !**** *EVDTUVAD_COMM* - Compute U,V in  spectral space
+(   22) 
+(   23) !     Purpose.
+(   24) !     --------
+(   25) !        In Laplace space communicate the mean winds
+(   26) !        from vorticity and divergence.
+(   27) 
+(   28) !**   Interface.
+(   29) !     ----------
+(   30) !        CALL EVDTUVAD_COMM(...)
+(   31) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:38      page 2
+
+(   32) !        Explicit arguments :  KM -zonal wavenumber (input-c)
+(   33) !        --------------------  KFIELD - number of fields (input-c)
+(   34) !                              KFLDPTR - fields pointers
+(   35) !                              PEPSNM - REPSNM for wavenumber KM (input-c)
+(   36) !        Organisation within NLEI1:
+(   37) !        NLEI1 = NSMAX+4+mod(NSMAX+4+1,2)
+(   38) !                        overdimensioning
+(   39) !        1        : n=NSMAX+2
+(   40) !        2        : n=NSMAX+1
+(   41) !        3        : n=NSMAX
+(   42) !        .        :
+(   43) !        .        :
+(   44) !        NSMAX+3  : n=0
+(   45) !        NSMAX+4  : n=-1
+(   46) 
+(   47) !        Implicit arguments :  Eigenvalues of inverse Laplace operator
+(   48) !        --------------------  from YOMLAP
+(   49) 
+(   50) !     Method.
+(   51) !     -------
+(   52) 
+(   53) !     Externals.   None.
+(   54) !     ----------
+(   55) 
+(   56) !     Reference.
+(   57) !     ----------
+(   58) !        ECMWF Research Department documentation of the IFS
+(   59) !        Temperton, 1991, MWR 119 p1303
+(   60) 
+(   61) !     Author.
+(   62) !     -------
+(   63) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   64) 
+(   65) !     Modifications.
+(   66) !     --------------
+(   67) !        Original : 00-02-01 From VDTUVAD in IFS CY22R1
+(   68) !        01-08-27 : R. El Khatib Fix for NPROMATR /= 0
+(   69) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   70) !        01-Dec-2004   A. Deckmyn    Fix mean wind for NPRTRW > 1
+(   71) !        N. Lopes & R. El Khatib 15-Jun-2012 Scalability enhancement +
+(   72) !        thread-safety
+(   73) !     ------------------------------------------------------------------
+(   74) 
+(   75) IMPLICIT NONE
+(   76) 
+(   77) INTEGER(KIND=JPIM), INTENT(IN)    :: KM, KFIELD, KMLOC
+(   78) 
+(   79) INTEGER(KIND=JPIM), OPTIONAL, INTENT(IN)  :: KFLDPTR(:)
+(   80) REAL(KIND=JPRB),    OPTIONAL, INTENT(OUT) :: PSPMEANU(:),PSPMEANV(:)
+(   81) 
+(   82) INTEGER(KIND=JPIM) :: II, IJ, IR, J, JN, IFLD
+(   83) 
+(   84) INTEGER(KIND=JPIM) :: IN
+(   85) INTEGER(KIND=JPIM) :: ISND, JA, ITAG, ILEN
+(   86) 
+(   87) INTEGER(KIND=JPIM) :: ISENDREQ(NPRTRW)
+(   88) 
+(   89) REAL(KIND=JPRB) :: ZSPU(2*KFIELD)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:38      page 3
+
+(   90) REAL(KIND=JPRB) :: ZKM
+(   91) REAL(KIND=JPRB) :: ZIN
+(   92) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   93) 
+(   94) !     ------------------------------------------------------------------
+(   95) 
+(   96) IF (LHOOK) CALL DR_HOOK('EVDTUVAD_COMM_MOD:EVDTUVAD_COMM',0,ZHOOK_HANDLE)
+(   97) 
+(   98) IF (NPRTRW > 1 .AND. KFIELD > 0) THEN
+(   99)   IF (KM == 0) THEN
+(  100)     IF (PRESENT(KFLDPTR)) THEN
+(  101)       DO J=1,KFIELD
+(  102)         IFLD=KFLDPTR(J)
+(  103)         ZSPU(J)=PSPMEANU(IFLD)
+(  104)         ZSPU(KFIELD+J)=PSPMEANV(IFLD)
+(  105)       ENDDO
+(  106)     ELSE
+(  107)       DO J=1,KFIELD
+(  108)         ZSPU(J)=PSPMEANU(J)
+(  109)         ZSPU(KFIELD+J)=PSPMEANV(J)
+(  110)       ENDDO
+(  111)     ENDIF 
+(  112)     DO JA=1,NPRTRW
+(  113)       IF (JA /= MYSETW) THEN
+(  114)         CALL SET2PE(ISND,0,0,JA,MYSETV)
+(  115)         ISND=NPRCIDS(ISND)
+(  116)         ITAG=300000+KFIELD*NPROC+ISND
+(  117)         CALL MPL_SEND(ZSPU(1:2*KFIELD),KDEST=ISND,KTAG=ITAG, &
+(  118)          & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(JA), &
+(  119)          & CDSTRING='EVDTUVAD_COMM:')
+(  120)       ENDIF
+(  121)     ENDDO
+(  122)   ELSE
+(  123)     IF (KMLOC == 1) THEN
+(  124)       IF (D%NPROCM(0) /= MYSETW) THEN
+(  125)         CALL SET2PE(ISND,0,0,D%NPROCM(0),MYSETV)
+(  126)         ISND=NPRCIDS(ISND)
+(  127)         ITAG=300000+KFIELD*NPROC+MYPROC
+(  128)         CALL MPL_RECV(ZSPU(1:2*KFIELD),KSOURCE=ISND,KTAG=ITAG,KOUNT=ILEN,CDSTRING='EVDTUVAD_COMM:')
+(  129)         IF (ILEN /= 2*KFIELD) THEN
+(  130)           CALL ABORT_TRANS('EVDTUVAD_COMM: RECV INVALID RECEIVE MESSAGE LENGTH')
+(  131)         ENDIF
+(  132)         IF (PRESENT(KFLDPTR)) THEN
+(  133)           DO J=1,KFIELD
+(  134)             IFLD=KFLDPTR(J)
+(  135)             PSPMEANU(IFLD)=ZSPU(J)
+(  136)             PSPMEANV(IFLD)=ZSPU(KFIELD+J)
+(  137)           ENDDO
+(  138)         ELSE
+(  139)           DO J=1,KFIELD
+(  140)             PSPMEANU(J)=ZSPU(J)
+(  141)             PSPMEANV(J)=ZSPU(KFIELD+J)
+(  142)           ENDDO
+(  143)         ENDIF
+(  144)       ENDIF
+(  145)     ENDIF
+(  146)   ENDIF
+(  147) ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:38      page 4
+
+(  148) 
+(  149) IF (LHOOK) CALL DR_HOOK('EVDTUVAD_COMM_MOD:EVDTUVAD_COMM',1,ZHOOK_HANDLE)
+(  150) 
+(  151) !     ------------------------------------------------------------------
+(  152) 
+(  153) END SUBROUTINE EVDTUVAD_COMM
+(  154) END MODULE EVDTUVAD_COMM_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:38      page 5
+
+(    1) # 1 "evdtuvad_comm_mod.F90"
+(    1) MODULE EVDTUVAD_COMM_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EVDTUVAD_COMM(KM,KMLOC,KFIELD,KFLDPTR,PSPMEANU,PSPMEANV)
+(    4) # 5 "evdtuvad_comm_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) # 8 "evdtuvad_comm_mod.F90"
+(    8) USE TPM_DIM
+(    9) USE TPM_FIELDS
+(   10) USE TPM_DISTR
+(   11) # 12 "evdtuvad_comm_mod.F90"
+(   12) USE TPMALD_FIELDS
+(   13) USE TPMALD_GEO
+(   14) USE TPMALD_DISTR
+(   15) # 16 "evdtuvad_comm_mod.F90"
+(   16) USE MPL_MODULE
+(   17) USE ABORT_TRANS_MOD
+(   18) USE SET2PE_MOD
+(   19) # 21 "evdtuvad_comm_mod.F90"
+(   21) !**** *EVDTUVAD_COMM* - Compute U,V in  spectral space
+(   22) # 23 "evdtuvad_comm_mod.F90"
+(   23) !     Purpose.
+(   24) !     --------
+(   25) !        In Laplace space communicate the mean winds
+(   26) !        from vorticity and divergence.
+(   27) # 28 "evdtuvad_comm_mod.F90"
+(   28) !**   Interface.
+(   29) !     ----------
+(   30) !        CALL EVDTUVAD_COMM(...)
+(   31) # 32 "evdtuvad_comm_mod.F90"
+(   32) !        Explicit arguments :  KM -zonal wavenumber (input-c)
+(   33) !        --------------------  KFIELD - number of fields (input-c)
+(   34) !                              KFLDPTR - fields pointers
+(   35) !                              PEPSNM - REPSNM for wavenumber KM (input-c)
+(   36) !        Organisation within NLEI1:
+(   37) !        NLEI1 = NSMAX+4+mod(NSMAX+4+1,2)
+(   38) !                        overdimensioning
+(   39) !        1        : n=NSMAX+2
+(   40) !        2        : n=NSMAX+1
+(   41) !        3        : n=NSMAX
+(   42) !        .        :
+(   43) !        .        :
+(   44) !        NSMAX+3  : n=0
+(   45) !        NSMAX+4  : n=-1
+(   46) # 47 "evdtuvad_comm_mod.F90"
+(   47) !        Implicit arguments :  Eigenvalues of inverse Laplace operator
+(   48) !        --------------------  from YOMLAP
+(   49) # 50 "evdtuvad_comm_mod.F90"
+(   50) !     Method.
+(   51) !     -------
+(   52) # 53 "evdtuvad_comm_mod.F90"
+(   53) !     Externals.   None.
+(   54) !     ----------
+(   55) # 56 "evdtuvad_comm_mod.F90"
+(   56) !     Reference.
+(   57) !     ----------
+(   58) !        ECMWF Research Department documentation of the IFS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:38      page 6
+
+(   59) !        Temperton, 1991, MWR 119 p1303
+(   60) # 61 "evdtuvad_comm_mod.F90"
+(   61) !     Author.
+(   62) !     -------
+(   63) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   64) # 65 "evdtuvad_comm_mod.F90"
+(   65) !     Modifications.
+(   66) !     --------------
+(   67) !        Original : 00-02-01 From VDTUVAD in IFS CY22R1
+(   68) !        01-08-27 : R. El Khatib Fix for NPROMATR /= 0
+(   69) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   70) !        01-Dec-2004   A. Deckmyn    Fix mean wind for NPRTRW > 1
+(   71) !        N. Lopes & R. El Khatib 15-Jun-2012 Scalability enhancement +
+(   72) !        thread-safety
+(   73) !     ------------------------------------------------------------------
+(   74) # 75 "evdtuvad_comm_mod.F90"
+(   75) IMPLICIT NONE
+(   76) # 77 "evdtuvad_comm_mod.F90"
+(   77) INTEGER(KIND=JPIM), INTENT(IN)    :: KM, KFIELD, KMLOC
+(   78) # 79 "evdtuvad_comm_mod.F90"
+(   79) INTEGER(KIND=JPIM), OPTIONAL, INTENT(IN)  :: KFLDPTR(:)
+(   80) REAL(KIND=JPRB),    OPTIONAL, INTENT(OUT) :: PSPMEANU(:),PSPMEANV(:)
+(   81) # 82 "evdtuvad_comm_mod.F90"
+(   82) INTEGER(KIND=JPIM) :: II, IJ, IR, J, JN, IFLD
+(   83) # 84 "evdtuvad_comm_mod.F90"
+(   84) INTEGER(KIND=JPIM) :: IN
+(   85) INTEGER(KIND=JPIM) :: ISND, JA, ITAG, ILEN
+(   86) # 87 "evdtuvad_comm_mod.F90"
+(   87) INTEGER(KIND=JPIM) :: ISENDREQ(NPRTRW)
+(   88) # 89 "evdtuvad_comm_mod.F90"
+(   89) REAL(KIND=JPRB) :: ZSPU(2*KFIELD)
+(   90) REAL(KIND=JPRB) :: ZKM
+(   91) REAL(KIND=JPRB) :: ZIN
+(   92) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   93) # 94 "evdtuvad_comm_mod.F90"
+(   94) !     ------------------------------------------------------------------
+(   95) # 96 "evdtuvad_comm_mod.F90"
+(   96) IF (LHOOK) CALL DR_HOOK('EVDTUVAD_COMM_MOD:EVDTUVAD_COMM',0,ZHOOK_HANDLE)
+(   97) # 98 "evdtuvad_comm_mod.F90"
+(   98) IF (NPRTRW > 1 .AND. KFIELD > 0) THEN
+(   99)   IF (KM == 0) THEN
+(  100)     IF (PRESENT(KFLDPTR)) THEN
+(  101)       DO J=1,KFIELD
+(  102)         IFLD=KFLDPTR(J)
+(  103)         ZSPU(J)=PSPMEANU(IFLD)
+(  104)         ZSPU(KFIELD+J)=PSPMEANV(IFLD)
+(  105)       ENDDO
+(  106)     ELSE
+(  107)       DO J=1,KFIELD
+(  108)         ZSPU(J)=PSPMEANU(J)
+(  109)         ZSPU(KFIELD+J)=PSPMEANV(J)
+(  110)       ENDDO
+(  111)     ENDIF 
+(  112)     DO JA=1,NPRTRW
+(  113)       IF (JA /= MYSETW) THEN
+(  114)         CALL SET2PE(ISND,0,0,JA,MYSETV)
+(  115)         ISND=NPRCIDS(ISND)
+(  116)         ITAG=300000+KFIELD*NPROC+ISND
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:38      page 7
+
+(  117)         CALL MPL_SEND(ZSPU(1:2*KFIELD),KDEST=ISND,KTAG=ITAG, &
+(  118)          & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(JA), &
+(  119)          & CDSTRING='EVDTUVAD_COMM:')
+(  120)       ENDIF
+(  121)     ENDDO
+(  122)   ELSE
+(  123)     IF (KMLOC == 1) THEN
+(  124)       IF (D%NPROCM(0) /= MYSETW) THEN
+(  125)         CALL SET2PE(ISND,0,0,D%NPROCM(0),MYSETV)
+(  126)         ISND=NPRCIDS(ISND)
+(  127)         ITAG=300000+KFIELD*NPROC+MYPROC
+(  128)         CALL MPL_RECV(ZSPU(1:2*KFIELD),KSOURCE=ISND,KTAG=ITAG,KOUNT=ILEN,CDSTRING='EVDTUVAD_COMM:')
+(  129)         IF (ILEN /= 2*KFIELD) THEN
+(  130)           CALL ABORT_TRANS('EVDTUVAD_COMM: RECV INVALID RECEIVE MESSAGE LENGTH')
+(  131)         ENDIF
+(  132)         IF (PRESENT(KFLDPTR)) THEN
+(  133)           DO J=1,KFIELD
+(  134)             IFLD=KFLDPTR(J)
+(  135)             PSPMEANU(IFLD)=ZSPU(J)
+(  136)             PSPMEANV(IFLD)=ZSPU(KFIELD+J)
+(  137)           ENDDO
+(  138)         ELSE
+(  139)           DO J=1,KFIELD
+(  140)             PSPMEANU(J)=ZSPU(J)
+(  141)             PSPMEANV(J)=ZSPU(KFIELD+J)
+(  142)           ENDDO
+(  143)         ENDIF
+(  144)       ENDIF
+(  145)     ENDIF
+(  146)   ENDIF
+(  147) ENDIF
+(  148) # 149 "evdtuvad_comm_mod.F90"
+(  149) IF (LHOOK) CALL DR_HOOK('EVDTUVAD_COMM_MOD:EVDTUVAD_COMM',1,ZHOOK_HANDLE)
+(  150) # 151 "evdtuvad_comm_mod.F90"
+(  151) !     ------------------------------------------------------------------
+(  152) # 153 "evdtuvad_comm_mod.F90"
+(  153) END SUBROUTINE EVDTUVAD_COMM
+(  154) END MODULE EVDTUVAD_COMM_MOD

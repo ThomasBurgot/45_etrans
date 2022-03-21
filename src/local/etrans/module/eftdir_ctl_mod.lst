@@ -1,0 +1,580 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:17      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eftdir_ctl_mod.F90
+
+(    1) MODULE EFTDIR_CTL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EFTDIR_CTL(KF_UV_G,KF_SCALARS_G,KF_GP,KF_FS,KF_GPB, &
+(    4)  & KVSETUV,KVSETSC,KPTRGP,&
+(    5)  & KVSETSC3A,KVSETSC3B,KVSETSC2,&
+(    6)  & PGP,PGPUV,PGP3A,PGP3B,PGP2,AUX_PROC)
+(    7) 
+(    8) !**** *EFTDIR_CTL - Direct Fourier transform control
+(    9) 
+(   10) !     Purpose. Control routine for Grid-point to Fourier transform
+(   11) !     --------
+(   12) 
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !     CALL FTDIR_CTL(..)
+(   16) 
+(   17) !     Explicit arguments :
+(   18) !     --------------------
+(   19) !     KF_UV_G      - global number of spectral u-v fields
+(   20) !     KF_SCALARS_G - global number of scalar spectral fields
+(   21) !     KF_GP        - total number of output gridpoint fields
+(   22) !     KF_FS        - total number of fields in fourier space
+(   23) !     KF_GPB       - total global number of output gridpoint fields
+(   24) !     PGP     -  gridpoint array
+(   25) !     KVSETUV - "B" set in spectral/fourier space for
+(   26) !                u and v variables
+(   27) !     KVSETSC - "B" set in spectral/fourier space for
+(   28) !                scalar variables
+(   29) !     KPTRGP  -  pointer array to fields in gridpoint space
+(   30) 
+(   31) !     Method.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:17      page 2
+
+(   32) !     -------
+(   33) 
+(   34) !     Externals.  TRGTOL      - transposition routine
+(   35) !     ----------  FOURIER_OUT - copy fourier data to Fourier buffer
+(   36) !                 FTDIR       - fourier transform
+(   37) 
+(   38) !     Author.
+(   39) !     -------
+(   40) !        Mats Hamrud *ECMWF*
+(   41) 
+(   42) !     Modifications.
+(   43) !     --------------
+(   44) !        Original : 00-03-03
+(   45) !        G. Radnoti 01-03-13 adaptation to aladin (coupling)
+(   46) !     01-08-28 : G. Radnoti & R. El Khatib Fix for NPROMATR /= 0
+(   47) !     19-11-01 : G. Radnoti    bug corection by introducing cpl_int interface
+(   48) !     02-09-30 : P. Smolikova  AUX_PROC for d4 in NH
+(   49) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   50) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   51) 
+(   52) !     ------------------------------------------------------------------
+(   53) 
+(   54) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   55) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   56) 
+(   57) USE TPM_DIM          ,ONLY : R
+(   58) USE TPM_TRANS        ,ONLY : FOUBUF_IN
+(   59) USE TPM_DISTR        ,ONLY : D
+(   60) USE TPM_GEN          ,ONLY : LALLOPERM2
+(   61) USE EFTDATA_MOD      ,ONLY : ZGTF_PERM
+(   62) 
+(   63) USE TRGTOL_MOD       ,ONLY : TRGTOL, TRGTOL_CUDAAWARE
+(   64) USE EFOURIER_OUT_MOD ,ONLY : EFOURIER_OUT
+(   65) USE EFTDIR_MOD       ,ONLY : EFTDIR
+(   66) USE EXTPER_MOD       ,ONLY : EXTPER
+(   67) !
+(   68) 
+(   69) IMPLICIT NONE
+(   70) 
+(   71) ! Dummy arguments
+(   72) 
+(   73) INTEGER(KIND=JPIM),INTENT(IN) :: KF_UV_G,KF_SCALARS_G,KF_GP,KF_FS,KF_GPB
+(   74) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETUV(:)
+(   75) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC(:)
+(   76) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KPTRGP(:)
+(   77) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3A(:)
+(   78) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3B(:)
+(   79) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC2(:)
+(   80) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP(:,:,:)
+(   81) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGPUV(:,:,:,:)
+(   82) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP3A(:,:,:,:)
+(   83) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP3B(:,:,:,:)
+(   84) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP2(:,:,:)
+(   85) EXTERNAL AUX_PROC
+(   86) OPTIONAL AUX_PROC
+(   87) 
+(   88) ! Local variables
+(   89) REAL(KIND=JPRB) :: ZDUM
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:17      page 3
+
+(   90) REAL(KIND=JPRB), POINTER :: ZGTF (:,:)
+(   91) INTEGER(KIND=JPIM) :: IST,INUL,JGL,IGL,IBLEN
+(   92) INTEGER(KIND=JPIM) :: IVSETUV(KF_UV_G)
+(   93) INTEGER(KIND=JPIM) :: IVSETSC(KF_SCALARS_G)
+(   94) INTEGER(KIND=JPIM) :: IVSET(KF_GP)
+(   95) INTEGER(KIND=JPIM) :: IFGP2,IFGP3A,IFGP3B,IOFF,J3
+(   96) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   97) 
+(   98) !     ------------------------------------------------------------------
+(   99) 
+(  100) ! Field distribution in Spectral/Fourier space
+(  101) 
+(  102) IF (LHOOK) CALL DR_HOOK('EFTDIR_CTL_MOD:EFTDIR_CTL',0,ZHOOK_HANDLE)
+(  103) 
+(  104) IF (ALLOCATED (ZGTF_PERM)) THEN
+(  105)   IF ((UBOUND (ZGTF_PERM, 1) /= D%NLENGTF) .OR. (UBOUND (ZGTF_PERM, 2) < KF_FS)) THEN
+(  106)     !$acc exit data delete (ZGTF_PERM)
+(  107)     DEALLOCATE (ZGTF_PERM)
+(  108)   ENDIF
+(  109) ENDIF
+(  110) 
+(  111) IF (.NOT. ALLOCATED (ZGTF_PERM)) THEN
+(  112)   ALLOCATE (ZGTF_PERM (D%NLENGTF,KF_FS))
+(  113)   !$acc enter data create (ZGTF_PERM)
+(  114) ENDIF
+(  115) 
+(  116) ZGTF => ZGTF_PERM (:, 1:KF_FS)
+(  117) 
+(  118) IF(PRESENT(KVSETUV)) THEN
+(  119)   IVSETUV(:) = KVSETUV(:)
+(  120) ELSE
+(  121)   IVSETUV(:) = -1
+(  122) ENDIF
+(  123) IVSETSC(:) = -1
+(  124) IF(PRESENT(KVSETSC)) THEN
+(  125)   IVSETSC(:) = KVSETSC(:)
+(  126) ELSE
+(  127)   IOFF=0
+(  128)   IF(PRESENT(KVSETSC2)) THEN
+(  129)     IFGP2=UBOUND(KVSETSC2,1)
+(  130)     IVSETSC(1:IFGP2)=KVSETSC2(:)
+(  131)     IOFF=IOFF+IFGP2
+(  132)   ENDIF
+(  133)   IF(PRESENT(KVSETSC3A)) THEN
+(  134)     IFGP3A=UBOUND(KVSETSC3A,1)
+(  135)     DO J3=1,UBOUND(PGP3A,3)
+(  136)       IVSETSC(IOFF+1:IOFF+IFGP3A)=KVSETSC3A(:)
+(  137)       IOFF=IOFF+IFGP3A
+(  138)     ENDDO
+(  139)   ENDIF
+(  140)   IF(PRESENT(KVSETSC3B)) THEN
+(  141)     IFGP3B=UBOUND(KVSETSC3B,1)
+(  142)     DO J3=1,UBOUND(PGP3B,3)
+(  143)       IVSETSC(IOFF+1:IOFF+IFGP3B)=KVSETSC3B(:)
+(  144)       IOFF=IOFF+IFGP3B
+(  145)     ENDDO
+(  146)   ENDIF
+(  147) ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:17      page 4
+
+(  148) 
+(  149) IST = 1
+(  150) IF(KF_UV_G > 0) THEN
+(  151)   IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  152)   IST = IST+KF_UV_G
+(  153)   IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  154)   IST = IST+KF_UV_G
+(  155) ENDIF
+(  156) IF(KF_SCALARS_G > 0) THEN
+(  157)   IVSET(IST:IST+KF_SCALARS_G-1) = IVSETSC(:)
+(  158)   IST = IST+KF_SCALARS_G
+(  159) ENDIF
+(  160) 
+(  161) ! Transposition
+(  162) 
+(  163) CALL GSTATS(158,0)
+(  164) 
+(  165) #ifdef USE_CUDA_AWARE_MPI_EFTDIR
+(  166) CALL TRGTOL_CUDAAWARE(ZGTF,KF_FS,KF_GP,KF_SCALARS_G,IVSET,KPTRGP,&
+(  167)  &PGP,PGPUV,PGP3A,PGP3B,PGP2,LDGW=.TRUE.)
+(  168) #else
+(  169) CALL TRGTOL(ZGTF,KF_FS,KF_GP,KF_SCALARS_G,IVSET,KPTRGP,&
+(  170)  &PGP,PGPUV,PGP3A,PGP3B,PGP2,LDGW=.TRUE.)
+(  171) #endif
+(  172) 
+(  173) CALL GSTATS(158,1)
+(  174) CALL GSTATS(106,0)
+(  175) 
+(  176) ! Periodization of auxiliary fields in x direction
+(  177) IF(R%NNOEXTZL>0) THEN
+(  178)   CALL ABOR1 ('EFTDIR_CTL: BIPERIODICIZATION NOT SUPPORTED')
+(  179) ELSE
+(  180)   IF (PRESENT(AUX_PROC)) THEN
+(  181)     CALL AUX_PROC(ZGTF,ZDUM,KF_FS,D%NLENGTF,1,D%NDGL_FS,0,.TRUE.,&
+(  182)      & D%NSTAGTF,INUL,INUL,INUL)
+(  183)   ENDIF
+(  184) ENDIF
+(  185) 
+(  186) 
+(  187) ! Fourier transform
+(  188) 
+(  189) IBLEN=D%NLENGT0B*2*KF_FS
+(  190) IF (ALLOCATED(FOUBUF_IN)) THEN
+(  191)   IF (MAX(1,IBLEN) > SIZE(FOUBUF_IN)) THEN
+(  192) !$acc exit data delete (FOUBUF_IN)
+(  193)     DEALLOCATE(FOUBUF_IN)
+(  194)     ALLOCATE(FOUBUF_IN(MAX(1,IBLEN)))
+(  195) !$acc enter data create (FOUBUF_IN)
+(  196)   ENDIF
+(  197) ELSE
+(  198)   ALLOCATE(FOUBUF_IN(MAX(1,IBLEN)))
+(  199) !$acc enter data create (FOUBUF_IN)
+(  200) ENDIF
+(  201) 
+(  202) CALL GSTATS(1640,0)
+(  203) 
+(  204) IF(KF_FS>0) THEN
+(  205)   CALL EFTDIR (ZGTF, KF_FS)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:17      page 5
+
+(  206) ENDIF
+(  207) 
+(  208) ! Save Fourier data in FOUBUF_IN
+(  209) 
+(  210) CALL EFOURIER_OUT (ZGTF, KF_FS)
+(  211) 
+(  212) CALL GSTATS(1640,1)
+(  213) CALL GSTATS(106,1)
+(  214) 
+(  215) IF (.NOT. LALLOPERM2) THEN
+(  216)   !$acc exit data delete (ZGTF_PERM)
+(  217)   DEALLOCATE (ZGTF_PERM)
+(  218) ENDIF
+(  219) 
+(  220) IF (LHOOK) CALL DR_HOOK('EFTDIR_CTL_MOD:EFTDIR_CTL',1,ZHOOK_HANDLE)
+(  221) 
+(  222) !     ------------------------------------------------------------------
+(  223) 
+(  224) END SUBROUTINE EFTDIR_CTL
+(  225) END MODULE EFTDIR_CTL_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:17      page 6
+
+(    1) # 1 "eftdir_ctl_mod.F90"
+(    1) MODULE EFTDIR_CTL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EFTDIR_CTL(KF_UV_G,KF_SCALARS_G,KF_GP,KF_FS,KF_GPB, &
+(    4)  & KVSETUV,KVSETSC,KPTRGP,&
+(    5)  & KVSETSC3A,KVSETSC3B,KVSETSC2,&
+(    6)  & PGP,PGPUV,PGP3A,PGP3B,PGP2,AUX_PROC)
+(    7) # 8 "eftdir_ctl_mod.F90"
+(    8) !**** *EFTDIR_CTL - Direct Fourier transform control
+(    9) # 10 "eftdir_ctl_mod.F90"
+(   10) !     Purpose. Control routine for Grid-point to Fourier transform
+(   11) !     --------
+(   12) # 13 "eftdir_ctl_mod.F90"
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !     CALL FTDIR_CTL(..)
+(   16) # 17 "eftdir_ctl_mod.F90"
+(   17) !     Explicit arguments :
+(   18) !     --------------------
+(   19) !     KF_UV_G      - global number of spectral u-v fields
+(   20) !     KF_SCALARS_G - global number of scalar spectral fields
+(   21) !     KF_GP        - total number of output gridpoint fields
+(   22) !     KF_FS        - total number of fields in fourier space
+(   23) !     KF_GPB       - total global number of output gridpoint fields
+(   24) !     PGP     -  gridpoint array
+(   25) !     KVSETUV - "B" set in spectral/fourier space for
+(   26) !                u and v variables
+(   27) !     KVSETSC - "B" set in spectral/fourier space for
+(   28) !                scalar variables
+(   29) !     KPTRGP  -  pointer array to fields in gridpoint space
+(   30) # 31 "eftdir_ctl_mod.F90"
+(   31) !     Method.
+(   32) !     -------
+(   33) # 34 "eftdir_ctl_mod.F90"
+(   34) !     Externals.  TRGTOL      - transposition routine
+(   35) !     ----------  FOURIER_OUT - copy fourier data to Fourier buffer
+(   36) !                 FTDIR       - fourier transform
+(   37) # 38 "eftdir_ctl_mod.F90"
+(   38) !     Author.
+(   39) !     -------
+(   40) !        Mats Hamrud *ECMWF*
+(   41) # 42 "eftdir_ctl_mod.F90"
+(   42) !     Modifications.
+(   43) !     --------------
+(   44) !        Original : 00-03-03
+(   45) !        G. Radnoti 01-03-13 adaptation to aladin (coupling)
+(   46) !     01-08-28 : G. Radnoti & R. El Khatib Fix for NPROMATR /= 0
+(   47) !     19-11-01 : G. Radnoti    bug corection by introducing cpl_int interface
+(   48) !     02-09-30 : P. Smolikova  AUX_PROC for d4 in NH
+(   49) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   50) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   51) # 52 "eftdir_ctl_mod.F90"
+(   52) !     ------------------------------------------------------------------
+(   53) # 54 "eftdir_ctl_mod.F90"
+(   54) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   55) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   56) # 57 "eftdir_ctl_mod.F90"
+(   57) USE TPM_DIM          ,ONLY : R
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:17      page 7
+
+(   58) USE TPM_TRANS        ,ONLY : FOUBUF_IN
+(   59) USE TPM_DISTR        ,ONLY : D
+(   60) USE TPM_GEN          ,ONLY : LALLOPERM2
+(   61) USE EFTDATA_MOD      ,ONLY : ZGTF_PERM
+(   62) # 63 "eftdir_ctl_mod.F90"
+(   63) USE TRGTOL_MOD       ,ONLY : TRGTOL, TRGTOL_CUDAAWARE
+(   64) USE EFOURIER_OUT_MOD ,ONLY : EFOURIER_OUT
+(   65) USE EFTDIR_MOD       ,ONLY : EFTDIR
+(   66) USE EXTPER_MOD       ,ONLY : EXTPER
+(   67) !
+(   68) # 69 "eftdir_ctl_mod.F90"
+(   69) IMPLICIT NONE
+(   70) # 71 "eftdir_ctl_mod.F90"
+(   71) ! Dummy arguments
+(   72) # 73 "eftdir_ctl_mod.F90"
+(   73) INTEGER(KIND=JPIM),INTENT(IN) :: KF_UV_G,KF_SCALARS_G,KF_GP,KF_FS,KF_GPB
+(   74) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETUV(:)
+(   75) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC(:)
+(   76) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KPTRGP(:)
+(   77) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3A(:)
+(   78) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3B(:)
+(   79) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC2(:)
+(   80) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP(:,:,:)
+(   81) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGPUV(:,:,:,:)
+(   82) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP3A(:,:,:,:)
+(   83) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP3B(:,:,:,:)
+(   84) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP2(:,:,:)
+(   85) EXTERNAL AUX_PROC
+(   86) OPTIONAL AUX_PROC
+(   87) # 88 "eftdir_ctl_mod.F90"
+(   88) ! Local variables
+(   89) REAL(KIND=JPRB) :: ZDUM
+(   90) REAL(KIND=JPRB), POINTER :: ZGTF (:,:)
+(   91) INTEGER(KIND=JPIM) :: IST,INUL,JGL,IGL,IBLEN
+(   92) INTEGER(KIND=JPIM) :: IVSETUV(KF_UV_G)
+(   93) INTEGER(KIND=JPIM) :: IVSETSC(KF_SCALARS_G)
+(   94) INTEGER(KIND=JPIM) :: IVSET(KF_GP)
+(   95) INTEGER(KIND=JPIM) :: IFGP2,IFGP3A,IFGP3B,IOFF,J3
+(   96) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   97) # 98 "eftdir_ctl_mod.F90"
+(   98) !     ------------------------------------------------------------------
+(   99) # 100 "eftdir_ctl_mod.F90"
+(  100) ! Field distribution in Spectral/Fourier space
+(  101) # 102 "eftdir_ctl_mod.F90"
+(  102) IF (LHOOK) CALL DR_HOOK('EFTDIR_CTL_MOD:EFTDIR_CTL',0,ZHOOK_HANDLE)
+(  103) # 104 "eftdir_ctl_mod.F90"
+(  104) IF (ALLOCATED (ZGTF_PERM)) THEN
+(  105)   IF ((UBOUND (ZGTF_PERM, 1) /= D%NLENGTF) .OR. (UBOUND (ZGTF_PERM, 2) < KF_FS)) THEN
+(  106)     !$acc exit data delete (ZGTF_PERM)
+(  107)     DEALLOCATE (ZGTF_PERM)
+(  108)   ENDIF
+(  109) ENDIF
+(  110) # 111 "eftdir_ctl_mod.F90"
+(  111) IF (.NOT. ALLOCATED (ZGTF_PERM)) THEN
+(  112)   ALLOCATE (ZGTF_PERM (D%NLENGTF,KF_FS))
+(  113)   !$acc enter data create (ZGTF_PERM)
+(  114) ENDIF
+(  115) # 116 "eftdir_ctl_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:17      page 8
+
+(  116) ZGTF => ZGTF_PERM (:, 1:KF_FS)
+(  117) # 118 "eftdir_ctl_mod.F90"
+(  118) IF(PRESENT(KVSETUV)) THEN
+(  119)   IVSETUV(:) = KVSETUV(:)
+(  120) ELSE
+(  121)   IVSETUV(:) = -1
+(  122) ENDIF
+(  123) IVSETSC(:) = -1
+(  124) IF(PRESENT(KVSETSC)) THEN
+(  125)   IVSETSC(:) = KVSETSC(:)
+(  126) ELSE
+(  127)   IOFF=0
+(  128)   IF(PRESENT(KVSETSC2)) THEN
+(  129)     IFGP2=UBOUND(KVSETSC2,1)
+(  130)     IVSETSC(1:IFGP2)=KVSETSC2(:)
+(  131)     IOFF=IOFF+IFGP2
+(  132)   ENDIF
+(  133)   IF(PRESENT(KVSETSC3A)) THEN
+(  134)     IFGP3A=UBOUND(KVSETSC3A,1)
+(  135)     DO J3=1,UBOUND(PGP3A,3)
+(  136)       IVSETSC(IOFF+1:IOFF+IFGP3A)=KVSETSC3A(:)
+(  137)       IOFF=IOFF+IFGP3A
+(  138)     ENDDO
+(  139)   ENDIF
+(  140)   IF(PRESENT(KVSETSC3B)) THEN
+(  141)     IFGP3B=UBOUND(KVSETSC3B,1)
+(  142)     DO J3=1,UBOUND(PGP3B,3)
+(  143)       IVSETSC(IOFF+1:IOFF+IFGP3B)=KVSETSC3B(:)
+(  144)       IOFF=IOFF+IFGP3B
+(  145)     ENDDO
+(  146)   ENDIF
+(  147) ENDIF
+(  148) # 149 "eftdir_ctl_mod.F90"
+(  149) IST = 1
+(  150) IF(KF_UV_G > 0) THEN
+(  151)   IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  152)   IST = IST+KF_UV_G
+(  153)   IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  154)   IST = IST+KF_UV_G
+(  155) ENDIF
+(  156) IF(KF_SCALARS_G > 0) THEN
+(  157)   IVSET(IST:IST+KF_SCALARS_G-1) = IVSETSC(:)
+(  158)   IST = IST+KF_SCALARS_G
+(  159) ENDIF
+(  160) # 161 "eftdir_ctl_mod.F90"
+(  161) ! Transposition
+(  162) # 163 "eftdir_ctl_mod.F90"
+(  163) CALL GSTATS(158,0)
+(  164) # 166 "eftdir_ctl_mod.F90"
+(  166) CALL TRGTOL_CUDAAWARE(ZGTF,KF_FS,KF_GP,KF_SCALARS_G,IVSET,KPTRGP,&
+(  167)  &PGP,PGPUV,PGP3A,PGP3B,PGP2,LDGW=.TRUE.)
+(  168) # 173 "eftdir_ctl_mod.F90"
+(  173) CALL GSTATS(158,1)
+(  174) CALL GSTATS(106,0)
+(  175) # 176 "eftdir_ctl_mod.F90"
+(  176) ! Periodization of auxiliary fields in x direction
+(  177) IF(R%NNOEXTZL>0) THEN
+(  178)   CALL ABOR1 ('EFTDIR_CTL: BIPERIODICIZATION NOT SUPPORTED')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:17      page 9
+
+(  179) ELSE
+(  180)   IF (PRESENT(AUX_PROC)) THEN
+(  181)     CALL AUX_PROC(ZGTF,ZDUM,KF_FS,D%NLENGTF,1,D%NDGL_FS,0,.TRUE.,&
+(  182)      & D%NSTAGTF,INUL,INUL,INUL)
+(  183)   ENDIF
+(  184) ENDIF
+(  185) # 187 "eftdir_ctl_mod.F90"
+(  187) ! Fourier transform
+(  188) # 189 "eftdir_ctl_mod.F90"
+(  189) IBLEN=D%NLENGT0B*2*KF_FS
+(  190) IF (ALLOCATED(FOUBUF_IN)) THEN
+(  191)   IF (MAX(1,IBLEN) > SIZE(FOUBUF_IN)) THEN
+(  192) !$acc exit data delete (FOUBUF_IN)
+(  193)     DEALLOCATE(FOUBUF_IN)
+(  194)     ALLOCATE(FOUBUF_IN(MAX(1,IBLEN)))
+(  195) !$acc enter data create (FOUBUF_IN)
+(  196)   ENDIF
+(  197) ELSE
+(  198)   ALLOCATE(FOUBUF_IN(MAX(1,IBLEN)))
+(  199) !$acc enter data create (FOUBUF_IN)
+(  200) ENDIF
+(  201) # 202 "eftdir_ctl_mod.F90"
+(  202) CALL GSTATS(1640,0)
+(  203) # 204 "eftdir_ctl_mod.F90"
+(  204) IF(KF_FS>0) THEN
+(  205)   CALL EFTDIR (ZGTF, KF_FS)
+(  206) ENDIF
+(  207) # 208 "eftdir_ctl_mod.F90"
+(  208) ! Save Fourier data in FOUBUF_IN
+(  209) # 210 "eftdir_ctl_mod.F90"
+(  210) CALL EFOURIER_OUT (ZGTF, KF_FS)
+(  211) # 212 "eftdir_ctl_mod.F90"
+(  212) CALL GSTATS(1640,1)
+(  213) CALL GSTATS(106,1)
+(  214) # 215 "eftdir_ctl_mod.F90"
+(  215) IF (.NOT. LALLOPERM2) THEN
+(  216)   !$acc exit data delete (ZGTF_PERM)
+(  217)   DEALLOCATE (ZGTF_PERM)
+(  218) ENDIF
+(  219) # 220 "eftdir_ctl_mod.F90"
+(  220) IF (LHOOK) CALL DR_HOOK('EFTDIR_CTL_MOD:EFTDIR_CTL',1,ZHOOK_HANDLE)
+(  221) # 222 "eftdir_ctl_mod.F90"
+(  222) !     ------------------------------------------------------------------
+(  223) # 224 "eftdir_ctl_mod.F90"
+(  224) END SUBROUTINE EFTDIR_CTL
+(  225) END MODULE EFTDIR_CTL_MOD

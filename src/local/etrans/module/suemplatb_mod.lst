@@ -1,0 +1,605 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:06      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: suemplatb_mod.F90
+
+(    1) MODULE SUEMPLATB_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUEMPLATB(KDGSA,KDGL,KPROCA,KLOENG,LDSPLIT,&
+(    4)  & PWEIGHT,LDWEIGHTED_DISTR,PMEDIAP,KPROCAGP,&
+(    5)  & KMEDIAP,KRESTM,KINDIC,KLAST,KDGUX)  
+(    6) 
+(    7) !**** *SUMPLATB * - Routine to initialize parallel environment
+(    8) 
+(    9) !     Purpose.
+(   10) !     --------
+(   11) 
+(   12) !**   Interface.
+(   13) !     ----------
+(   14) !        *CALL* *SUMPLATB *
+(   15) 
+(   16) !     Explicit arguments - input :
+(   17) !     -------------------- 
+(   18) !                          KDGSA      -first latitude (grid-space)
+(   19) !                                      (may be different from NDGSAG)
+(   20) !                          KDGL       -last  latitude
+(   21) !                          KPROCA     -number of processors in A direction
+(   22) !                          KLOENG     -actual number of longitudes per latitude.
+(   23) !                          LDSPLIT    -true for latitudes shared between sets
+(   24) !                          KDGUX      -last latitude for meaningful computations
+(   25) !                                      (suggested to pass NDGUX in gp-space, NDGL in Fourier space
+(   26) !                                       for having a good load-balance)
+(   27) !                          PWEIGHT    -weight per grid-point if weighted distribution
+(   28) !                          LDWEIGHTED_DISTR -true if weighted distribution`
+(   29) 
+(   30) !     Explicit arguments - output:
+(   31) !     -------------------- 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:06      page 2
+
+(   32) !                          KMEDIAP    -mean number of grid points per PE
+(   33) !                          KPROCAGP   -number of grid points per A set
+(   34) !                          KRESTM     -number of PEs with one extra point
+(   35) !                          KINDIC     -intermediate quantity for 'sumplat'
+(   36) !                          KLAST      -intermediate quantity for 'sumplat'
+(   37) !                          PMEDIAP    -mean weight per PE if weighted distribution
+(   38) 
+(   39) !        Implicit arguments :
+(   40) !        --------------------
+(   41) 
+(   42) !     Method.
+(   43) !     -------
+(   44) !        See documentation
+(   45) 
+(   46) !     Externals.   NONE.
+(   47) !     ----------
+(   48) 
+(   49) !     Reference.
+(   50) !     ----------
+(   51) !        ECMWF Research Department documentation of the IFS
+(   52) 
+(   53) !     Author.
+(   54) !     -------
+(   55) !        K. YESSAD (after old version of sumplat.F).
+(   56) 
+(   57) !     Modifications.
+(   58) !     --------------
+(   59) !        Original : 98-12-07
+(   60) !         G. Radnoti: 03-03-03: Semi-merge with sumplatb, only difference:
+(   61) !                               NS-partitioning according to NDGUX
+(   62) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   63) !        A.Bogatchev   21-Sep-2010 phasing CY37
+(   64) !     ------------------------------------------------------------------
+(   65) 
+(   66) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   67) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   68) 
+(   69) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   70) !
+(   71) 
+(   72) IMPLICIT NONE
+(   73) 
+(   74) !     * DUMMY:
+(   75) INTEGER(KIND=JPIM),INTENT(IN)  :: KDGSA
+(   76) INTEGER(KIND=JPIM),INTENT(IN)  :: KDGL
+(   77) INTEGER(KIND=JPIM),INTENT(IN)  :: KPROCA
+(   78) INTEGER(KIND=JPIM),INTENT(IN)  :: KLOENG(KDGSA:KDGL)
+(   79) REAL(KIND=JPRB),INTENT(IN)     :: PWEIGHT(:)
+(   80) LOGICAL,INTENT(IN)  :: LDSPLIT
+(   81) LOGICAL,INTENT(INOUT)  :: LDWEIGHTED_DISTR
+(   82) INTEGER(KIND=JPIM),INTENT(IN)  :: KDGUX
+(   83) INTEGER(KIND=JPIM),INTENT(OUT)  :: KMEDIAP
+(   84) INTEGER(KIND=JPIM),INTENT(OUT)  :: KRESTM
+(   85) INTEGER(KIND=JPIM),INTENT(OUT)  :: KINDIC(KPROCA)
+(   86) INTEGER(KIND=JPIM),INTENT(OUT)  :: KLAST(KPROCA)
+(   87) INTEGER(KIND=JPIM),INTENT(IN)  :: KPROCAGP(KPROCA)
+(   88) REAL(KIND=JPRB),INTENT(IN)     :: PMEDIAP
+(   89) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:06      page 3
+
+(   90) INTEGER(KIND=JPIM) :: IPP1(KPROCA),ILAST1(KPROCA)
+(   91) INTEGER(KIND=JPIM) :: IPP(KPROCA)
+(   92) INTEGER(KIND=JPIM) :: IFIRST(KPROCA)
+(   93) 
+(   94) INTEGER(KIND=JPIM) :: ICOMP, IGL, IMAXI, IMAXIOL, IMEDIA, ITOT, JA, JGL,&
+(   95)  & ILAST,IREST,ILIMIT,IFRST
+(   96) LOGICAL   :: LLDONE
+(   97) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   98) 
+(   99) !      -----------------------------------------------------------------
+(  100) 
+(  101) !*       1.    COMPUTATION OF KMEDIAP, KRESTM, KINDIC, KLAST.
+(  102) !              ----------------------------------------------
+(  103) 
+(  104) !     * Computation of KMEDIAP and KRESTM.
+(  105) 
+(  106) IF (LHOOK) CALL DR_HOOK('SUEMPLATB_MOD:SUEMPLATB',0,ZHOOK_HANDLE)
+(  107) IF (LDWEIGHTED_DISTR) THEN
+(  108)   CALL ABORT_TRANS ('SUMPLATBEQ: ALADIN CODE IS NOT PREPARED FOR WEIGHTED DISTRIBUTION')
+(  109) ENDIF
+(  110) IMEDIA = SUM(KLOENG(KDGSA:KDGUX))
+(  111) KMEDIAP = IMEDIA / KPROCA
+(  112) IF (KMEDIAP  <  KLOENG(KDGL/2)) THEN
+(  113)   CALL ABORT_TRANS ('SUMPLATB: KPROCA TOO BIG FOR THIS RESOLUTION')
+(  114) ENDIF
+(  115) KRESTM = IMEDIA - KMEDIAP * KPROCA
+(  116) IF (KRESTM  >  0) KMEDIAP = KMEDIAP + 1
+(  117) 
+(  118) !     * Computation of intermediate quantities KINDIC and KLAST
+(  119) 
+(  120) IF (LDSPLIT) THEN
+(  121) 
+(  122)   IREST = 0
+(  123)   ILAST =0
+(  124)   DO JA=1,KPROCA
+(  125)     IF (JA  <=  KRESTM .OR. KRESTM  ==  0) THEN
+(  126)       ICOMP = KMEDIAP
+(  127)     ELSE
+(  128)       ICOMP = KMEDIAP - 1
+(  129)     ENDIF
+(  130)     ITOT = IREST
+(  131)     IGL = ILAST+1
+(  132)     DO JGL=IGL,KDGUX
+(  133)       ILAST = JGL
+(  134)       IF(ITOT+KLOENG(JGL) < ICOMP) THEN
+(  135)         ITOT = ITOT+KLOENG(JGL)
+(  136)       ELSEIF(ITOT+KLOENG(JGL) == ICOMP) THEN
+(  137)         IREST = 0
+(  138)         KLAST(JA) = JGL 
+(  139)         KINDIC(JA) = 0
+(  140)         EXIT
+(  141)       ELSE
+(  142)         IREST =  KLOENG(JGL) -(ICOMP-ITOT)
+(  143)         KLAST(JA) = JGL 
+(  144)         KINDIC(JA) = JGL
+(  145)         EXIT
+(  146)       ENDIF
+(  147)     ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:06      page 4
+
+(  148)   ENDDO
+(  149)   KLAST(KPROCA)=KDGL
+(  150)   KINDIC(KPROCA)=0
+(  151) ELSE
+(  152) 
+(  153)   KINDIC(:) = 0
+(  154) 
+(  155)   IMAXI = KMEDIAP-1
+(  156)   IMAXIOL = HUGE(IMAXIOL)
+(  157)   DO
+(  158)     ILIMIT = IMAXI
+(  159)     IMAXI = 0
+(  160)     IFRST = KDGUX
+(  161)     ILAST1(:) = 0
+(  162)     IPP1(:) = 0
+(  163)     DO JA=KPROCA,1,-1
+(  164)       IGL = IFRST
+(  165)       LATS:DO JGL=IGL,1,-1
+(  166)         IF (IPP1(JA) < ILIMIT .OR. JA == 1) THEN
+(  167)           IFRST = JGL-1
+(  168)           IPP1(JA) = IPP1(JA) + KLOENG(JGL)
+(  169)           IF(ILAST1(JA)  ==  0) ILAST1(JA) = JGL
+(  170)         ELSE
+(  171)           EXIT LATS
+(  172)         ENDIF
+(  173)       ENDDO LATS
+(  174)       IMAXI = MAX (IMAXI,IPP1(JA))
+(  175)     ENDDO
+(  176)     IF(IMAXI >= IMAXIOL) EXIT
+(  177)     KLAST(:) = ILAST1(:)
+(  178)     IPP(:) = IPP1(:)
+(  179)     IMAXIOL = IMAXI
+(  180)   ENDDO
+(  181) 
+(  182) !       make the distribution more uniform
+(  183) !       ----------------------------------
+(  184) 
+(  185)   IFIRST(1) = 0
+(  186)   IF (KLAST(1) > 0) IFIRST(1) = 1
+(  187)   DO JA=2,KPROCA
+(  188)     IF (IPP(JA) > 0) THEN
+(  189)       IFIRST(JA) = KLAST(JA-1)+1
+(  190)     ELSE
+(  191)       IFIRST(JA) = 0
+(  192)     ENDIF
+(  193)   ENDDO
+(  194) 
+(  195)   LLDONE = .FALSE.
+(  196)   DO WHILE( .NOT.LLDONE )
+(  197)     LLDONE = .TRUE.
+(  198) 
+(  199)     DO JA=1,KPROCA-1
+(  200)       IF (IPP(JA) > IPP(JA+1)) THEN
+(  201)         IF (IPP(JA)-IPP(JA+1)  >  IPP(JA+1) + 2 *&
+(  202)            & KLOENG(KLAST(JA)) -IPP(JA) ) THEN  
+(  203)           IPP(JA) = IPP(JA) - KLOENG(KLAST(JA))
+(  204)           IPP(JA+1) = IPP(JA+1) + KLOENG(KLAST(JA))
+(  205)           IF (KLAST(JA+1)  ==  0) KLAST(JA+1) = KLAST(JA)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:06      page 5
+
+(  206)           IFIRST(JA+1) = KLAST(JA)
+(  207)           KLAST(JA) = KLAST(JA) - 1
+(  208)           IF (KLAST(JA) == 0) IFIRST(JA) = 0
+(  209)           LLDONE = .FALSE.
+(  210)         ENDIF
+(  211)       ELSE
+(  212)         IF( IFIRST(JA+1) > 0 )THEN
+(  213)           IF (IPP(JA+1)-IPP(JA)  >=  IPP(JA) + 2 *&
+(  214)              & KLOENG(IFIRST(JA+1)) -IPP(JA+1) ) THEN  
+(  215)             IPP(JA) = IPP(JA) + KLOENG(IFIRST(JA+1))
+(  216)             IPP(JA+1) = IPP(JA+1) - KLOENG(IFIRST(JA+1))
+(  217)             KLAST(JA) = IFIRST(JA+1)
+(  218)             IF (IFIRST(JA) == 0) IFIRST(JA) = KLAST(JA)
+(  219)             IF (KLAST(JA+1)  ==  KLAST(JA)) THEN
+(  220)               KLAST(JA+1) = 0
+(  221)               IFIRST(JA+1) = 0
+(  222)             ELSE
+(  223)               IFIRST(JA+1) = IFIRST(JA+1) + 1
+(  224)             ENDIF
+(  225)             LLDONE = .FALSE.
+(  226)           ENDIF
+(  227)         ENDIF
+(  228)       ENDIF
+(  229)     ENDDO
+(  230)   ENDDO
+(  231)   KLAST(KPROCA)=KDGL
+(  232) ENDIF
+(  233) 
+(  234) IF (LHOOK) CALL DR_HOOK('SUEMPLATB_MOD:SUEMPLATB',1,ZHOOK_HANDLE)
+(  235) END SUBROUTINE SUEMPLATB
+(  236) END MODULE SUEMPLATB_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:06      page 6
+
+(    1) # 1 "suemplatb_mod.F90"
+(    1) MODULE SUEMPLATB_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUEMPLATB(KDGSA,KDGL,KPROCA,KLOENG,LDSPLIT,&
+(    4)  & PWEIGHT,LDWEIGHTED_DISTR,PMEDIAP,KPROCAGP,&
+(    5)  & KMEDIAP,KRESTM,KINDIC,KLAST,KDGUX)  
+(    6) # 7 "suemplatb_mod.F90"
+(    7) !**** *SUMPLATB * - Routine to initialize parallel environment
+(    8) # 9 "suemplatb_mod.F90"
+(    9) !     Purpose.
+(   10) !     --------
+(   11) # 12 "suemplatb_mod.F90"
+(   12) !**   Interface.
+(   13) !     ----------
+(   14) !        *CALL* *SUMPLATB *
+(   15) # 16 "suemplatb_mod.F90"
+(   16) !     Explicit arguments - input :
+(   17) !     -------------------- 
+(   18) !                          KDGSA      -first latitude (grid-space)
+(   19) !                                      (may be different from NDGSAG)
+(   20) !                          KDGL       -last  latitude
+(   21) !                          KPROCA     -number of processors in A direction
+(   22) !                          KLOENG     -actual number of longitudes per latitude.
+(   23) !                          LDSPLIT    -true for latitudes shared between sets
+(   24) !                          KDGUX      -last latitude for meaningful computations
+(   25) !                                      (suggested to pass NDGUX in gp-space, NDGL in Fourier space
+(   26) !                                       for having a good load-balance)
+(   27) !                          PWEIGHT    -weight per grid-point if weighted distribution
+(   28) !                          LDWEIGHTED_DISTR -true if weighted distribution`
+(   29) # 30 "suemplatb_mod.F90"
+(   30) !     Explicit arguments - output:
+(   31) !     -------------------- 
+(   32) !                          KMEDIAP    -mean number of grid points per PE
+(   33) !                          KPROCAGP   -number of grid points per A set
+(   34) !                          KRESTM     -number of PEs with one extra point
+(   35) !                          KINDIC     -intermediate quantity for 'sumplat'
+(   36) !                          KLAST      -intermediate quantity for 'sumplat'
+(   37) !                          PMEDIAP    -mean weight per PE if weighted distribution
+(   38) # 39 "suemplatb_mod.F90"
+(   39) !        Implicit arguments :
+(   40) !        --------------------
+(   41) # 42 "suemplatb_mod.F90"
+(   42) !     Method.
+(   43) !     -------
+(   44) !        See documentation
+(   45) # 46 "suemplatb_mod.F90"
+(   46) !     Externals.   NONE.
+(   47) !     ----------
+(   48) # 49 "suemplatb_mod.F90"
+(   49) !     Reference.
+(   50) !     ----------
+(   51) !        ECMWF Research Department documentation of the IFS
+(   52) # 53 "suemplatb_mod.F90"
+(   53) !     Author.
+(   54) !     -------
+(   55) !        K. YESSAD (after old version of sumplat.F).
+(   56) # 57 "suemplatb_mod.F90"
+(   57) !     Modifications.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:06      page 7
+
+(   58) !     --------------
+(   59) !        Original : 98-12-07
+(   60) !         G. Radnoti: 03-03-03: Semi-merge with sumplatb, only difference:
+(   61) !                               NS-partitioning according to NDGUX
+(   62) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   63) !        A.Bogatchev   21-Sep-2010 phasing CY37
+(   64) !     ------------------------------------------------------------------
+(   65) # 66 "suemplatb_mod.F90"
+(   66) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   67) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   68) # 69 "suemplatb_mod.F90"
+(   69) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   70) !
+(   71) # 72 "suemplatb_mod.F90"
+(   72) IMPLICIT NONE
+(   73) # 74 "suemplatb_mod.F90"
+(   74) !     * DUMMY:
+(   75) INTEGER(KIND=JPIM),INTENT(IN)  :: KDGSA
+(   76) INTEGER(KIND=JPIM),INTENT(IN)  :: KDGL
+(   77) INTEGER(KIND=JPIM),INTENT(IN)  :: KPROCA
+(   78) INTEGER(KIND=JPIM),INTENT(IN)  :: KLOENG(KDGSA:KDGL)
+(   79) REAL(KIND=JPRB),INTENT(IN)     :: PWEIGHT(:)
+(   80) LOGICAL,INTENT(IN)  :: LDSPLIT
+(   81) LOGICAL,INTENT(INOUT)  :: LDWEIGHTED_DISTR
+(   82) INTEGER(KIND=JPIM),INTENT(IN)  :: KDGUX
+(   83) INTEGER(KIND=JPIM),INTENT(OUT)  :: KMEDIAP
+(   84) INTEGER(KIND=JPIM),INTENT(OUT)  :: KRESTM
+(   85) INTEGER(KIND=JPIM),INTENT(OUT)  :: KINDIC(KPROCA)
+(   86) INTEGER(KIND=JPIM),INTENT(OUT)  :: KLAST(KPROCA)
+(   87) INTEGER(KIND=JPIM),INTENT(IN)  :: KPROCAGP(KPROCA)
+(   88) REAL(KIND=JPRB),INTENT(IN)     :: PMEDIAP
+(   89) # 90 "suemplatb_mod.F90"
+(   90) INTEGER(KIND=JPIM) :: IPP1(KPROCA),ILAST1(KPROCA)
+(   91) INTEGER(KIND=JPIM) :: IPP(KPROCA)
+(   92) INTEGER(KIND=JPIM) :: IFIRST(KPROCA)
+(   93) # 94 "suemplatb_mod.F90"
+(   94) INTEGER(KIND=JPIM) :: ICOMP, IGL, IMAXI, IMAXIOL, IMEDIA, ITOT, JA, JGL,&
+(   95)  & ILAST,IREST,ILIMIT,IFRST
+(   96) LOGICAL   :: LLDONE
+(   97) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   98) # 99 "suemplatb_mod.F90"
+(   99) !      -----------------------------------------------------------------
+(  100) # 101 "suemplatb_mod.F90"
+(  101) !*       1.    COMPUTATION OF KMEDIAP, KRESTM, KINDIC, KLAST.
+(  102) !              ----------------------------------------------
+(  103) # 104 "suemplatb_mod.F90"
+(  104) !     * Computation of KMEDIAP and KRESTM.
+(  105) # 106 "suemplatb_mod.F90"
+(  106) IF (LHOOK) CALL DR_HOOK('SUEMPLATB_MOD:SUEMPLATB',0,ZHOOK_HANDLE)
+(  107) IF (LDWEIGHTED_DISTR) THEN
+(  108)   CALL ABORT_TRANS ('SUMPLATBEQ: ALADIN CODE IS NOT PREPARED FOR WEIGHTED DISTRIBUTION')
+(  109) ENDIF
+(  110) IMEDIA = SUM(KLOENG(KDGSA:KDGUX))
+(  111) KMEDIAP = IMEDIA / KPROCA
+(  112) IF (KMEDIAP  <  KLOENG(KDGL/2)) THEN
+(  113)   CALL ABORT_TRANS ('SUMPLATB: KPROCA TOO BIG FOR THIS RESOLUTION')
+(  114) ENDIF
+(  115) KRESTM = IMEDIA - KMEDIAP * KPROCA
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:06      page 8
+
+(  116) IF (KRESTM  >  0) KMEDIAP = KMEDIAP + 1
+(  117) # 118 "suemplatb_mod.F90"
+(  118) !     * Computation of intermediate quantities KINDIC and KLAST
+(  119) # 120 "suemplatb_mod.F90"
+(  120) IF (LDSPLIT) THEN
+(  121) # 122 "suemplatb_mod.F90"
+(  122)   IREST = 0
+(  123)   ILAST =0
+(  124)   DO JA=1,KPROCA
+(  125)     IF (JA  <=  KRESTM .OR. KRESTM  ==  0) THEN
+(  126)       ICOMP = KMEDIAP
+(  127)     ELSE
+(  128)       ICOMP = KMEDIAP - 1
+(  129)     ENDIF
+(  130)     ITOT = IREST
+(  131)     IGL = ILAST+1
+(  132)     DO JGL=IGL,KDGUX
+(  133)       ILAST = JGL
+(  134)       IF(ITOT+KLOENG(JGL) < ICOMP) THEN
+(  135)         ITOT = ITOT+KLOENG(JGL)
+(  136)       ELSEIF(ITOT+KLOENG(JGL) == ICOMP) THEN
+(  137)         IREST = 0
+(  138)         KLAST(JA) = JGL 
+(  139)         KINDIC(JA) = 0
+(  140)         EXIT
+(  141)       ELSE
+(  142)         IREST =  KLOENG(JGL) -(ICOMP-ITOT)
+(  143)         KLAST(JA) = JGL 
+(  144)         KINDIC(JA) = JGL
+(  145)         EXIT
+(  146)       ENDIF
+(  147)     ENDDO
+(  148)   ENDDO
+(  149)   KLAST(KPROCA)=KDGL
+(  150)   KINDIC(KPROCA)=0
+(  151) ELSE
+(  152) # 153 "suemplatb_mod.F90"
+(  153)   KINDIC(:) = 0
+(  154) # 155 "suemplatb_mod.F90"
+(  155)   IMAXI = KMEDIAP-1
+(  156)   IMAXIOL = HUGE(IMAXIOL)
+(  157)   DO
+(  158)     ILIMIT = IMAXI
+(  159)     IMAXI = 0
+(  160)     IFRST = KDGUX
+(  161)     ILAST1(:) = 0
+(  162)     IPP1(:) = 0
+(  163)     DO JA=KPROCA,1,-1
+(  164)       IGL = IFRST
+(  165)       LATS:DO JGL=IGL,1,-1
+(  166)         IF (IPP1(JA) < ILIMIT .OR. JA == 1) THEN
+(  167)           IFRST = JGL-1
+(  168)           IPP1(JA) = IPP1(JA) + KLOENG(JGL)
+(  169)           IF(ILAST1(JA)  ==  0) ILAST1(JA) = JGL
+(  170)         ELSE
+(  171)           EXIT LATS
+(  172)         ENDIF
+(  173)       ENDDO LATS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:06      page 9
+
+(  174)       IMAXI = MAX (IMAXI,IPP1(JA))
+(  175)     ENDDO
+(  176)     IF(IMAXI >= IMAXIOL) EXIT
+(  177)     KLAST(:) = ILAST1(:)
+(  178)     IPP(:) = IPP1(:)
+(  179)     IMAXIOL = IMAXI
+(  180)   ENDDO
+(  181) # 182 "suemplatb_mod.F90"
+(  182) !       make the distribution more uniform
+(  183) !       ----------------------------------
+(  184) # 185 "suemplatb_mod.F90"
+(  185)   IFIRST(1) = 0
+(  186)   IF (KLAST(1) > 0) IFIRST(1) = 1
+(  187)   DO JA=2,KPROCA
+(  188)     IF (IPP(JA) > 0) THEN
+(  189)       IFIRST(JA) = KLAST(JA-1)+1
+(  190)     ELSE
+(  191)       IFIRST(JA) = 0
+(  192)     ENDIF
+(  193)   ENDDO
+(  194) # 195 "suemplatb_mod.F90"
+(  195)   LLDONE = .FALSE.
+(  196)   DO WHILE( .NOT.LLDONE )
+(  197)     LLDONE = .TRUE.
+(  198) # 199 "suemplatb_mod.F90"
+(  199)     DO JA=1,KPROCA-1
+(  200)       IF (IPP(JA) > IPP(JA+1)) THEN
+(  201)         IF (IPP(JA)-IPP(JA+1)  >  IPP(JA+1) + 2 *&
+(  202)            & KLOENG(KLAST(JA)) -IPP(JA) ) THEN  
+(  203)           IPP(JA) = IPP(JA) - KLOENG(KLAST(JA))
+(  204)           IPP(JA+1) = IPP(JA+1) + KLOENG(KLAST(JA))
+(  205)           IF (KLAST(JA+1)  ==  0) KLAST(JA+1) = KLAST(JA)
+(  206)           IFIRST(JA+1) = KLAST(JA)
+(  207)           KLAST(JA) = KLAST(JA) - 1
+(  208)           IF (KLAST(JA) == 0) IFIRST(JA) = 0
+(  209)           LLDONE = .FALSE.
+(  210)         ENDIF
+(  211)       ELSE
+(  212)         IF( IFIRST(JA+1) > 0 )THEN
+(  213)           IF (IPP(JA+1)-IPP(JA)  >=  IPP(JA) + 2 *&
+(  214)              & KLOENG(IFIRST(JA+1)) -IPP(JA+1) ) THEN  
+(  215)             IPP(JA) = IPP(JA) + KLOENG(IFIRST(JA+1))
+(  216)             IPP(JA+1) = IPP(JA+1) - KLOENG(IFIRST(JA+1))
+(  217)             KLAST(JA) = IFIRST(JA+1)
+(  218)             IF (IFIRST(JA) == 0) IFIRST(JA) = KLAST(JA)
+(  219)             IF (KLAST(JA+1)  ==  KLAST(JA)) THEN
+(  220)               KLAST(JA+1) = 0
+(  221)               IFIRST(JA+1) = 0
+(  222)             ELSE
+(  223)               IFIRST(JA+1) = IFIRST(JA+1) + 1
+(  224)             ENDIF
+(  225)             LLDONE = .FALSE.
+(  226)           ENDIF
+(  227)         ENDIF
+(  228)       ENDIF
+(  229)     ENDDO
+(  230)   ENDDO
+(  231)   KLAST(KPROCA)=KDGL
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:06      page 10
+
+(  232) ENDIF
+(  233) # 234 "suemplatb_mod.F90"
+(  234) IF (LHOOK) CALL DR_HOOK('SUEMPLATB_MOD:SUEMPLATB',1,ZHOOK_HANDLE)
+(  235) END SUBROUTINE SUEMPLATB
+(  236) END MODULE SUEMPLATB_MOD

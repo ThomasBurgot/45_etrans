@@ -1,0 +1,581 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:15      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: ltinvad_mod.F90
+
+(    1) MODULE LTINVAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE LTINVAD(KM,KMLOC,KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS,KLEI2,KDIM1,&
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2 , &
+(    6)  & KFLDPTRUV,KFLDPTRSC,FSPGL_PROC)
+(    7) 
+(    8) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(    9) 
+(   10) USE TPM_DIM         ,ONLY : R
+(   11) USE TPM_TRANS       ,ONLY : LDIVGP, LVORGP, NF_SC2, NF_SC3A, NF_SC3B
+(   12) USE TPM_GEOMETRY
+(   13) 
+(   14) !USE PRLE1AD_MOD
+(   15) USE PREPSNM_MOD     ,ONLY : PREPSNM
+(   16) USE PRFI1BAD_MOD    ,ONLY : PRFI1BAD
+(   17) USE VDTUVAD_MOD     ,ONLY : VDTUVAD
+(   18) USE SPNSDEAD_MOD    ,ONLY : SPNSDEAD
+(   19) USE LEINVAD_MOD     ,ONLY : LEINVAD
+(   20) USE ASRE1BAD_MOD    ,ONLY : ASRE1BAD
+(   21) !USE FSPGL_INT_MOD
+(   22) 
+(   23) 
+(   24) !**** *LTINVAD* - Inverse Legendre transform
+(   25) 
+(   26) !     Purpose.
+(   27) !     --------
+(   28) !        Tranform from Laplace space to Fourier space, compute U and V
+(   29) !        and north/south derivatives of state variables.
+(   30) 
+(   31) !**   Interface.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:15      page 2
+
+(   32) !     ----------
+(   33) !        *CALL* *LTINVAD(...)
+(   34) 
+(   35) !        Explicit arguments :
+(   36) !        --------------------
+(   37) !          KM        - zonal wavenumber
+(   38) !          KMLOC     - local zonal wavenumber
+(   39) !          PSPVOR    - spectral vorticity
+(   40) !          PSPDIV    - spectral divergence
+(   41) !          PSPSCALAR - spectral scalar variables
+(   42) 
+(   43) !        Implicit arguments :  The Laplace arrays of the model.
+(   44) !        --------------------  The values of the Legendre polynomials
+(   45) !                              The grid point arrays of the model
+(   46) !     Method.
+(   47) !     -------
+(   48) 
+(   49) !     Externals.
+(   50) !     ----------
+(   51) !         PRLE1AD - prepares the Legendre polonymials
+(   52) !         PREPSNM - prepare REPSNM for wavenumber KM
+(   53) !         PRFI1AD - prepares the spectral fields
+(   54) !         VDTUVAD - compute u and v from vorticity and divergence
+(   55) !         SPNSDEAD- compute north-south derivatives
+(   56) !         LEINVAD - Inverse Legendre transform
+(   57) !         ASRE1AD - recombination of symmetric/antisymmetric part
+(   58) 
+(   59) !     Reference.
+(   60) !     ----------
+(   61) !        ECMWF Research Department documentation of the IFS
+(   62) !        Temperton, 1991, MWR 119 p1303
+(   63) 
+(   64) !     Author.
+(   65) !     -------
+(   66) !        Mats Hamrud  *ECMWF*
+(   67) 
+(   68) !     Modifications.
+(   69) !     --------------
+(   70) !        Original : 00-02-01 From LTINVAD in IFS CY22R1
+(   71) !     ------------------------------------------------------------------
+(   72) 
+(   73) IMPLICIT NONE
+(   74) 
+(   75) 
+(   76) INTEGER(KIND=JPIM), INTENT(IN) :: KM
+(   77) INTEGER(KIND=JPIM), INTENT(IN) :: KMLOC
+(   78) INTEGER(KIND=JPIM), INTENT(IN) :: KF_OUT_LT
+(   79) INTEGER(KIND=JPIM), INTENT(IN) :: KF_UV
+(   80) INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCALARS
+(   81) INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCDERS
+(   82) INTEGER(KIND=JPIM), INTENT(IN) :: KLEI2
+(   83) INTEGER(KIND=JPIM), INTENT(IN) :: KDIM1
+(   84) 
+(   85) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPVOR(:,:)
+(   86) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPDIV(:,:)
+(   87) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPSCALAR(:,:)
+(   88) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PSPSC2(:,:)
+(   89) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PSPSC3A(:,:,:)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:15      page 3
+
+(   90) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PSPSC3B(:,:,:)
+(   91) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRUV(:)
+(   92) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRSC(:)
+(   93) EXTERNAL  FSPGL_PROC
+(   94) OPTIONAL  FSPGL_PROC
+(   95) 
+(   96) REAL(KIND=JPRB) :: ZIA(R%NLEI1,KLEI2)
+(   97) REAL(KIND=JPRBT) :: ZEPSNM(0:R%NTMAX+2)
+(   98) REAL(KIND=JPRBT) :: ZSOA1(KDIM1,R%NLEI3),ZAOA1(KDIM1,R%NLEI3)
+(   99) 
+(  100) 
+(  101) !     LOCAL INTEGER SCALARS
+(  102) INTEGER(KIND=JPIM) :: IFC, ISTA, IIFC, IDGLU
+(  103) INTEGER(KIND=JPIM) :: IVORL,IVORU,IDIVL,IDIVU,IUL,IUU,IVL,IVU,ISL,ISU,IDL,IDU
+(  104) INTEGER(KIND=JPIM) :: ILAST,IFIRST,IDIM1,IDIM3,J3
+(  105) 
+(  106) !     LOCAL LOGICAL SCALARS
+(  107) 
+(  108) !     LOCAL REAL SCALARS
+(  109) 
+(  110) !     ------------------------------------------------------------------
+(  111) 
+(  112) !*       1.    PREPARE AND ZEPSNM.
+(  113) !              -------------------
+(  114) 
+(  115) stop 'Error: code path not (yet) supported in GPU version'
+(  116) !CALL PREPSNM(KM,KMLOC,ZEPSNM)
+(  117) 
+(  118) !     ------------------------------------------------------------------
+(  119) !     6. OPTIONAL COMPUTATIONS IN FOURIER SPACE
+(  120) 
+(  121) !IF(PRESENT(FSPGL_PROC)) THEN
+(  122) !  CALL FSPGL_INT(KM,KMLOC,FSPGL_PROC)
+(  123) !ENDIF
+(  124) 
+(  125) !     ------------------------------------------------------------------
+(  126) 
+(  127) !*       5.    RECOMBINATION SYMMETRIC/ANTISYMMETRIC PART.
+(  128) !              --------------------------------------------
+(  129) 
+(  130) CALL ASRE1BAD(KF_OUT_LT,KM,KMLOC,ZAOA1,ZSOA1)
+(  131) 
+(  132) !     ------------------------------------------------------------------
+(  133) 
+(  134) !*       4.    INVERSE LEGENDRE TRANSFORM.
+(  135) !              ---------------------------
+(  136) 
+(  137) 
+(  138) ISTA = 1
+(  139) IFC  = 2*KF_OUT_LT
+(  140) IF(KF_UV > 0 .AND. .NOT. LVORGP) THEN
+(  141)   ISTA = ISTA+2*KF_UV
+(  142) ENDIF
+(  143) IF(KF_UV > 0 .AND. .NOT. LDIVGP) THEN
+(  144)   ISTA = ISTA+2*KF_UV
+(  145) ENDIF
+(  146) 
+(  147) ZIA(:,ISTA:ISTA+IFC-1) = 0.0_JPRBT
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:15      page 4
+
+(  148) 
+(  149) IDGLU = MIN(R%NDGNH,G%NDGLU(KM))
+(  150) IIFC=IFC
+(  151) IF(KM == 0)THEN
+(  152)   IIFC=IFC/2
+(  153) ENDIF
+(  154) CALL LEINVAD(KM,KMLOC,IFC,IIFC,KF_OUT_LT,IDGLU,ZIA(:,ISTA:ISTA+IFC-1),ZAOA1,ZSOA1)
+(  155) 
+(  156) !     ------------------------------------------------------------------
+(  157) 
+(  158) !*       3.    SPECTRAL COMPUTATIONS FOR U,V AND DERIVATIVES.
+(  159) !              ----------------------------------------------
+(  160) 
+(  161) ZIA(:,1:ISTA-1) = 0.0_JPRBT
+(  162) 
+(  163) IFIRST = 1
+(  164) ILAST  = 4*KF_UV
+(  165) IF (KF_UV > 0) THEN
+(  166)   IVORL = 1
+(  167)   IVORU = 2*KF_UV
+(  168)   IDIVL = 2*KF_UV+1
+(  169)   IDIVU = 4*KF_UV
+(  170)   IUL   = 4*KF_UV+1
+(  171)   IUU   = 6*KF_UV
+(  172)   IVL   = 6*KF_UV+1
+(  173)   IVU   = 8*KF_UV
+(  174)   CALL VDTUVAD(KM,KF_UV,ZEPSNM,ZIA(:,IVORL:IVORU),ZIA(:,IDIVL:IDIVU),&
+(  175)             & ZIA(:,IUL:IUU),ZIA(:,IVL:IVU))
+(  176)   CALL PRFI1BAD(KM,ZIA(:,IVORL:IVORU),PSPVOR,KF_UV,KFLDPTRUV)
+(  177)   CALL PRFI1BAD(KM,ZIA(:,IDIVL:IDIVU),PSPDIV,KF_UV,KFLDPTRUV)
+(  178)   ILAST = ILAST+4*KF_UV
+(  179) ENDIF
+(  180) 
+(  181) IF (KF_SCDERS > 0) THEN
+(  182)   ISL = 2*(4*KF_UV)+1
+(  183)   ISU = ISL+2*KF_SCALARS-1
+(  184)   IDL = 2*(4*KF_UV+KF_SCALARS)+1
+(  185)   IDU = IDL+2*KF_SCDERS-1
+(  186)   CALL SPNSDEAD(KM,KF_SCALARS,ZEPSNM,ZIA(:,ISL:ISU),ZIA(:,IDL:IDU))
+(  187) ENDIF
+(  188) 
+(  189) IF(KF_SCALARS > 0)THEN
+(  190)   IF(PRESENT(PSPSCALAR)) THEN
+(  191)     IFIRST = ILAST+1
+(  192)     ILAST  = IFIRST - 1 + 2*KF_SCALARS
+(  193)     CALL PRFI1BAD(KM,ZIA(:,IFIRST:ILAST),PSPSCALAR(:,:),KF_SCALARS,KFLDPTRSC)
+(  194)   ELSE
+(  195)     IF(PRESENT(PSPSC2) .AND. NF_SC2 > 0) THEN
+(  196)       IFIRST = ILAST+1
+(  197)       ILAST  = IFIRST-1+2*NF_SC2
+(  198)       CALL PRFI1BAD(KM,ZIA(:,IFIRST:ILAST),PSPSC2(:,:),NF_SC2)
+(  199)     ENDIF
+(  200)     IF(PRESENT(PSPSC3A) .AND. NF_SC3A > 0) THEN
+(  201)       IDIM1=NF_SC3A
+(  202)       IDIM3=UBOUND(PSPSC3A,3)
+(  203)       DO J3=1,IDIM3
+(  204)         IFIRST = ILAST+1
+(  205)         ILAST  = IFIRST-1+2*IDIM1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:15      page 5
+
+(  206)         CALL PRFI1BAD(KM,ZIA(:,IFIRST:ILAST),PSPSC3A(:,:,J3),IDIM1)
+(  207)       ENDDO
+(  208)     ENDIF
+(  209)     IF(PRESENT(PSPSC3B) .AND. NF_SC3B > 0) THEN
+(  210)       IDIM1=NF_SC3B
+(  211)       IDIM3=UBOUND(PSPSC3B,3)
+(  212)       DO J3=1,IDIM3
+(  213)         IFIRST = ILAST+1
+(  214)         ILAST  = IFIRST-1+2*IDIM1
+(  215)         CALL PRFI1BAD(KM,ZIA(:,IFIRST:ILAST),PSPSC3B(:,:,J3),IDIM1)
+(  216)       ENDDO
+(  217)     ENDIF
+(  218)   ENDIF
+(  219) ENDIF
+(  220) 
+(  221) 
+(  222) !     ------------------------------------------------------------------
+(  223) 
+(  224) 
+(  225) END SUBROUTINE LTINVAD
+(  226) END MODULE LTINVAD_MOD
+(  227) 
+(  228) 
+(  229) 
+(  230) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:15      page 6
+
+(    1) # 1 "ltinvad_mod.F90"
+(    1) MODULE LTINVAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE LTINVAD(KM,KMLOC,KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS,KLEI2,KDIM1,&
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2 , &
+(    6)  & KFLDPTRUV,KFLDPTRSC,FSPGL_PROC)
+(    7) # 8 "ltinvad_mod.F90"
+(    8) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(    9) # 10 "ltinvad_mod.F90"
+(   10) USE TPM_DIM         ,ONLY : R
+(   11) USE TPM_TRANS       ,ONLY : LDIVGP, LVORGP, NF_SC2, NF_SC3A, NF_SC3B
+(   12) USE TPM_GEOMETRY
+(   13) # 14 "ltinvad_mod.F90"
+(   14) !USE PRLE1AD_MOD
+(   15) USE PREPSNM_MOD     ,ONLY : PREPSNM
+(   16) USE PRFI1BAD_MOD    ,ONLY : PRFI1BAD
+(   17) USE VDTUVAD_MOD     ,ONLY : VDTUVAD
+(   18) USE SPNSDEAD_MOD    ,ONLY : SPNSDEAD
+(   19) USE LEINVAD_MOD     ,ONLY : LEINVAD
+(   20) USE ASRE1BAD_MOD    ,ONLY : ASRE1BAD
+(   21) !USE FSPGL_INT_MOD
+(   22) # 24 "ltinvad_mod.F90"
+(   24) !**** *LTINVAD* - Inverse Legendre transform
+(   25) # 26 "ltinvad_mod.F90"
+(   26) !     Purpose.
+(   27) !     --------
+(   28) !        Tranform from Laplace space to Fourier space, compute U and V
+(   29) !        and north/south derivatives of state variables.
+(   30) # 31 "ltinvad_mod.F90"
+(   31) !**   Interface.
+(   32) !     ----------
+(   33) !        *CALL* *LTINVAD(...)
+(   34) # 35 "ltinvad_mod.F90"
+(   35) !        Explicit arguments :
+(   36) !        --------------------
+(   37) !          KM        - zonal wavenumber
+(   38) !          KMLOC     - local zonal wavenumber
+(   39) !          PSPVOR    - spectral vorticity
+(   40) !          PSPDIV    - spectral divergence
+(   41) !          PSPSCALAR - spectral scalar variables
+(   42) # 43 "ltinvad_mod.F90"
+(   43) !        Implicit arguments :  The Laplace arrays of the model.
+(   44) !        --------------------  The values of the Legendre polynomials
+(   45) !                              The grid point arrays of the model
+(   46) !     Method.
+(   47) !     -------
+(   48) # 49 "ltinvad_mod.F90"
+(   49) !     Externals.
+(   50) !     ----------
+(   51) !         PRLE1AD - prepares the Legendre polonymials
+(   52) !         PREPSNM - prepare REPSNM for wavenumber KM
+(   53) !         PRFI1AD - prepares the spectral fields
+(   54) !         VDTUVAD - compute u and v from vorticity and divergence
+(   55) !         SPNSDEAD- compute north-south derivatives
+(   56) !         LEINVAD - Inverse Legendre transform
+(   57) !         ASRE1AD - recombination of symmetric/antisymmetric part
+(   58) # 59 "ltinvad_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:15      page 7
+
+(   59) !     Reference.
+(   60) !     ----------
+(   61) !        ECMWF Research Department documentation of the IFS
+(   62) !        Temperton, 1991, MWR 119 p1303
+(   63) # 64 "ltinvad_mod.F90"
+(   64) !     Author.
+(   65) !     -------
+(   66) !        Mats Hamrud  *ECMWF*
+(   67) # 68 "ltinvad_mod.F90"
+(   68) !     Modifications.
+(   69) !     --------------
+(   70) !        Original : 00-02-01 From LTINVAD in IFS CY22R1
+(   71) !     ------------------------------------------------------------------
+(   72) # 73 "ltinvad_mod.F90"
+(   73) IMPLICIT NONE
+(   74) # 76 "ltinvad_mod.F90"
+(   76) INTEGER(KIND=JPIM), INTENT(IN) :: KM
+(   77) INTEGER(KIND=JPIM), INTENT(IN) :: KMLOC
+(   78) INTEGER(KIND=JPIM), INTENT(IN) :: KF_OUT_LT
+(   79) INTEGER(KIND=JPIM), INTENT(IN) :: KF_UV
+(   80) INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCALARS
+(   81) INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCDERS
+(   82) INTEGER(KIND=JPIM), INTENT(IN) :: KLEI2
+(   83) INTEGER(KIND=JPIM), INTENT(IN) :: KDIM1
+(   84) # 85 "ltinvad_mod.F90"
+(   85) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPVOR(:,:)
+(   86) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPDIV(:,:)
+(   87) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPSCALAR(:,:)
+(   88) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PSPSC2(:,:)
+(   89) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PSPSC3A(:,:,:)
+(   90) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PSPSC3B(:,:,:)
+(   91) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRUV(:)
+(   92) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRSC(:)
+(   93) EXTERNAL  FSPGL_PROC
+(   94) OPTIONAL  FSPGL_PROC
+(   95) # 96 "ltinvad_mod.F90"
+(   96) REAL(KIND=JPRB) :: ZIA(R%NLEI1,KLEI2)
+(   97) REAL(KIND=JPRBT) :: ZEPSNM(0:R%NTMAX+2)
+(   98) REAL(KIND=JPRBT) :: ZSOA1(KDIM1,R%NLEI3),ZAOA1(KDIM1,R%NLEI3)
+(   99) # 101 "ltinvad_mod.F90"
+(  101) !     LOCAL INTEGER SCALARS
+(  102) INTEGER(KIND=JPIM) :: IFC, ISTA, IIFC, IDGLU
+(  103) INTEGER(KIND=JPIM) :: IVORL,IVORU,IDIVL,IDIVU,IUL,IUU,IVL,IVU,ISL,ISU,IDL,IDU
+(  104) INTEGER(KIND=JPIM) :: ILAST,IFIRST,IDIM1,IDIM3,J3
+(  105) # 106 "ltinvad_mod.F90"
+(  106) !     LOCAL LOGICAL SCALARS
+(  107) # 108 "ltinvad_mod.F90"
+(  108) !     LOCAL REAL SCALARS
+(  109) # 110 "ltinvad_mod.F90"
+(  110) !     ------------------------------------------------------------------
+(  111) # 112 "ltinvad_mod.F90"
+(  112) !*       1.    PREPARE AND ZEPSNM.
+(  113) !              -------------------
+(  114) # 115 "ltinvad_mod.F90"
+(  115) stop 'Error: code path not (yet) supported in GPU version'
+(  116) !CALL PREPSNM(KM,KMLOC,ZEPSNM)
+(  117) # 118 "ltinvad_mod.F90"
+(  118) !     ------------------------------------------------------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:15      page 8
+
+(  119) !     6. OPTIONAL COMPUTATIONS IN FOURIER SPACE
+(  120) # 121 "ltinvad_mod.F90"
+(  121) !IF(PRESENT(FSPGL_PROC)) THEN
+(  122) !  CALL FSPGL_INT(KM,KMLOC,FSPGL_PROC)
+(  123) !ENDIF
+(  124) # 125 "ltinvad_mod.F90"
+(  125) !     ------------------------------------------------------------------
+(  126) # 127 "ltinvad_mod.F90"
+(  127) !*       5.    RECOMBINATION SYMMETRIC/ANTISYMMETRIC PART.
+(  128) !              --------------------------------------------
+(  129) # 130 "ltinvad_mod.F90"
+(  130) CALL ASRE1BAD(KF_OUT_LT,KM,KMLOC,ZAOA1,ZSOA1)
+(  131) # 132 "ltinvad_mod.F90"
+(  132) !     ------------------------------------------------------------------
+(  133) # 134 "ltinvad_mod.F90"
+(  134) !*       4.    INVERSE LEGENDRE TRANSFORM.
+(  135) !              ---------------------------
+(  136) # 138 "ltinvad_mod.F90"
+(  138) ISTA = 1
+(  139) IFC  = 2*KF_OUT_LT
+(  140) IF(KF_UV > 0 .AND. .NOT. LVORGP) THEN
+(  141)   ISTA = ISTA+2*KF_UV
+(  142) ENDIF
+(  143) IF(KF_UV > 0 .AND. .NOT. LDIVGP) THEN
+(  144)   ISTA = ISTA+2*KF_UV
+(  145) ENDIF
+(  146) # 147 "ltinvad_mod.F90"
+(  147) ZIA(:,ISTA:ISTA+IFC-1) = 0.0_JPRBT
+(  148) # 149 "ltinvad_mod.F90"
+(  149) IDGLU = MIN(R%NDGNH,G%NDGLU(KM))
+(  150) IIFC=IFC
+(  151) IF(KM == 0)THEN
+(  152)   IIFC=IFC/2
+(  153) ENDIF
+(  154) CALL LEINVAD(KM,KMLOC,IFC,IIFC,KF_OUT_LT,IDGLU,ZIA(:,ISTA:ISTA+IFC-1),ZAOA1,ZSOA1)
+(  155) # 156 "ltinvad_mod.F90"
+(  156) !     ------------------------------------------------------------------
+(  157) # 158 "ltinvad_mod.F90"
+(  158) !*       3.    SPECTRAL COMPUTATIONS FOR U,V AND DERIVATIVES.
+(  159) !              ----------------------------------------------
+(  160) # 161 "ltinvad_mod.F90"
+(  161) ZIA(:,1:ISTA-1) = 0.0_JPRBT
+(  162) # 163 "ltinvad_mod.F90"
+(  163) IFIRST = 1
+(  164) ILAST  = 4*KF_UV
+(  165) IF (KF_UV > 0) THEN
+(  166)   IVORL = 1
+(  167)   IVORU = 2*KF_UV
+(  168)   IDIVL = 2*KF_UV+1
+(  169)   IDIVU = 4*KF_UV
+(  170)   IUL   = 4*KF_UV+1
+(  171)   IUU   = 6*KF_UV
+(  172)   IVL   = 6*KF_UV+1
+(  173)   IVU   = 8*KF_UV
+(  174)   CALL VDTUVAD(KM,KF_UV,ZEPSNM,ZIA(:,IVORL:IVORU),ZIA(:,IDIVL:IDIVU),&
+(  175)             & ZIA(:,IUL:IUU),ZIA(:,IVL:IVU))
+(  176)   CALL PRFI1BAD(KM,ZIA(:,IVORL:IVORU),PSPVOR,KF_UV,KFLDPTRUV)
+(  177)   CALL PRFI1BAD(KM,ZIA(:,IDIVL:IDIVU),PSPDIV,KF_UV,KFLDPTRUV)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:15      page 9
+
+(  178)   ILAST = ILAST+4*KF_UV
+(  179) ENDIF
+(  180) # 181 "ltinvad_mod.F90"
+(  181) IF (KF_SCDERS > 0) THEN
+(  182)   ISL = 2*(4*KF_UV)+1
+(  183)   ISU = ISL+2*KF_SCALARS-1
+(  184)   IDL = 2*(4*KF_UV+KF_SCALARS)+1
+(  185)   IDU = IDL+2*KF_SCDERS-1
+(  186)   CALL SPNSDEAD(KM,KF_SCALARS,ZEPSNM,ZIA(:,ISL:ISU),ZIA(:,IDL:IDU))
+(  187) ENDIF
+(  188) # 189 "ltinvad_mod.F90"
+(  189) IF(KF_SCALARS > 0)THEN
+(  190)   IF(PRESENT(PSPSCALAR)) THEN
+(  191)     IFIRST = ILAST+1
+(  192)     ILAST  = IFIRST - 1 + 2*KF_SCALARS
+(  193)     CALL PRFI1BAD(KM,ZIA(:,IFIRST:ILAST),PSPSCALAR(:,:),KF_SCALARS,KFLDPTRSC)
+(  194)   ELSE
+(  195)     IF(PRESENT(PSPSC2) .AND. NF_SC2 > 0) THEN
+(  196)       IFIRST = ILAST+1
+(  197)       ILAST  = IFIRST-1+2*NF_SC2
+(  198)       CALL PRFI1BAD(KM,ZIA(:,IFIRST:ILAST),PSPSC2(:,:),NF_SC2)
+(  199)     ENDIF
+(  200)     IF(PRESENT(PSPSC3A) .AND. NF_SC3A > 0) THEN
+(  201)       IDIM1=NF_SC3A
+(  202)       IDIM3=UBOUND(PSPSC3A,3)
+(  203)       DO J3=1,IDIM3
+(  204)         IFIRST = ILAST+1
+(  205)         ILAST  = IFIRST-1+2*IDIM1
+(  206)         CALL PRFI1BAD(KM,ZIA(:,IFIRST:ILAST),PSPSC3A(:,:,J3),IDIM1)
+(  207)       ENDDO
+(  208)     ENDIF
+(  209)     IF(PRESENT(PSPSC3B) .AND. NF_SC3B > 0) THEN
+(  210)       IDIM1=NF_SC3B
+(  211)       IDIM3=UBOUND(PSPSC3B,3)
+(  212)       DO J3=1,IDIM3
+(  213)         IFIRST = ILAST+1
+(  214)         ILAST  = IFIRST-1+2*IDIM1
+(  215)         CALL PRFI1BAD(KM,ZIA(:,IFIRST:ILAST),PSPSC3B(:,:,J3),IDIM1)
+(  216)       ENDDO
+(  217)     ENDIF
+(  218)   ENDIF
+(  219) ENDIF
+(  220) # 222 "ltinvad_mod.F90"
+(  222) !     ------------------------------------------------------------------
+(  223) # 225 "ltinvad_mod.F90"
+(  225) END SUBROUTINE LTINVAD
+(  226) END MODULE LTINVAD_MOD

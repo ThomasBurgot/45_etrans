@@ -1,0 +1,362 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:24      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eupdsp_mod.F90
+
+(    1) MODULE EUPDSP_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EUPDSP(KF_UV,KF_SCALARS,PFFA,PVODI, &
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2 , &
+(    6)  & KFLDPTRUV,KFLDPTRSC)
+(    7) 
+(    8) !**** *EUPDSP* - Update spectral arrays after direct Legendre transform
+(    9) 
+(   10) !     Purpose.
+(   11) !     --------
+(   12) !        To update the spectral arrays for a fixed zonal wave-number
+(   13) !        from values in POA1 and POA2.
+(   14) 
+(   15) !**   Interface.
+(   16) !     ----------
+(   17) !        CALL EUPDSP(...)
+(   18) 
+(   19) !        Explicit arguments :
+(   20) !        --------------------
+(   21) !        POA1 - spectral fields for zonal wavenumber KM (basic var.)
+(   22) !        POA2 - spectral fields for zonal wavenumber KM (vor. div.)
+(   23) !        PSPVOR - spectral vorticity
+(   24) !        PSPDIV - spectral divergence
+(   25) !        PSPSCALAR - spectral scalar variables
+(   26) 
+(   27) !        Implicit arguments :
+(   28) !        --------------------
+(   29) 
+(   30) !     Method.
+(   31) !     -------
+(   32) 
+(   33) !     Externals.  UPDSPB - basic transfer routine
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:24      page 2
+
+(   34) !     ----------
+(   35) 
+(   36) !     Reference.
+(   37) !     ----------
+(   38) !        ECMWF Research Department documentation of the IFS
+(   39) 
+(   40) !     Author.
+(   41) !     -------
+(   42) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   43) 
+(   44) !     Modifications.
+(   45) !     --------------
+(   46) !        Original : 88-02-02
+(   47) !        Modified : 91-07-01 Philippe Courtier/Mats Hamrud - Rewrite
+(   48) !                            for uv formulation
+(   49) !        Modified : 94-08-02 R. El Khatib - interface to UPDSPB
+(   50) !        M.Hamrud : 94-11-01 New conf 'G' - vor,div->vor,div
+(   51) !                            instead of u,v->vor,div
+(   52) !        MPP Group: 95-10-01 Support for Distributed Memory version
+(   53) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   54) !     ------------------------------------------------------------------
+(   55) 
+(   56) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   57) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   58) 
+(   59) USE TPM_TRANS       ,ONLY : NF_SC2, NF_SC3A, NF_SC3B
+(   60) !USE TPM_DISTR
+(   61) 
+(   62) USE EUPDSPB_MOD     ,ONLY : EUPDSPB
+(   63) !
+(   64) 
+(   65) IMPLICIT NONE
+(   66) 
+(   67) 
+(   68) INTEGER(KIND=JPIM), INTENT(IN)  :: KF_UV,KF_SCALARS
+(   69) REAL(KIND=JPRB) , INTENT(IN)  :: PFFA(:,:,:)
+(   70) REAL(KIND=JPRB) , INTENT(IN)  :: PVODI(:,:,:)
+(   71) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(OUT) :: PSPVOR(:,:)
+(   72) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(OUT) :: PSPDIV(:,:)
+(   73) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(OUT) :: PSPSCALAR(:,:)
+(   74) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC2(:,:)
+(   75) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC3A(:,:,:)
+(   76) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC3B(:,:,:)
+(   77) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRUV(:)
+(   78) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRSC(:)
+(   79) 
+(   80) INTEGER(KIND=JPIM) :: IVORS, IVORE, IDIVS, IDIVE, IST ,IEND,IDIM1,IDIM3,J3
+(   81) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   82) 
+(   83) !     ------------------------------------------------------------------
+(   84) 
+(   85) !*       1.    UPDATE FIELDS
+(   86) !              -------------
+(   87) 
+(   88) !*       1.1      VORTICITY AND DIVERGENCE.
+(   89) 
+(   90) IF (LHOOK) CALL DR_HOOK('EUPDSP_MOD:EUPDSP',0,ZHOOK_HANDLE)
+(   91) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:24      page 3
+
+(   92) IST = 1
+(   93) IF (KF_UV > 0) THEN
+(   94)   IST = IST+4*KF_UV
+(   95)   IVORS = 1
+(   96)   IVORE = 2*KF_UV
+(   97)   IDIVS = 2*KF_UV+1
+(   98)   IDIVE = 4*KF_UV
+(   99)   CALL EUPDSPB(KF_UV,PVODI(:,:,IVORS:IVORE),PSPVOR,KFLDPTRUV)
+(  100)   CALL EUPDSPB(KF_UV,PVODI(:,:,IDIVS:IDIVE),PSPDIV,KFLDPTRUV)
+(  101) ENDIF
+(  102) 
+(  103) !*       1.2   SCALARS
+(  104) 
+(  105) IF (KF_SCALARS > 0) THEN
+(  106)   IF(PRESENT(PSPSCALAR)) THEN
+(  107)     IEND = IST+2*KF_SCALARS-1
+(  108)     CALL EUPDSPB(KF_SCALARS,PFFA(:,:,IST:IEND),PSPSCALAR,KFLDPTRSC)
+(  109)   ELSE
+(  110)     IF(PRESENT(PSPSC2) .AND. NF_SC2 > 0) THEN
+(  111)       IDIM1 = NF_SC2
+(  112)       IEND  = IST+2*IDIM1-1
+(  113)       CALL EUPDSPB(IDIM1,PFFA(:,:,IST:IEND),PSPSC2)
+(  114)       IST=IST+2*IDIM1
+(  115)     ENDIF
+(  116)     IF(PRESENT(PSPSC3A) .AND. NF_SC3A > 0) THEN
+(  117)       IDIM1=NF_SC3A
+(  118)       IDIM3=UBOUND(PSPSC3A,3)
+(  119)       DO J3=1,IDIM3
+(  120)         IEND = IST+2*IDIM1-1
+(  121)         CALL EUPDSPB(IDIM1,PFFA(:,:,IST:IEND),PSPSC3A(:,:,J3))
+(  122)         IST=IST+2*IDIM1
+(  123)       ENDDO
+(  124)     ENDIF
+(  125)     IF(PRESENT(PSPSC3B) .AND. NF_SC3B > 0) THEN
+(  126)       IDIM1=NF_SC3B
+(  127)       IDIM3=UBOUND(PSPSC3B,3)
+(  128)       DO J3=1,IDIM3
+(  129)         IEND = IST+2*IDIM1-1
+(  130)         CALL EUPDSPB(IDIM1,PFFA(:,:,IST:IEND),PSPSC3B(:,:,J3))
+(  131)         IST=IST+2*IDIM1
+(  132)       ENDDO
+(  133)     ENDIF
+(  134)   ENDIF
+(  135) ENDIF
+(  136) 
+(  137) IF (LHOOK) CALL DR_HOOK('EUPDSP_MOD:EUPDSP',1,ZHOOK_HANDLE)
+(  138) 
+(  139) !     ------------------------------------------------------------------
+(  140) 
+(  141) END SUBROUTINE EUPDSP
+(  142) END MODULE EUPDSP_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:24      page 4
+
+(    1) # 1 "eupdsp_mod.F90"
+(    1) MODULE EUPDSP_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EUPDSP(KF_UV,KF_SCALARS,PFFA,PVODI, &
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2 , &
+(    6)  & KFLDPTRUV,KFLDPTRSC)
+(    7) # 8 "eupdsp_mod.F90"
+(    8) !**** *EUPDSP* - Update spectral arrays after direct Legendre transform
+(    9) # 10 "eupdsp_mod.F90"
+(   10) !     Purpose.
+(   11) !     --------
+(   12) !        To update the spectral arrays for a fixed zonal wave-number
+(   13) !        from values in POA1 and POA2.
+(   14) # 15 "eupdsp_mod.F90"
+(   15) !**   Interface.
+(   16) !     ----------
+(   17) !        CALL EUPDSP(...)
+(   18) # 19 "eupdsp_mod.F90"
+(   19) !        Explicit arguments :
+(   20) !        --------------------
+(   21) !        POA1 - spectral fields for zonal wavenumber KM (basic var.)
+(   22) !        POA2 - spectral fields for zonal wavenumber KM (vor. div.)
+(   23) !        PSPVOR - spectral vorticity
+(   24) !        PSPDIV - spectral divergence
+(   25) !        PSPSCALAR - spectral scalar variables
+(   26) # 27 "eupdsp_mod.F90"
+(   27) !        Implicit arguments :
+(   28) !        --------------------
+(   29) # 30 "eupdsp_mod.F90"
+(   30) !     Method.
+(   31) !     -------
+(   32) # 33 "eupdsp_mod.F90"
+(   33) !     Externals.  UPDSPB - basic transfer routine
+(   34) !     ----------
+(   35) # 36 "eupdsp_mod.F90"
+(   36) !     Reference.
+(   37) !     ----------
+(   38) !        ECMWF Research Department documentation of the IFS
+(   39) # 40 "eupdsp_mod.F90"
+(   40) !     Author.
+(   41) !     -------
+(   42) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   43) # 44 "eupdsp_mod.F90"
+(   44) !     Modifications.
+(   45) !     --------------
+(   46) !        Original : 88-02-02
+(   47) !        Modified : 91-07-01 Philippe Courtier/Mats Hamrud - Rewrite
+(   48) !                            for uv formulation
+(   49) !        Modified : 94-08-02 R. El Khatib - interface to UPDSPB
+(   50) !        M.Hamrud : 94-11-01 New conf 'G' - vor,div->vor,div
+(   51) !                            instead of u,v->vor,div
+(   52) !        MPP Group: 95-10-01 Support for Distributed Memory version
+(   53) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   54) !     ------------------------------------------------------------------
+(   55) # 56 "eupdsp_mod.F90"
+(   56) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   57) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:24      page 5
+
+(   58) # 59 "eupdsp_mod.F90"
+(   59) USE TPM_TRANS       ,ONLY : NF_SC2, NF_SC3A, NF_SC3B
+(   60) !USE TPM_DISTR
+(   61) # 62 "eupdsp_mod.F90"
+(   62) USE EUPDSPB_MOD     ,ONLY : EUPDSPB
+(   63) !
+(   64) # 65 "eupdsp_mod.F90"
+(   65) IMPLICIT NONE
+(   66) # 68 "eupdsp_mod.F90"
+(   68) INTEGER(KIND=JPIM), INTENT(IN)  :: KF_UV,KF_SCALARS
+(   69) REAL(KIND=JPRB) , INTENT(IN)  :: PFFA(:,:,:)
+(   70) REAL(KIND=JPRB) , INTENT(IN)  :: PVODI(:,:,:)
+(   71) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(OUT) :: PSPVOR(:,:)
+(   72) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(OUT) :: PSPDIV(:,:)
+(   73) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(OUT) :: PSPSCALAR(:,:)
+(   74) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC2(:,:)
+(   75) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC3A(:,:,:)
+(   76) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC3B(:,:,:)
+(   77) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRUV(:)
+(   78) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRSC(:)
+(   79) # 80 "eupdsp_mod.F90"
+(   80) INTEGER(KIND=JPIM) :: IVORS, IVORE, IDIVS, IDIVE, IST ,IEND,IDIM1,IDIM3,J3
+(   81) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   82) # 83 "eupdsp_mod.F90"
+(   83) !     ------------------------------------------------------------------
+(   84) # 85 "eupdsp_mod.F90"
+(   85) !*       1.    UPDATE FIELDS
+(   86) !              -------------
+(   87) # 88 "eupdsp_mod.F90"
+(   88) !*       1.1      VORTICITY AND DIVERGENCE.
+(   89) # 90 "eupdsp_mod.F90"
+(   90) IF (LHOOK) CALL DR_HOOK('EUPDSP_MOD:EUPDSP',0,ZHOOK_HANDLE)
+(   91) # 92 "eupdsp_mod.F90"
+(   92) IST = 1
+(   93) IF (KF_UV > 0) THEN
+(   94)   IST = IST+4*KF_UV
+(   95)   IVORS = 1
+(   96)   IVORE = 2*KF_UV
+(   97)   IDIVS = 2*KF_UV+1
+(   98)   IDIVE = 4*KF_UV
+(   99)   CALL EUPDSPB(KF_UV,PVODI(:,:,IVORS:IVORE),PSPVOR,KFLDPTRUV)
+(  100)   CALL EUPDSPB(KF_UV,PVODI(:,:,IDIVS:IDIVE),PSPDIV,KFLDPTRUV)
+(  101) ENDIF
+(  102) # 103 "eupdsp_mod.F90"
+(  103) !*       1.2   SCALARS
+(  104) # 105 "eupdsp_mod.F90"
+(  105) IF (KF_SCALARS > 0) THEN
+(  106)   IF(PRESENT(PSPSCALAR)) THEN
+(  107)     IEND = IST+2*KF_SCALARS-1
+(  108)     CALL EUPDSPB(KF_SCALARS,PFFA(:,:,IST:IEND),PSPSCALAR,KFLDPTRSC)
+(  109)   ELSE
+(  110)     IF(PRESENT(PSPSC2) .AND. NF_SC2 > 0) THEN
+(  111)       IDIM1 = NF_SC2
+(  112)       IEND  = IST+2*IDIM1-1
+(  113)       CALL EUPDSPB(IDIM1,PFFA(:,:,IST:IEND),PSPSC2)
+(  114)       IST=IST+2*IDIM1
+(  115)     ENDIF
+(  116)     IF(PRESENT(PSPSC3A) .AND. NF_SC3A > 0) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:24      page 6
+
+(  117)       IDIM1=NF_SC3A
+(  118)       IDIM3=UBOUND(PSPSC3A,3)
+(  119)       DO J3=1,IDIM3
+(  120)         IEND = IST+2*IDIM1-1
+(  121)         CALL EUPDSPB(IDIM1,PFFA(:,:,IST:IEND),PSPSC3A(:,:,J3))
+(  122)         IST=IST+2*IDIM1
+(  123)       ENDDO
+(  124)     ENDIF
+(  125)     IF(PRESENT(PSPSC3B) .AND. NF_SC3B > 0) THEN
+(  126)       IDIM1=NF_SC3B
+(  127)       IDIM3=UBOUND(PSPSC3B,3)
+(  128)       DO J3=1,IDIM3
+(  129)         IEND = IST+2*IDIM1-1
+(  130)         CALL EUPDSPB(IDIM1,PFFA(:,:,IST:IEND),PSPSC3B(:,:,J3))
+(  131)         IST=IST+2*IDIM1
+(  132)       ENDDO
+(  133)     ENDIF
+(  134)   ENDIF
+(  135) ENDIF
+(  136) # 137 "eupdsp_mod.F90"
+(  137) IF (LHOOK) CALL DR_HOOK('EUPDSP_MOD:EUPDSP',1,ZHOOK_HANDLE)
+(  138) # 139 "eupdsp_mod.F90"
+(  139) !     ------------------------------------------------------------------
+(  140) # 141 "eupdsp_mod.F90"
+(  141) END SUBROUTINE EUPDSP
+(  142) END MODULE EUPDSP_MOD

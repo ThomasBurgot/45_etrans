@@ -1,0 +1,324 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:51      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: espnsdead_mod.F90
+
+(    1) MODULE ESPNSDEAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ESPNSDEAD(KM,KF_SCALARS,PF,PNSD)
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) 
+(    8) !USE TPM_GEN
+(    9) !USE TPM_DIM
+(   10) !USE TPM_FIELDS
+(   11) !USE TPM_TRANS
+(   12) 
+(   13) USE TPMALD_DISTR    ,ONLY : DALD
+(   14) USE TPMALD_GEO      ,ONLY : GALD
+(   15) 
+(   16) 
+(   17) !**** *ESPNSDEAD* - Compute North-South derivative in spectral space
+(   18) 
+(   19) !     Purpose.
+(   20) !     --------
+(   21) !        In Laplace space compute the the North-south derivative
+(   22) 
+(   23) !**   Interface.
+(   24) !     ----------
+(   25) !        CALL ESPNSDEAD(...)
+(   26) 
+(   27) !        Explicit arguments :
+(   28) !        --------------------
+(   29) !        KM -zonal wavenumber (input-c)
+(   30) !        PEPSNM - REPSNM for wavenumber KM (input-c)
+(   31) !        PF  (NLEI1,2*KF_SCALARS) - input field (input)
+(   32) !        PNSD(NLEI1,2*KF_SCALARS) - N-S derivative (output)
+(   33) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:51      page 2
+
+(   34) !        Organisation within NLEI1:
+(   35) !        NLEI1 = NSMAX+4+mod(NSMAX+4+1,2)
+(   36) !                        overdimensioning
+(   37) !        1        : n=NSMAX+2
+(   38) !        2        : n=NSMAX+1
+(   39) !        3        : n=NSMAX
+(   40) !        .        :
+(   41) !        .        :
+(   42) !        NSMAX+3  : n=0
+(   43) !        NSMAX+4  : n=-1
+(   44) 
+(   45) !        Implicit arguments :  YOMLAP
+(   46) !        --------------------
+(   47) 
+(   48) !     Method.
+(   49) !     -------
+(   50) 
+(   51) !     Externals.   None.
+(   52) !     ----------
+(   53) 
+(   54) !     Reference.
+(   55) !     ----------
+(   56) !        ECMWF Research Department documentation of the IFS
+(   57) !        Temperton, 1991, MWR 119 p1303
+(   58) 
+(   59) !     Author.
+(   60) !     -------
+(   61) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   62) 
+(   63) !     Modifications.
+(   64) !     --------------
+(   65) !        Original : 00-02-01 From SPNSDEAD in IFS CY22R1
+(   66) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   67) 
+(   68) !     ------------------------------------------------------------------
+(   69) 
+(   70) IMPLICIT NONE
+(   71) 
+(   72) INTEGER(KIND=JPIM), INTENT(IN)    :: KM
+(   73) INTEGER(KIND=JPIM), INTENT(IN)    :: KF_SCALARS
+(   74) REAL(KIND=JPRB),    INTENT(INOUT) :: PF(:,:)
+(   75) REAL(KIND=JPRB),    INTENT(IN)    :: PNSD(:,:)
+(   76) INTEGER(KIND=JPIM) ::  ISKIP, J, JN
+(   77) INTEGER(KIND=JPIM) :: IN
+(   78) REAL(KIND=JPRB)    :: ZIN
+(   79) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   80) 
+(   81) !     ------------------------------------------------------------------
+(   82) 
+(   83) !*       1.    COMPUTE NORTH SOUTH DERIVATIVE.
+(   84) !              -------------------------------
+(   85) 
+(   86) !*       1.1      COMPUTE
+(   87) 
+(   88) IF (LHOOK) CALL DR_HOOK('ESPNSDEAD_MOD:ESPNSDEAD',0,ZHOOK_HANDLE)
+(   89) IF(KM == 0) THEN
+(   90)   ISKIP = 1
+(   91) ELSE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:51      page 3
+
+(   92)   ISKIP = 1
+(   93) ENDIF
+(   94) 
+(   95) DO JN=1,DALD%NCPL2M(KM),2
+(   96) 
+(   97)   IN = (JN-1)/2
+(   98)   ZIN = REAL(IN,JPRB)*GALD%EYWN
+(   99) 
+(  100)   DO J=1,2*KF_SCALARS,ISKIP
+(  101) 
+(  102)     PF(JN+1,J) = PF(JN+1,J)-ZIN*PNSD(JN  ,J)
+(  103)     PF(JN  ,J) = PF(JN  ,J)+ZIN*PNSD(JN+1,J)
+(  104) 
+(  105)   ENDDO
+(  106) ENDDO
+(  107) IF (LHOOK) CALL DR_HOOK('ESPNSDEAD_MOD:ESPNSDEAD',1,ZHOOK_HANDLE)
+(  108) 
+(  109) !     ------------------------------------------------------------------
+(  110) 
+(  111) END SUBROUTINE ESPNSDEAD
+(  112) END MODULE ESPNSDEAD_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:51      page 4
+
+(    1) # 1 "espnsdead_mod.F90"
+(    1) MODULE ESPNSDEAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ESPNSDEAD(KM,KF_SCALARS,PF,PNSD)
+(    4) # 5 "espnsdead_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) # 8 "espnsdead_mod.F90"
+(    8) !USE TPM_GEN
+(    9) !USE TPM_DIM
+(   10) !USE TPM_FIELDS
+(   11) !USE TPM_TRANS
+(   12) # 13 "espnsdead_mod.F90"
+(   13) USE TPMALD_DISTR    ,ONLY : DALD
+(   14) USE TPMALD_GEO      ,ONLY : GALD
+(   15) # 17 "espnsdead_mod.F90"
+(   17) !**** *ESPNSDEAD* - Compute North-South derivative in spectral space
+(   18) # 19 "espnsdead_mod.F90"
+(   19) !     Purpose.
+(   20) !     --------
+(   21) !        In Laplace space compute the the North-south derivative
+(   22) # 23 "espnsdead_mod.F90"
+(   23) !**   Interface.
+(   24) !     ----------
+(   25) !        CALL ESPNSDEAD(...)
+(   26) # 27 "espnsdead_mod.F90"
+(   27) !        Explicit arguments :
+(   28) !        --------------------
+(   29) !        KM -zonal wavenumber (input-c)
+(   30) !        PEPSNM - REPSNM for wavenumber KM (input-c)
+(   31) !        PF  (NLEI1,2*KF_SCALARS) - input field (input)
+(   32) !        PNSD(NLEI1,2*KF_SCALARS) - N-S derivative (output)
+(   33) # 34 "espnsdead_mod.F90"
+(   34) !        Organisation within NLEI1:
+(   35) !        NLEI1 = NSMAX+4+mod(NSMAX+4+1,2)
+(   36) !                        overdimensioning
+(   37) !        1        : n=NSMAX+2
+(   38) !        2        : n=NSMAX+1
+(   39) !        3        : n=NSMAX
+(   40) !        .        :
+(   41) !        .        :
+(   42) !        NSMAX+3  : n=0
+(   43) !        NSMAX+4  : n=-1
+(   44) # 45 "espnsdead_mod.F90"
+(   45) !        Implicit arguments :  YOMLAP
+(   46) !        --------------------
+(   47) # 48 "espnsdead_mod.F90"
+(   48) !     Method.
+(   49) !     -------
+(   50) # 51 "espnsdead_mod.F90"
+(   51) !     Externals.   None.
+(   52) !     ----------
+(   53) # 54 "espnsdead_mod.F90"
+(   54) !     Reference.
+(   55) !     ----------
+(   56) !        ECMWF Research Department documentation of the IFS
+(   57) !        Temperton, 1991, MWR 119 p1303
+(   58) # 59 "espnsdead_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:51      page 5
+
+(   59) !     Author.
+(   60) !     -------
+(   61) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   62) # 63 "espnsdead_mod.F90"
+(   63) !     Modifications.
+(   64) !     --------------
+(   65) !        Original : 00-02-01 From SPNSDEAD in IFS CY22R1
+(   66) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   67) # 68 "espnsdead_mod.F90"
+(   68) !     ------------------------------------------------------------------
+(   69) # 70 "espnsdead_mod.F90"
+(   70) IMPLICIT NONE
+(   71) # 72 "espnsdead_mod.F90"
+(   72) INTEGER(KIND=JPIM), INTENT(IN)    :: KM
+(   73) INTEGER(KIND=JPIM), INTENT(IN)    :: KF_SCALARS
+(   74) REAL(KIND=JPRB),    INTENT(INOUT) :: PF(:,:)
+(   75) REAL(KIND=JPRB),    INTENT(IN)    :: PNSD(:,:)
+(   76) INTEGER(KIND=JPIM) ::  ISKIP, J, JN
+(   77) INTEGER(KIND=JPIM) :: IN
+(   78) REAL(KIND=JPRB)    :: ZIN
+(   79) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   80) # 81 "espnsdead_mod.F90"
+(   81) !     ------------------------------------------------------------------
+(   82) # 83 "espnsdead_mod.F90"
+(   83) !*       1.    COMPUTE NORTH SOUTH DERIVATIVE.
+(   84) !              -------------------------------
+(   85) # 86 "espnsdead_mod.F90"
+(   86) !*       1.1      COMPUTE
+(   87) # 88 "espnsdead_mod.F90"
+(   88) IF (LHOOK) CALL DR_HOOK('ESPNSDEAD_MOD:ESPNSDEAD',0,ZHOOK_HANDLE)
+(   89) IF(KM == 0) THEN
+(   90)   ISKIP = 1
+(   91) ELSE
+(   92)   ISKIP = 1
+(   93) ENDIF
+(   94) # 95 "espnsdead_mod.F90"
+(   95) DO JN=1,DALD%NCPL2M(KM),2
+(   96) # 97 "espnsdead_mod.F90"
+(   97)   IN = (JN-1)/2
+(   98)   ZIN = REAL(IN,JPRB)*GALD%EYWN
+(   99) # 100 "espnsdead_mod.F90"
+(  100)   DO J=1,2*KF_SCALARS,ISKIP
+(  101) # 102 "espnsdead_mod.F90"
+(  102)     PF(JN+1,J) = PF(JN+1,J)-ZIN*PNSD(JN  ,J)
+(  103)     PF(JN  ,J) = PF(JN  ,J)+ZIN*PNSD(JN+1,J)
+(  104) # 105 "espnsdead_mod.F90"
+(  105)   ENDDO
+(  106) ENDDO
+(  107) IF (LHOOK) CALL DR_HOOK('ESPNSDEAD_MOD:ESPNSDEAD',1,ZHOOK_HANDLE)
+(  108) # 109 "espnsdead_mod.F90"
+(  109) !     ------------------------------------------------------------------
+(  110) # 111 "espnsdead_mod.F90"
+(  111) END SUBROUTINE ESPNSDEAD
+(  112) END MODULE ESPNSDEAD_MOD

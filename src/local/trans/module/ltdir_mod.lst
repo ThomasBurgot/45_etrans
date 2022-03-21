@@ -1,0 +1,492 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:56      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: ltdir_mod.F90
+
+(    1) MODULE LTDIR_MOD
+(    2)   CONTAINS
+(    3) SUBROUTINE LTDIR(KF_FS,KF_UV,KF_SCALARS,KLED2,&
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2, &
+(    6)  & KFLDPTRUV,KFLDPTRSC)
+(    7) 
+(    8) 
+(    9) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   10) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   11) 
+(   12) USE TPM_DIM         ,ONLY : R
+(   13) USE TPM_DISTR       ,ONLY : D
+(   14) USE TPM_GEOMETRY
+(   15) 
+(   16) USE PREPSNM_MOD     ,ONLY : PREPSNM
+(   17) USE PRFI2_MOD       ,ONLY : PRFI2
+(   18) USE LDFOU2_MOD      ,ONLY : LDFOU2
+(   19) USE LEDIR_MOD       ,ONLY : LEDIR
+(   20) USE UVTVD_MOD
+(   21) USE UPDSP_MOD       ,ONLY : UPDSP
+(   22)  
+(   23) USE TPM_FIELDS      ,ONLY : ZSIA,ZAIA,ZOA1,ZOA2,ZEPSNM
+(   24) 
+(   25) !**** *LTDIR* - Control of Direct Legendre transform step
+(   26) 
+(   27) !     Purpose.
+(   28) !     --------
+(   29) !        Tranform from Fourier space to spectral space, compute
+(   30) !        vorticity and divergence.
+(   31) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:56      page 2
+
+(   32) !**   Interface.
+(   33) !     ----------
+(   34) !        *CALL* *LTDIR(...)*
+(   35) 
+(   36) !        Explicit arguments :
+(   37) !        --------------------  KM     - zonal wavenumber
+(   38) !                              KMLOC  - local zonal wavenumber
+(   39) 
+(   40) !        Implicit arguments :  None
+(   41) !        --------------------
+(   42) 
+(   43) !     Method.
+(   44) !     -------
+(   45) 
+(   46) !     Externals.
+(   47) !     ----------
+(   48) !         PREPSNM - prepare REPSNM for wavenumber KM
+(   49) !         PRFI2   - prepares the Fourier work arrays for model variables.
+(   50) !         LDFOU2  - computations in Fourier space
+(   51) !         LEDIR   - direct Legendre transform
+(   52) !         UVTVD   -
+(   53) !         UPDSP   - updating of spectral arrays (fields)
+(   54) 
+(   55) !     Reference.
+(   56) !     ----------
+(   57) !        ECMWF Research Department documentation of the IFS
+(   58) 
+(   59) !     Author.
+(   60) !     -------
+(   61) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   62) 
+(   63) !     Modifications.
+(   64) !     --------------
+(   65) !        Original : 87-11-24
+(   66) !        Modified : 91-07-01 Philippe Courtier/Mats Hamrud - Rewrite
+(   67) !                            for uv formulation
+(   68) !        Modified 93-03-19 D. Giard - CDCONF='T' for tendencies
+(   69) !        Modified 93-11-18 M. Hamrud - use only one Fourier buffer
+(   70) !        Modified 94-04-06 R. El khatib Full-POS implementation
+(   71) !        M.Hamrud  : 94-11-01 New conf 'G' - vor,div->vor,div
+(   72) !                             instead of u,v->vor,div
+(   73) !        MPP Group : 95-10-01 Support for Distributed Memory version
+(   74) !        K. YESSAD (AUGUST 1996):
+(   75) !               - Legendre transforms for transmission coefficients.
+(   76) !        Modified : 04/06/99 D.Salmond : change order of AIA and SIA
+(   77) !        R. El Khatib 12-Jul-2012 LDSPC2 replaced by UVTVD
+(   78) !     ------------------------------------------------------------------
+(   79) 
+(   80) IMPLICIT NONE
+(   81) 
+(   82) INTERFACE
+(   83)    SUBROUTINE cudaProfilerStart() BIND(C,name='cudaProfilerStart')
+(   84)      USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_INT
+(   85)      IMPLICIT NONE
+(   86)    END SUBROUTINE cudaProfilerStart
+(   87) END INTERFACE
+(   88) 
+(   89) INTERFACE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:56      page 3
+
+(   90)    SUBROUTINE cudaProfilerStop() BIND(C,name='cudaProfilerStop')
+(   91)      USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_INT
+(   92)      IMPLICIT NONE
+(   93)    END SUBROUTINE cudaProfilerStop
+(   94) END INTERFACE
+(   95) 
+(   96) 
+(   97) 
+(   98) !     DUMMY INTEGER SCALARS
+(   99) INTEGER(KIND=JPIM)  :: KM
+(  100) INTEGER(KIND=JPIM)  :: KMLOC
+(  101) INTEGER(KIND=JPIM),INTENT(IN)   :: KF_FS,KF_UV,KF_SCALARS,KLED2
+(  102) 
+(  103) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(OUT) :: PSPVOR(:,:)
+(  104) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(OUT) :: PSPDIV(:,:)
+(  105) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(OUT) :: PSPSCALAR(:,:)
+(  106) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC2(:,:)
+(  107) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC3A(:,:,:)
+(  108) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC3B(:,:,:)
+(  109) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRUV(:)
+(  110) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRSC(:)
+(  111) 
+(  112) !     LOCAL INTEGER SCALARS
+(  113) INTEGER(KIND=JPIM) :: IFC, IIFC, IDGLU
+(  114) INTEGER(KIND=JPIM) :: IUS, IUE, IVS, IVE, IVORS, IVORE, IDIVS, IDIVE
+(  115) 
+(  116) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  117) 
+(  118) 
+(  119) !call cudaProfilerStart
+(  120) 
+(  121) !     ------------------------------------------------------------------
+(  122) IF (LHOOK) CALL DR_HOOK('LTDIR_MOD',0,ZHOOK_HANDLE)
+(  123) 
+(  124) !     ------------------------------------------------------------------
+(  125) 
+(  126) !*       1.    PREPARE LEGENDRE POLONOMIALS AND EPSNM
+(  127) !              --------------------------------------
+(  128) 
+(  129) 
+(  130) !     ------------------------------------------------------------------
+(  131) 
+(  132) !*       2.    PREPARE WORK ARRAYS.
+(  133) !              --------------------
+(  134) 
+(  135) CALL PRFI2(KF_FS,ZAIA,ZSIA)
+(  136) !!!!ACC update host(ZAIA,ZSIA)
+(  137) !     ------------------------------------------------------------------
+(  138) 
+(  139) !*       3.    FOURIER SPACE COMPUTATIONS.
+(  140) !              ---------------------------
+(  141) 
+(  142) CALL LDFOU2(KF_UV,ZAIA,ZSIA)
+(  143) !! !ACC update host(ZAIA,ZSIA)
+(  144) 
+(  145) ! !     ------------------------------------------------------------------
+(  146) 
+(  147) ! !*       4.    DIRECT LEGENDRE TRANSFORM.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:56      page 4
+
+(  148) ! !              --------------------------
+(  149) !call cudaProfilerStart
+(  150) CALL LEDIR(KF_FS,KLED2,ZAIA,ZSIA,ZOA1)
+(  151) !call cudaProfilerStop
+(  152) !     ------------------------------------------------------------------
+(  153) 
+(  154) !*       5.    COMPUTE VORTICITY AND DIVERGENCE.
+(  155) !              ---------------------------------
+(  156) 
+(  157) IF( KF_UV > 0 ) THEN
+(  158)       !stop 'Error: code path not (yet) supported in GPU version'
+(  159) 
+(  160)    CALL PREPSNM(ZEPSNM)
+(  161) 
+(  162) 
+(  163)    IUS = 1
+(  164)    IUE = 2*KF_UV
+(  165)    IVS = 2*KF_UV+1
+(  166)    IVE = 4*KF_UV
+(  167)    IVORS = 1
+(  168)    IVORE = 2*KF_UV
+(  169)    IDIVS = 2*KF_UV+1
+(  170)    IDIVE = 4*KF_UV
+(  171)    CALL UVTVD(KF_UV)
+(  172)    !     CALL UVTVD(KF_UV,ZEPSNM,ZOA1(IUS:IUE,:,:),ZOA1(IVS:IVE,:,:),&
+(  173)    !  & ZOA2(IVORS:IVORE,:,:),ZOA2(IDIVS:IDIVE,:,:))
+(  174) ENDIF
+(  175) !     ------------------------------------------------------------------
+(  176) 
+(  177) !*       6.    UPDATE SPECTRAL ARRAYS.
+(  178) !              -----------------------
+(  179) 
+(  180) !end loop over wavenumber
+(  181) 
+(  182) !END DO
+(  183) 
+(  184) !loop over wavenumber
+(  185) !DO KMLOC=1,D%NUMP
+(  186) !    KM = D%MYMS(KMLOC)
+(  187) 
+(  188) ! this is on the host, so need to cp from device, Nils
+(  189) CALL UPDSP(KF_UV,KF_SCALARS,ZOA1,ZOA2, &
+(  190)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(  191)  & PSPSC3A,PSPSC3B,PSPSC2 , &
+(  192)  & KFLDPTRUV,KFLDPTRSC)
+(  193) 
+(  194) !     ------------------------------------------------------------------
+(  195) 
+(  196) IF (LHOOK) CALL DR_HOOK('LTDIR_MOD',1,ZHOOK_HANDLE)
+(  197) 
+(  198) !end loop over wavenumber
+(  199) !END DO
+(  200) 
+(  201) !call cudaProfilerStop
+(  202) END SUBROUTINE LTDIR
+(  203) END MODULE LTDIR_MOD
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:56      page 5
+
+(    1) # 1 "ltdir_mod.F90"
+(    1) MODULE LTDIR_MOD
+(    2)   CONTAINS
+(    3) SUBROUTINE LTDIR(KF_FS,KF_UV,KF_SCALARS,KLED2,&
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2, &
+(    6)  & KFLDPTRUV,KFLDPTRSC)
+(    7) # 9 "ltdir_mod.F90"
+(    9) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   10) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   11) # 12 "ltdir_mod.F90"
+(   12) USE TPM_DIM         ,ONLY : R
+(   13) USE TPM_DISTR       ,ONLY : D
+(   14) USE TPM_GEOMETRY
+(   15) # 16 "ltdir_mod.F90"
+(   16) USE PREPSNM_MOD     ,ONLY : PREPSNM
+(   17) USE PRFI2_MOD       ,ONLY : PRFI2
+(   18) USE LDFOU2_MOD      ,ONLY : LDFOU2
+(   19) USE LEDIR_MOD       ,ONLY : LEDIR
+(   20) USE UVTVD_MOD
+(   21) USE UPDSP_MOD       ,ONLY : UPDSP
+(   22)  
+(   23) USE TPM_FIELDS      ,ONLY : ZSIA,ZAIA,ZOA1,ZOA2,ZEPSNM
+(   24) # 25 "ltdir_mod.F90"
+(   25) !**** *LTDIR* - Control of Direct Legendre transform step
+(   26) # 27 "ltdir_mod.F90"
+(   27) !     Purpose.
+(   28) !     --------
+(   29) !        Tranform from Fourier space to spectral space, compute
+(   30) !        vorticity and divergence.
+(   31) # 32 "ltdir_mod.F90"
+(   32) !**   Interface.
+(   33) !     ----------
+(   34) !        *CALL* *LTDIR(...)*
+(   35) # 36 "ltdir_mod.F90"
+(   36) !        Explicit arguments :
+(   37) !        --------------------  KM     - zonal wavenumber
+(   38) !                              KMLOC  - local zonal wavenumber
+(   39) # 40 "ltdir_mod.F90"
+(   40) !        Implicit arguments :  None
+(   41) !        --------------------
+(   42) # 43 "ltdir_mod.F90"
+(   43) !     Method.
+(   44) !     -------
+(   45) # 46 "ltdir_mod.F90"
+(   46) !     Externals.
+(   47) !     ----------
+(   48) !         PREPSNM - prepare REPSNM for wavenumber KM
+(   49) !         PRFI2   - prepares the Fourier work arrays for model variables.
+(   50) !         LDFOU2  - computations in Fourier space
+(   51) !         LEDIR   - direct Legendre transform
+(   52) !         UVTVD   -
+(   53) !         UPDSP   - updating of spectral arrays (fields)
+(   54) # 55 "ltdir_mod.F90"
+(   55) !     Reference.
+(   56) !     ----------
+(   57) !        ECMWF Research Department documentation of the IFS
+(   58) # 59 "ltdir_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:56      page 6
+
+(   59) !     Author.
+(   60) !     -------
+(   61) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   62) # 63 "ltdir_mod.F90"
+(   63) !     Modifications.
+(   64) !     --------------
+(   65) !        Original : 87-11-24
+(   66) !        Modified : 91-07-01 Philippe Courtier/Mats Hamrud - Rewrite
+(   67) !                            for uv formulation
+(   68) !        Modified 93-03-19 D. Giard - CDCONF='T' for tendencies
+(   69) !        Modified 93-11-18 M. Hamrud - use only one Fourier buffer
+(   70) !        Modified 94-04-06 R. El khatib Full-POS implementation
+(   71) !        M.Hamrud  : 94-11-01 New conf 'G' - vor,div->vor,div
+(   72) !                             instead of u,v->vor,div
+(   73) !        MPP Group : 95-10-01 Support for Distributed Memory version
+(   74) !        K. YESSAD (AUGUST 1996):
+(   75) !               - Legendre transforms for transmission coefficients.
+(   76) !        Modified : 04/06/99 D.Salmond : change order of AIA and SIA
+(   77) !        R. El Khatib 12-Jul-2012 LDSPC2 replaced by UVTVD
+(   78) !     ------------------------------------------------------------------
+(   79) # 80 "ltdir_mod.F90"
+(   80) IMPLICIT NONE
+(   81) # 82 "ltdir_mod.F90"
+(   82) INTERFACE
+(   83)    SUBROUTINE cudaProfilerStart() BIND(C,name='cudaProfilerStart')
+(   84)      USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_INT
+(   85)      IMPLICIT NONE
+(   86)    END SUBROUTINE cudaProfilerStart
+(   87) END INTERFACE
+(   88) # 89 "ltdir_mod.F90"
+(   89) INTERFACE
+(   90)    SUBROUTINE cudaProfilerStop() BIND(C,name='cudaProfilerStop')
+(   91)      USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_INT
+(   92)      IMPLICIT NONE
+(   93)    END SUBROUTINE cudaProfilerStop
+(   94) END INTERFACE
+(   95) # 98 "ltdir_mod.F90"
+(   98) !     DUMMY INTEGER SCALARS
+(   99) INTEGER(KIND=JPIM)  :: KM
+(  100) INTEGER(KIND=JPIM)  :: KMLOC
+(  101) INTEGER(KIND=JPIM),INTENT(IN)   :: KF_FS,KF_UV,KF_SCALARS,KLED2
+(  102) # 103 "ltdir_mod.F90"
+(  103) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(OUT) :: PSPVOR(:,:)
+(  104) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(OUT) :: PSPDIV(:,:)
+(  105) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(OUT) :: PSPSCALAR(:,:)
+(  106) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC2(:,:)
+(  107) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC3A(:,:,:)
+(  108) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC3B(:,:,:)
+(  109) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRUV(:)
+(  110) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRSC(:)
+(  111) # 112 "ltdir_mod.F90"
+(  112) !     LOCAL INTEGER SCALARS
+(  113) INTEGER(KIND=JPIM) :: IFC, IIFC, IDGLU
+(  114) INTEGER(KIND=JPIM) :: IUS, IUE, IVS, IVE, IVORS, IVORE, IDIVS, IDIVE
+(  115) # 116 "ltdir_mod.F90"
+(  116) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  117) # 119 "ltdir_mod.F90"
+(  119) !call cudaProfilerStart
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:56      page 7
+
+(  120) # 121 "ltdir_mod.F90"
+(  121) !     ------------------------------------------------------------------
+(  122) IF (LHOOK) CALL DR_HOOK('LTDIR_MOD',0,ZHOOK_HANDLE)
+(  123) # 124 "ltdir_mod.F90"
+(  124) !     ------------------------------------------------------------------
+(  125) # 126 "ltdir_mod.F90"
+(  126) !*       1.    PREPARE LEGENDRE POLONOMIALS AND EPSNM
+(  127) !              --------------------------------------
+(  128) # 130 "ltdir_mod.F90"
+(  130) !     ------------------------------------------------------------------
+(  131) # 132 "ltdir_mod.F90"
+(  132) !*       2.    PREPARE WORK ARRAYS.
+(  133) !              --------------------
+(  134) # 135 "ltdir_mod.F90"
+(  135) CALL PRFI2(KF_FS,ZAIA,ZSIA)
+(  136) !!!!ACC update host(ZAIA,ZSIA)
+(  137) !     ------------------------------------------------------------------
+(  138) # 139 "ltdir_mod.F90"
+(  139) !*       3.    FOURIER SPACE COMPUTATIONS.
+(  140) !              ---------------------------
+(  141) # 142 "ltdir_mod.F90"
+(  142) CALL LDFOU2(KF_UV,ZAIA,ZSIA)
+(  143) !! !ACC update host(ZAIA,ZSIA)
+(  144) # 145 "ltdir_mod.F90"
+(  145) ! !     ------------------------------------------------------------------
+(  146) # 147 "ltdir_mod.F90"
+(  147) ! !*       4.    DIRECT LEGENDRE TRANSFORM.
+(  148) ! !              --------------------------
+(  149) !call cudaProfilerStart
+(  150) CALL LEDIR(KF_FS,KLED2,ZAIA,ZSIA,ZOA1)
+(  151) !call cudaProfilerStop
+(  152) !     ------------------------------------------------------------------
+(  153) # 154 "ltdir_mod.F90"
+(  154) !*       5.    COMPUTE VORTICITY AND DIVERGENCE.
+(  155) !              ---------------------------------
+(  156) # 157 "ltdir_mod.F90"
+(  157) IF( KF_UV > 0 ) THEN
+(  158)       !stop 'Error: code path not (yet) supported in GPU version'
+(  159) # 160 "ltdir_mod.F90"
+(  160)    CALL PREPSNM(ZEPSNM)
+(  161) # 163 "ltdir_mod.F90"
+(  163)    IUS = 1
+(  164)    IUE = 2*KF_UV
+(  165)    IVS = 2*KF_UV+1
+(  166)    IVE = 4*KF_UV
+(  167)    IVORS = 1
+(  168)    IVORE = 2*KF_UV
+(  169)    IDIVS = 2*KF_UV+1
+(  170)    IDIVE = 4*KF_UV
+(  171)    CALL UVTVD(KF_UV)
+(  172)    !     CALL UVTVD(KF_UV,ZEPSNM,ZOA1(IUS:IUE,:,:),ZOA1(IVS:IVE,:,:),&
+(  173)    !  & ZOA2(IVORS:IVORE,:,:),ZOA2(IDIVS:IDIVE,:,:))
+(  174) ENDIF
+(  175) !     ------------------------------------------------------------------
+(  176) # 177 "ltdir_mod.F90"
+(  177) !*       6.    UPDATE SPECTRAL ARRAYS.
+(  178) !              -----------------------
+(  179) # 180 "ltdir_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:56      page 8
+
+(  180) !end loop over wavenumber
+(  181) # 182 "ltdir_mod.F90"
+(  182) !END DO
+(  183) # 184 "ltdir_mod.F90"
+(  184) !loop over wavenumber
+(  185) !DO KMLOC=1,D%NUMP
+(  186) !    KM = D%MYMS(KMLOC)
+(  187) # 188 "ltdir_mod.F90"
+(  188) ! this is on the host, so need to cp from device, Nils
+(  189) CALL UPDSP(KF_UV,KF_SCALARS,ZOA1,ZOA2, &
+(  190)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(  191)  & PSPSC3A,PSPSC3B,PSPSC2 , &
+(  192)  & KFLDPTRUV,KFLDPTRSC)
+(  193) # 194 "ltdir_mod.F90"
+(  194) !     ------------------------------------------------------------------
+(  195) # 196 "ltdir_mod.F90"
+(  196) IF (LHOOK) CALL DR_HOOK('LTDIR_MOD',1,ZHOOK_HANDLE)
+(  197) # 198 "ltdir_mod.F90"
+(  198) !end loop over wavenumber
+(  199) !END DO
+(  200) # 201 "ltdir_mod.F90"
+(  201) !call cudaProfilerStop
+(  202) END SUBROUTINE LTDIR
+(  203) END MODULE LTDIR_MOD

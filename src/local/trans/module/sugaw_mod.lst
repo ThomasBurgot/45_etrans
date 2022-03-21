@@ -1,0 +1,1011 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: sugaw_mod.F90
+
+(    1) MODULE SUGAW_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUGAW(KDGL,KM,KN,PL,PW,PANM,PFN)
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPRD, JPIM
+(    6) USE PARKIND2  ,ONLY : JPRH
+(    7) 
+(    8) USE TPM_CONSTANTS   ,ONLY : RA
+(    9) 
+(   10) USE TPM_GEN         ,ONLY : NOUT
+(   11) USE GAWL_MOD        ,ONLY : GAWL
+(   12) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   13) USE SUPOLF_MOD
+(   14) USE TPM_POL
+(   15) 
+(   16) !**** *SUGAW * - Routine to initialize the Gaussian
+(   17) !                 abcissa and the associated weights
+(   18) 
+(   19) !     Purpose.
+(   20) !     --------
+(   21) !           Initialize arrays PL, and PW (quadrature abscissas and weights)
+(   22) !**   Interface.
+(   23) !     ----------
+(   24) !        *CALL* *SUGAW(KN,PFN,PL,PW) *
+(   25) 
+(   26) !        Explicit arguments :
+(   27) !        --------------------
+(   28) !           INPUT:
+(   29) !              KDGL     :  Number of Gauss  abscissas 
+(   30) !              KM       :  Polynomial order m
+(   31) !              KN       :  Polynomial degree n
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 2
+
+(   32) !             PFN       :  Fourier coefficients of series expansion for
+(   33) !                          the ordinary Legendre polynomials
+(   34) !           OUTPUT:
+(   35) !              PL (KN)  :  abscissas of Gauss
+(   36) !              PW (KN)  :  Weights of the Gaussian integration
+(   37) 
+(   38) !     PL (i) is the abscissa i starting from the northern pole, it is
+(   39) ! the cosine of the colatitude of the corresponding row of the collocation
+(   40) ! grid.
+(   41) 
+(   42) !        Implicit arguments :
+(   43) !        --------------------
+(   44) !       None
+(   45) 
+(   46) !     Method.
+(   47) !     -------
+(   48) !        See documentation
+(   49) 
+(   50) !     Externals.
+(   51) !     ----------
+(   52) 
+(   53) !     Reference.
+(   54) !     ----------
+(   55) 
+(   56) !     S.L. Belousov, Tables of normalized associated Legendre Polynomials, Pergamon Press (1962)
+(   57) !     P.N. Swarztrauber, On computing the points and weights for Gauss-Legendre quadrature,
+(   58) !     SIAM J. Sci. Comput. Vol. 24 (3) pp. 945-954 (2002)
+(   59) 
+(   60) !     Author.
+(   61) !     -------
+(   62) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   63) 
+(   64) !     Modifications.
+(   65) !     --------------
+(   66) !        Original          : 87-10-15
+(   67) !        Michel Rochas     : 90-08-30
+(   68) !        Philippe Courtier : 92-12-19 Multitasking
+(   69) !        Ryad El Khatib    : 94-04-20 Remove unused comdecks pardim and yomdim
+(   70) !        Mats Hamrud       : 94-08-12 Printing level
+(   71) !        K. Yessad (Sep 2008): cleaning, improve comments.
+(   72) !        Nils Wedi + Mats Hamrud, 2009-02-05 revised following Swarztrauber, 2002
+(   73) !      F. Vana  05-Mar-2015  Support for single precision
+(   74) !     ------------------------------------------------------------------
+(   75) 
+(   76) IMPLICIT NONE
+(   77) 
+(   78) INTEGER(KIND=JPIM),INTENT(IN) :: KDGL
+(   79) INTEGER(KIND=JPIM),INTENT(IN) :: KM
+(   80) INTEGER(KIND=JPIM),INTENT(IN) :: KN
+(   81) 
+(   82) REAL(KIND=JPRD)   ,INTENT(IN)  :: PANM
+(   83) 
+(   84) REAL(KIND=JPRD),INTENT(OUT) :: PW(KDGL)
+(   85) REAL(KIND=JPRD),INTENT(OUT) :: PL(KDGL)
+(   86) 
+(   87) REAL(KIND=JPRD)   ,OPTIONAL, INTENT(IN)  :: PFN(0:KDGL,0:KDGL)
+(   88) 
+(   89) !     ------------------------------------------------------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 3
+
+(   90) 
+(   91) REAL(KIND=JPRD) :: ZLI(KDGL),ZT(KDGL),ZFN(0:KDGL/2),ZL(KDGL)
+(   92) REAL(KIND=JPRD) :: ZREG(KDGL),ZMOD(KDGL),ZM(KDGL),ZRR(KDGL)
+(   93) INTEGER(KIND=JPIM) :: ITER(KDGL)
+(   94) 
+(   95) INTEGER(KIND=JPIM) :: IALLOW, INS2, ISYM, JGL, IK, IODD, I, IMAX
+(   96) 
+(   97) REAL(KIND=JPRD) :: Z, ZEPS, Z0, ZPI
+(   98) 
+(   99) ! computations in extended precision for alternative root finding
+(  100) ! which also works for associated polynomials (m>0)
+(  101) REAL(KIND=JPRH) :: ZLK, ZLK1, ZLLDN, ZANM
+(  102) REAL(KIND=JPRH) :: ZTHETA, ZTHETA0, ZX, ZX0, ZDX0, ZH, ZPIH, ZS0
+(  103) REAL(KIND=JPRH) :: ZK1, ZK2, ZK3, ZK4
+(  104) REAL(KIND=JPRH) :: ZF1, ZF2, ZF3
+(  105) REAL(KIND=JPRH) :: FP, FQ, FP1, FQ1
+(  106) REAL(KIND=JPRH) :: X, ZXOLD, ZBIG, ZEPSH
+(  107) 
+(  108) INTEGER(KIND=JPIM) :: ISTEPMAX
+(  109) 
+(  110) LOGICAL :: LLP2, LLREF, LLOLD
+(  111) 
+(  112) REAL(KIND=JPRD) :: ZDDPOL(0:KN)
+(  113) 
+(  114) INTEGER(KIND=JPIM), PARAMETER :: JPKD=KIND(ZLK)
+(  115) 
+(  116) FP(X) = 1._JPRH-X**2
+(  117) FQ(X) = REAL(KN*(KN+1),JPRH)-REAL(KM**2,JPRH)/(1._JPRH-X**2)
+(  118) FP1(X) = -2._JPRH*X
+(  119) FQ1(X) = -2._JPRH*X*REAL(KM**2,JPRH)/SQRT(1._JPRH-X**2)
+(  120) 
+(  121) !     ------------------------------------------------------------------
+(  122) !     ------------------------------------------------------------------
+(  123) !*       1. Initialization + root + weight computation
+(  124) !           ------------------------------------------
+(  125) 
+(  126) LLP2 = .FALSE.
+(  127) INS2 = KDGL/2
+(  128) 
+(  129) LLOLD=( KM == 0 .AND. KN == KDGL ).AND.PRESENT(PFN)
+(  130) 
+(  131) 
+(  132) CALL GSTATS(1650,0)
+(  133) 
+(  134) ZEPS  = EPSILON(Z)
+(  135) ZEPSH = EPSILON(X)
+(  136) 
+(  137) ZBIG  = SQRT(HUGE(X))
+(  138) 
+(  139) !*       1.1 Find the roots of the ordinary
+(  140) !           Legendre polynomial of degree KN using an analytical first guess
+(  141) !           and then refine to machine precision via Newton's method
+(  142) !           in double precision following Swarztrauber (2002)
+(  143) 
+(  144) !        Nils Comment: in principle the else case could also be used for this but
+(  145) !                      this is slightly more accurate and consistent with the past
+(  146) 
+(  147) IF( LLOLD ) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 4
+
+(  148) 
+(  149)   ZPI  = 2.0_JPRD*ASIN(1.0_JPRD)
+(  150)   IODD=MOD(KDGL,2)
+(  151)   IK=IODD
+(  152)   DO JGL=IODD,KDGL,2
+(  153)     ZFN(IK)=PFN(KDGL,JGL)
+(  154)     IK=IK+1
+(  155)   ENDDO
+(  156) 
+(  157)   DO JGL=1,INS2
+(  158)     Z = REAL(4*JGL-1,JPRD)*ZPI/REAL(4*KN+2,JPRD)
+(  159)     ! analytic initial guess for cos(theta) (same quality as RK below)
+(  160)     ! ZX = 1._JPRD-REAL(KN-1,JPRD)/REAL(8*KN*KN*KN,JPRD)-(1._JPRD/REAL(384*KN*KN*KN*KN))*(39._JPRD-28._JPRD/SIN(Z)**2)
+(  161)     ! PL(JGL) = ACOS(ZX*COS(Z))
+(  162)     ZL(JGL) = Z+1.0_JPRD/(TAN(Z)*REAL(8*KN**2,JPRD))
+(  163)     ZREG(JGL) = COS(Z)
+(  164)     ZLI(JGL) = COS(ZL(JGL))
+(  165)   ENDDO
+(  166) 
+(  167)   ! refine PL here via Newton's method
+(  168) 
+(  169)   !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JGL)
+(  170)   DO JGL=INS2,1,-1
+(  171)     CALL GAWL(ZFN,ZL(JGL),PW(JGL),ZEPS,KN,ITER(JGL),ZMOD(JGL))
+(  172)   ENDDO
+(  173)   !$OMP END PARALLEL DO
+(  174) 
+(  175)   ! convert to physical latitude space PMU
+(  176)   !DIR$ IVDEP
+(  177)   !OCL NOVREC
+(  178)   DO JGL=1,INS2
+(  179)     PL(JGL) = COS(ZL(JGL))
+(  180)   ENDDO
+(  181) 
+(  182) ELSE
+(  183) 
+(  184) !*       1.2 Find the roots of the associated
+(  185) !            Legendre polynomial of degree KN and the associated Gaussian weights 
+(  186) !            using a Runge-Kutta 4 integration of the Pruefer transformed Sturm-Liouville problem 
+(  187) !            (Tygert (J. Comput. Phys. 2008) and Glaser et al., SIAM J. SCI. COMPUT. Vol. 29 (4) 1420-1438)
+(  188) ! 
+(  189) 
+(  190)   ISTEPMAX=10
+(  191) 
+(  192)   ZANM = REAL(PANM, JPKD)
+(  193)   ZPIH = 2.0_JPRH*ASIN(1.0_JPRH)
+(  194) 
+(  195)   ZX0 = 0._JPRH
+(  196)   Z0  = 0._JPRD
+(  197) 
+(  198)   ! first guess starting point
+(  199)   IF( MOD(KN-KM,2) == 0 ) THEN
+(  200)     ! even, extremum at X == 0 
+(  201)     ZTHETA0 = 0._JPRH
+(  202)     ZH = -0.5_JPRH*ZPIH/REAL(ISTEPMAX,JPRH)
+(  203)   ELSE
+(  204)     ! odd, root at X == 0
+(  205)     ZTHETA0 = 0.5_JPRH*ZPIH
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 5
+
+(  206)     ZX0 = 0._JPRH
+(  207)     ZH = -ZPIH/REAL(ISTEPMAX,JPRH)
+(  208)   ENDIF
+(  209)   
+(  210)   ZX = ZX0
+(  211)   ZTHETA = ZTHETA0
+(  212) 
+(  213)   ZF1 = SQRT(FQ(ZX)/FP(ZX))
+(  214)   ZF2 = FQ1(ZX)/FQ(ZX)
+(  215)   ZF3 = FP1(ZX)/FP(ZX)
+(  216) 
+(  217)   ! Formula (81) in Tygert
+(  218)   ZDX0=-1._JPRH/(ZF1 + 0.25_JPRH*(ZF2 + ZF3)*SIN(2._JPRH*ZTHETA))
+(  219) 
+(  220)   ! loop over all roots
+(  221)   LLREF=.TRUE.
+(  222)   DO JGL=INS2,1,-1
+(  223)     
+(  224)     ! runge-kutta
+(  225)     DGL:DO IK=1,ISTEPMAX
+(  226) 
+(  227)       ZK1 = ZDX0
+(  228)       ZTHETA  = ZTHETA + 0.5_JPRH*ZH
+(  229) 
+(  230)       ZX = ZX0 + 0.5_JPRH*ZH*ZK1
+(  231)       
+(  232)       ZF1 = SQRT(FQ(ZX)/FP(ZX))
+(  233)       ZF2 = FQ1(ZX)/FQ(ZX)
+(  234)       ZF3 = FP1(ZX)/FP(ZX)
+(  235)       
+(  236)       ZK2 = -1._JPRH/(ZF1 + 0.25_JPRH*(ZF2 + ZF3)*SIN(2._JPRH*ZTHETA))
+(  237)       ZX = ZX0 + 0.5_JPRH*ZH*ZK2
+(  238) 
+(  239)       ZF1 = SQRT(FQ(ZX)/FP(ZX))
+(  240)       ZF2 = FQ1(ZX)/FQ(ZX)
+(  241)       ZF3 = FP1(ZX)/FP(ZX)
+(  242) 
+(  243)       ZK3 = -1._JPRH/(ZF1 + 0.25_JPRH*(ZF2 + ZF3)*SIN(2._JPRH*ZTHETA))
+(  244)       ZTHETA  = ZTHETA + 0.5_JPRH*ZH
+(  245)       ZX = ZX0 + ZH*ZK3
+(  246) 
+(  247)       ZF1 = SQRT(FQ(ZX)/FP(ZX))
+(  248)       ZF2 = FQ1(ZX)/FQ(ZX)
+(  249)       ZF3 = FP1(ZX)/FP(ZX)
+(  250) 
+(  251)       ZK4 = -1._JPRH/(ZF1 + 0.25_JPRH*(ZF2 + ZF3)*SIN(2._JPRH*ZTHETA))
+(  252)       ZX = ZX0 + (1._JPRH/6._JPRH)*ZH*(ZK1+2._JPRH*ZK2+2._JPRH*ZK3+ZK4)
+(  253)       ZXOLD = ZX0
+(  254) 
+(  255)       ZX0 = ZX
+(  256) 
+(  257)       IF( .NOT.ZX==ZX ) THEN
+(  258)         WRITE(NOUT,*) 'invoke overflow ...ZX ',KM, KN, JGL
+(  259)         ZX  = ZXOLD
+(  260)         ZX0 = ZXOLD
+(  261)         EXIT DGL
+(  262)       ENDIF
+(  263)       
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 6
+
+(  264)       ZF1 = SQRT(FQ(ZX)/FP(ZX))
+(  265)       ZF2 = FQ1(ZX)/FQ(ZX)
+(  266)       ZF3 = FP1(ZX)/FP(ZX)  
+(  267) 
+(  268)       ZDX0 = -1._JPRH/(ZF1 + 0.25_JPRH*(ZF2 + ZF3)*SIN(2._JPRH*ZTHETA))
+(  269) 
+(  270)     ENDDO DGL
+(  271) 
+(  272) ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+(  273) ! Everything from here until <<END>> is to refine the 
+(  274) ! root and compute the starting point for the next root search
+(  275) ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+(  276) 
+(  277)     ! should not happen, but does if loss of accuracy in supolf occurs (useful for debugging)
+(  278)     IF( JGL < INS2 ) LLREF = PW(JGL+1).GT.ZEPSH
+(  279)       
+(  280)     IF( LLREF ) THEN
+(  281) 
+(  282)       ! chosen for speed/accuracy compromise
+(  283)       IMAX=3
+(  284)       LOOP: DO I=1,IMAX
+(  285)         ! supol fast
+(  286)         ZS0 = ACOS(ZX0)
+(  287)         CALL SUPOLF(KM,KN,REAL(ZX0,JPRD),ZDDPOL)
+(  288)         ZLK=REAL(ZDDPOL(KN),JPKD)
+(  289)         ZLK1= REAL(ZDDPOL(KN-1),JPKD)
+(  290)         ZLLDN= -(ZANM*ZLK1-DDI(KN)*COS(ZS0)*ZLK)/SIN(ZS0)
+(  291)         
+(  292)         IF( ABS(ZLLDN) > ZEPSH ) THEN
+(  293)           ! single Newton refinement in theta
+(  294)           ZS0 = ZS0 - ZLK/ZLLDN
+(  295)           ZX  = COS(ZS0)
+(  296)         ELSE
+(  297)           ! do nothing
+(  298)           ZX = ZX0
+(  299)         ENDIF
+(  300)         
+(  301)         IF( ABS(ZX-ZX0) > 1000._JPRD*ZEPS ) THEN
+(  302)           ZX0 = ZX
+(  303)         ELSE
+(  304)           EXIT LOOP
+(  305)         ENDIF
+(  306)       ENDDO LOOP
+(  307)       
+(  308)       ! recompute for accuracy weights
+(  309)       CALL SUPOLF(KM,KN,REAL(ZX,JPRD),ZDDPOL)
+(  310)       ! option f in Schwarztrauber to compute the weights
+(  311)       ZS0 = ACOS(ZX)
+(  312)       ZLK=REAL(ZDDPOL(KN),JPKD)
+(  313)       ZLK1= REAL(ZDDPOL(KN-1),JPKD)
+(  314)       ZLLDN= -(ZANM*ZLK1-DDI(KN)*COS(ZS0)*ZLK)/SIN(ZS0)
+(  315)       
+(  316)       PW(JGL) = REAL(REAL(2*KN+1,JPRH)/ZLLDN**2,JPRD)
+(  317)       
+(  318)       ! catch overflow, should never happen
+(  319)       IF( .NOT.(PW(JGL)==PW(JGL)) ) THEN
+(  320)         WRITE(NOUT,*) 'invoke overflow ...PW ',KM, KN, JGL
+(  321)         PW(JGL) = 0.0_JPRD
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 7
+
+(  322)       ENDIF
+(  323)       
+(  324)     ELSE
+(  325)       ! should never happen ...
+(  326)       WRITE(NOUT,*) 'Refinement not possible ... PW set to 0',KM, KN, JGL
+(  327)       PW(JGL) = 0.0_JPRD
+(  328)     ENDIF
+(  329)     
+(  330)     ZX0 = ZX
+(  331)     PL(JGL) = REAL(ZX0,JPRD)
+(  332)     
+(  333)     ! catch overflow, should never happen
+(  334)     IF( .NOT.(PW(JGL)==PW(JGL)) ) THEN
+(  335)       WRITE(NOUT,*) 'invoke overflow ...PW ',KM, KN, JGL
+(  336)       PW(JGL) = 0.0_JPRD
+(  337)     ENDIF
+(  338)     
+(  339) ! ++++++++++++++++++++++++++++++++++++++++++++++++
+(  340) ! <<<< END REFINEMENT >>>> 
+(  341) ! ++++++++++++++++++++++++++++++++++++++++++++++++
+(  342) 
+(  343)     ZF1 = SQRT(FQ(ZX0)/FP(ZX0))
+(  344)     ZF2 = FQ1(ZX0)/FQ(ZX0)
+(  345)     ZF3 = FP1(ZX0)/FP(ZX0)  
+(  346) 
+(  347)     ! continue to next root with refined ZX,ZR as initial condition
+(  348)     ZH = -ZPIH/REAL(ISTEPMAX,JPRH)
+(  349)     ZTHETA = 0.5_JPRH*ZPIH
+(  350)     ZDX0 = -1._JPRH/(ZF1 + 0.25_JPRH*(ZF2 + ZF3)*SIN(2._JPRH*ZTHETA))
+(  351)   ENDDO
+(  352) 
+(  353) ENDIF
+(  354) 
+(  355) CALL GSTATS(1650,1)
+(  356) !     ------------------------------------------------------------------
+(  357) 
+(  358) !DIR$ IVDEP
+(  359) !OCL NOVREC
+(  360) DO JGL=1,KDGL/2
+(  361)   ISYM = KDGL-JGL+1
+(  362)   PL(ISYM) = -PL(JGL)
+(  363)   PW(ISYM) = PW(JGL)
+(  364) ENDDO
+(  365) 
+(  366) !     ------------------------------------------------------------------
+(  367) 
+(  368) !*      3. Diagnostics.
+(  369) !          ------------
+(  370) 
+(  371) IF( LLOLD ) THEN
+(  372) 
+(  373)   IF(LLP2)THEN
+(  374)     DO JGL=1,INS2
+(  375)       ZM(JGL) = (ACOS(PL(JGL))-ACOS(ZLI(JGL)))*RA
+(  376)       ZRR(JGL) = (ACOS(PL(JGL))-ACOS(ZREG(JGL)))*RA
+(  377)       ZT(JGL) = ACOS(PL(JGL))*180._JPRD/ZPI
+(  378)     ENDDO
+(  379)   ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 8
+
+(  380)   
+(  381)   IALLOW = 20
+(  382)   DO JGL=1,INS2
+(  383)   
+(  384)     IF(LLP2)THEN
+(  385)       WRITE(UNIT=NOUT,FMT=&
+(  386)        &'('' M ='',I4,'' ROW ='',I4,'' ITERATIONS='',I4,'' ROOT='',F30.20,&
+(  387)        &'' WEIGHT='',F30.20,'' MODIF :'',E8.2)')KM,JGL,ITER(JGL),PL(JGL)&
+(  388)        &,PW(JGL),PL(JGL)-ZLI(JGL)
+(  389)       WRITE(UNIT=NOUT,FMT=&
+(  390)        &'(10X,'' LAST INC. : '',E8.2,'' MODIF IN M : '',F10.3,&
+(  391)        &'' FROM THE REGULAR GRID : '',F10.3,'' COLAT '',F10.3)')&
+(  392)        &ZMOD(JGL),ZM(JGL),ZRR(JGL),ZT(JGL)
+(  393)     ENDIF
+(  394) 
+(  395)     IF(ITER(JGL) > IALLOW)THEN
+(  396)       WRITE(UNIT=NOUT,FMT='('' CONVERGENCE FAILED IN SUGAW '')')
+(  397)       WRITE(UNIT=NOUT,FMT='('' ALLOWED : '',I4,''&
+(  398)        &NECESSARY : '',&
+(  399)        &I4)')IALLOW,ITER(JGL)
+(  400)       CALL ABORT_TRANS(' FAILURE IN SUGAW ')
+(  401)     ENDIF
+(  402) 
+(  403)   ENDDO
+(  404) 
+(  405) ELSE
+(  406) 
+(  407)   IF(LLP2)THEN
+(  408)     DO JGL=1,INS2
+(  409)       WRITE(UNIT=NOUT,FMT=&
+(  410)        &'('' M ='',I4,'' ROW ='',I4,'' ITERATIONS='',I4,'' ROOT='',F30.20,&
+(  411)        &'' WEIGHT='',F30.20,'' COLAT '',F10.3)')KM,JGL,0,PL(JGL),PW(JGL),&
+(  412)        & ACOS(PL(JGL))*180._JPRD/ZPIH
+(  413)     ENDDO
+(  414)   ENDIF
+(  415) 
+(  416) ENDIF
+(  417) 
+(  418) !     ------------------------------------------------------------------
+(  419) 
+(  420) END SUBROUTINE SUGAW
+(  421) END MODULE SUGAW_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 9
+
+(    1) # 1 "sugaw_mod.F90"
+(    1) MODULE SUGAW_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUGAW(KDGL,KM,KN,PL,PW,PANM,PFN)
+(    4) # 5 "sugaw_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPRD, JPIM
+(    6) USE PARKIND2  ,ONLY : JPRH
+(    7) # 8 "sugaw_mod.F90"
+(    8) USE TPM_CONSTANTS   ,ONLY : RA
+(    9) # 10 "sugaw_mod.F90"
+(   10) USE TPM_GEN         ,ONLY : NOUT
+(   11) USE GAWL_MOD        ,ONLY : GAWL
+(   12) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   13) USE SUPOLF_MOD
+(   14) USE TPM_POL
+(   15) # 16 "sugaw_mod.F90"
+(   16) !**** *SUGAW * - Routine to initialize the Gaussian
+(   17) !                 abcissa and the associated weights
+(   18) # 19 "sugaw_mod.F90"
+(   19) !     Purpose.
+(   20) !     --------
+(   21) !           Initialize arrays PL, and PW (quadrature abscissas and weights)
+(   22) !**   Interface.
+(   23) !     ----------
+(   24) !        *CALL* *SUGAW(KN,PFN,PL,PW) *
+(   25) # 26 "sugaw_mod.F90"
+(   26) !        Explicit arguments :
+(   27) !        --------------------
+(   28) !           INPUT:
+(   29) !              KDGL     :  Number of Gauss  abscissas 
+(   30) !              KM       :  Polynomial order m
+(   31) !              KN       :  Polynomial degree n
+(   32) !             PFN       :  Fourier coefficients of series expansion for
+(   33) !                          the ordinary Legendre polynomials
+(   34) !           OUTPUT:
+(   35) !              PL (KN)  :  abscissas of Gauss
+(   36) !              PW (KN)  :  Weights of the Gaussian integration
+(   37) # 38 "sugaw_mod.F90"
+(   38) !     PL (i) is the abscissa i starting from the northern pole, it is
+(   39) ! the cosine of the colatitude of the corresponding row of the collocation
+(   40) ! grid.
+(   41) # 42 "sugaw_mod.F90"
+(   42) !        Implicit arguments :
+(   43) !        --------------------
+(   44) !       None
+(   45) # 46 "sugaw_mod.F90"
+(   46) !     Method.
+(   47) !     -------
+(   48) !        See documentation
+(   49) # 50 "sugaw_mod.F90"
+(   50) !     Externals.
+(   51) !     ----------
+(   52) # 53 "sugaw_mod.F90"
+(   53) !     Reference.
+(   54) !     ----------
+(   55) # 56 "sugaw_mod.F90"
+(   56) !     S.L. Belousov, Tables of normalized associated Legendre Polynomials, Pergamon Press (1962)
+(   57) !     P.N. Swarztrauber, On computing the points and weights for Gauss-Legendre quadrature,
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 10
+
+(   58) !     SIAM J. Sci. Comput. Vol. 24 (3) pp. 945-954 (2002)
+(   59) # 60 "sugaw_mod.F90"
+(   60) !     Author.
+(   61) !     -------
+(   62) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   63) # 64 "sugaw_mod.F90"
+(   64) !     Modifications.
+(   65) !     --------------
+(   66) !        Original          : 87-10-15
+(   67) !        Michel Rochas     : 90-08-30
+(   68) !        Philippe Courtier : 92-12-19 Multitasking
+(   69) !        Ryad El Khatib    : 94-04-20 Remove unused comdecks pardim and yomdim
+(   70) !        Mats Hamrud       : 94-08-12 Printing level
+(   71) !        K. Yessad (Sep 2008): cleaning, improve comments.
+(   72) !        Nils Wedi + Mats Hamrud, 2009-02-05 revised following Swarztrauber, 2002
+(   73) !      F. Vana  05-Mar-2015  Support for single precision
+(   74) !     ------------------------------------------------------------------
+(   75) # 76 "sugaw_mod.F90"
+(   76) IMPLICIT NONE
+(   77) # 78 "sugaw_mod.F90"
+(   78) INTEGER(KIND=JPIM),INTENT(IN) :: KDGL
+(   79) INTEGER(KIND=JPIM),INTENT(IN) :: KM
+(   80) INTEGER(KIND=JPIM),INTENT(IN) :: KN
+(   81) # 82 "sugaw_mod.F90"
+(   82) REAL(KIND=JPRD)   ,INTENT(IN)  :: PANM
+(   83) # 84 "sugaw_mod.F90"
+(   84) REAL(KIND=JPRD),INTENT(OUT) :: PW(KDGL)
+(   85) REAL(KIND=JPRD),INTENT(OUT) :: PL(KDGL)
+(   86) # 87 "sugaw_mod.F90"
+(   87) REAL(KIND=JPRD)   ,OPTIONAL, INTENT(IN)  :: PFN(0:KDGL,0:KDGL)
+(   88) # 89 "sugaw_mod.F90"
+(   89) !     ------------------------------------------------------------------
+(   90) # 91 "sugaw_mod.F90"
+(   91) REAL(KIND=JPRD) :: ZLI(KDGL),ZT(KDGL),ZFN(0:KDGL/2),ZL(KDGL)
+(   92) REAL(KIND=JPRD) :: ZREG(KDGL),ZMOD(KDGL),ZM(KDGL),ZRR(KDGL)
+(   93) INTEGER(KIND=JPIM) :: ITER(KDGL)
+(   94) # 95 "sugaw_mod.F90"
+(   95) INTEGER(KIND=JPIM) :: IALLOW, INS2, ISYM, JGL, IK, IODD, I, IMAX
+(   96) # 97 "sugaw_mod.F90"
+(   97) REAL(KIND=JPRD) :: Z, ZEPS, Z0, ZPI
+(   98) # 99 "sugaw_mod.F90"
+(   99) ! computations in extended precision for alternative root finding
+(  100) ! which also works for associated polynomials (m>0)
+(  101) REAL(KIND=JPRH) :: ZLK, ZLK1, ZLLDN, ZANM
+(  102) REAL(KIND=JPRH) :: ZTHETA, ZTHETA0, ZX, ZX0, ZDX0, ZH, ZPIH, ZS0
+(  103) REAL(KIND=JPRH) :: ZK1, ZK2, ZK3, ZK4
+(  104) REAL(KIND=JPRH) :: ZF1, ZF2, ZF3
+(  105) REAL(KIND=JPRH) :: FP, FQ, FP1, FQ1
+(  106) REAL(KIND=JPRH) :: X, ZXOLD, ZBIG, ZEPSH
+(  107) # 108 "sugaw_mod.F90"
+(  108) INTEGER(KIND=JPIM) :: ISTEPMAX
+(  109) # 110 "sugaw_mod.F90"
+(  110) LOGICAL :: LLP2, LLREF, LLOLD
+(  111) # 112 "sugaw_mod.F90"
+(  112) REAL(KIND=JPRD) :: ZDDPOL(0:KN)
+(  113) # 114 "sugaw_mod.F90"
+(  114) INTEGER(KIND=JPIM), PARAMETER :: JPKD=KIND(ZLK)
+(  115) # 116 "sugaw_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 11
+
+(  116) FP(X) = 1._JPRH-X**2
+(  117) FQ(X) = REAL(KN*(KN+1),JPRH)-REAL(KM**2,JPRH)/(1._JPRH-X**2)
+(  118) FP1(X) = -2._JPRH*X
+(  119) FQ1(X) = -2._JPRH*X*REAL(KM**2,JPRH)/SQRT(1._JPRH-X**2)
+(  120) # 121 "sugaw_mod.F90"
+(  121) !     ------------------------------------------------------------------
+(  122) !     ------------------------------------------------------------------
+(  123) !*       1. Initialization + root + weight computation
+(  124) !           ------------------------------------------
+(  125) # 126 "sugaw_mod.F90"
+(  126) LLP2 = .FALSE.
+(  127) INS2 = KDGL/2
+(  128) # 129 "sugaw_mod.F90"
+(  129) LLOLD=( KM == 0 .AND. KN == KDGL ).AND.PRESENT(PFN)
+(  130) # 132 "sugaw_mod.F90"
+(  132) CALL GSTATS(1650,0)
+(  133) # 134 "sugaw_mod.F90"
+(  134) ZEPS  = EPSILON(Z)
+(  135) ZEPSH = EPSILON(X)
+(  136) # 137 "sugaw_mod.F90"
+(  137) ZBIG  = SQRT(HUGE(X))
+(  138) # 139 "sugaw_mod.F90"
+(  139) !*       1.1 Find the roots of the ordinary
+(  140) !           Legendre polynomial of degree KN using an analytical first guess
+(  141) !           and then refine to machine precision via Newton's method
+(  142) !           in double precision following Swarztrauber (2002)
+(  143) # 144 "sugaw_mod.F90"
+(  144) !        Nils Comment: in principle the else case could also be used for this but
+(  145) !                      this is slightly more accurate and consistent with the past
+(  146) # 147 "sugaw_mod.F90"
+(  147) IF( LLOLD ) THEN
+(  148) # 149 "sugaw_mod.F90"
+(  149)   ZPI  = 2.0_JPRD*ASIN(1.0_JPRD)
+(  150)   IODD=MOD(KDGL,2)
+(  151)   IK=IODD
+(  152)   DO JGL=IODD,KDGL,2
+(  153)     ZFN(IK)=PFN(KDGL,JGL)
+(  154)     IK=IK+1
+(  155)   ENDDO
+(  156) # 157 "sugaw_mod.F90"
+(  157)   DO JGL=1,INS2
+(  158)     Z = REAL(4*JGL-1,JPRD)*ZPI/REAL(4*KN+2,JPRD)
+(  159)     ! analytic initial guess for cos(theta) (same quality as RK below)
+(  160)     ! ZX = 1._JPRD-REAL(KN-1,JPRD)/REAL(8*KN*KN*KN,JPRD)-(1._JPRD/REAL(384*KN*KN*KN*KN))*(39._JPRD-28._JPRD/SIN(Z)**2)
+(  161)     ! PL(JGL) = ACOS(ZX*COS(Z))
+(  162)     ZL(JGL) = Z+1.0_JPRD/(TAN(Z)*REAL(8*KN**2,JPRD))
+(  163)     ZREG(JGL) = COS(Z)
+(  164)     ZLI(JGL) = COS(ZL(JGL))
+(  165)   ENDDO
+(  166) # 167 "sugaw_mod.F90"
+(  167)   ! refine PL here via Newton's method
+(  168) # 169 "sugaw_mod.F90"
+(  169)   !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JGL)
+(  170)   DO JGL=INS2,1,-1
+(  171)     CALL GAWL(ZFN,ZL(JGL),PW(JGL),ZEPS,KN,ITER(JGL),ZMOD(JGL))
+(  172)   ENDDO
+(  173)   !$OMP END PARALLEL DO
+(  174) # 175 "sugaw_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 12
+
+(  175)   ! convert to physical latitude space PMU
+(  176)   !DIR$ IVDEP
+(  177)   !OCL NOVREC
+(  178)   DO JGL=1,INS2
+(  179)     PL(JGL) = COS(ZL(JGL))
+(  180)   ENDDO
+(  181) # 182 "sugaw_mod.F90"
+(  182) ELSE
+(  183) # 184 "sugaw_mod.F90"
+(  184) !*       1.2 Find the roots of the associated
+(  185) !            Legendre polynomial of degree KN and the associated Gaussian weights 
+(  186) !            using a Runge-Kutta 4 integration of the Pruefer transformed Sturm-Liouville problem 
+(  187) !            (Tygert (J. Comput. Phys. 2008) and Glaser et al., SIAM J. SCI. COMPUT. Vol. 29 (4) 1420-1438)
+(  188) ! 
+(  189) # 190 "sugaw_mod.F90"
+(  190)   ISTEPMAX=10
+(  191) # 192 "sugaw_mod.F90"
+(  192)   ZANM = REAL(PANM, JPKD)
+(  193)   ZPIH = 2.0_JPRH*ASIN(1.0_JPRH)
+(  194) # 195 "sugaw_mod.F90"
+(  195)   ZX0 = 0._JPRH
+(  196)   Z0  = 0._JPRD
+(  197) # 198 "sugaw_mod.F90"
+(  198)   ! first guess starting point
+(  199)   IF( MOD(KN-KM,2) == 0 ) THEN
+(  200)     ! even, extremum at X == 0 
+(  201)     ZTHETA0 = 0._JPRH
+(  202)     ZH = -0.5_JPRH*ZPIH/REAL(ISTEPMAX,JPRH)
+(  203)   ELSE
+(  204)     ! odd, root at X == 0
+(  205)     ZTHETA0 = 0.5_JPRH*ZPIH
+(  206)     ZX0 = 0._JPRH
+(  207)     ZH = -ZPIH/REAL(ISTEPMAX,JPRH)
+(  208)   ENDIF
+(  209)   
+(  210)   ZX = ZX0
+(  211)   ZTHETA = ZTHETA0
+(  212) # 213 "sugaw_mod.F90"
+(  213)   ZF1 = SQRT(FQ(ZX)/FP(ZX))
+(  214)   ZF2 = FQ1(ZX)/FQ(ZX)
+(  215)   ZF3 = FP1(ZX)/FP(ZX)
+(  216) # 217 "sugaw_mod.F90"
+(  217)   ! Formula (81) in Tygert
+(  218)   ZDX0=-1._JPRH/(ZF1 + 0.25_JPRH*(ZF2 + ZF3)*SIN(2._JPRH*ZTHETA))
+(  219) # 220 "sugaw_mod.F90"
+(  220)   ! loop over all roots
+(  221)   LLREF=.TRUE.
+(  222)   DO JGL=INS2,1,-1
+(  223)     
+(  224)     ! runge-kutta
+(  225)     DGL:DO IK=1,ISTEPMAX
+(  226) # 227 "sugaw_mod.F90"
+(  227)       ZK1 = ZDX0
+(  228)       ZTHETA  = ZTHETA + 0.5_JPRH*ZH
+(  229) # 230 "sugaw_mod.F90"
+(  230)       ZX = ZX0 + 0.5_JPRH*ZH*ZK1
+(  231)       
+(  232)       ZF1 = SQRT(FQ(ZX)/FP(ZX))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 13
+
+(  233)       ZF2 = FQ1(ZX)/FQ(ZX)
+(  234)       ZF3 = FP1(ZX)/FP(ZX)
+(  235)       
+(  236)       ZK2 = -1._JPRH/(ZF1 + 0.25_JPRH*(ZF2 + ZF3)*SIN(2._JPRH*ZTHETA))
+(  237)       ZX = ZX0 + 0.5_JPRH*ZH*ZK2
+(  238) # 239 "sugaw_mod.F90"
+(  239)       ZF1 = SQRT(FQ(ZX)/FP(ZX))
+(  240)       ZF2 = FQ1(ZX)/FQ(ZX)
+(  241)       ZF3 = FP1(ZX)/FP(ZX)
+(  242) # 243 "sugaw_mod.F90"
+(  243)       ZK3 = -1._JPRH/(ZF1 + 0.25_JPRH*(ZF2 + ZF3)*SIN(2._JPRH*ZTHETA))
+(  244)       ZTHETA  = ZTHETA + 0.5_JPRH*ZH
+(  245)       ZX = ZX0 + ZH*ZK3
+(  246) # 247 "sugaw_mod.F90"
+(  247)       ZF1 = SQRT(FQ(ZX)/FP(ZX))
+(  248)       ZF2 = FQ1(ZX)/FQ(ZX)
+(  249)       ZF3 = FP1(ZX)/FP(ZX)
+(  250) # 251 "sugaw_mod.F90"
+(  251)       ZK4 = -1._JPRH/(ZF1 + 0.25_JPRH*(ZF2 + ZF3)*SIN(2._JPRH*ZTHETA))
+(  252)       ZX = ZX0 + (1._JPRH/6._JPRH)*ZH*(ZK1+2._JPRH*ZK2+2._JPRH*ZK3+ZK4)
+(  253)       ZXOLD = ZX0
+(  254) # 255 "sugaw_mod.F90"
+(  255)       ZX0 = ZX
+(  256) # 257 "sugaw_mod.F90"
+(  257)       IF( .NOT.ZX==ZX ) THEN
+(  258)         WRITE(NOUT,*) 'invoke overflow ...ZX ',KM, KN, JGL
+(  259)         ZX  = ZXOLD
+(  260)         ZX0 = ZXOLD
+(  261)         EXIT DGL
+(  262)       ENDIF
+(  263)       
+(  264)       ZF1 = SQRT(FQ(ZX)/FP(ZX))
+(  265)       ZF2 = FQ1(ZX)/FQ(ZX)
+(  266)       ZF3 = FP1(ZX)/FP(ZX)  
+(  267) # 268 "sugaw_mod.F90"
+(  268)       ZDX0 = -1._JPRH/(ZF1 + 0.25_JPRH*(ZF2 + ZF3)*SIN(2._JPRH*ZTHETA))
+(  269) # 270 "sugaw_mod.F90"
+(  270)     ENDDO DGL
+(  271) # 272 "sugaw_mod.F90"
+(  272) ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+(  273) ! Everything from here until <<END>> is to refine the 
+(  274) ! root and compute the starting point for the next root search
+(  275) ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+(  276) # 277 "sugaw_mod.F90"
+(  277)     ! should not happen, but does if loss of accuracy in supolf occurs (useful for debugging)
+(  278)     IF( JGL < INS2 ) LLREF = PW(JGL+1).GT.ZEPSH
+(  279)       
+(  280)     IF( LLREF ) THEN
+(  281) # 282 "sugaw_mod.F90"
+(  282)       ! chosen for speed/accuracy compromise
+(  283)       IMAX=3
+(  284)       LOOP: DO I=1,IMAX
+(  285)         ! supol fast
+(  286)         ZS0 = ACOS(ZX0)
+(  287)         CALL SUPOLF(KM,KN,REAL(ZX0,JPRD),ZDDPOL)
+(  288)         ZLK=REAL(ZDDPOL(KN),JPKD)
+(  289)         ZLK1= REAL(ZDDPOL(KN-1),JPKD)
+(  290)         ZLLDN= -(ZANM*ZLK1-DDI(KN)*COS(ZS0)*ZLK)/SIN(ZS0)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 14
+
+(  291)         
+(  292)         IF( ABS(ZLLDN) > ZEPSH ) THEN
+(  293)           ! single Newton refinement in theta
+(  294)           ZS0 = ZS0 - ZLK/ZLLDN
+(  295)           ZX  = COS(ZS0)
+(  296)         ELSE
+(  297)           ! do nothing
+(  298)           ZX = ZX0
+(  299)         ENDIF
+(  300)         
+(  301)         IF( ABS(ZX-ZX0) > 1000._JPRD*ZEPS ) THEN
+(  302)           ZX0 = ZX
+(  303)         ELSE
+(  304)           EXIT LOOP
+(  305)         ENDIF
+(  306)       ENDDO LOOP
+(  307)       
+(  308)       ! recompute for accuracy weights
+(  309)       CALL SUPOLF(KM,KN,REAL(ZX,JPRD),ZDDPOL)
+(  310)       ! option f in Schwarztrauber to compute the weights
+(  311)       ZS0 = ACOS(ZX)
+(  312)       ZLK=REAL(ZDDPOL(KN),JPKD)
+(  313)       ZLK1= REAL(ZDDPOL(KN-1),JPKD)
+(  314)       ZLLDN= -(ZANM*ZLK1-DDI(KN)*COS(ZS0)*ZLK)/SIN(ZS0)
+(  315)       
+(  316)       PW(JGL) = REAL(REAL(2*KN+1,JPRH)/ZLLDN**2,JPRD)
+(  317)       
+(  318)       ! catch overflow, should never happen
+(  319)       IF( .NOT.(PW(JGL)==PW(JGL)) ) THEN
+(  320)         WRITE(NOUT,*) 'invoke overflow ...PW ',KM, KN, JGL
+(  321)         PW(JGL) = 0.0_JPRD
+(  322)       ENDIF
+(  323)       
+(  324)     ELSE
+(  325)       ! should never happen ...
+(  326)       WRITE(NOUT,*) 'Refinement not possible ... PW set to 0',KM, KN, JGL
+(  327)       PW(JGL) = 0.0_JPRD
+(  328)     ENDIF
+(  329)     
+(  330)     ZX0 = ZX
+(  331)     PL(JGL) = REAL(ZX0,JPRD)
+(  332)     
+(  333)     ! catch overflow, should never happen
+(  334)     IF( .NOT.(PW(JGL)==PW(JGL)) ) THEN
+(  335)       WRITE(NOUT,*) 'invoke overflow ...PW ',KM, KN, JGL
+(  336)       PW(JGL) = 0.0_JPRD
+(  337)     ENDIF
+(  338)     
+(  339) ! ++++++++++++++++++++++++++++++++++++++++++++++++
+(  340) ! <<<< END REFINEMENT >>>> 
+(  341) ! ++++++++++++++++++++++++++++++++++++++++++++++++
+(  342) # 343 "sugaw_mod.F90"
+(  343)     ZF1 = SQRT(FQ(ZX0)/FP(ZX0))
+(  344)     ZF2 = FQ1(ZX0)/FQ(ZX0)
+(  345)     ZF3 = FP1(ZX0)/FP(ZX0)  
+(  346) # 347 "sugaw_mod.F90"
+(  347)     ! continue to next root with refined ZX,ZR as initial condition
+(  348)     ZH = -ZPIH/REAL(ISTEPMAX,JPRH)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 15
+
+(  349)     ZTHETA = 0.5_JPRH*ZPIH
+(  350)     ZDX0 = -1._JPRH/(ZF1 + 0.25_JPRH*(ZF2 + ZF3)*SIN(2._JPRH*ZTHETA))
+(  351)   ENDDO
+(  352) # 353 "sugaw_mod.F90"
+(  353) ENDIF
+(  354) # 355 "sugaw_mod.F90"
+(  355) CALL GSTATS(1650,1)
+(  356) !     ------------------------------------------------------------------
+(  357) # 358 "sugaw_mod.F90"
+(  358) !DIR$ IVDEP
+(  359) !OCL NOVREC
+(  360) DO JGL=1,KDGL/2
+(  361)   ISYM = KDGL-JGL+1
+(  362)   PL(ISYM) = -PL(JGL)
+(  363)   PW(ISYM) = PW(JGL)
+(  364) ENDDO
+(  365) # 366 "sugaw_mod.F90"
+(  366) !     ------------------------------------------------------------------
+(  367) # 368 "sugaw_mod.F90"
+(  368) !*      3. Diagnostics.
+(  369) !          ------------
+(  370) # 371 "sugaw_mod.F90"
+(  371) IF( LLOLD ) THEN
+(  372) # 373 "sugaw_mod.F90"
+(  373)   IF(LLP2)THEN
+(  374)     DO JGL=1,INS2
+(  375)       ZM(JGL) = (ACOS(PL(JGL))-ACOS(ZLI(JGL)))*RA
+(  376)       ZRR(JGL) = (ACOS(PL(JGL))-ACOS(ZREG(JGL)))*RA
+(  377)       ZT(JGL) = ACOS(PL(JGL))*180._JPRD/ZPI
+(  378)     ENDDO
+(  379)   ENDIF
+(  380)   
+(  381)   IALLOW = 20
+(  382)   DO JGL=1,INS2
+(  383)   
+(  384)     IF(LLP2)THEN
+(  385)       WRITE(UNIT=NOUT,FMT=&
+(  386)        &'('' M ='',I4,'' ROW ='',I4,'' ITERATIONS='',I4,'' ROOT='',F30.20,&
+(  387)        &'' WEIGHT='',F30.20,'' MODIF :'',E8.2)')KM,JGL,ITER(JGL),PL(JGL)&
+(  388)        &,PW(JGL),PL(JGL)-ZLI(JGL)
+(  389)       WRITE(UNIT=NOUT,FMT=&
+(  390)        &'(10X,'' LAST INC. : '',E8.2,'' MODIF IN M : '',F10.3,&
+(  391)        &'' FROM THE REGULAR GRID : '',F10.3,'' COLAT '',F10.3)')&
+(  392)        &ZMOD(JGL),ZM(JGL),ZRR(JGL),ZT(JGL)
+(  393)     ENDIF
+(  394) # 395 "sugaw_mod.F90"
+(  395)     IF(ITER(JGL) > IALLOW)THEN
+(  396)       WRITE(UNIT=NOUT,FMT='('' CONVERGENCE FAILED IN SUGAW '')')
+(  397)       WRITE(UNIT=NOUT,FMT='('' ALLOWED : '',I4,''&
+(  398)        &NECESSARY : '',&
+(  399)        &I4)')IALLOW,ITER(JGL)
+(  400)       CALL ABORT_TRANS(' FAILURE IN SUGAW ')
+(  401)     ENDIF
+(  402) # 403 "sugaw_mod.F90"
+(  403)   ENDDO
+(  404) # 405 "sugaw_mod.F90"
+(  405) ELSE
+(  406) # 407 "sugaw_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:30      page 16
+
+(  407)   IF(LLP2)THEN
+(  408)     DO JGL=1,INS2
+(  409)       WRITE(UNIT=NOUT,FMT=&
+(  410)        &'('' M ='',I4,'' ROW ='',I4,'' ITERATIONS='',I4,'' ROOT='',F30.20,&
+(  411)        &'' WEIGHT='',F30.20,'' COLAT '',F10.3)')KM,JGL,0,PL(JGL),PW(JGL),&
+(  412)        & ACOS(PL(JGL))*180._JPRD/ZPIH
+(  413)     ENDDO
+(  414)   ENDIF
+(  415) # 416 "sugaw_mod.F90"
+(  416) ENDIF
+(  417) # 418 "sugaw_mod.F90"
+(  418) !     ------------------------------------------------------------------
+(  419) # 420 "sugaw_mod.F90"
+(  420) END SUBROUTINE SUGAW
+(  421) END MODULE SUGAW_MOD

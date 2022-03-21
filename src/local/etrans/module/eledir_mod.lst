@@ -1,0 +1,310 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:58      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eledir_mod.F90
+
+(    1) MODULE ELEDIR_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ELEDIR(KFC,KLED2,PFFT)
+(    4) 
+(    5) !**** *ELEDIR* - Direct meridional transform.
+(    6) 
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Direct meridional tranform of state variables.
+(   10) 
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        CALL ELEDIR(...)
+(   14) 
+(   15) !        Explicit arguments :  KM - zonal wavenumber
+(   16) !        --------------------  KFC - number of field to transform
+(   17) !                              PAIA - antisymmetric part of Fourier
+(   18) !                              fields for zonal wavenumber KM
+(   19) !                              PSIA - symmetric part of Fourier
+(   20) !                              fields for zonal wavenumber KM
+(   21) !                              POA1 -  spectral
+(   22) !                              fields for zonal wavenumber KM
+(   23) !                              PLEPO - Legendre polonomials
+(   24) 
+(   25) !        Implicit arguments :  None.
+(   26) !        --------------------
+(   27) 
+(   28) !     Method.
+(   29) !     -------
+(   30) 
+(   31) !     Reference.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:58      page 2
+
+(   32) !     ----------
+(   33) 
+(   34) !     Author.
+(   35) !     -------
+(   36) 
+(   37) !     Modifications.
+(   38) !     --------------
+(   39) !     ------------------------------------------------------------------
+(   40) 
+(   41) USE PARKIND1  ,ONLY : JPIM, JPRB
+(   42) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   43) 
+(   44) USE TPM_DISTR       ,ONLY : D, D_NUMP
+(   45) USE TPM_DIM         ,ONLY : R
+(   46) USE TPMALD_FFT      ,ONLY : TALD
+(   47) USE TPMALD_DIM      ,ONLY : RALD
+(   48) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   49) USE TPM_FFTC        ,ONLY : CREATE_PLAN_FFT
+(   50) USE CUDA_DEVICE_MOD
+(   51) !
+(   52) 
+(   53) IMPLICIT NONE
+(   54) 
+(   55) INTEGER(KIND=JPIM), INTENT(IN)  :: KFC,KLED2
+(   56) REAL(KIND=JPRB) ,   INTENT(INOUT)  :: PFFT(:,:,:)
+(   57) 
+(   58) INTEGER(KIND=JPIM) :: IRLEN, ICLEN
+(   59) INTEGER(KIND=JPIM) :: IPLAN_R2C
+(   60) INTEGER(KIND=JPIM) :: JM, JF, JJ
+(   61) REAL (KIND=JPRB)   :: ZSCAL
+(   62) 
+(   63) integer :: istat
+(   64) 
+(   65) !     ------------------------------------------------------------------
+(   66) 
+(   67) !*       1.       PERFORM FOURIER TRANFORM.
+(   68) !                 --------------------------
+(   69) 
+(   70) IRLEN=R%NDGL+R%NNOEXTZG
+(   71) ICLEN=RALD%NDGLSUR+R%NNOEXTZG
+(   72) 
+(   73) CALL CREATE_PLAN_FFT (IPLAN_R2C, -1, KN=IRLEN, KLOT=UBOUND (PFFT,2)*UBOUND (PFFT, 3), &
+(   74)                     & KISTRIDE=1, KIDIST=ICLEN, KOSTRIDE=1, KODIST=ICLEN/2)
+(   75) 
+(   76) !$acc host_data use_device (PFFT) 
+(   77) CALL EXECUTE_PLAN_FFTC(IPLAN_R2C, -1, PFFT (1, 1, 1))
+(   78) !$acc end host_data
+(   79) 
+(   80) istat = cuda_Synchronize()
+(   81) 
+(   82) ZSCAL = 1._JPRB / REAL (IRLEN, JPRB)
+(   83) 
+(   84) !$acc parallel loop collapse (3) copyin (D_NUMP, KFC, ICLEN, ZSCAL) present (PFFT)
+(   85) DO JF = 1, KFC
+(   86)   DO JM = 1, D_NUMP
+(   87)     DO JJ = 1, ICLEN
+(   88)       PFFT (JJ, JM, JF) = PFFT (JJ, JM, JF) * ZSCAL
+(   89)     ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:58      page 3
+
+(   90)   ENDDO
+(   91) ENDDO
+(   92) !$acc end parallel loop
+(   93) 
+(   94) !     ------------------------------------------------------------------
+(   95) 
+(   96) END SUBROUTINE ELEDIR
+(   97) END MODULE ELEDIR_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:58      page 4
+
+(    1) # 1 "eledir_mod.F90"
+(    1) MODULE ELEDIR_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ELEDIR(KFC,KLED2,PFFT)
+(    4) # 5 "eledir_mod.F90"
+(    5) !**** *ELEDIR* - Direct meridional transform.
+(    6) # 7 "eledir_mod.F90"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Direct meridional tranform of state variables.
+(   10) # 11 "eledir_mod.F90"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        CALL ELEDIR(...)
+(   14) # 15 "eledir_mod.F90"
+(   15) !        Explicit arguments :  KM - zonal wavenumber
+(   16) !        --------------------  KFC - number of field to transform
+(   17) !                              PAIA - antisymmetric part of Fourier
+(   18) !                              fields for zonal wavenumber KM
+(   19) !                              PSIA - symmetric part of Fourier
+(   20) !                              fields for zonal wavenumber KM
+(   21) !                              POA1 -  spectral
+(   22) !                              fields for zonal wavenumber KM
+(   23) !                              PLEPO - Legendre polonomials
+(   24) # 25 "eledir_mod.F90"
+(   25) !        Implicit arguments :  None.
+(   26) !        --------------------
+(   27) # 28 "eledir_mod.F90"
+(   28) !     Method.
+(   29) !     -------
+(   30) # 31 "eledir_mod.F90"
+(   31) !     Reference.
+(   32) !     ----------
+(   33) # 34 "eledir_mod.F90"
+(   34) !     Author.
+(   35) !     -------
+(   36) # 37 "eledir_mod.F90"
+(   37) !     Modifications.
+(   38) !     --------------
+(   39) !     ------------------------------------------------------------------
+(   40) # 41 "eledir_mod.F90"
+(   41) USE PARKIND1  ,ONLY : JPIM, JPRB
+(   42) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   43) # 44 "eledir_mod.F90"
+(   44) USE TPM_DISTR       ,ONLY : D, D_NUMP
+(   45) USE TPM_DIM         ,ONLY : R
+(   46) USE TPMALD_FFT      ,ONLY : TALD
+(   47) USE TPMALD_DIM      ,ONLY : RALD
+(   48) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   49) USE TPM_FFTC        ,ONLY : CREATE_PLAN_FFT
+(   50) USE CUDA_DEVICE_MOD
+(   51) !
+(   52) # 53 "eledir_mod.F90"
+(   53) IMPLICIT NONE
+(   54) # 55 "eledir_mod.F90"
+(   55) INTEGER(KIND=JPIM), INTENT(IN)  :: KFC,KLED2
+(   56) REAL(KIND=JPRB) ,   INTENT(INOUT)  :: PFFT(:,:,:)
+(   57) # 58 "eledir_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:58      page 5
+
+(   58) INTEGER(KIND=JPIM) :: IRLEN, ICLEN
+(   59) INTEGER(KIND=JPIM) :: IPLAN_R2C
+(   60) INTEGER(KIND=JPIM) :: JM, JF, JJ
+(   61) REAL (KIND=JPRB)   :: ZSCAL
+(   62) # 63 "eledir_mod.F90"
+(   63) integer :: istat
+(   64) # 65 "eledir_mod.F90"
+(   65) !     ------------------------------------------------------------------
+(   66) # 67 "eledir_mod.F90"
+(   67) !*       1.       PERFORM FOURIER TRANFORM.
+(   68) !                 --------------------------
+(   69) # 70 "eledir_mod.F90"
+(   70) IRLEN=R%NDGL+R%NNOEXTZG
+(   71) ICLEN=RALD%NDGLSUR+R%NNOEXTZG
+(   72) # 73 "eledir_mod.F90"
+(   73) CALL CREATE_PLAN_FFT (IPLAN_R2C, -1, KN=IRLEN, KLOT=UBOUND (PFFT,2)*UBOUND (PFFT, 3), &
+(   74)                     & KISTRIDE=1, KIDIST=ICLEN, KOSTRIDE=1, KODIST=ICLEN/2)
+(   75) # 76 "eledir_mod.F90"
+(   76) !$acc host_data use_device (PFFT) 
+(   77) CALL EXECUTE_PLAN_FFTC(IPLAN_R2C, -1, PFFT (1, 1, 1))
+(   78) !$acc end host_data
+(   79) # 80 "eledir_mod.F90"
+(   80) istat = cuda_Synchronize()
+(   81) # 82 "eledir_mod.F90"
+(   82) ZSCAL = 1._JPRB / REAL (IRLEN, JPRB)
+(   83) # 84 "eledir_mod.F90"
+(   84) !$acc parallel loop collapse (3) copyin (D_NUMP, KFC, ICLEN, ZSCAL) present (PFFT)
+(   85) DO JF = 1, KFC
+(   86)   DO JM = 1, D_NUMP
+(   87)     DO JJ = 1, ICLEN
+(   88)       PFFT (JJ, JM, JF) = PFFT (JJ, JM, JF) * ZSCAL
+(   89)     ENDDO
+(   90)   ENDDO
+(   91) ENDDO
+(   92) !$acc end parallel loop
+(   93) # 94 "eledir_mod.F90"
+(   94) !     ------------------------------------------------------------------
+(   95) # 96 "eledir_mod.F90"
+(   96) END SUBROUTINE ELEDIR
+(   97) END MODULE ELEDIR_MOD

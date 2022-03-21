@@ -1,0 +1,351 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:15      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: field_split_mod.F90
+
+(    1) MODULE FIELD_SPLIT_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE FIELD_SPLIT(KBLK,KF_GP,KKF_UV_G,KVSETUV,KVSETSC,&
+(    4)  & KSTUV_G,KENUV_G,KF_UV_G,KSTSC_G,KENSC_G,KF_SCALARS_G,&
+(    5)  & KSTUV,KENUV,KF_UV,KSTSC,KENSC,KF_SCALARS)
+(    6) 
+(    7) !**** *FIELD_SPLIT* - Split fields
+(    8) 
+(    9) !     Purpose.
+(   10) !     --------
+(   11) !        Split fields
+(   12) 
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !     CALL FIELD_SPLIT(...)
+(   16) 
+(   17) !     Explicit arguments :
+(   18) !     --------------------
+(   19) !     KBLK          - block number
+(   20) !     KF_GP         - total number of output gridpoint fields
+(   21) !     KKF_UV_G      - global number of spectral u-v fields
+(   22) !     KVSETUV       - IVSETUV from SHUFFLE
+(   23) !     KVSETSC       - IVSETUV from SHUFFLE
+(   24) 
+(   25) !     All the following output arguments are quantities for THIS packet.
+(   26) !     KSTUV_G       -
+(   27) !     KENUV_G       -
+(   28) !     KF_UV_G       -
+(   29) !     KSTSC_G       -
+(   30) !     KENSC_G       -
+(   31) !     KF_SCALARS_G  -
+(   32) !     KSTUV         -
+(   33) !     KENUV         -
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:15      page 2
+
+(   34) !     KF_UV         -
+(   35) !     KSTSC         -
+(   36) !     KENSC         -
+(   37) !     KF_SCALARS    -
+(   38) 
+(   39) !     Externals.  NONE
+(   40) !     ----------
+(   41) 
+(   42) !     Author.
+(   43) !     -------
+(   44) !        Mats Hamrud *ECMWF*
+(   45) 
+(   46) !     Modifications.
+(   47) !     --------------
+(   48) !        Original : 01-01-03
+(   49) 
+(   50) !     ------------------------------------------------------------------
+(   51) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   52) 
+(   53) USE TPM_GEN         ,ONLY : NPROMATR
+(   54) !USE TPM_TRANS
+(   55) USE TPM_DISTR       ,ONLY : MYSETV, NPRTRV
+(   56) !
+(   57) 
+(   58) IMPLICIT NONE
+(   59) 
+(   60) ! Declaration of arguments
+(   61) 
+(   62) INTEGER(KIND=JPIM),INTENT(IN)  :: KBLK,KF_GP,KKF_UV_G
+(   63) INTEGER(KIND=JPIM), INTENT(IN)  :: KVSETUV(:),KVSETSC(:)
+(   64) INTEGER(KIND=JPIM), INTENT(OUT) :: KSTUV_G,KENUV_G,KF_UV_G,KSTSC_G,KENSC_G,KF_SCALARS_G
+(   65) INTEGER(KIND=JPIM), INTENT(OUT) :: KSTUV,KENUV,KF_UV,KSTSC,KENSC,KF_SCALARS
+(   66) 
+(   67) ! Local variables
+(   68) 
+(   69) INTEGER(KIND=JPIM) :: ISTF,IENF,J
+(   70) 
+(   71) !     ------------------------------------------------------------------
+(   72) 
+(   73) ISTF  = (KBLK-1)*NPROMATR+1
+(   74) IENF  = MIN(KBLK*NPROMATR,KF_GP)
+(   75) 
+(   76) KSTUV_G = (KBLK-1)*NPROMATR/2+1
+(   77) KENUV_G = MIN(KBLK*NPROMATR/2,KKF_UV_G)
+(   78) IF(ISTF > 2*KKF_UV_G) KSTUV_G = KENUV_G+1
+(   79) KF_UV_G = KENUV_G-KSTUV_G+1
+(   80) KSTSC_G = MAX(ISTF-2*KKF_UV_G,1)
+(   81) KENSC_G = MAX(IENF-2*KKF_UV_G,0)
+(   82) KF_SCALARS_G = KENSC_G-KSTSC_G+1
+(   83) 
+(   84) ! Spectral fields distributed over fields
+(   85) 
+(   86) IF(NPRTRV > 1) THEN
+(   87)   KF_UV = 0
+(   88)   KSTUV = 1
+(   89)   DO J=1,KSTUV_G-1
+(   90)     IF(KVSETUV(J) == MYSETV) THEN
+(   91)       KSTUV = KSTUV+1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:15      page 3
+
+(   92)     ENDIF
+(   93)   ENDDO
+(   94)   KENUV = KSTUV-1
+(   95)   DO J=KSTUV_G,KENUV_G
+(   96)     IF(KVSETUV(J) == MYSETV) THEN
+(   97)       KF_UV = KF_UV+1
+(   98)       KENUV = KENUV+1
+(   99)     ENDIF
+(  100)   ENDDO
+(  101)   KF_SCALARS = 0
+(  102)   KSTSC = 1
+(  103)   DO J=1,KSTSC_G-1
+(  104)     IF(KVSETSC(J) == MYSETV) THEN
+(  105)       KSTSC =KSTSC+1
+(  106)     ENDIF
+(  107)   ENDDO
+(  108)   KENSC = KSTSC-1
+(  109)   DO J=KSTSC_G,KENSC_G
+(  110)     IF(KVSETSC(J) == MYSETV) THEN
+(  111)       KF_SCALARS = KF_SCALARS+1
+(  112)       KENSC = KENSC+1
+(  113)     ENDIF
+(  114)   ENDDO
+(  115) ELSE
+(  116) 
+(  117)   ! Spectral fields not distributed over fields
+(  118) 
+(  119)   KF_UV = KF_UV_G
+(  120)   KSTUV = KSTUV_G
+(  121)   KENUV = KENUV_G
+(  122)   KF_SCALARS = KF_SCALARS_G
+(  123)   KSTSC = KSTSC_G
+(  124)   KENSC = KENSC_G
+(  125) ENDIF
+(  126) 
+(  127) !     ------------------------------------------------------------------
+(  128) 
+(  129) END SUBROUTINE FIELD_SPLIT
+(  130) END MODULE FIELD_SPLIT_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:15      page 4
+
+(    1) # 1 "field_split_mod.F90"
+(    1) MODULE FIELD_SPLIT_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE FIELD_SPLIT(KBLK,KF_GP,KKF_UV_G,KVSETUV,KVSETSC,&
+(    4)  & KSTUV_G,KENUV_G,KF_UV_G,KSTSC_G,KENSC_G,KF_SCALARS_G,&
+(    5)  & KSTUV,KENUV,KF_UV,KSTSC,KENSC,KF_SCALARS)
+(    6) # 7 "field_split_mod.F90"
+(    7) !**** *FIELD_SPLIT* - Split fields
+(    8) # 9 "field_split_mod.F90"
+(    9) !     Purpose.
+(   10) !     --------
+(   11) !        Split fields
+(   12) # 13 "field_split_mod.F90"
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !     CALL FIELD_SPLIT(...)
+(   16) # 17 "field_split_mod.F90"
+(   17) !     Explicit arguments :
+(   18) !     --------------------
+(   19) !     KBLK          - block number
+(   20) !     KF_GP         - total number of output gridpoint fields
+(   21) !     KKF_UV_G      - global number of spectral u-v fields
+(   22) !     KVSETUV       - IVSETUV from SHUFFLE
+(   23) !     KVSETSC       - IVSETUV from SHUFFLE
+(   24) # 25 "field_split_mod.F90"
+(   25) !     All the following output arguments are quantities for THIS packet.
+(   26) !     KSTUV_G       -
+(   27) !     KENUV_G       -
+(   28) !     KF_UV_G       -
+(   29) !     KSTSC_G       -
+(   30) !     KENSC_G       -
+(   31) !     KF_SCALARS_G  -
+(   32) !     KSTUV         -
+(   33) !     KENUV         -
+(   34) !     KF_UV         -
+(   35) !     KSTSC         -
+(   36) !     KENSC         -
+(   37) !     KF_SCALARS    -
+(   38) # 39 "field_split_mod.F90"
+(   39) !     Externals.  NONE
+(   40) !     ----------
+(   41) # 42 "field_split_mod.F90"
+(   42) !     Author.
+(   43) !     -------
+(   44) !        Mats Hamrud *ECMWF*
+(   45) # 46 "field_split_mod.F90"
+(   46) !     Modifications.
+(   47) !     --------------
+(   48) !        Original : 01-01-03
+(   49) # 50 "field_split_mod.F90"
+(   50) !     ------------------------------------------------------------------
+(   51) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   52) # 53 "field_split_mod.F90"
+(   53) USE TPM_GEN         ,ONLY : NPROMATR
+(   54) !USE TPM_TRANS
+(   55) USE TPM_DISTR       ,ONLY : MYSETV, NPRTRV
+(   56) !
+(   57) # 58 "field_split_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:15      page 5
+
+(   58) IMPLICIT NONE
+(   59) # 60 "field_split_mod.F90"
+(   60) ! Declaration of arguments
+(   61) # 62 "field_split_mod.F90"
+(   62) INTEGER(KIND=JPIM),INTENT(IN)  :: KBLK,KF_GP,KKF_UV_G
+(   63) INTEGER(KIND=JPIM), INTENT(IN)  :: KVSETUV(:),KVSETSC(:)
+(   64) INTEGER(KIND=JPIM), INTENT(OUT) :: KSTUV_G,KENUV_G,KF_UV_G,KSTSC_G,KENSC_G,KF_SCALARS_G
+(   65) INTEGER(KIND=JPIM), INTENT(OUT) :: KSTUV,KENUV,KF_UV,KSTSC,KENSC,KF_SCALARS
+(   66) # 67 "field_split_mod.F90"
+(   67) ! Local variables
+(   68) # 69 "field_split_mod.F90"
+(   69) INTEGER(KIND=JPIM) :: ISTF,IENF,J
+(   70) # 71 "field_split_mod.F90"
+(   71) !     ------------------------------------------------------------------
+(   72) # 73 "field_split_mod.F90"
+(   73) ISTF  = (KBLK-1)*NPROMATR+1
+(   74) IENF  = MIN(KBLK*NPROMATR,KF_GP)
+(   75) # 76 "field_split_mod.F90"
+(   76) KSTUV_G = (KBLK-1)*NPROMATR/2+1
+(   77) KENUV_G = MIN(KBLK*NPROMATR/2,KKF_UV_G)
+(   78) IF(ISTF > 2*KKF_UV_G) KSTUV_G = KENUV_G+1
+(   79) KF_UV_G = KENUV_G-KSTUV_G+1
+(   80) KSTSC_G = MAX(ISTF-2*KKF_UV_G,1)
+(   81) KENSC_G = MAX(IENF-2*KKF_UV_G,0)
+(   82) KF_SCALARS_G = KENSC_G-KSTSC_G+1
+(   83) # 84 "field_split_mod.F90"
+(   84) ! Spectral fields distributed over fields
+(   85) # 86 "field_split_mod.F90"
+(   86) IF(NPRTRV > 1) THEN
+(   87)   KF_UV = 0
+(   88)   KSTUV = 1
+(   89)   DO J=1,KSTUV_G-1
+(   90)     IF(KVSETUV(J) == MYSETV) THEN
+(   91)       KSTUV = KSTUV+1
+(   92)     ENDIF
+(   93)   ENDDO
+(   94)   KENUV = KSTUV-1
+(   95)   DO J=KSTUV_G,KENUV_G
+(   96)     IF(KVSETUV(J) == MYSETV) THEN
+(   97)       KF_UV = KF_UV+1
+(   98)       KENUV = KENUV+1
+(   99)     ENDIF
+(  100)   ENDDO
+(  101)   KF_SCALARS = 0
+(  102)   KSTSC = 1
+(  103)   DO J=1,KSTSC_G-1
+(  104)     IF(KVSETSC(J) == MYSETV) THEN
+(  105)       KSTSC =KSTSC+1
+(  106)     ENDIF
+(  107)   ENDDO
+(  108)   KENSC = KSTSC-1
+(  109)   DO J=KSTSC_G,KENSC_G
+(  110)     IF(KVSETSC(J) == MYSETV) THEN
+(  111)       KF_SCALARS = KF_SCALARS+1
+(  112)       KENSC = KENSC+1
+(  113)     ENDIF
+(  114)   ENDDO
+(  115) ELSE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:15      page 6
+
+(  116) # 117 "field_split_mod.F90"
+(  117)   ! Spectral fields not distributed over fields
+(  118) # 119 "field_split_mod.F90"
+(  119)   KF_UV = KF_UV_G
+(  120)   KSTUV = KSTUV_G
+(  121)   KENUV = KENUV_G
+(  122)   KF_SCALARS = KF_SCALARS_G
+(  123)   KSTSC = KSTSC_G
+(  124)   KENSC = KENSC_G
+(  125) ENDIF
+(  126) # 127 "field_split_mod.F90"
+(  127) !     ------------------------------------------------------------------
+(  128) # 129 "field_split_mod.F90"
+(  129) END SUBROUTINE FIELD_SPLIT
+(  130) END MODULE FIELD_SPLIT_MOD

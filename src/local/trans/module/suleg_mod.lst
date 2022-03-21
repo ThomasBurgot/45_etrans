@@ -1,0 +1,2809 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: suleg_mod.F90
+
+(    1) MODULE SULEG_MOD
+(    2) #ifdef __NEC__
+(    3) #define SIZEOF(x) STORAGE_SIZE(x)/KIND(x)
+(    4) #endif
+(    5) CONTAINS
+(    6) SUBROUTINE SULEG
+(    7) !DEC$ OPTIMIZE:1
+(    8) 
+(    9) USE PARKIND1  ,ONLY : JPRD, JPIM, JPRBT
+(   10) USE PARKIND2  ,ONLY : JPRH
+(   11) USE MPL_MODULE
+(   12) 
+(   13) USE TPM_GEN
+(   14) USE TPM_DIM
+(   15) USE TPM_CONSTANTS
+(   16) USE TPM_DISTR
+(   17) USE TPM_FIELDS ,ONLY : FIELDS_RESOL, F
+(   18) USE TPM_FLT
+(   19) USE TPM_GEOMETRY
+(   20) USE TPM_CTL
+(   21) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   22) 
+(   23) USE PRE_SULEG_MOD
+(   24) USE SUGAW_MOD
+(   25) USE SUPOL_MOD
+(   26) USE SUPOLF_MOD
+(   27) USE TPM_POL
+(   28) USE SUTRLE_MOD
+(   29) USE SETUP_GEOM_MOD
+(   30) USE BUTTERFLY_ALG_MOD
+(   31) USE SEEFMM_MIX
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 2
+
+(   32) USE SET2PE_MOD
+(   33) USE ABORT_TRANS_MOD
+(   34) USE PREPSNM_MOD     ,ONLY : PREPSNM
+(   35) USE WRITE_LEGPOL_MOD
+(   36) USE READ_LEGPOL_MOD
+(   37) 
+(   38) !**** *SULEG * - initialize the Legendre polynomials
+(   39) 
+(   40) !     Purpose.
+(   41) !     --------
+(   42) !           Initialize COMMON YOMLEG
+(   43) 
+(   44) !**   Interface.
+(   45) !     ----------
+(   46) !        *CALL* *SULEG*
+(   47) 
+(   48) !        Explicit arguments :
+(   49) !        --------------------
+(   50) 
+(   51) !        Implicit arguments :
+(   52) !        --------------------
+(   53) !              COMMON YOMLEG
+(   54) 
+(   55) !     Method.
+(   56) !     -------
+(   57) !        See documentation
+(   58) 
+(   59) !     Externals.
+(   60) !     ----------
+(   61) !        SUGAW  (Gaussian latitudes)
+(   62) !        SUPOLM (polynomials)
+(   63) !        LFI routines for external IO's
+(   64) !        Called by SUGEM.
+(   65) 
+(   66) !     Reference.
+(   67) !     ----------
+(   68) !        ECMWF Research Department documentation of the IFS
+(   69) !     
+(   70) !     S.L. Belousov, Tables of normalized associated Legendre Polynomials, Pergamon Press (1962)
+(   71) !     P.N. Swarztrauber, On computing the points and weights for Gauss-Legendre quadrature,
+(   72) !     SIAM J. Sci. Comput. Vol. 24 (3) pp. 945-954 (2002)
+(   73) 
+(   74) !     Author.
+(   75) !     -------
+(   76) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   77) 
+(   78) !     Modifications.
+(   79) !     --------------
+(   80) !        Original : 87-10-15
+(   81) !        MODIFICATION : 91-04  J.M. Piriou:
+(   82) !                       - Read gaussian latitudes and PNM on LFI
+(   83) !                       - If file missing, computes
+(   84) !                       91-04 M.Hamrud:
+(   85) !                       - IO Scheme introduced
+(   86) !        MODIFICATION : 91-07-03 P.Courtier suppress derivatives
+(   87) !        MODIFICATION : 91-07-03 P.Courtier computes RATATH and RACTHE
+(   88) !        MODIFICATION : 91-07-03 P.Courtier change upper limit (NSMAX+1)
+(   89) !        MODIFICATION : 91-07-03 P.Courtier change ordering
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 3
+
+(   90) !     Order of the PNM in the file, as in the model :
+(   91) !         - increasing wave numbers m
+(   92) !         - for a given m, from n=NSMAX+1 to m
+(   93) !        MODIFICATION : 92-07-02 R. Bubnova: shift RATATH calculation
+(   94) !                                            to SUGEM1
+(   95) !        MODIFICATION : 92-12-17 P.Courtier multitask computations
+(   96) !        Modified by R. EL Khatib : 93-04-02 Set-up defaults controled by LECMWF
+(   97) !        MODIFICATION : 93-03-19 D.Giard : n <= NTMAX
+(   98) !        K. YESSAD    : 93-05-11 : DLMU --> global array DRMU(NDGSA:NDGEN).
+(   99) !                       (not stored currently on LFI files).
+(  100) !        MODIFICATION : 94-02-03 R. El Khatib : subroutine SULEG2 to write out
+(  101) !                       the Leg. polynomials on workfile or LFI file
+(  102) !        Modification : 94-08-31 M. Tolstykh: Setup for CUD interpolation
+(  103) !        Modified by K. YESSAD (MARCH 1995): Extra-latitudes computations
+(  104) !                 according to value of NDGSUR and LRPOLE only.
+(  105) !                 + change fancy loop numbering.
+(  106) !        Modified 98-08-10 by K. YESSAD: removal of LRPOLE option.
+(  107) !          - removal of LRPOLE in YOMCT0.
+(  108) !          - removal of code under LRPOLE.
+(  109) !        R. El Khatib 11-Apr-2007 Emulation of vectorized quadruple precision
+(  110) !                                 on NEC
+(  111) !        Nils Wedi + Mats Hamrud, 2009-02-05 revised following Swarztrauber, 2002
+(  112) !        G.Mozdzynski: March 2011 Support 2D (RW,RV) initialisation of legendre coeffs
+(  113) !        G.Mozdzynski: July 2012  distribute FLT initialisation over NPRTRV
+(  114) !        R. El Khatib 14-Jun-2013 optional computation on the stretched latitudes
+(  115) !        F. Vana  05-Mar-2015  Support for single precision
+(  116) !        Nils Wedi, 20-Apr-2015 Support dual latitude/longitude set
+(  117) !        T. Wilhelmsson, 22-Sep-2016 Support single precision for dual too
+(  118) !     ------------------------------------------------------------------
+(  119) 
+(  120) IMPLICIT NONE
+(  121) 
+(  122) !     LOCAL 
+(  123) !     ------------------------------------------------------------------
+(  124) REAL(KIND=JPRD),ALLOCATABLE :: ZPNMG(:)
+(  125) REAL(KIND=JPRD),ALLOCATABLE :: ZFN(:,:)
+(  126) REAL(KIND=JPRD),ALLOCATABLE :: ZLRMUZ2(:)
+(  127) REAL(KIND=JPRBT) :: ZEPSNM(0:R%NTMAX+2)
+(  128) REAL(KIND=JPRD) :: ZLRMUZ(R%NDGL)
+(  129) REAL(KIND=JPRD) :: ZW(R%NDGL)
+(  130) 
+(  131) REAL(KIND=JPRD) :: ZANM
+(  132) REAL(KIND=JPRD) :: ZFNN
+(  133) REAL(KIND=JPRD) :: ZPI, ZINC, ZOFF, ZTEMP, ZORIG, ZTHETA, ZCOS
+(  134) 
+(  135) REAL(KIND=JPRD), ALLOCATABLE :: ZSNDBUFV(:),ZRCVBUFV(:,:)
+(  136) REAL(KIND=JPRD), ALLOCATABLE :: ZPNMCDO(:,:),ZPNMCDD(:,:)
+(  137) REAL(KIND=JPRBT), ALLOCATABLE :: ZRCVBUTFV(:,:)
+(  138) REAL(KIND=JPRBT) :: ZDUM(2)
+(  139) REAL(KIND=KIND(ZRCVBUTFV)) :: ZBYTES
+(  140) INTEGER(KIND=JPIM) :: IBYTES
+(  141) INTEGER(KIND=JPIM) :: ISENDREQ(NPRTRV)
+(  142) INTEGER(KIND=JPIM) :: IRECVREQ(NPRTRV)
+(  143) INTEGER(KIND=JPIM) :: IKOUNT(NPRTRV)
+(  144) INTEGER(KIND=JPIM) :: IRECVLENMAXV(NPRTRV)
+(  145) 
+(  146) INTEGER(KIND=JPIM) :: INM, IM, IRECV, ISEND, ISREQ, IRREQ, &
+(  147)              &JGL,  JM, JMLOC, IMLOC, JN, JNM, IODD, INN, INMAX, JI, IMAXN, ITAG, ITAG1, &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 4
+
+(  148)              &INX, ISL, ISTART, ITHRESHOLD, INSMAX, IMAXCOLS,ILATSMAX,JW,JV,J, &
+(  149)              &IDGLU, ILA, ILS, IA, IS, I, ILATS, ILOOP, IPRTRV, JSETV, JH, &
+(  150)              &IMAXRECVA, IMAXRECVS, IRECVLENMAX, ICLONELEN, IHEMIS, INNH, IGL, IGL1, IGL2, &
+(  151)              &IDGLU2, ISYM, INZ
+(  152) 
+(  153) REAL(KIND=JPRD) :: ZEPS_INT_DEC
+(  154) REAL(KIND=JPRD) :: ZEPS
+(  155) REAL(KIND=JPRD),ALLOCATABLE :: ZLFPOL(:,:)
+(  156) REAL(KIND=JPRD),ALLOCATABLE :: ZLPOL(:)
+(  157) 
+(  158) TYPE(CLONE),ALLOCATABLE :: ZCLONEA(:),ZCLONES(:)
+(  159) 
+(  160) LOGICAL :: LLP1,LLP2
+(  161) 
+(  162) ! For latitudes on the stretched geometry
+(  163) REAL(KIND=JPRH) :: ZTAN
+(  164) REAL(KIND=JPRH) :: ZSTRETMU(R%NDGL)
+(  165) 
+(  166) !     ------------------------------------------------------------------
+(  167) 
+(  168) !*       0.    Some initializations.
+(  169) !              ---------------------
+(  170) 
+(  171) IBYTES = MPL_BYTES(ZBYTES)
+(  172) 
+(  173) ZEPS = 1000._JPRD*EPSILON(ZEPS)
+(  174) !ZEPS_INT_DEC = EPSILON(ZEPS)
+(  175) ZEPS_INT_DEC = 1.0E-7_JPRD
+(  176) !ZEPS_INT_DEC = 1.0E-5_JPRD
+(  177) 
+(  178) IHEMIS=1
+(  179) IF (S%LSOUTHPNM) IHEMIS=2
+(  180) LLP1 = NPRINTLEV>0
+(  181) LLP2 = NPRINTLEV>1
+(  182) IF(LLP1) WRITE(NOUT,*) '=== ENTER ROUTINE SULEG ==='
+(  183) 
+(  184) IF( NPROC > 1 )THEN
+(  185)   CALL GSTATS(798,0)
+(  186)   CALL MPL_BARRIER(CDSTRING='SULEG:')
+(  187)   CALL GSTATS(798,1)
+(  188) ENDIF
+(  189) 
+(  190) CALL GSTATS(140,0)
+(  191) CALL GSTATS(1801,0)
+(  192) 
+(  193) IF(.NOT.D%LGRIDONLY) THEN
+(  194)   CALL PRE_SULEG
+(  195) ENDIF
+(  196) 
+(  197) ALLOCATE(F%RMU(R%NDGL))
+(  198) IF (LLP2) WRITE(NOUT,9) 'F%RMU     ',SIZE(F%RMU ),SHAPE(F%RMU ) 
+(  199) ALLOCATE(F%RW(R%NDGL))
+(  200) IF (LLP2) WRITE(NOUT,9) 'F%RW      ',SIZE(F%RW  ),SHAPE(F%RW  ) 
+(  201) 
+(  202) 
+(  203) !*       1.0 Initialize Fourier coefficients for ordinary Legendre polynomials
+(  204) !     ------------------------------------------------------------------------
+(  205) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 5
+
+(  206) ALLOCATE(ZFN(0:R%NDGL,0:R%NDGL))
+(  207) IF (LLP2) WRITE(NOUT,9) 'ZFN       ',SIZE(ZFN   ),SHAPE(ZFN   )
+(  208) 
+(  209) 
+(  210) 
+(  211) ! determines the number of stripes in butterfly NSMAX/IMAXCOLS 
+(  212) ! IMAXCOLS = (R%NSMAX - 1)/4 + 1
+(  213) ! IMAXCOLS=64 (min flops)
+(  214) IMAXCOLS=64
+(  215) 
+(  216) ! the threshold of efficiency
+(  217) IF(NPROC == 1 .OR. R%NDGNH <= 2560) THEN
+(  218)    ITHRESHOLD = R%NDGNH/4
+(  219)    DO
+(  220)       IF(ITHRESHOLD >= IMAXCOLS*4) EXIT
+(  221)       IMAXCOLS = IMAXCOLS/2
+(  222)    ENDDO
+(  223) ELSE
+(  224)    ITHRESHOLD = 900
+(  225) ENDIF
+(  226) 
+(  227) ITHRESHOLD = MAX(ITHRESHOLD,IMAXCOLS+1)
+(  228) S%ITHRESHOLD = ITHRESHOLD
+(  229) 
+(  230) !*       3.1   Gaussian latitudes and weights
+(  231) !     ---------------------------------------
+(  232) 
+(  233) !IF (S%LUSE_BELUSOV.OR.S%LUSEFLT) 
+(  234) CALL INI_POL(R%NTMAX+3)
+(  235) 
+(  236) IF(.NOT.D%LGRIDONLY) THEN
+(  237)   ISTART=1
+(  238) ELSE
+(  239)   ISTART=R%NDGL
+(  240) ENDIF
+(  241) 
+(  242) INMAX=R%NDGL
+(  243) ! Belousov, Swarztrauber use ZFN(0,0)=SQRT(2._JPRD)
+(  244) ! IFS normalisation chosen to be 0.5*Integral(Pnm**2) = 1
+(  245) ZFN(0,0)=2._JPRD
+(  246) DO JN=ISTART,R%NDGL
+(  247)   ZFNN=ZFN(0,0)
+(  248)   DO JGL=1,JN
+(  249)     ZFNN=ZFNN*SQRT(1._JPRD-0.25_JPRD/REAL(JGL**2,JPRD))
+(  250)   ENDDO
+(  251) 
+(  252)   IODD=MOD(JN,2)
+(  253)   ZFN(JN,JN)=ZFNN
+(  254)   DO JGL=2,JN-IODD,2
+(  255)     ZFN(JN,JN-JGL)=ZFN(JN,JN-JGL+2)*REAL((JGL-1)*(2*JN-JGL+2),JPRD)/REAL(JGL*(2*JN-JGL+1),JPRD)
+(  256)   ENDDO
+(  257) ENDDO
+(  258) 
+(  259) ! compute latitudes and weights for original Gaussian latitudes
+(  260) ZANM=SQRT(REAL(2*INMAX+1,JPRD)*REAL(INMAX**2,JPRD)/REAL(2*INMAX-1,JPRD))
+(  261) INN=R%NDGL
+(  262) CALL GSTATS(1801,2)
+(  263) CALL SUGAW(INN,0,INMAX,ZLRMUZ(1:INN),ZW(1:INN),ZANM,ZFN)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 6
+
+(  264) CALL GSTATS(1801,3)
+(  265) 
+(  266) IF (ABS(G%RSTRET-1.0_JPRD)>100._JPRD*EPSILON(1._JPRD)) THEN
+(  267)   WRITE(NOUT,*) '=== SULEG: Change Gaussian latitudes to the transformed sphere ==='
+(  268)   INNH=(INN+1)/2
+(  269)   ZTAN=(1.0_JPRD-G%RSTRET**2)/(1.0_JPRD+G%RSTRET**2)
+(  270) ! North hemisphere
+(  271)   DO JGL=1,INNH
+(  272)     ZSTRETMU(JGL)=(ZTAN+REAL(ZLRMUZ(JGL),JPRH))/(1.0_JPRD+ZTAN*REAL(ZLRMUZ(JGL),JPRH))
+(  273)   ENDDO
+(  274) ! South hemisphere
+(  275)   DO JGL=1,INNH
+(  276)     IGL=2*INNH-JGL+1
+(  277)     ZSTRETMU(IGL)=(ZTAN-REAL(ZLRMUZ(JGL),JPRH))/(1.0_JPRD-ZTAN*REAL(ZLRMUZ(JGL),JPRH))
+(  278)   ENDDO
+(  279)   DO JGL=1,INN
+(  280)     ZLRMUZ(JGL)=REAL(ZSTRETMU(JGL),JPRD)
+(  281)   ENDDO
+(  282) ENDIF
+(  283) 
+(  284) DO JGL=1,R%NDGL
+(  285)   F%RW(JGL)     = ZW(JGL)
+(  286)   F%RMU(JGL)    = ZLRMUZ(JGL)
+(  287) ENDDO
+(  288) 
+(  289) IF (LLP1) WRITE(NOUT,*) '=== SULEG: Finished Gaussian latitudes ==='
+(  290) 
+(  291) !*       3.1.1  specify a dual set of output (inv_trans) or input (dir_trans) latitudes / longitudes
+(  292) 
+(  293) IF( S%LDLL ) THEN
+(  294) 
+(  295)   INMAX = S%NDGL
+(  296)   INN= S%NDGL
+(  297) 
+(  298)   S%NDGNHD = (INMAX+1)/2
+(  299)   ALLOCATE(ZLRMUZ2(INN))
+(  300) 
+(  301)   ! here we want to use the positions of the specified dual grid
+(  302)   ! accuracy requirement is ZLRMUZ2(JGL) < F%RMU(1)
+(  303)   ! so we use approximations for the remaining latitudes outside this range
+(  304)   ! we approximate the vicinity to the pole/equator
+(  305) 
+(  306)   ZPI = 2.0_JPRD*ASIN(1.0_JPRD)
+(  307)   
+(  308)   ZORIG = ASIN(F%RMU(1))
+(  309)   IF( S%LSHIFTLL )  THEN
+(  310)     ZINC = ZPI/REAL(INN,JPRD)
+(  311)     ZOFF = 0.5_JPRD*ZINC
+(  312)     ZTEMP = ZOFF + ZINC*REAL(S%NDGNHD-1,JPRD)
+(  313)     ZLRMUZ2(1) =  SIN(MIN(ZTEMP,ZORIG) - 0.5_JPRD*MAX(0._JPRD,ZTEMP - ZORIG))
+(  314)     ZLRMUZ2(S%NDGNHD) = SIN(ZOFF)
+(  315)   ELSE
+(  316)     ZINC = ZPI/REAL(INN-2,JPRD)
+(  317)     ZOFF=-0.5_JPRD*ZINC
+(  318)     ZTEMP = ZOFF + ZINC*REAL(S%NDGNHD-1,JPRD)
+(  319)     ZLRMUZ2(1) =  SIN(MIN(ZTEMP,ZORIG) - 0.5_JPRD*MAX(0._JPRD,ZTEMP - ZORIG))
+(  320)     ZOFF=0.01_JPRD*ZINC
+(  321)     ZLRMUZ2(S%NDGNHD) = SIN(ZOFF)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 7
+
+(  322)     ZOFF=0._JPRD
+(  323)   ENDIF
+(  324)   DO JGL=2, S%NDGNHD-1
+(  325)     ZLRMUZ2(JGL) = SIN(ZOFF + ZINC*REAL(S%NDGNHD-JGL,JPRD))
+(  326)   ENDDO
+(  327)   DO JGL=1, S%NDGNHD
+(  328)     ISYM = INN-JGL+1
+(  329)     ZLRMUZ2(ISYM) = -ZLRMUZ2(JGL)
+(  330)   ENDDO
+(  331) 
+(  332)   IF( LLP2 ) THEN
+(  333)     WRITE(NOUT,*) 'dual latitudes'
+(  334)     DO JGL= 1, INN
+(  335)       WRITE(NOUT,*)  'dual  JGL=',JGL,(180._JPRD/ZPI)*ZINC,(180._JPRD/ZPI)*ASIN(ZLRMUZ2(JGL)),(180._JPRD/ZPI)*ASIN(F%RMU(JGL
+(  336)     ENDDO
+(  337)   ENDIF
+(  338)   
+(  339)   ALLOCATE(F%RMU2(INMAX))
+(  340)   IF (LLP2) WRITE(NOUT,9) 'F%RMU2     ',SIZE(F%RMU2 ),SHAPE(F%RMU2 )
+(  341)   ALLOCATE(F%RACTHE2(INMAX))
+(  342)   IF (LLP2) WRITE(NOUT,9) 'F%RACTHE2  ',SIZE(F%RACTHE2),SHAPE(F%RACTHE2 )
+(  343)   DO JGL=1,INN
+(  344)     F%RMU2(JGL)    = ZLRMUZ2(JGL)
+(  345)     F%RACTHE2(JGL) = 1.0_JPRD/(SQRT(1.0_JPRD-ZLRMUZ2(JGL)*ZLRMUZ2(JGL))+ZEPS)/REAL(RA,JPRD)
+(  346)   ENDDO
+(  347) 
+(  348)   IF (LLP1) WRITE(NOUT,*)  '=== SULEG: Finished dual Gaussian latitudes ==='
+(  349) 
+(  350)   ! inverse + direct map for FMM
+(  351)   INX=2*R%NDGNH
+(  352)   INZ=2*S%NDGNHD
+(  353)   ALLOCATE(S%FMM_INTI)
+(  354)   CALL SETUP_SEEFMM(INX,F%RMU,INZ,F%RMU2,S%FMM_INTI)
+(  355) 
+(  356) ENDIF
+(  357) 
+(  358) !*       3.2   Computes related arrays
+(  359) 
+(  360) IF(.NOT.D%LGRIDONLY) THEN
+(  361) 
+(  362)   ALLOCATE(S%FA(D%NUMP))
+(  363) 
+(  364)   ALLOCATE(F%R1MU2(R%NDGL))
+(  365)   IF (LLP2) WRITE(NOUT,9) 'F%R1MU2   ',SIZE(F%R1MU2),SHAPE(F%R1MU2 ) 
+(  366)   ALLOCATE(F%RACTHE(R%NDGL))
+(  367)   IF (LLP2) WRITE(NOUT,9) 'F%RACTHE  ',SIZE(F%RACTHE),SHAPE(F%RACTHE ) 
+(  368) 
+(  369)   IF( S%LUSE_BELUSOV) THEN
+(  370)     ALLOCATE(F%RPNM(R%NLEI3,D%NSPOLEGL))
+(  371)     IF (LLP2) WRITE(NOUT,9) 'F%RPNM    ',SIZE(F%RPNM),SHAPE(F%RPNM) 
+(  372)     DO JNM=1,D%NSPOLEGL
+(  373)       F%RPNM(R%NLEI3,JNM) = 0.0_JPRD
+(  374)     ENDDO
+(  375)   ENDIF
+(  376) 
+(  377) !*       3.2   Computes related arrays
+(  378) 
+(  379)   DO JGL=1,R%NDGL
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 8
+
+(  380) ! test cosine differently
+(  381)     ZTHETA = ASIN(ZLRMUZ(JGL))
+(  382)     ZCOS   = COS(ZTHETA)
+(  383)     F%R1MU2(JGL)  = ZCOS**2
+(  384)     F%RACTHE(JGL) = 1.0_JPRD/ZCOS/REAL(RA,JPRD)
+(  385) !    F%R1MU2(JGL)  = 1.0_JPRD-ZLRMUZ(JGL)*ZLRMUZ(JGL)
+(  386) !    F%RACTHE(JGL) = 1.0_JPRD/SQRT(1.0_JPRD-ZLRMUZ(JGL)*ZLRMUZ(JGL))/REAL(RA,JPRD)
+(  387)   ENDDO
+(  388) 
+(  389) !*       3.3   Working arrays
+(  390) 
+(  391) ! compute the Legendre polynomials as a function of the z_k (Gaussian Latitudes)
+(  392) ! this may be faster than calling supolf for each m but uses extra communication
+(  393) ! and the parallelism is more limited ? Nils
+(  394) 
+(  395)   IF( S%LUSE_BELUSOV .AND. .NOT. C%LREAD_LEGPOL  ) THEN
+(  396) 
+(  397)     INSMAX = R%NTMAX+1
+(  398) 
+(  399)     IF( INSMAX /= R%NDGL) THEN
+(  400)       DEALLOCATE(ZFN)
+(  401)       ALLOCATE(ZFN(0:INSMAX,0:INSMAX))
+(  402)       ! Belousov, Swarztrauber use ZFN(0,0)=SQRT(2._JPRD)
+(  403)       ! IFS normalisation chosen to be 0.5*Integral(Pnm**2) = 1
+(  404)       ZFN(0,0)=2._JPRD
+(  405)       DO JN=1,INSMAX
+(  406)         ZFNN=ZFN(0,0)
+(  407)         DO JGL=1,JN
+(  408)           ZFNN=ZFNN*SQRT(1._JPRD-0.25_JPRD/REAL(JGL**2,JPRD))
+(  409)         ENDDO
+(  410) 
+(  411)         IODD=MOD(JN,2)
+(  412)         ZFN(JN,JN)=ZFNN
+(  413)         DO JGL=2,JN-IODD,2
+(  414)           ZFN(JN,JN-JGL)=ZFN(JN,JN-JGL+2)*REAL((JGL-1)*(2*JN-JGL+2),JPRD)/REAL(JGL*(2*JN-JGL+1),JPRD)
+(  415)         ENDDO
+(  416)       ENDDO
+(  417)     ENDIF
+(  418) 
+(  419)     ALLOCATE(ZLFPOL(0:INSMAX,0:INSMAX))
+(  420)     ALLOCATE(ZPNMG(R%NSPOLEG))
+(  421) 
+(  422)     DO JH=1,IHEMIS
+(  423) 
+(  424)       IF (JH==1) THEN
+(  425)         IGL1=D%NLATLS(MYSETW,MYSETV)
+(  426)         IGL2=D%NLATLE(MYSETW,MYSETV)
+(  427)       ELSE
+(  428)         IGL1=R%NDGL-D%NLATLE(MYSETW,MYSETV)+1
+(  429)         IGL2=R%NDGL-D%NLATLS(MYSETW,MYSETV)+1
+(  430)       ENDIF
+(  431) 
+(  432)       ILOOP=0
+(  433)       DO JGL=IGL1,IGL2
+(  434) 
+(  435)         INM = 0
+(  436)         CALL SUPOL(INSMAX,ZLRMUZ(JGL),ZFN,ZLFPOL)
+(  437)         DO JM=0,R%NSMAX
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 9
+
+(  438)           DO JN=INSMAX,JM,-1
+(  439)             INM = INM+1
+(  440)             ZPNMG(INM) = ZLFPOL(JM,JN)
+(  441)           ENDDO
+(  442)         ENDDO
+(  443) 
+(  444)         CALL GSTATS(1801,2)
+(  445)         ILOOP = JGL-IGL1+1
+(  446)         CALL SUTRLE(ZPNMG,JGL,ILOOP)
+(  447)         CALL GSTATS(1801,3)
+(  448) 
+(  449)       ENDDO
+(  450) 
+(  451)       ILATSMAX=0
+(  452)       DO JW=1,NPRTRW
+(  453)         DO JV=1,NPRTRV
+(  454)           ILATSMAX=MAX(ILATSMAX,D%NLATLE(JW,JV)-D%NLATLS(JW,JV)+1)
+(  455)         ENDDO
+(  456)       ENDDO
+(  457) 
+(  458)       ILATS=IGL2-IGL1+1
+(  459)       IF (S%LSOUTHPNM .AND. IHEMIS==1 .AND. ILATSMAX-1 >= ILATS) THEN
+(  460)         ! I don't know what to do for south pole. But isn't this piece of code
+(  461)         ! a dead stuff for poles rows ? 
+(  462)         CALL ABORT_TRANS('SULEG: WILL BE BROKEN FOR SOUTH HEMISPHERE')
+(  463)       ENDIF
+(  464) 
+(  465)       DO J=ILATS,ILATSMAX-1
+(  466)         ILOOP=ILOOP+1
+(  467)         CALL GSTATS(1801,2)
+(  468)         CALL SUTRLE(ZPNMG,-1,ILOOP)
+(  469)         CALL GSTATS(1801,3)
+(  470)       ENDDO
+(  471) 
+(  472)     ENDDO
+(  473) 
+(  474)     DEALLOCATE(ZLFPOL)
+(  475)     IF( ALLOCATED(ZFN) ) DEALLOCATE(ZFN)
+(  476) 
+(  477)     DEALLOCATE(ZPNMG)
+(  478) 
+(  479)     IF(LLP1) WRITE(NOUT,*) '=== SULEG: Finished RPNM ==='
+(  480) 
+(  481)   ENDIF
+(  482) 
+(  483)   CALL SETUP_GEOM
+(  484) 
+(  485)   IMAXN=R%NTMAX+1
+(  486) 
+(  487)   ITAG=MTAGLETR
+(  488)   ITAG1=MTAGLETR+1
+(  489) 
+(  490)   IMAXRECVA=0
+(  491)   IMAXRECVS=0
+(  492)   DO JMLOC=1,D%NUMP
+(  493)     IM = D%MYMS(JMLOC)
+(  494)     ILA = (R%NSMAX-IM+2)/2
+(  495)     ILS = (R%NSMAX-IM+3)/2
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 10
+
+(  496)     IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  497)     ISL = MAX(R%NDGNH-G%NDGLU(IM)+1,1)
+(  498)     IMAXRECVA = MAX(IDGLU*ILA,IMAXRECVA)
+(  499)     IMAXRECVS = MAX(IDGLU*ILS,IMAXRECVS)
+(  500) 
+(  501)     !find nearest starting latitude of the dual set
+(  502)     IF( S%LDLL ) THEN
+(  503) 
+(  504)       INMAX=MIN(R%NTMAX+1,S%NDGL)
+(  505)       IDGLU2=S%NDGNHD
+(  506)       S%FA(JMLOC)%ISLD = 1
+(  507)       LLA:DO JGL=1,S%NDGNHD-1
+(  508)         IF( (ZLRMUZ2(JGL) < ZLRMUZ(ISL)) ) THEN
+(  509)           S%FA(JMLOC)%ISLD = JGL
+(  510)           IDGLU2 = S%NDGNHD-S%FA(JMLOC)%ISLD+1
+(  511)           EXIT LLA
+(  512)         ENDIF
+(  513)       ENDDO LLA
+(  514) 
+(  515)       IF( .NOT. C%LREAD_LEGPOL  ) THEN
+(  516)        ! compute auxiliary quantities for the dual mapping
+(  517) 
+(  518)        ! output data latitudes
+(  519)         ALLOCATE(ZPNMCDO(2*IDGLU2,2))
+(  520)       !$OMP PARALLEL PRIVATE(JGL,ZLPOL)
+(  521)         IF (.NOT.ALLOCATED(ZLPOL)) ALLOCATE(ZLPOL(0:INMAX))
+(  522)       !$OMP DO SCHEDULE(DYNAMIC,1)
+(  523)         DO JGL=1,2*IDGLU2
+(  524)           CALL SUPOLF(IM,INMAX,ZLRMUZ2(S%FA(JMLOC)%ISLD+JGL-1),ZLPOL(0:INMAX))
+(  525)           ZPNMCDO(JGL,1)=ZLPOL(INMAX-1)
+(  526)           ZPNMCDO(JGL,2)=ZLPOL(INMAX)
+(  527)         ENDDO
+(  528)         !$OMP END DO
+(  529)         IF (ALLOCATED(ZLPOL)) DEALLOCATE(ZLPOL)
+(  530)         !$OMP END PARALLEL
+(  531) 
+(  532)         ! internal (gg-roots) latitudes
+(  533)         ALLOCATE(ZPNMCDD(2*IDGLU,2))
+(  534)         !$OMP PARALLEL PRIVATE(JGL,ZLPOL,JI,JN)
+(  535)         IF (.NOT.ALLOCATED(ZLPOL)) ALLOCATE(ZLPOL(0:INMAX))
+(  536)         !$OMP DO SCHEDULE(DYNAMIC,1)
+(  537)         DO JGL=1,2*IDGLU
+(  538)           CALL SUPOLF(IM,INMAX,ZLRMUZ(ISL+JGL-1),ZLPOL(0:INMAX))
+(  539)           ZPNMCDD(JGL,1)=ZLPOL(INMAX-1)
+(  540)           ZPNMCDD(JGL,2)=ZLPOL(INMAX)
+(  541)         ENDDO
+(  542)         !$OMP END DO
+(  543)         IF (ALLOCATED(ZLPOL)) DEALLOCATE(ZLPOL)
+(  544)         !$OMP END PARALLEL
+(  545)         
+(  546)         stop 'Error: code path not (yet) supported in GPU version'
+(  547)         !CALL PREPSNM(IM,JMLOC,ZEPSNM)
+(  548)         ALLOCATE(S%FA(JMLOC)%RPNMWI(2*IDGLU,1:2))
+(  549)         DO JGL=1,2*IDGLU
+(  550)           ! inverse trafo
+(  551)           S%FA(JMLOC)%RPNMWI(JGL,1) = F%RW(ISL+JGL-1)*ZPNMCDD(JGL,1)
+(  552)           S%FA(JMLOC)%RPNMWI(JGL,2) = F%RW(ISL+JGL-1)*ZPNMCDD(JGL,2)
+(  553)           ! direct trafo needed if mapping to another set of gg roots
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 11
+
+(  554)           !S%FA(JMLOC)%RPNMWI(JGL,3) = -ZEPSNM(IMAXN)*ZPNMCDD(JGL,2)
+(  555)           !S%FA(JMLOC)%RPNMWI(JGL,4) = -ZEPSNM(IMAXN)*ZPNMCDD(JGL,1)
+(  556)         ENDDO
+(  557)         DEALLOCATE(ZPNMCDD)
+(  558)         ALLOCATE(S%FA(JMLOC)%RPNMWO(2*IDGLU2,1:2))
+(  559)         DO JGL=1,2*IDGLU2
+(  560)           ! inverse trafo
+(  561)           S%FA(JMLOC)%RPNMWO(JGL,1) = -ZEPSNM(IMAXN)*ZPNMCDO(JGL,2)
+(  562)           S%FA(JMLOC)%RPNMWO(JGL,2) = -ZEPSNM(IMAXN)*ZPNMCDO(JGL,1)
+(  563)           ! only needed in direct trafo, need if mapping to another set of roots
+(  564)           !S%FA(JMLOC)%RPNMWO(JGL,3) = F%RW2(S%FA(JMLOC)%ISLD+JGL-1)*ZPNMCDO(JGL,1)
+(  565)           !S%FA(JMLOC)%RPNMWO(JGL,4) = F%RW2(S%FA(JMLOC)%ISLD+JGL-1)*ZPNMCDO(JGL,2)
+(  566)         ENDDO
+(  567)         DEALLOCATE(ZPNMCDO)
+(  568)       ENDIF ! LREAD_LEGPOL
+(  569)     ENDIF ! LDLL
+(  570) 
+(  571)   ENDDO
+(  572) 
+(  573)   IF( S%LDLL ) THEN
+(  574)     DEALLOCATE(ZLRMUZ2)
+(  575)   ENDIF
+(  576) 
+(  577) !!$  IF( S%LUSEFLT.AND.LMPOFF ) THEN
+(  578) !!$    CALL ABORT_TRANS('SULEG: LUSEFLT=T and LMPOFF=T not supported')
+(  579) !!$  ENDIF
+(  580)   CALL GSTATS(1801,2)
+(  581) 
+(  582)   IF(.NOT.C%LREAD_LEGPOL) THEN
+(  583)   IF( S%LUSEFLT )THEN
+(  584)     ALLOCATE(ZCLONEA(D%NUMP))
+(  585)     ALLOCATE(ZCLONES(D%NUMP))
+(  586)   ENDIF
+(  587) 
+(  588) ! not correct logic
+(  589) !  IF (S%LUSE_BELUSOV.OR.S%LUSEFLT) THEN
+(  590) 
+(  591)   DO JMLOC=1,D%NUMP,NPRTRV  ! +++++++++++++++++++++ JMLOC LOOP +++++++++++++++++++++++
+(  592) !     IF( S%LUSEFLT )THEN
+(  593) !       ZCLONES(JMLOC)%COMMSBUF => NULL()
+(  594) !       ZCLONEA(JMLOC)%COMMSBUF => NULL()
+(  595) !     ENDIF
+(  596) 
+(  597)     IPRTRV=MIN(NPRTRV,D%NUMP-JMLOC+1)
+(  598) 
+(  599)     ! --------------------anti-symmetric-----------------------
+(  600)     ! --------------------anti-symmetric-----------------------
+(  601)     ! --------------------anti-symmetric-----------------------
+(  602) 
+(  603)     DO JSETV=1,IPRTRV
+(  604)       IMLOC=JMLOC+JSETV-1
+(  605)       IM = D%MYMS(IMLOC)
+(  606)       ILA = (R%NSMAX-IM+2)/2
+(  607)       IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  608)       ALLOCATE(S%FA(IMLOC)%RPNMA(IDGLU,ILA))  
+(  609)     ENDDO
+(  610) 
+(  611)     IF( .NOT. S%LUSE_BELUSOV ) THEN 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 12
+
+(  612) 
+(  613)       ISREQ = 0
+(  614)       IRREQ = 0
+(  615) 
+(  616)       ALLOCATE (ZRCVBUFV(IMAXRECVA,IPRTRV))
+(  617)       CALL GSTATS(851,0)
+(  618)       DO JSETV=1,IPRTRV
+(  619)         CALL SET2PE(IRECV,0,0,MYSETW,JSETV)
+(  620)         IF( .NOT.LMPOFF )THEN
+(  621)           IRREQ = IRREQ+1
+(  622)           CALL MPL_RECV(ZRCVBUFV(:,JSETV),KSOURCE=NPRCIDS(IRECV), &
+(  623)            & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IRECVREQ(IRREQ),&
+(  624)            & KTAG=ITAG,CDSTRING='SULEG:')
+(  625)         ENDIF
+(  626)       ENDDO
+(  627)       CALL GSTATS(851,1)
+(  628) 
+(  629)       IF( JMLOC+MYSETV-1 <= D%NUMP )THEN
+(  630) 
+(  631)         IMLOC=JMLOC+MYSETV-1
+(  632)         IM = D%MYMS(IMLOC)
+(  633)         ISL = MAX(R%NDGNH-G%NDGLU(IM)+1,1)
+(  634)         IA  = 1+MOD(R%NSMAX-IM+2,2)
+(  635)         ILA = (R%NSMAX-IM+2)/2
+(  636)         IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  637) 
+(  638)         ALLOCATE(ZSNDBUFV(IDGLU*ILA))
+(  639)       
+(  640)         IF(MOD(IMAXN-IM,2) == 0) THEN
+(  641)           INMAX=IMAXN+1
+(  642)         ELSE
+(  643)           INMAX=IMAXN
+(  644)         ENDIF
+(  645) 
+(  646)         CALL GSTATS(1251,0)
+(  647)         IF (.NOT.ALLOCATED(ZLPOL)) ALLOCATE(ZLPOL(0:INMAX))
+(  648)         !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JGL,ZLPOL,JI,JN)
+(  649)         DO JGL=1,IDGLU
+(  650)           CALL SUPOLF(IM,INMAX,ZLRMUZ(ISL+JGL-1),ZLPOL(0:INMAX),KCHEAP=3)
+(  651)           DO JI=1,ILA
+(  652)             JN=IM+2*(JI-1)+1
+(  653)             ZSNDBUFV((JGL-1)*ILA+JI)=ZLPOL(JN)
+(  654)           ENDDO
+(  655)         ENDDO
+(  656)         !$OMP END PARALLEL DO
+(  657)         IF (ALLOCATED(ZLPOL)) DEALLOCATE(ZLPOL)
+(  658)         CALL GSTATS(1251,1)
+(  659) 
+(  660)         CALL GSTATS(851,0)
+(  661)         DO JSETV=1,NPRTRV
+(  662)           CALL SET2PE(ISEND,0,0,MYSETW,JSETV)
+(  663)           IF( .NOT.LMPOFF )THEN
+(  664)             ISREQ = ISREQ+1
+(  665)             CALL MPL_SEND(ZSNDBUFV(:),KDEST=NPRCIDS(ISEND), &
+(  666)              & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(ISREQ),&
+(  667)             & KTAG=ITAG,CDSTRING='SULEG:')
+(  668)           ENDIF
+(  669)         ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 13
+
+(  670)         CALL GSTATS(851,1)
+(  671) 
+(  672)       ENDIF
+(  673) 
+(  674)       CALL GSTATS(851,0)
+(  675)       IF(IRREQ > 0) THEN
+(  676)         CALL MPL_WAIT(KREQUEST=IRECVREQ(1:IRREQ), &
+(  677)          & CDSTRING='SUTRLE: SULEG')
+(  678)       ENDIF
+(  679) 
+(  680)       IF(ISREQ > 0) THEN
+(  681)         CALL MPL_WAIT(KREQUEST=ISENDREQ(1:ISREQ), &
+(  682)          & CDSTRING='SUTRLE: SULEG')
+(  683)       ENDIF
+(  684) 
+(  685)       IF( NPROC==1.AND.LMPOFF )THEN
+(  686)         ZRCVBUFV(1:SIZE(ZSNDBUFV(:)),1)=ZSNDBUFV(:)
+(  687)       ENDIF
+(  688)       CALL GSTATS(851,1)
+(  689) 
+(  690)       CALL GSTATS(1251,0)
+(  691)       !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JSETV,IMLOC,IM,ISL,IA,ILA,IDGLU,JGL,JI)
+(  692)       DO JSETV=1,IPRTRV
+(  693)         IMLOC=JMLOC+JSETV-1
+(  694)         IM = D%MYMS(IMLOC)
+(  695)         ISL = MAX(R%NDGNH-G%NDGLU(IM)+1,1)
+(  696)         IA  = 1+MOD(R%NSMAX-IM+2,2)
+(  697)         ILA = (R%NSMAX-IM+2)/2
+(  698)         IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  699)         IF( S%LUSEFLT .AND. ILA > ITHRESHOLD ) THEN
+(  700)           IF( .NOT. S%LKEEPRPNM ) DEALLOCATE(S%FA(IMLOC)%RPNMA)
+(  701)           ALLOCATE(S%FA(IMLOC)%RPNMDA(IDGLU,ILA))
+(  702)           DO JGL=1,IDGLU
+(  703)             DO JI=1,ILA
+(  704)               S%FA(IMLOC)%RPNMDA(JGL,ILA-JI+1)=ZRCVBUFV((JGL-1)*ILA+JI,JSETV)
+(  705)             ENDDO
+(  706)           ENDDO
+(  707)           IF( S%LKEEPRPNM ) THEN
+(  708)              DO JGL=1,IDGLU
+(  709)                 DO JI=1,ILA
+(  710)                    S%FA(IMLOC)%RPNMA(JGL,ILA-JI+1)=ZRCVBUFV((JGL-1)*ILA+JI,JSETV)
+(  711)                 ENDDO
+(  712)              ENDDO
+(  713)           ENDIF
+(  714)        ELSE
+(  715)           DO JGL=1,IDGLU
+(  716)             DO JI=1,ILA
+(  717)               S%FA(IMLOC)%RPNMA(JGL,ILA-JI+1)=ZRCVBUFV((JGL-1)*ILA+JI,JSETV)
+(  718)             ENDDO
+(  719)           ENDDO
+(  720)         ENDIF
+(  721)       ENDDO
+(  722)      !$OMP END PARALLEL DO
+(  723)       CALL GSTATS(1251,1)
+(  724)         
+(  725)       IF( ALLOCATED(ZSNDBUFV) ) DEALLOCATE(ZSNDBUFV)
+(  726)       IF( ALLOCATED(ZRCVBUFV) ) DEALLOCATE(ZRCVBUFV)
+(  727) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 14
+
+(  728)     ELSE    
+(  729) 
+(  730)        CALL GSTATS(1251,0)
+(  731)        !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JSETV,IMLOC,IM,ISL,IA,ILA,IDGLU,JGL,JI)
+(  732)        DO JSETV=1,IPRTRV
+(  733)           IMLOC=JMLOC+JSETV-1
+(  734)           IM = D%MYMS(IMLOC)
+(  735)           ISL = MAX(R%NDGNH-G%NDGLU(IM)+1,1)
+(  736)           IA  = 1+MOD(R%NSMAX-IM+2,2)
+(  737)           ILA = (R%NSMAX-IM+2)/2
+(  738)           IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  739)           IF( S%LUSEFLT .AND. ILA > ITHRESHOLD ) THEN
+(  740)              IF( .NOT. S%LKEEPRPNM ) DEALLOCATE(S%FA(IMLOC)%RPNMA)
+(  741)              ALLOCATE(S%FA(IMLOC)%RPNMDA(IDGLU,ILA))
+(  742)              DO JI=1,ILA
+(  743)                 DO JGL=1,IDGLU
+(  744)                    S%FA(IMLOC)%RPNMDA(JGL,JI) = F%RPNM(ISL+JGL-1,D%NPMS(IM)+IA+(JI-1)*2)
+(  745)                 ENDDO
+(  746)              ENDDO
+(  747)              IF( S%LKEEPRPNM ) THEN
+(  748)                DO JI=1,ILA
+(  749)                  DO JGL=1,IDGLU
+(  750)                    S%FA(IMLOC)%RPNMA(JGL,JI) = F%RPNM(ISL+JGL-1,D%NPMS(IM)+IA+(JI-1)*2)
+(  751)                  ENDDO
+(  752)                ENDDO
+(  753)             ENDIF
+(  754)           ELSE
+(  755)              DO JI=1,ILA
+(  756)                 DO JGL=1,IDGLU
+(  757)                    S%FA(IMLOC)%RPNMA(JGL,JI) = F%RPNM(ISL+JGL-1,D%NPMS(IM)+IA+(JI-1)*2)
+(  758)                 ENDDO
+(  759)              ENDDO
+(  760)           END IF
+(  761)        ENDDO
+(  762)        !$OMP END PARALLEL DO
+(  763)        CALL GSTATS(1251,1)
+(  764) 
+(  765)     ENDIF
+(  766) 
+(  767)     ! -------------------- anti-symmetric FLT iniitialisation -----------------------
+(  768) 
+(  769)     IF( S%LUSEFLT) THEN
+(  770)       IRECVLENMAX=0
+(  771)       ISREQ = 0
+(  772)       IRREQ = 0
+(  773)       IF( JMLOC+MYSETV-1 <= D%NUMP )THEN
+(  774)         IMLOC=JMLOC+MYSETV-1
+(  775)         IM = D%MYMS(IMLOC)
+(  776)         ILA = (R%NSMAX-IM+2)/2
+(  777)         IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  778)         IF( ILA > ITHRESHOLD ) THEN
+(  779)           S%LSYM = .FALSE.
+(  780)           INX = IDGLU
+(  781)           CALL CONSTRUCT_BUTTERFLY(ZEPS_INT_DEC,IMAXCOLS,INX,ILA,S%FA(IMLOC)%RPNMDA,&
+(  782)            & S%FA(IMLOC)%YBUT_STRUCT_A)
+(  783)           CALL PACK_BUTTERFLY_STRUCT(S%FA(IMLOC)%YBUT_STRUCT_A,ZCLONEA(IMLOC))
+(  784)           IRECVLENMAX=SIZE(ZCLONEA(IMLOC)%COMMSBUF)
+(  785)           CALL GSTATS(852,0)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 15
+
+(  786)           DO JSETV=1,NPRTRV
+(  787)             CALL SET2PE(ISEND,0,0,MYSETW,JSETV)
+(  788)             IF(.NOT.LMPOFF) THEN
+(  789)               ISREQ = ISREQ+1
+(  790)               CALL MPL_SEND(ZCLONEA(IMLOC)%COMMSBUF(:),KDEST=NPRCIDS(ISEND),&
+(  791)                & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(ISREQ),&
+(  792)                & KTAG=ITAG,CDSTRING='SULEG:')
+(  793)             ENDIF
+(  794)           ENDDO
+(  795)           CALL GSTATS(852,1)
+(  796)         ELSE
+(  797)           IRECVLENMAX=2
+(  798)           ZDUM(:)=0.0_JPRBT
+(  799)           CALL GSTATS(852,0)
+(  800)           DO JSETV=1,NPRTRV
+(  801)             CALL SET2PE(ISEND,0,0,MYSETW,JSETV)
+(  802)             IF(.NOT.LMPOFF) THEN
+(  803)               ISREQ = ISREQ+1
+(  804)               CALL MPL_SEND(ZDUM(:),KDEST=NPRCIDS(ISEND), &
+(  805)                & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(ISREQ),&
+(  806)                & KTAG=ITAG,CDSTRING='SULEG:')
+(  807)             ENDIF
+(  808)           ENDDO
+(  809)           CALL GSTATS(852,1)
+(  810)         ENDIF
+(  811)       ENDIF
+(  812)       IF(.NOT.LMPOFF) THEN
+(  813)         CALL GSTATS(852,0)
+(  814)         DO JSETV=1,NPRTRV
+(  815)           CALL SET2PE(ISEND,0,0,MYSETW,JSETV)
+(  816)           CALL MPL_SEND(IRECVLENMAX,KDEST=NPRCIDS(ISEND),KTAG=ITAG1,CDSTRING='SULEG:')
+(  817)         ENDDO
+(  818)         IRECVLENMAX=0
+(  819)         DO JSETV=1,NPRTRV ! ? should this be IPRTRV ?
+(  820)           CALL SET2PE(IRECV,0,0,MYSETW,JSETV)
+(  821)           CALL MPL_RECV(IRECVLENMAXV(JSETV),KSOURCE=NPRCIDS(IRECV),KTAG=ITAG1,CDSTRING='SULEG:')
+(  822)           IRECVLENMAX=MAX(IRECVLENMAX,IRECVLENMAXV(JSETV))
+(  823)         ENDDO
+(  824)         IF( MYPROC == 1 )THEN
+(  825)           IF( IRECVLENMAX > 2 )THEN
+(  826)             WRITE(NOUT,'("SULEG: ANTI-SYM MAX BUTTERFLY CLONE LEN=",I8)')IRECVLENMAX
+(  827)           ENDIF
+(  828)         ENDIF
+(  829)         IF( IRECVLENMAX == 0 )THEN
+(  830)           WRITE(NOUT,'("SULEG: ANTI-SYM WARNING CLONE LEN=",I8,I8)') MYPROC, IRECVLENMAX
+(  831)         ENDIF
+(  832)         IF( IRECVLENMAX > 0 )THEN
+(  833)            ALLOCATE (ZRCVBUTFV(IRECVLENMAX,IPRTRV))
+(  834)            DO JSETV=1,IPRTRV
+(  835)               IRREQ = IRREQ+1
+(  836)               CALL SET2PE(IRECV,0,0,MYSETW,JSETV)
+(  837)               CALL MPL_RECV(ZRCVBUTFV(:,JSETV),KSOURCE=NPRCIDS(IRECV), &
+(  838)                    &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IRECVREQ(IRREQ),&
+(  839)                    & KTAG=ITAG,CDSTRING='SULEG:')
+(  840)            ENDDO
+(  841)         END IF
+(  842)         IF(ISREQ > 0) THEN
+(  843)           CALL MPL_WAIT(KREQUEST=ISENDREQ(1:ISREQ), &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 16
+
+(  844)            & CDSTRING='SUTRLE: SULEG')
+(  845)         ENDIF
+(  846)         IF(IRREQ > 0) THEN
+(  847)           CALL MPL_WAIT(KBYTES=IBYTES,KOUNT=IKOUNT(1:IRREQ),KREQUEST=IRECVREQ(1:IRREQ), &
+(  848)            & CDSTRING='SUTRLE: SULEG')
+(  849)         ENDIF
+(  850)         CALL GSTATS(852,1)
+(  851)         IF( IRECVLENMAX > 0 )THEN
+(  852)           CALL GSTATS(1252,0)
+(  853)           !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JSETV,IMLOC,IM,ILA,IDGLU,INX,ICLONELEN)
+(  854)           DO JSETV=1,IPRTRV
+(  855)             IMLOC=JMLOC+JSETV-1
+(  856)             IM = D%MYMS(IMLOC)
+(  857)             ILA = (R%NSMAX-IM+2)/2
+(  858)             IF( ILA > ITHRESHOLD ) THEN
+(  859)               IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  860)               INX=IDGLU
+(  861)               IF( .NOT.ALLOCATED(ZCLONEA(IMLOC)%COMMSBUF) )THEN
+(  862)                 ICLONELEN=IKOUNT(JSETV)
+(  863)                 ALLOCATE(ZCLONEA(IMLOC)%COMMSBUF(ICLONELEN))
+(  864)                 ZCLONEA(IMLOC)%COMMSBUF(1:ICLONELEN) = ZRCVBUTFV(1:ICLONELEN,JSETV)
+(  865)                 CALL UNPACK_BUTTERFLY_STRUCT(S%FA(IMLOC)%YBUT_STRUCT_A,ZCLONEA(IMLOC))
+(  866)               ENDIF
+(  867)               IF(ALLOCATED(ZCLONEA(IMLOC)%COMMSBUF) ) THEN
+(  868)                 IF( SIZEOF(ZCLONEA(IMLOC)%COMMSBUF) > 0 ) DEALLOCATE(ZCLONEA(IMLOC)%COMMSBUF)
+(  869)                 !              ZCLONEA(IMLOC)%COMMSBUF=>NULL()
+(  870)               ENDIF
+(  871)               IF( ASSOCIATED(S%FA(IMLOC)%RPNMA) .AND. .NOT. S%LKEEPRPNM ) DEALLOCATE(S%FA(IMLOC)%RPNMA)
+(  872)               IF( ASSOCIATED(S%FA(IMLOC)%RPNMDA) ) DEALLOCATE(S%FA(IMLOC)%RPNMDA)
+(  873)             ENDIF
+(  874)           ENDDO
+(  875)           !$OMP END PARALLEL DO
+(  876)           CALL GSTATS(1252,1)
+(  877)           DEALLOCATE(ZRCVBUTFV)
+(  878)         ENDIF
+(  879)       ENDIF
+(  880)    ENDIF
+(  881) 
+(  882)     ! --------------------symmetric-----------------------
+(  883)     ! --------------------symmetric-----------------------
+(  884)     ! --------------------symmetric-----------------------
+(  885) 
+(  886)     DO JSETV=1,IPRTRV
+(  887)       IMLOC=JMLOC+JSETV-1
+(  888)       IM = D%MYMS(IMLOC)
+(  889)       ILS = (R%NSMAX-IM+3)/2
+(  890)       IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  891)       ALLOCATE(S%FA(IMLOC)%RPNMS(IDGLU,ILS))  
+(  892)     ENDDO
+(  893) 
+(  894)     IF( .NOT. S%LUSE_BELUSOV ) THEN 
+(  895) 
+(  896)       ISREQ = 0
+(  897)       IRREQ = 0
+(  898) 
+(  899)       ALLOCATE (ZRCVBUFV(IMAXRECVS,IPRTRV))
+(  900)       CALL GSTATS(851,0)
+(  901)       DO JSETV=1,IPRTRV
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 17
+
+(  902)         CALL SET2PE(IRECV,0,0,MYSETW,JSETV)
+(  903)         IF( .NOT.LMPOFF )THEN
+(  904)           IRREQ = IRREQ+1
+(  905)           CALL MPL_RECV(ZRCVBUFV(:,JSETV),KSOURCE=NPRCIDS(IRECV), &
+(  906)            & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IRECVREQ(IRREQ),&
+(  907)            & KTAG=ITAG,CDSTRING='SULEG:')
+(  908)         ENDIF
+(  909)       ENDDO
+(  910)       CALL GSTATS(851,1)
+(  911) 
+(  912)       IF( JMLOC+MYSETV-1 <= D%NUMP )THEN
+(  913) 
+(  914)         IMLOC=JMLOC+MYSETV-1
+(  915)         IM = D%MYMS(IMLOC)
+(  916)         ISL = MAX(R%NDGNH-G%NDGLU(IM)+1,1)
+(  917)         IS  = 1+MOD(R%NSMAX-IM+1,2)
+(  918)         ILS = (R%NSMAX-IM+3)/2
+(  919)         IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  920) 
+(  921)         ALLOCATE(ZSNDBUFV(IDGLU*ILS))
+(  922)       
+(  923)         IF(MOD(IMAXN-IM,2) == 0) THEN
+(  924)           INMAX=IMAXN
+(  925)         ELSE
+(  926)           INMAX=IMAXN+1
+(  927)         ENDIF
+(  928) 
+(  929)         IF (.NOT.ALLOCATED(ZLPOL)) ALLOCATE(ZLPOL(0:INMAX))
+(  930)         CALL GSTATS(1251,0)
+(  931)         !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JGL,ZLPOL,JI,JN)
+(  932)         DO JGL=1,IDGLU
+(  933)           CALL SUPOLF(IM,INMAX,ZLRMUZ(ISL+JGL-1),ZLPOL(0:INMAX),KCHEAP=2)
+(  934)           DO JI=1,ILS
+(  935)             JN=IM+2*(JI-1)
+(  936)             ZSNDBUFV((JGL-1)*ILS+JI)=ZLPOL(JN)
+(  937)           ENDDO
+(  938)         ENDDO
+(  939)         !$OMP END PARALLEL DO
+(  940)         CALL GSTATS(1251,1)
+(  941)         IF (ALLOCATED(ZLPOL)) DEALLOCATE(ZLPOL)
+(  942) 
+(  943)         CALL GSTATS(851,0)
+(  944)         DO JSETV=1,NPRTRV
+(  945)           CALL SET2PE(ISEND,0,0,MYSETW,JSETV)
+(  946)           IF( .NOT.LMPOFF )THEN
+(  947)             ISREQ = ISREQ+1
+(  948)             CALL MPL_SEND(ZSNDBUFV(:),KDEST=NPRCIDS(ISEND), &
+(  949)              & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(ISREQ),&
+(  950)              & KTAG=ITAG,CDSTRING='SULEG:')
+(  951)           ENDIF
+(  952)         ENDDO
+(  953)         CALL GSTATS(851,1)
+(  954) 
+(  955)       ENDIF
+(  956) 
+(  957)       CALL GSTATS(851,0)
+(  958)       IF(IRREQ > 0) THEN
+(  959)         CALL MPL_WAIT(KREQUEST=IRECVREQ(1:IRREQ), &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 18
+
+(  960)          & CDSTRING='SUTRLE: SULEG')
+(  961)       ENDIF
+(  962) 
+(  963)       IF(ISREQ > 0) THEN
+(  964)         CALL MPL_WAIT(KREQUEST=ISENDREQ(1:ISREQ), &
+(  965)          & CDSTRING='SUTRLE: SULEG')
+(  966)       ENDIF
+(  967)       IF( NPROC==1.AND.LMPOFF )THEN
+(  968)         ZRCVBUFV(1:SIZE(ZSNDBUFV(:)),1)=ZSNDBUFV(:)
+(  969)       ENDIF
+(  970)       CALL GSTATS(851,1)
+(  971) 
+(  972)       CALL GSTATS(1251,0)
+(  973)       !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JSETV,IMLOC,IM,ISL,IS,ILS,IDGLU,JGL,JI)
+(  974)       DO JSETV=1,IPRTRV
+(  975)         IMLOC=JMLOC+JSETV-1
+(  976)         IM = D%MYMS(IMLOC)
+(  977)         ISL = MAX(R%NDGNH-G%NDGLU(IM)+1,1)
+(  978)         IS  = 1+MOD(R%NSMAX-IM+1,2)
+(  979)         ILS = (R%NSMAX-IM+3)/2
+(  980)         IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  981)         IF( S%LUSEFLT .AND. ILS > ITHRESHOLD ) THEN
+(  982)           IF( .NOT. S%LKEEPRPNM ) DEALLOCATE(S%FA(IMLOC)%RPNMS)
+(  983)           ALLOCATE(S%FA(IMLOC)%RPNMDS(IDGLU,ILS))
+(  984)           DO JGL=1,IDGLU
+(  985)             DO JI=1,ILS
+(  986)               S%FA(IMLOC)%RPNMDS(JGL,ILS-JI+1)=ZRCVBUFV((JGL-1)*ILS+JI,JSETV)
+(  987)             ENDDO
+(  988)           ENDDO
+(  989)           IF( S%LKEEPRPNM ) THEN
+(  990)             DO JGL=1,IDGLU
+(  991)               DO JI=1,ILS
+(  992)                 S%FA(IMLOC)%RPNMS(JGL,ILS-JI+1)=ZRCVBUFV((JGL-1)*ILS+JI,JSETV)
+(  993)               ENDDO
+(  994)             ENDDO
+(  995)           ENDIF
+(  996)         ELSE
+(  997)           DO JGL=1,IDGLU
+(  998)             DO JI=1,ILS
+(  999)               S%FA(IMLOC)%RPNMS(JGL,ILS-JI+1)=ZRCVBUFV((JGL-1)*ILS+JI,JSETV)
+( 1000)             ENDDO
+( 1001)           ENDDO
+( 1002)        ENDIF
+( 1003)     ENDDO
+( 1004)     !$OMP END PARALLEL DO
+( 1005)       CALL GSTATS(1251,1)
+( 1006)         
+( 1007)       IF( ALLOCATED(ZSNDBUFV) ) DEALLOCATE(ZSNDBUFV)
+( 1008)       IF( ALLOCATED(ZRCVBUFV) ) DEALLOCATE(ZRCVBUFV)
+( 1009) 
+( 1010)     ELSE    
+( 1011)       CALL GSTATS(1251,0)
+( 1012)       !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JSETV,IMLOC,IM,ISL,IS,ILS,IDGLU,JGL,JI)
+( 1013)       DO JSETV=1,IPRTRV
+( 1014)         IMLOC=JMLOC+JSETV-1
+( 1015)         IM = D%MYMS(IMLOC)
+( 1016)         ISL = MAX(R%NDGNH-G%NDGLU(IM)+1,1)
+( 1017)         IS  = 1+MOD(R%NSMAX-IM+1,2)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 19
+
+( 1018)         ILS = (R%NSMAX-IM+3)/2
+( 1019)         IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+( 1020)         IF( S%LUSEFLT .AND. ILS > ITHRESHOLD ) THEN
+( 1021)            IF( .NOT. S%LKEEPRPNM ) DEALLOCATE(S%FA(IMLOC)%RPNMS)
+( 1022)            ALLOCATE(S%FA(IMLOC)%RPNMDS(IDGLU,ILS))
+( 1023)            DO JI=1,ILS
+( 1024)               DO JGL=1,IDGLU
+( 1025)                  S%FA(IMLOC)%RPNMDS(JGL,JI) = F%RPNM(ISL+JGL-1,D%NPMS(IM)+IS+(JI-1)*2)
+( 1026)               ENDDO
+( 1027)            ENDDO
+( 1028)            IF( S%LKEEPRPNM ) THEN
+( 1029)              DO JI=1,ILS
+( 1030)                DO JGL=1,IDGLU
+( 1031)                  S%FA(IMLOC)%RPNMS(JGL,JI) = F%RPNM(ISL+JGL-1,D%NPMS(IM)+IS+(JI-1)*2)
+( 1032)                ENDDO
+( 1033)              ENDDO
+( 1034)            ENDIF
+( 1035)          ELSE
+( 1036)            DO JI=1,ILS
+( 1037)               DO JGL=1,IDGLU
+( 1038)                  S%FA(IMLOC)%RPNMS(JGL,JI) = F%RPNM(ISL+JGL-1,D%NPMS(IM)+IS+(JI-1)*2)
+( 1039)               ENDDO
+( 1040)            ENDDO
+( 1041)         END IF
+( 1042)      END DO
+( 1043)      !$OMP END PARALLEL DO
+( 1044)      CALL GSTATS(1251,1)
+( 1045)         
+( 1046)   ENDIF
+( 1047) 
+( 1048)     ! -------------------- symmetric FLT iniitialisation -----------------------
+( 1049) 
+( 1050)     IF( S%LUSEFLT) THEN
+( 1051)       IRECVLENMAX=0
+( 1052)       ISREQ = 0
+( 1053)       IRREQ = 0
+( 1054)       IF( JMLOC+MYSETV-1 <= D%NUMP )THEN
+( 1055)          IMLOC=JMLOC+MYSETV-1
+( 1056)          IM = D%MYMS(IMLOC)
+( 1057)          ILS = (R%NSMAX-IM+3)/2
+( 1058)          IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+( 1059)          IF( ILS > ITHRESHOLD ) THEN
+( 1060)             S%LSYM = .TRUE.
+( 1061)             INX = IDGLU
+( 1062)             CALL CONSTRUCT_BUTTERFLY(ZEPS_INT_DEC,IMAXCOLS,INX,ILS,S%FA(IMLOC)%RPNMDS,&
+( 1063)                  & S%FA(IMLOC)%YBUT_STRUCT_S)
+( 1064)           CALL PACK_BUTTERFLY_STRUCT(S%FA(IMLOC)%YBUT_STRUCT_S,ZCLONES(IMLOC))
+( 1065)           IRECVLENMAX=SIZE(ZCLONES(IMLOC)%COMMSBUF)
+( 1066)           CALL GSTATS(852,0)
+( 1067)           DO JSETV=1,NPRTRV
+( 1068)             CALL SET2PE(ISEND,0,0,MYSETW,JSETV)
+( 1069)             IF(.NOT.LMPOFF) THEN
+( 1070)               ISREQ = ISREQ+1
+( 1071)               CALL MPL_SEND(ZCLONES(IMLOC)%COMMSBUF(:),KDEST=NPRCIDS(ISEND),&
+( 1072)                &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(ISREQ),&
+( 1073)                & KTAG=ITAG,CDSTRING='SULEG:')
+( 1074)             ENDIF
+( 1075)           ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 20
+
+( 1076)           CALL GSTATS(852,1)
+( 1077)         ELSE
+( 1078)           IRECVLENMAX=2
+( 1079)           ZDUM(:)=0.0_JPRBT
+( 1080)           CALL GSTATS(852,0)
+( 1081)           DO JSETV=1,NPRTRV
+( 1082)             CALL SET2PE(ISEND,0,0,MYSETW,JSETV)
+( 1083)             IF(.NOT.LMPOFF) THEN
+( 1084)               ISREQ = ISREQ+1
+( 1085)               CALL MPL_SEND(ZDUM(:),KDEST=NPRCIDS(ISEND), &
+( 1086)                &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(ISREQ),&
+( 1087)                & KTAG=ITAG,CDSTRING='SULEG:')
+( 1088)             ENDIF
+( 1089)           ENDDO
+( 1090)           CALL GSTATS(852,1)
+( 1091)         ENDIF
+( 1092)       ENDIF
+( 1093)       IF(.NOT. LMPOFF) THEN
+( 1094)         CALL GSTATS(852,0)
+( 1095)         DO JSETV=1,NPRTRV
+( 1096)           CALL SET2PE(ISEND,0,0,MYSETW,JSETV)
+( 1097)           CALL MPL_SEND(IRECVLENMAX,KDEST=NPRCIDS(ISEND),KTAG=ITAG1,CDSTRING='SULEG:')
+( 1098)         ENDDO
+( 1099)         IRECVLENMAX=0
+( 1100)         DO JSETV=1,NPRTRV ! ? should this be IPRTRV ?
+( 1101)           CALL SET2PE(IRECV,0,0,MYSETW,JSETV)
+( 1102)           CALL MPL_RECV(IRECVLENMAXV(JSETV),KSOURCE=NPRCIDS(IRECV),KTAG=ITAG1,CDSTRING='SULEG:')
+( 1103)           IRECVLENMAX=MAX(IRECVLENMAX,IRECVLENMAXV(JSETV))
+( 1104)         ENDDO
+( 1105)         IF( MYPROC == 1 )THEN
+( 1106)           IF( IRECVLENMAX > 2 )THEN
+( 1107)             WRITE(NOUT,'("SULEG: SYM      MAX BUTTERFLY CLONE LEN=",I8)')IRECVLENMAX
+( 1108)           ENDIF
+( 1109)         ENDIF
+( 1110)         IF( IRECVLENMAX == 0 )THEN
+( 1111)           WRITE(NOUT,'("SULEG: SYM WARNING CLONE LEN=",I8,I8)')MYPROC, IRECVLENMAX
+( 1112)         ENDIF
+( 1113)         IF( IRECVLENMAX > 0 )THEN
+( 1114)           ALLOCATE (ZRCVBUTFV(IRECVLENMAX,IPRTRV))
+( 1115)           DO JSETV=1,IPRTRV
+( 1116)             IRREQ = IRREQ+1
+( 1117)             CALL SET2PE(IRECV,0,0,MYSETW,JSETV)
+( 1118)             CALL MPL_RECV(ZRCVBUTFV(:,JSETV),KSOURCE=NPRCIDS(IRECV), &
+( 1119)              &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IRECVREQ(IRREQ),&
+( 1120)              & KTAG=ITAG,CDSTRING='SULEG:')
+( 1121)           ENDDO
+( 1122)         ENDIF
+( 1123)         IF(ISREQ > 0) THEN
+( 1124)           CALL MPL_WAIT(KREQUEST=ISENDREQ(1:ISREQ), &
+( 1125)            & CDSTRING='SUTRLE: SULEG')
+( 1126)         ENDIF
+( 1127)         IF(IRREQ > 0) THEN
+( 1128)           CALL MPL_WAIT(KBYTES=IBYTES,KOUNT=IKOUNT(1:IRREQ),KREQUEST=IRECVREQ(1:IRREQ), &
+( 1129)            & CDSTRING='SUTRLE: SULEG')
+( 1130)         ENDIF
+( 1131)         CALL GSTATS(852,1)
+( 1132) 
+( 1133) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 21
+
+( 1134)         IF( IRECVLENMAX > 0 )THEN
+( 1135)           CALL GSTATS(1252,0)
+( 1136)           !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JSETV,IMLOC,IM,ILS,IDGLU,INX,ICLONELEN)
+( 1137)           DO JSETV=1,IPRTRV
+( 1138)             IMLOC=JMLOC+JSETV-1
+( 1139)             IM = D%MYMS(IMLOC)
+( 1140)             ILS = (R%NSMAX-IM+3)/2
+( 1141)             IF( ILS > ITHRESHOLD ) THEN
+( 1142)               IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+( 1143)               INX=IDGLU
+( 1144)               IF( .NOT.ALLOCATED(ZCLONES(IMLOC)%COMMSBUF) )THEN
+( 1145)                 ICLONELEN=IKOUNT(JSETV)
+( 1146)                 ALLOCATE(ZCLONES(IMLOC)%COMMSBUF(ICLONELEN))
+( 1147)                 ZCLONES(IMLOC)%COMMSBUF(1:ICLONELEN) = ZRCVBUTFV(1:ICLONELEN,JSETV)
+( 1148)                 CALL UNPACK_BUTTERFLY_STRUCT( S%FA(IMLOC)%YBUT_STRUCT_S,ZCLONES(IMLOC))
+( 1149)               ENDIF
+( 1150)               IF( ALLOCATED(ZCLONES(IMLOC)%COMMSBUF) ) THEN
+( 1151)                 IF( SIZEOF(ZCLONES(IMLOC)%COMMSBUF) > 0 ) DEALLOCATE(ZCLONES(IMLOC)%COMMSBUF)
+( 1152)                 !              ZCLONES(IMLOC)%COMMSBUF=>NULL()
+( 1153)               ENDIF
+( 1154)               IF( ASSOCIATED(S%FA(IMLOC)%RPNMS) .AND. .NOT. S%LKEEPRPNM ) DEALLOCATE(S%FA(IMLOC)%RPNMS)
+( 1155)               IF( ASSOCIATED(S%FA(IMLOC)%RPNMDS) ) DEALLOCATE(S%FA(IMLOC)%RPNMDS)
+( 1156)             ENDIF
+( 1157)           ENDDO
+( 1158)           !$OMP END PARALLEL DO
+( 1159)           CALL GSTATS(1252,1)
+( 1160)           DEALLOCATE(ZRCVBUTFV)
+( 1161)         ENDIF
+( 1162)       ENDIF
+( 1163)     ENDIF
+( 1164) 
+( 1165)   ENDDO                     ! +++++++++++++++++++++ END JMLOC LOOP +++++++++++++++++++++++
+( 1166) 
+( 1167) !  ENDIF ! (S%LUSE_BELUSOV.OR.S%LUSEFLT)
+( 1168)     
+( 1169)   IF( S%LUSEFLT )THEN
+( 1170)     DEALLOCATE(ZCLONEA)
+( 1171)     DEALLOCATE(ZCLONES)
+( 1172)   ENDIF
+( 1173) 
+( 1174)   IF( LLP1 .AND. S%LUSEFLT ) THEN    
+( 1175)     WRITE(NOUT,*) '=== SULEG: Finished SETUP_BUTTERFLY ==='
+( 1176)   ENDIF
+( 1177)   ENDIF
+( 1178) 
+( 1179)   CALL GSTATS(1801,3)
+( 1180)   IF(S%LUSE_BELUSOV) DEALLOCATE(F%RPNM)
+( 1181) 
+( 1182)   IF(C%LWRITE_LEGPOL) CALL WRITE_LEGPOL
+( 1183)   IF(C%LREAD_LEGPOL)  CALL READ_LEGPOL
+( 1184) 
+( 1185) 
+( 1186) ENDIF
+( 1187) CALL GSTATS(1801,1)
+( 1188) CALL GSTATS(140,1)
+( 1189) 
+( 1190) !     ------------------------------------------------------------------
+( 1191) 9 FORMAT(1X,'ARRAY ',A10,' ALLOCATED ',8I8)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 22
+
+( 1192) 
+( 1193) !IF (S%LUSE_BELUSOV.OR.S%LUSEFLT) 
+( 1194) CALL END_POL
+( 1195) 
+( 1196) END SUBROUTINE SULEG
+( 1197) END MODULE SULEG_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 23
+
+(    1) # 1 "suleg_mod.F90"
+(    1) MODULE SULEG_MOD
+(    2) # 5 "suleg_mod.F90"
+(    5) CONTAINS
+(    6) SUBROUTINE SULEG
+(    7) !DEC$ OPTIMIZE:1
+(    8) # 9 "suleg_mod.F90"
+(    9) USE PARKIND1  ,ONLY : JPRD, JPIM, JPRBT
+(   10) USE PARKIND2  ,ONLY : JPRH
+(   11) USE MPL_MODULE
+(   12) # 13 "suleg_mod.F90"
+(   13) USE TPM_GEN
+(   14) USE TPM_DIM
+(   15) USE TPM_CONSTANTS
+(   16) USE TPM_DISTR
+(   17) USE TPM_FIELDS ,ONLY : FIELDS_RESOL, F
+(   18) USE TPM_FLT
+(   19) USE TPM_GEOMETRY
+(   20) USE TPM_CTL
+(   21) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   22) # 23 "suleg_mod.F90"
+(   23) USE PRE_SULEG_MOD
+(   24) USE SUGAW_MOD
+(   25) USE SUPOL_MOD
+(   26) USE SUPOLF_MOD
+(   27) USE TPM_POL
+(   28) USE SUTRLE_MOD
+(   29) USE SETUP_GEOM_MOD
+(   30) USE BUTTERFLY_ALG_MOD
+(   31) USE SEEFMM_MIX
+(   32) USE SET2PE_MOD
+(   33) USE ABORT_TRANS_MOD
+(   34) USE PREPSNM_MOD     ,ONLY : PREPSNM
+(   35) USE WRITE_LEGPOL_MOD
+(   36) USE READ_LEGPOL_MOD
+(   37) # 38 "suleg_mod.F90"
+(   38) !**** *SULEG * - initialize the Legendre polynomials
+(   39) # 40 "suleg_mod.F90"
+(   40) !     Purpose.
+(   41) !     --------
+(   42) !           Initialize COMMON YOMLEG
+(   43) # 44 "suleg_mod.F90"
+(   44) !**   Interface.
+(   45) !     ----------
+(   46) !        *CALL* *SULEG*
+(   47) # 48 "suleg_mod.F90"
+(   48) !        Explicit arguments :
+(   49) !        --------------------
+(   50) # 51 "suleg_mod.F90"
+(   51) !        Implicit arguments :
+(   52) !        --------------------
+(   53) !              COMMON YOMLEG
+(   54) # 55 "suleg_mod.F90"
+(   55) !     Method.
+(   56) !     -------
+(   57) !        See documentation
+(   58) # 59 "suleg_mod.F90"
+(   59) !     Externals.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 24
+
+(   60) !     ----------
+(   61) !        SUGAW  (Gaussian latitudes)
+(   62) !        SUPOLM (polynomials)
+(   63) !        LFI routines for external IO's
+(   64) !        Called by SUGEM.
+(   65) # 66 "suleg_mod.F90"
+(   66) !     Reference.
+(   67) !     ----------
+(   68) !        ECMWF Research Department documentation of the IFS
+(   69) !     
+(   70) !     S.L. Belousov, Tables of normalized associated Legendre Polynomials, Pergamon Press (1962)
+(   71) !     P.N. Swarztrauber, On computing the points and weights for Gauss-Legendre quadrature,
+(   72) !     SIAM J. Sci. Comput. Vol. 24 (3) pp. 945-954 (2002)
+(   73) # 74 "suleg_mod.F90"
+(   74) !     Author.
+(   75) !     -------
+(   76) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   77) # 78 "suleg_mod.F90"
+(   78) !     Modifications.
+(   79) !     --------------
+(   80) !        Original : 87-10-15
+(   81) !        MODIFICATION : 91-04  J.M. Piriou:
+(   82) !                       - Read gaussian latitudes and PNM on LFI
+(   83) !                       - If file missing, computes
+(   84) !                       91-04 M.Hamrud:
+(   85) !                       - IO Scheme introduced
+(   86) !        MODIFICATION : 91-07-03 P.Courtier suppress derivatives
+(   87) !        MODIFICATION : 91-07-03 P.Courtier computes RATATH and RACTHE
+(   88) !        MODIFICATION : 91-07-03 P.Courtier change upper limit (NSMAX+1)
+(   89) !        MODIFICATION : 91-07-03 P.Courtier change ordering
+(   90) !     Order of the PNM in the file, as in the model :
+(   91) !         - increasing wave numbers m
+(   92) !         - for a given m, from n=NSMAX+1 to m
+(   93) !        MODIFICATION : 92-07-02 R. Bubnova: shift RATATH calculation
+(   94) !                                            to SUGEM1
+(   95) !        MODIFICATION : 92-12-17 P.Courtier multitask computations
+(   96) !        Modified by R. EL Khatib : 93-04-02 Set-up defaults controled by LECMWF
+(   97) !        MODIFICATION : 93-03-19 D.Giard : n <= NTMAX
+(   98) !        K. YESSAD    : 93-05-11 : DLMU --> global array DRMU(NDGSA:NDGEN).
+(   99) !                       (not stored currently on LFI files).
+(  100) !        MODIFICATION : 94-02-03 R. El Khatib : subroutine SULEG2 to write out
+(  101) !                       the Leg. polynomials on workfile or LFI file
+(  102) !        Modification : 94-08-31 M. Tolstykh: Setup for CUD interpolation
+(  103) !        Modified by K. YESSAD (MARCH 1995): Extra-latitudes computations
+(  104) !                 according to value of NDGSUR and LRPOLE only.
+(  105) !                 + change fancy loop numbering.
+(  106) !        Modified 98-08-10 by K. YESSAD: removal of LRPOLE option.
+(  107) !          - removal of LRPOLE in YOMCT0.
+(  108) !          - removal of code under LRPOLE.
+(  109) !        R. El Khatib 11-Apr-2007 Emulation of vectorized quadruple precision
+(  110) !                                 on NEC
+(  111) !        Nils Wedi + Mats Hamrud, 2009-02-05 revised following Swarztrauber, 2002
+(  112) !        G.Mozdzynski: March 2011 Support 2D (RW,RV) initialisation of legendre coeffs
+(  113) !        G.Mozdzynski: July 2012  distribute FLT initialisation over NPRTRV
+(  114) !        R. El Khatib 14-Jun-2013 optional computation on the stretched latitudes
+(  115) !        F. Vana  05-Mar-2015  Support for single precision
+(  116) !        Nils Wedi, 20-Apr-2015 Support dual latitude/longitude set
+(  117) !        T. Wilhelmsson, 22-Sep-2016 Support single precision for dual too
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 25
+
+(  118) !     ------------------------------------------------------------------
+(  119) # 120 "suleg_mod.F90"
+(  120) IMPLICIT NONE
+(  121) # 122 "suleg_mod.F90"
+(  122) !     LOCAL 
+(  123) !     ------------------------------------------------------------------
+(  124) REAL(KIND=JPRD),ALLOCATABLE :: ZPNMG(:)
+(  125) REAL(KIND=JPRD),ALLOCATABLE :: ZFN(:,:)
+(  126) REAL(KIND=JPRD),ALLOCATABLE :: ZLRMUZ2(:)
+(  127) REAL(KIND=JPRBT) :: ZEPSNM(0:R%NTMAX+2)
+(  128) REAL(KIND=JPRD) :: ZLRMUZ(R%NDGL)
+(  129) REAL(KIND=JPRD) :: ZW(R%NDGL)
+(  130) # 131 "suleg_mod.F90"
+(  131) REAL(KIND=JPRD) :: ZANM
+(  132) REAL(KIND=JPRD) :: ZFNN
+(  133) REAL(KIND=JPRD) :: ZPI, ZINC, ZOFF, ZTEMP, ZORIG, ZTHETA, ZCOS
+(  134) # 135 "suleg_mod.F90"
+(  135) REAL(KIND=JPRD), ALLOCATABLE :: ZSNDBUFV(:),ZRCVBUFV(:,:)
+(  136) REAL(KIND=JPRD), ALLOCATABLE :: ZPNMCDO(:,:),ZPNMCDD(:,:)
+(  137) REAL(KIND=JPRBT), ALLOCATABLE :: ZRCVBUTFV(:,:)
+(  138) REAL(KIND=JPRBT) :: ZDUM(2)
+(  139) REAL(KIND=KIND(ZRCVBUTFV)) :: ZBYTES
+(  140) INTEGER(KIND=JPIM) :: IBYTES
+(  141) INTEGER(KIND=JPIM) :: ISENDREQ(NPRTRV)
+(  142) INTEGER(KIND=JPIM) :: IRECVREQ(NPRTRV)
+(  143) INTEGER(KIND=JPIM) :: IKOUNT(NPRTRV)
+(  144) INTEGER(KIND=JPIM) :: IRECVLENMAXV(NPRTRV)
+(  145) # 146 "suleg_mod.F90"
+(  146) INTEGER(KIND=JPIM) :: INM, IM, IRECV, ISEND, ISREQ, IRREQ, &
+(  147)              &JGL,  JM, JMLOC, IMLOC, JN, JNM, IODD, INN, INMAX, JI, IMAXN, ITAG, ITAG1, &
+(  148)              &INX, ISL, ISTART, ITHRESHOLD, INSMAX, IMAXCOLS,ILATSMAX,JW,JV,J, &
+(  149)              &IDGLU, ILA, ILS, IA, IS, I, ILATS, ILOOP, IPRTRV, JSETV, JH, &
+(  150)              &IMAXRECVA, IMAXRECVS, IRECVLENMAX, ICLONELEN, IHEMIS, INNH, IGL, IGL1, IGL2, &
+(  151)              &IDGLU2, ISYM, INZ
+(  152) # 153 "suleg_mod.F90"
+(  153) REAL(KIND=JPRD) :: ZEPS_INT_DEC
+(  154) REAL(KIND=JPRD) :: ZEPS
+(  155) REAL(KIND=JPRD),ALLOCATABLE :: ZLFPOL(:,:)
+(  156) REAL(KIND=JPRD),ALLOCATABLE :: ZLPOL(:)
+(  157) # 158 "suleg_mod.F90"
+(  158) TYPE(CLONE),ALLOCATABLE :: ZCLONEA(:),ZCLONES(:)
+(  159) # 160 "suleg_mod.F90"
+(  160) LOGICAL :: LLP1,LLP2
+(  161) # 162 "suleg_mod.F90"
+(  162) ! For latitudes on the stretched geometry
+(  163) REAL(KIND=JPRH) :: ZTAN
+(  164) REAL(KIND=JPRH) :: ZSTRETMU(R%NDGL)
+(  165) # 166 "suleg_mod.F90"
+(  166) !     ------------------------------------------------------------------
+(  167) # 168 "suleg_mod.F90"
+(  168) !*       0.    Some initializations.
+(  169) !              ---------------------
+(  170) # 171 "suleg_mod.F90"
+(  171) IBYTES = MPL_BYTES(ZBYTES)
+(  172) # 173 "suleg_mod.F90"
+(  173) ZEPS = 1000._JPRD*EPSILON(ZEPS)
+(  174) !ZEPS_INT_DEC = EPSILON(ZEPS)
+(  175) ZEPS_INT_DEC = 1.0E-7_JPRD
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 26
+
+(  176) !ZEPS_INT_DEC = 1.0E-5_JPRD
+(  177) # 178 "suleg_mod.F90"
+(  178) IHEMIS=1
+(  179) IF (S%LSOUTHPNM) IHEMIS=2
+(  180) LLP1 = NPRINTLEV>0
+(  181) LLP2 = NPRINTLEV>1
+(  182) IF(LLP1) WRITE(NOUT,*) '=== ENTER ROUTINE SULEG ==='
+(  183) # 184 "suleg_mod.F90"
+(  184) IF( NPROC > 1 )THEN
+(  185)   CALL GSTATS(798,0)
+(  186)   CALL MPL_BARRIER(CDSTRING='SULEG:')
+(  187)   CALL GSTATS(798,1)
+(  188) ENDIF
+(  189) # 190 "suleg_mod.F90"
+(  190) CALL GSTATS(140,0)
+(  191) CALL GSTATS(1801,0)
+(  192) # 193 "suleg_mod.F90"
+(  193) IF(.NOT.D%LGRIDONLY) THEN
+(  194)   CALL PRE_SULEG
+(  195) ENDIF
+(  196) # 197 "suleg_mod.F90"
+(  197) ALLOCATE(F%RMU(R%NDGL))
+(  198) IF (LLP2) WRITE(NOUT,9) 'F%RMU     ',SIZE(F%RMU ),SHAPE(F%RMU ) 
+(  199) ALLOCATE(F%RW(R%NDGL))
+(  200) IF (LLP2) WRITE(NOUT,9) 'F%RW      ',SIZE(F%RW  ),SHAPE(F%RW  ) 
+(  201) # 203 "suleg_mod.F90"
+(  203) !*       1.0 Initialize Fourier coefficients for ordinary Legendre polynomials
+(  204) !     ------------------------------------------------------------------------
+(  205) # 206 "suleg_mod.F90"
+(  206) ALLOCATE(ZFN(0:R%NDGL,0:R%NDGL))
+(  207) IF (LLP2) WRITE(NOUT,9) 'ZFN       ',SIZE(ZFN   ),SHAPE(ZFN   )
+(  208) # 211 "suleg_mod.F90"
+(  211) ! determines the number of stripes in butterfly NSMAX/IMAXCOLS 
+(  212) ! IMAXCOLS = (R%NSMAX - 1)/4 + 1
+(  213) ! IMAXCOLS=64 (min flops)
+(  214) IMAXCOLS=64
+(  215) # 216 "suleg_mod.F90"
+(  216) ! the threshold of efficiency
+(  217) IF(NPROC == 1 .OR. R%NDGNH <= 2560) THEN
+(  218)    ITHRESHOLD = R%NDGNH/4
+(  219)    DO
+(  220)       IF(ITHRESHOLD >= IMAXCOLS*4) EXIT
+(  221)       IMAXCOLS = IMAXCOLS/2
+(  222)    ENDDO
+(  223) ELSE
+(  224)    ITHRESHOLD = 900
+(  225) ENDIF
+(  226) # 227 "suleg_mod.F90"
+(  227) ITHRESHOLD = MAX(ITHRESHOLD,IMAXCOLS+1)
+(  228) S%ITHRESHOLD = ITHRESHOLD
+(  229) # 230 "suleg_mod.F90"
+(  230) !*       3.1   Gaussian latitudes and weights
+(  231) !     ---------------------------------------
+(  232) # 233 "suleg_mod.F90"
+(  233) !IF (S%LUSE_BELUSOV.OR.S%LUSEFLT) 
+(  234) CALL INI_POL(R%NTMAX+3)
+(  235) # 236 "suleg_mod.F90"
+(  236) IF(.NOT.D%LGRIDONLY) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 27
+
+(  237)   ISTART=1
+(  238) ELSE
+(  239)   ISTART=R%NDGL
+(  240) ENDIF
+(  241) # 242 "suleg_mod.F90"
+(  242) INMAX=R%NDGL
+(  243) ! Belousov, Swarztrauber use ZFN(0,0)=SQRT(2._JPRD)
+(  244) ! IFS normalisation chosen to be 0.5*Integral(Pnm**2) = 1
+(  245) ZFN(0,0)=2._JPRD
+(  246) DO JN=ISTART,R%NDGL
+(  247)   ZFNN=ZFN(0,0)
+(  248)   DO JGL=1,JN
+(  249)     ZFNN=ZFNN*SQRT(1._JPRD-0.25_JPRD/REAL(JGL**2,JPRD))
+(  250)   ENDDO
+(  251) # 252 "suleg_mod.F90"
+(  252)   IODD=MOD(JN,2)
+(  253)   ZFN(JN,JN)=ZFNN
+(  254)   DO JGL=2,JN-IODD,2
+(  255)     ZFN(JN,JN-JGL)=ZFN(JN,JN-JGL+2)*REAL((JGL-1)*(2*JN-JGL+2),JPRD)/REAL(JGL*(2*JN-JGL+1),JPRD)
+(  256)   ENDDO
+(  257) ENDDO
+(  258) # 259 "suleg_mod.F90"
+(  259) ! compute latitudes and weights for original Gaussian latitudes
+(  260) ZANM=SQRT(REAL(2*INMAX+1,JPRD)*REAL(INMAX**2,JPRD)/REAL(2*INMAX-1,JPRD))
+(  261) INN=R%NDGL
+(  262) CALL GSTATS(1801,2)
+(  263) CALL SUGAW(INN,0,INMAX,ZLRMUZ(1:INN),ZW(1:INN),ZANM,ZFN)
+(  264) CALL GSTATS(1801,3)
+(  265) # 266 "suleg_mod.F90"
+(  266) IF (ABS(G%RSTRET-1.0_JPRD)>100._JPRD*EPSILON(1._JPRD)) THEN
+(  267)   WRITE(NOUT,*) '=== SULEG: Change Gaussian latitudes to the transformed sphere ==='
+(  268)   INNH=(INN+1)/2
+(  269)   ZTAN=(1.0_JPRD-G%RSTRET**2)/(1.0_JPRD+G%RSTRET**2)
+(  270) ! North hemisphere
+(  271)   DO JGL=1,INNH
+(  272)     ZSTRETMU(JGL)=(ZTAN+REAL(ZLRMUZ(JGL),JPRH))/(1.0_JPRD+ZTAN*REAL(ZLRMUZ(JGL),JPRH))
+(  273)   ENDDO
+(  274) ! South hemisphere
+(  275)   DO JGL=1,INNH
+(  276)     IGL=2*INNH-JGL+1
+(  277)     ZSTRETMU(IGL)=(ZTAN-REAL(ZLRMUZ(JGL),JPRH))/(1.0_JPRD-ZTAN*REAL(ZLRMUZ(JGL),JPRH))
+(  278)   ENDDO
+(  279)   DO JGL=1,INN
+(  280)     ZLRMUZ(JGL)=REAL(ZSTRETMU(JGL),JPRD)
+(  281)   ENDDO
+(  282) ENDIF
+(  283) # 284 "suleg_mod.F90"
+(  284) DO JGL=1,R%NDGL
+(  285)   F%RW(JGL)     = ZW(JGL)
+(  286)   F%RMU(JGL)    = ZLRMUZ(JGL)
+(  287) ENDDO
+(  288) # 289 "suleg_mod.F90"
+(  289) IF (LLP1) WRITE(NOUT,*) '=== SULEG: Finished Gaussian latitudes ==='
+(  290) # 291 "suleg_mod.F90"
+(  291) !*       3.1.1  specify a dual set of output (inv_trans) or input (dir_trans) latitudes / longitudes
+(  292) # 293 "suleg_mod.F90"
+(  293) IF( S%LDLL ) THEN
+(  294) # 295 "suleg_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 28
+
+(  295)   INMAX = S%NDGL
+(  296)   INN= S%NDGL
+(  297) # 298 "suleg_mod.F90"
+(  298)   S%NDGNHD = (INMAX+1)/2
+(  299)   ALLOCATE(ZLRMUZ2(INN))
+(  300) # 301 "suleg_mod.F90"
+(  301)   ! here we want to use the positions of the specified dual grid
+(  302)   ! accuracy requirement is ZLRMUZ2(JGL) < F%RMU(1)
+(  303)   ! so we use approximations for the remaining latitudes outside this range
+(  304)   ! we approximate the vicinity to the pole/equator
+(  305) # 306 "suleg_mod.F90"
+(  306)   ZPI = 2.0_JPRD*ASIN(1.0_JPRD)
+(  307)   
+(  308)   ZORIG = ASIN(F%RMU(1))
+(  309)   IF( S%LSHIFTLL )  THEN
+(  310)     ZINC = ZPI/REAL(INN,JPRD)
+(  311)     ZOFF = 0.5_JPRD*ZINC
+(  312)     ZTEMP = ZOFF + ZINC*REAL(S%NDGNHD-1,JPRD)
+(  313)     ZLRMUZ2(1) =  SIN(MIN(ZTEMP,ZORIG) - 0.5_JPRD*MAX(0._JPRD,ZTEMP - ZORIG))
+(  314)     ZLRMUZ2(S%NDGNHD) = SIN(ZOFF)
+(  315)   ELSE
+(  316)     ZINC = ZPI/REAL(INN-2,JPRD)
+(  317)     ZOFF=-0.5_JPRD*ZINC
+(  318)     ZTEMP = ZOFF + ZINC*REAL(S%NDGNHD-1,JPRD)
+(  319)     ZLRMUZ2(1) =  SIN(MIN(ZTEMP,ZORIG) - 0.5_JPRD*MAX(0._JPRD,ZTEMP - ZORIG))
+(  320)     ZOFF=0.01_JPRD*ZINC
+(  321)     ZLRMUZ2(S%NDGNHD) = SIN(ZOFF)
+(  322)     ZOFF=0._JPRD
+(  323)   ENDIF
+(  324)   DO JGL=2, S%NDGNHD-1
+(  325)     ZLRMUZ2(JGL) = SIN(ZOFF + ZINC*REAL(S%NDGNHD-JGL,JPRD))
+(  326)   ENDDO
+(  327)   DO JGL=1, S%NDGNHD
+(  328)     ISYM = INN-JGL+1
+(  329)     ZLRMUZ2(ISYM) = -ZLRMUZ2(JGL)
+(  330)   ENDDO
+(  331) # 332 "suleg_mod.F90"
+(  332)   IF( LLP2 ) THEN
+(  333)     WRITE(NOUT,*) 'dual latitudes'
+(  334)     DO JGL= 1, INN
+(  335)       WRITE(NOUT,*)  'dual  JGL=',JGL,(180._JPRD/ZPI)*ZINC,(180._JPRD/ZPI)*ASIN(ZLRMUZ2(JGL)),(180._JPRD/ZPI)*ASIN(F%RMU(JGL))
+(  336)     ENDDO
+(  337)   ENDIF
+(  338)   
+(  339)   ALLOCATE(F%RMU2(INMAX))
+(  340)   IF (LLP2) WRITE(NOUT,9) 'F%RMU2     ',SIZE(F%RMU2 ),SHAPE(F%RMU2 )
+(  341)   ALLOCATE(F%RACTHE2(INMAX))
+(  342)   IF (LLP2) WRITE(NOUT,9) 'F%RACTHE2  ',SIZE(F%RACTHE2),SHAPE(F%RACTHE2 )
+(  343)   DO JGL=1,INN
+(  344)     F%RMU2(JGL)    = ZLRMUZ2(JGL)
+(  345)     F%RACTHE2(JGL) = 1.0_JPRD/(SQRT(1.0_JPRD-ZLRMUZ2(JGL)*ZLRMUZ2(JGL))+ZEPS)/REAL(RA,JPRD)
+(  346)   ENDDO
+(  347) # 348 "suleg_mod.F90"
+(  348)   IF (LLP1) WRITE(NOUT,*)  '=== SULEG: Finished dual Gaussian latitudes ==='
+(  349) # 350 "suleg_mod.F90"
+(  350)   ! inverse + direct map for FMM
+(  351)   INX=2*R%NDGNH
+(  352)   INZ=2*S%NDGNHD
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 29
+
+(  353)   ALLOCATE(S%FMM_INTI)
+(  354)   CALL SETUP_SEEFMM(INX,F%RMU,INZ,F%RMU2,S%FMM_INTI)
+(  355) # 356 "suleg_mod.F90"
+(  356) ENDIF
+(  357) # 358 "suleg_mod.F90"
+(  358) !*       3.2   Computes related arrays
+(  359) # 360 "suleg_mod.F90"
+(  360) IF(.NOT.D%LGRIDONLY) THEN
+(  361) # 362 "suleg_mod.F90"
+(  362)   ALLOCATE(S%FA(D%NUMP))
+(  363) # 364 "suleg_mod.F90"
+(  364)   ALLOCATE(F%R1MU2(R%NDGL))
+(  365)   IF (LLP2) WRITE(NOUT,9) 'F%R1MU2   ',SIZE(F%R1MU2),SHAPE(F%R1MU2 ) 
+(  366)   ALLOCATE(F%RACTHE(R%NDGL))
+(  367)   IF (LLP2) WRITE(NOUT,9) 'F%RACTHE  ',SIZE(F%RACTHE),SHAPE(F%RACTHE ) 
+(  368) # 369 "suleg_mod.F90"
+(  369)   IF( S%LUSE_BELUSOV) THEN
+(  370)     ALLOCATE(F%RPNM(R%NLEI3,D%NSPOLEGL))
+(  371)     IF (LLP2) WRITE(NOUT,9) 'F%RPNM    ',SIZE(F%RPNM),SHAPE(F%RPNM) 
+(  372)     DO JNM=1,D%NSPOLEGL
+(  373)       F%RPNM(R%NLEI3,JNM) = 0.0_JPRD
+(  374)     ENDDO
+(  375)   ENDIF
+(  376) # 377 "suleg_mod.F90"
+(  377) !*       3.2   Computes related arrays
+(  378) # 379 "suleg_mod.F90"
+(  379)   DO JGL=1,R%NDGL
+(  380) ! test cosine differently
+(  381)     ZTHETA = ASIN(ZLRMUZ(JGL))
+(  382)     ZCOS   = COS(ZTHETA)
+(  383)     F%R1MU2(JGL)  = ZCOS**2
+(  384)     F%RACTHE(JGL) = 1.0_JPRD/ZCOS/REAL(RA,JPRD)
+(  385) !    F%R1MU2(JGL)  = 1.0_JPRD-ZLRMUZ(JGL)*ZLRMUZ(JGL)
+(  386) !    F%RACTHE(JGL) = 1.0_JPRD/SQRT(1.0_JPRD-ZLRMUZ(JGL)*ZLRMUZ(JGL))/REAL(RA,JPRD)
+(  387)   ENDDO
+(  388) # 389 "suleg_mod.F90"
+(  389) !*       3.3   Working arrays
+(  390) # 391 "suleg_mod.F90"
+(  391) ! compute the Legendre polynomials as a function of the z_k (Gaussian Latitudes)
+(  392) ! this may be faster than calling supolf for each m but uses extra communication
+(  393) ! and the parallelism is more limited ? Nils
+(  394) # 395 "suleg_mod.F90"
+(  395)   IF( S%LUSE_BELUSOV .AND. .NOT. C%LREAD_LEGPOL  ) THEN
+(  396) # 397 "suleg_mod.F90"
+(  397)     INSMAX = R%NTMAX+1
+(  398) # 399 "suleg_mod.F90"
+(  399)     IF( INSMAX /= R%NDGL) THEN
+(  400)       DEALLOCATE(ZFN)
+(  401)       ALLOCATE(ZFN(0:INSMAX,0:INSMAX))
+(  402)       ! Belousov, Swarztrauber use ZFN(0,0)=SQRT(2._JPRD)
+(  403)       ! IFS normalisation chosen to be 0.5*Integral(Pnm**2) = 1
+(  404)       ZFN(0,0)=2._JPRD
+(  405)       DO JN=1,INSMAX
+(  406)         ZFNN=ZFN(0,0)
+(  407)         DO JGL=1,JN
+(  408)           ZFNN=ZFNN*SQRT(1._JPRD-0.25_JPRD/REAL(JGL**2,JPRD))
+(  409)         ENDDO
+(  410) # 411 "suleg_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 30
+
+(  411)         IODD=MOD(JN,2)
+(  412)         ZFN(JN,JN)=ZFNN
+(  413)         DO JGL=2,JN-IODD,2
+(  414)           ZFN(JN,JN-JGL)=ZFN(JN,JN-JGL+2)*REAL((JGL-1)*(2*JN-JGL+2),JPRD)/REAL(JGL*(2*JN-JGL+1),JPRD)
+(  415)         ENDDO
+(  416)       ENDDO
+(  417)     ENDIF
+(  418) # 419 "suleg_mod.F90"
+(  419)     ALLOCATE(ZLFPOL(0:INSMAX,0:INSMAX))
+(  420)     ALLOCATE(ZPNMG(R%NSPOLEG))
+(  421) # 422 "suleg_mod.F90"
+(  422)     DO JH=1,IHEMIS
+(  423) # 424 "suleg_mod.F90"
+(  424)       IF (JH==1) THEN
+(  425)         IGL1=D%NLATLS(MYSETW,MYSETV)
+(  426)         IGL2=D%NLATLE(MYSETW,MYSETV)
+(  427)       ELSE
+(  428)         IGL1=R%NDGL-D%NLATLE(MYSETW,MYSETV)+1
+(  429)         IGL2=R%NDGL-D%NLATLS(MYSETW,MYSETV)+1
+(  430)       ENDIF
+(  431) # 432 "suleg_mod.F90"
+(  432)       ILOOP=0
+(  433)       DO JGL=IGL1,IGL2
+(  434) # 435 "suleg_mod.F90"
+(  435)         INM = 0
+(  436)         CALL SUPOL(INSMAX,ZLRMUZ(JGL),ZFN,ZLFPOL)
+(  437)         DO JM=0,R%NSMAX
+(  438)           DO JN=INSMAX,JM,-1
+(  439)             INM = INM+1
+(  440)             ZPNMG(INM) = ZLFPOL(JM,JN)
+(  441)           ENDDO
+(  442)         ENDDO
+(  443) # 444 "suleg_mod.F90"
+(  444)         CALL GSTATS(1801,2)
+(  445)         ILOOP = JGL-IGL1+1
+(  446)         CALL SUTRLE(ZPNMG,JGL,ILOOP)
+(  447)         CALL GSTATS(1801,3)
+(  448) # 449 "suleg_mod.F90"
+(  449)       ENDDO
+(  450) # 451 "suleg_mod.F90"
+(  451)       ILATSMAX=0
+(  452)       DO JW=1,NPRTRW
+(  453)         DO JV=1,NPRTRV
+(  454)           ILATSMAX=MAX(ILATSMAX,D%NLATLE(JW,JV)-D%NLATLS(JW,JV)+1)
+(  455)         ENDDO
+(  456)       ENDDO
+(  457) # 458 "suleg_mod.F90"
+(  458)       ILATS=IGL2-IGL1+1
+(  459)       IF (S%LSOUTHPNM .AND. IHEMIS==1 .AND. ILATSMAX-1 >= ILATS) THEN
+(  460)         ! I don't know what to do for south pole. But isn't this piece of code
+(  461)         ! a dead stuff for poles rows ? 
+(  462)         CALL ABORT_TRANS('SULEG: WILL BE BROKEN FOR SOUTH HEMISPHERE')
+(  463)       ENDIF
+(  464) # 465 "suleg_mod.F90"
+(  465)       DO J=ILATS,ILATSMAX-1
+(  466)         ILOOP=ILOOP+1
+(  467)         CALL GSTATS(1801,2)
+(  468)         CALL SUTRLE(ZPNMG,-1,ILOOP)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 31
+
+(  469)         CALL GSTATS(1801,3)
+(  470)       ENDDO
+(  471) # 472 "suleg_mod.F90"
+(  472)     ENDDO
+(  473) # 474 "suleg_mod.F90"
+(  474)     DEALLOCATE(ZLFPOL)
+(  475)     IF( ALLOCATED(ZFN) ) DEALLOCATE(ZFN)
+(  476) # 477 "suleg_mod.F90"
+(  477)     DEALLOCATE(ZPNMG)
+(  478) # 479 "suleg_mod.F90"
+(  479)     IF(LLP1) WRITE(NOUT,*) '=== SULEG: Finished RPNM ==='
+(  480) # 481 "suleg_mod.F90"
+(  481)   ENDIF
+(  482) # 483 "suleg_mod.F90"
+(  483)   CALL SETUP_GEOM
+(  484) # 485 "suleg_mod.F90"
+(  485)   IMAXN=R%NTMAX+1
+(  486) # 487 "suleg_mod.F90"
+(  487)   ITAG=MTAGLETR
+(  488)   ITAG1=MTAGLETR+1
+(  489) # 490 "suleg_mod.F90"
+(  490)   IMAXRECVA=0
+(  491)   IMAXRECVS=0
+(  492)   DO JMLOC=1,D%NUMP
+(  493)     IM = D%MYMS(JMLOC)
+(  494)     ILA = (R%NSMAX-IM+2)/2
+(  495)     ILS = (R%NSMAX-IM+3)/2
+(  496)     IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  497)     ISL = MAX(R%NDGNH-G%NDGLU(IM)+1,1)
+(  498)     IMAXRECVA = MAX(IDGLU*ILA,IMAXRECVA)
+(  499)     IMAXRECVS = MAX(IDGLU*ILS,IMAXRECVS)
+(  500) # 501 "suleg_mod.F90"
+(  501)     !find nearest starting latitude of the dual set
+(  502)     IF( S%LDLL ) THEN
+(  503) # 504 "suleg_mod.F90"
+(  504)       INMAX=MIN(R%NTMAX+1,S%NDGL)
+(  505)       IDGLU2=S%NDGNHD
+(  506)       S%FA(JMLOC)%ISLD = 1
+(  507)       LLA:DO JGL=1,S%NDGNHD-1
+(  508)         IF( (ZLRMUZ2(JGL) < ZLRMUZ(ISL)) ) THEN
+(  509)           S%FA(JMLOC)%ISLD = JGL
+(  510)           IDGLU2 = S%NDGNHD-S%FA(JMLOC)%ISLD+1
+(  511)           EXIT LLA
+(  512)         ENDIF
+(  513)       ENDDO LLA
+(  514) # 515 "suleg_mod.F90"
+(  515)       IF( .NOT. C%LREAD_LEGPOL  ) THEN
+(  516)        ! compute auxiliary quantities for the dual mapping
+(  517) # 518 "suleg_mod.F90"
+(  518)        ! output data latitudes
+(  519)         ALLOCATE(ZPNMCDO(2*IDGLU2,2))
+(  520)       !$OMP PARALLEL PRIVATE(JGL,ZLPOL)
+(  521)         IF (.NOT.ALLOCATED(ZLPOL)) ALLOCATE(ZLPOL(0:INMAX))
+(  522)       !$OMP DO SCHEDULE(DYNAMIC,1)
+(  523)         DO JGL=1,2*IDGLU2
+(  524)           CALL SUPOLF(IM,INMAX,ZLRMUZ2(S%FA(JMLOC)%ISLD+JGL-1),ZLPOL(0:INMAX))
+(  525)           ZPNMCDO(JGL,1)=ZLPOL(INMAX-1)
+(  526)           ZPNMCDO(JGL,2)=ZLPOL(INMAX)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 32
+
+(  527)         ENDDO
+(  528)         !$OMP END DO
+(  529)         IF (ALLOCATED(ZLPOL)) DEALLOCATE(ZLPOL)
+(  530)         !$OMP END PARALLEL
+(  531) # 532 "suleg_mod.F90"
+(  532)         ! internal (gg-roots) latitudes
+(  533)         ALLOCATE(ZPNMCDD(2*IDGLU,2))
+(  534)         !$OMP PARALLEL PRIVATE(JGL,ZLPOL,JI,JN)
+(  535)         IF (.NOT.ALLOCATED(ZLPOL)) ALLOCATE(ZLPOL(0:INMAX))
+(  536)         !$OMP DO SCHEDULE(DYNAMIC,1)
+(  537)         DO JGL=1,2*IDGLU
+(  538)           CALL SUPOLF(IM,INMAX,ZLRMUZ(ISL+JGL-1),ZLPOL(0:INMAX))
+(  539)           ZPNMCDD(JGL,1)=ZLPOL(INMAX-1)
+(  540)           ZPNMCDD(JGL,2)=ZLPOL(INMAX)
+(  541)         ENDDO
+(  542)         !$OMP END DO
+(  543)         IF (ALLOCATED(ZLPOL)) DEALLOCATE(ZLPOL)
+(  544)         !$OMP END PARALLEL
+(  545)         
+(  546)         stop 'Error: code path not (yet) supported in GPU version'
+(  547)         !CALL PREPSNM(IM,JMLOC,ZEPSNM)
+(  548)         ALLOCATE(S%FA(JMLOC)%RPNMWI(2*IDGLU,1:2))
+(  549)         DO JGL=1,2*IDGLU
+(  550)           ! inverse trafo
+(  551)           S%FA(JMLOC)%RPNMWI(JGL,1) = F%RW(ISL+JGL-1)*ZPNMCDD(JGL,1)
+(  552)           S%FA(JMLOC)%RPNMWI(JGL,2) = F%RW(ISL+JGL-1)*ZPNMCDD(JGL,2)
+(  553)           ! direct trafo needed if mapping to another set of gg roots
+(  554)           !S%FA(JMLOC)%RPNMWI(JGL,3) = -ZEPSNM(IMAXN)*ZPNMCDD(JGL,2)
+(  555)           !S%FA(JMLOC)%RPNMWI(JGL,4) = -ZEPSNM(IMAXN)*ZPNMCDD(JGL,1)
+(  556)         ENDDO
+(  557)         DEALLOCATE(ZPNMCDD)
+(  558)         ALLOCATE(S%FA(JMLOC)%RPNMWO(2*IDGLU2,1:2))
+(  559)         DO JGL=1,2*IDGLU2
+(  560)           ! inverse trafo
+(  561)           S%FA(JMLOC)%RPNMWO(JGL,1) = -ZEPSNM(IMAXN)*ZPNMCDO(JGL,2)
+(  562)           S%FA(JMLOC)%RPNMWO(JGL,2) = -ZEPSNM(IMAXN)*ZPNMCDO(JGL,1)
+(  563)           ! only needed in direct trafo, need if mapping to another set of roots
+(  564)           !S%FA(JMLOC)%RPNMWO(JGL,3) = F%RW2(S%FA(JMLOC)%ISLD+JGL-1)*ZPNMCDO(JGL,1)
+(  565)           !S%FA(JMLOC)%RPNMWO(JGL,4) = F%RW2(S%FA(JMLOC)%ISLD+JGL-1)*ZPNMCDO(JGL,2)
+(  566)         ENDDO
+(  567)         DEALLOCATE(ZPNMCDO)
+(  568)       ENDIF ! LREAD_LEGPOL
+(  569)     ENDIF ! LDLL
+(  570) # 571 "suleg_mod.F90"
+(  571)   ENDDO
+(  572) # 573 "suleg_mod.F90"
+(  573)   IF( S%LDLL ) THEN
+(  574)     DEALLOCATE(ZLRMUZ2)
+(  575)   ENDIF
+(  576) # 577 "suleg_mod.F90"
+(  577) !!$  IF( S%LUSEFLT.AND.LMPOFF ) THEN
+(  578) !!$    CALL ABORT_TRANS('SULEG: LUSEFLT=T and LMPOFF=T not supported')
+(  579) !!$  ENDIF
+(  580)   CALL GSTATS(1801,2)
+(  581) # 582 "suleg_mod.F90"
+(  582)   IF(.NOT.C%LREAD_LEGPOL) THEN
+(  583)   IF( S%LUSEFLT )THEN
+(  584)     ALLOCATE(ZCLONEA(D%NUMP))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 33
+
+(  585)     ALLOCATE(ZCLONES(D%NUMP))
+(  586)   ENDIF
+(  587) # 588 "suleg_mod.F90"
+(  588) ! not correct logic
+(  589) !  IF (S%LUSE_BELUSOV.OR.S%LUSEFLT) THEN
+(  590) # 591 "suleg_mod.F90"
+(  591)   DO JMLOC=1,D%NUMP,NPRTRV  ! +++++++++++++++++++++ JMLOC LOOP +++++++++++++++++++++++
+(  592) !     IF( S%LUSEFLT )THEN
+(  593) !       ZCLONES(JMLOC)%COMMSBUF => NULL()
+(  594) !       ZCLONEA(JMLOC)%COMMSBUF => NULL()
+(  595) !     ENDIF
+(  596) # 597 "suleg_mod.F90"
+(  597)     IPRTRV=MIN(NPRTRV,D%NUMP-JMLOC+1)
+(  598) # 599 "suleg_mod.F90"
+(  599)     ! --------------------anti-symmetric-----------------------
+(  600)     ! --------------------anti-symmetric-----------------------
+(  601)     ! --------------------anti-symmetric-----------------------
+(  602) # 603 "suleg_mod.F90"
+(  603)     DO JSETV=1,IPRTRV
+(  604)       IMLOC=JMLOC+JSETV-1
+(  605)       IM = D%MYMS(IMLOC)
+(  606)       ILA = (R%NSMAX-IM+2)/2
+(  607)       IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  608)       ALLOCATE(S%FA(IMLOC)%RPNMA(IDGLU,ILA))  
+(  609)     ENDDO
+(  610) # 611 "suleg_mod.F90"
+(  611)     IF( .NOT. S%LUSE_BELUSOV ) THEN 
+(  612) # 613 "suleg_mod.F90"
+(  613)       ISREQ = 0
+(  614)       IRREQ = 0
+(  615) # 616 "suleg_mod.F90"
+(  616)       ALLOCATE (ZRCVBUFV(IMAXRECVA,IPRTRV))
+(  617)       CALL GSTATS(851,0)
+(  618)       DO JSETV=1,IPRTRV
+(  619)         CALL SET2PE(IRECV,0,0,MYSETW,JSETV)
+(  620)         IF( .NOT.LMPOFF )THEN
+(  621)           IRREQ = IRREQ+1
+(  622)           CALL MPL_RECV(ZRCVBUFV(:,JSETV),KSOURCE=NPRCIDS(IRECV), &
+(  623)            & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IRECVREQ(IRREQ),&
+(  624)            & KTAG=ITAG,CDSTRING='SULEG:')
+(  625)         ENDIF
+(  626)       ENDDO
+(  627)       CALL GSTATS(851,1)
+(  628) # 629 "suleg_mod.F90"
+(  629)       IF( JMLOC+MYSETV-1 <= D%NUMP )THEN
+(  630) # 631 "suleg_mod.F90"
+(  631)         IMLOC=JMLOC+MYSETV-1
+(  632)         IM = D%MYMS(IMLOC)
+(  633)         ISL = MAX(R%NDGNH-G%NDGLU(IM)+1,1)
+(  634)         IA  = 1+MOD(R%NSMAX-IM+2,2)
+(  635)         ILA = (R%NSMAX-IM+2)/2
+(  636)         IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  637) # 638 "suleg_mod.F90"
+(  638)         ALLOCATE(ZSNDBUFV(IDGLU*ILA))
+(  639)       
+(  640)         IF(MOD(IMAXN-IM,2) == 0) THEN
+(  641)           INMAX=IMAXN+1
+(  642)         ELSE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 34
+
+(  643)           INMAX=IMAXN
+(  644)         ENDIF
+(  645) # 646 "suleg_mod.F90"
+(  646)         CALL GSTATS(1251,0)
+(  647)         IF (.NOT.ALLOCATED(ZLPOL)) ALLOCATE(ZLPOL(0:INMAX))
+(  648)         !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JGL,ZLPOL,JI,JN)
+(  649)         DO JGL=1,IDGLU
+(  650)           CALL SUPOLF(IM,INMAX,ZLRMUZ(ISL+JGL-1),ZLPOL(0:INMAX),KCHEAP=3)
+(  651)           DO JI=1,ILA
+(  652)             JN=IM+2*(JI-1)+1
+(  653)             ZSNDBUFV((JGL-1)*ILA+JI)=ZLPOL(JN)
+(  654)           ENDDO
+(  655)         ENDDO
+(  656)         !$OMP END PARALLEL DO
+(  657)         IF (ALLOCATED(ZLPOL)) DEALLOCATE(ZLPOL)
+(  658)         CALL GSTATS(1251,1)
+(  659) # 660 "suleg_mod.F90"
+(  660)         CALL GSTATS(851,0)
+(  661)         DO JSETV=1,NPRTRV
+(  662)           CALL SET2PE(ISEND,0,0,MYSETW,JSETV)
+(  663)           IF( .NOT.LMPOFF )THEN
+(  664)             ISREQ = ISREQ+1
+(  665)             CALL MPL_SEND(ZSNDBUFV(:),KDEST=NPRCIDS(ISEND), &
+(  666)              & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(ISREQ),&
+(  667)             & KTAG=ITAG,CDSTRING='SULEG:')
+(  668)           ENDIF
+(  669)         ENDDO
+(  670)         CALL GSTATS(851,1)
+(  671) # 672 "suleg_mod.F90"
+(  672)       ENDIF
+(  673) # 674 "suleg_mod.F90"
+(  674)       CALL GSTATS(851,0)
+(  675)       IF(IRREQ > 0) THEN
+(  676)         CALL MPL_WAIT(KREQUEST=IRECVREQ(1:IRREQ), &
+(  677)          & CDSTRING='SUTRLE: SULEG')
+(  678)       ENDIF
+(  679) # 680 "suleg_mod.F90"
+(  680)       IF(ISREQ > 0) THEN
+(  681)         CALL MPL_WAIT(KREQUEST=ISENDREQ(1:ISREQ), &
+(  682)          & CDSTRING='SUTRLE: SULEG')
+(  683)       ENDIF
+(  684) # 685 "suleg_mod.F90"
+(  685)       IF( NPROC==1.AND.LMPOFF )THEN
+(  686)         ZRCVBUFV(1:SIZE(ZSNDBUFV(:)),1)=ZSNDBUFV(:)
+(  687)       ENDIF
+(  688)       CALL GSTATS(851,1)
+(  689) # 690 "suleg_mod.F90"
+(  690)       CALL GSTATS(1251,0)
+(  691)       !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JSETV,IMLOC,IM,ISL,IA,ILA,IDGLU,JGL,JI)
+(  692)       DO JSETV=1,IPRTRV
+(  693)         IMLOC=JMLOC+JSETV-1
+(  694)         IM = D%MYMS(IMLOC)
+(  695)         ISL = MAX(R%NDGNH-G%NDGLU(IM)+1,1)
+(  696)         IA  = 1+MOD(R%NSMAX-IM+2,2)
+(  697)         ILA = (R%NSMAX-IM+2)/2
+(  698)         IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  699)         IF( S%LUSEFLT .AND. ILA > ITHRESHOLD ) THEN
+(  700)           IF( .NOT. S%LKEEPRPNM ) DEALLOCATE(S%FA(IMLOC)%RPNMA)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 35
+
+(  701)           ALLOCATE(S%FA(IMLOC)%RPNMDA(IDGLU,ILA))
+(  702)           DO JGL=1,IDGLU
+(  703)             DO JI=1,ILA
+(  704)               S%FA(IMLOC)%RPNMDA(JGL,ILA-JI+1)=ZRCVBUFV((JGL-1)*ILA+JI,JSETV)
+(  705)             ENDDO
+(  706)           ENDDO
+(  707)           IF( S%LKEEPRPNM ) THEN
+(  708)              DO JGL=1,IDGLU
+(  709)                 DO JI=1,ILA
+(  710)                    S%FA(IMLOC)%RPNMA(JGL,ILA-JI+1)=ZRCVBUFV((JGL-1)*ILA+JI,JSETV)
+(  711)                 ENDDO
+(  712)              ENDDO
+(  713)           ENDIF
+(  714)        ELSE
+(  715)           DO JGL=1,IDGLU
+(  716)             DO JI=1,ILA
+(  717)               S%FA(IMLOC)%RPNMA(JGL,ILA-JI+1)=ZRCVBUFV((JGL-1)*ILA+JI,JSETV)
+(  718)             ENDDO
+(  719)           ENDDO
+(  720)         ENDIF
+(  721)       ENDDO
+(  722)      !$OMP END PARALLEL DO
+(  723)       CALL GSTATS(1251,1)
+(  724)         
+(  725)       IF( ALLOCATED(ZSNDBUFV) ) DEALLOCATE(ZSNDBUFV)
+(  726)       IF( ALLOCATED(ZRCVBUFV) ) DEALLOCATE(ZRCVBUFV)
+(  727) # 728 "suleg_mod.F90"
+(  728)     ELSE    
+(  729) # 730 "suleg_mod.F90"
+(  730)        CALL GSTATS(1251,0)
+(  731)        !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JSETV,IMLOC,IM,ISL,IA,ILA,IDGLU,JGL,JI)
+(  732)        DO JSETV=1,IPRTRV
+(  733)           IMLOC=JMLOC+JSETV-1
+(  734)           IM = D%MYMS(IMLOC)
+(  735)           ISL = MAX(R%NDGNH-G%NDGLU(IM)+1,1)
+(  736)           IA  = 1+MOD(R%NSMAX-IM+2,2)
+(  737)           ILA = (R%NSMAX-IM+2)/2
+(  738)           IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  739)           IF( S%LUSEFLT .AND. ILA > ITHRESHOLD ) THEN
+(  740)              IF( .NOT. S%LKEEPRPNM ) DEALLOCATE(S%FA(IMLOC)%RPNMA)
+(  741)              ALLOCATE(S%FA(IMLOC)%RPNMDA(IDGLU,ILA))
+(  742)              DO JI=1,ILA
+(  743)                 DO JGL=1,IDGLU
+(  744)                    S%FA(IMLOC)%RPNMDA(JGL,JI) = F%RPNM(ISL+JGL-1,D%NPMS(IM)+IA+(JI-1)*2)
+(  745)                 ENDDO
+(  746)              ENDDO
+(  747)              IF( S%LKEEPRPNM ) THEN
+(  748)                DO JI=1,ILA
+(  749)                  DO JGL=1,IDGLU
+(  750)                    S%FA(IMLOC)%RPNMA(JGL,JI) = F%RPNM(ISL+JGL-1,D%NPMS(IM)+IA+(JI-1)*2)
+(  751)                  ENDDO
+(  752)                ENDDO
+(  753)             ENDIF
+(  754)           ELSE
+(  755)              DO JI=1,ILA
+(  756)                 DO JGL=1,IDGLU
+(  757)                    S%FA(IMLOC)%RPNMA(JGL,JI) = F%RPNM(ISL+JGL-1,D%NPMS(IM)+IA+(JI-1)*2)
+(  758)                 ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 36
+
+(  759)              ENDDO
+(  760)           END IF
+(  761)        ENDDO
+(  762)        !$OMP END PARALLEL DO
+(  763)        CALL GSTATS(1251,1)
+(  764) # 765 "suleg_mod.F90"
+(  765)     ENDIF
+(  766) # 767 "suleg_mod.F90"
+(  767)     ! -------------------- anti-symmetric FLT iniitialisation -----------------------
+(  768) # 769 "suleg_mod.F90"
+(  769)     IF( S%LUSEFLT) THEN
+(  770)       IRECVLENMAX=0
+(  771)       ISREQ = 0
+(  772)       IRREQ = 0
+(  773)       IF( JMLOC+MYSETV-1 <= D%NUMP )THEN
+(  774)         IMLOC=JMLOC+MYSETV-1
+(  775)         IM = D%MYMS(IMLOC)
+(  776)         ILA = (R%NSMAX-IM+2)/2
+(  777)         IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  778)         IF( ILA > ITHRESHOLD ) THEN
+(  779)           S%LSYM = .FALSE.
+(  780)           INX = IDGLU
+(  781)           CALL CONSTRUCT_BUTTERFLY(ZEPS_INT_DEC,IMAXCOLS,INX,ILA,S%FA(IMLOC)%RPNMDA,&
+(  782)            & S%FA(IMLOC)%YBUT_STRUCT_A)
+(  783)           CALL PACK_BUTTERFLY_STRUCT(S%FA(IMLOC)%YBUT_STRUCT_A,ZCLONEA(IMLOC))
+(  784)           IRECVLENMAX=SIZE(ZCLONEA(IMLOC)%COMMSBUF)
+(  785)           CALL GSTATS(852,0)
+(  786)           DO JSETV=1,NPRTRV
+(  787)             CALL SET2PE(ISEND,0,0,MYSETW,JSETV)
+(  788)             IF(.NOT.LMPOFF) THEN
+(  789)               ISREQ = ISREQ+1
+(  790)               CALL MPL_SEND(ZCLONEA(IMLOC)%COMMSBUF(:),KDEST=NPRCIDS(ISEND),&
+(  791)                & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(ISREQ),&
+(  792)                & KTAG=ITAG,CDSTRING='SULEG:')
+(  793)             ENDIF
+(  794)           ENDDO
+(  795)           CALL GSTATS(852,1)
+(  796)         ELSE
+(  797)           IRECVLENMAX=2
+(  798)           ZDUM(:)=0.0_JPRBT
+(  799)           CALL GSTATS(852,0)
+(  800)           DO JSETV=1,NPRTRV
+(  801)             CALL SET2PE(ISEND,0,0,MYSETW,JSETV)
+(  802)             IF(.NOT.LMPOFF) THEN
+(  803)               ISREQ = ISREQ+1
+(  804)               CALL MPL_SEND(ZDUM(:),KDEST=NPRCIDS(ISEND), &
+(  805)                & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(ISREQ),&
+(  806)                & KTAG=ITAG,CDSTRING='SULEG:')
+(  807)             ENDIF
+(  808)           ENDDO
+(  809)           CALL GSTATS(852,1)
+(  810)         ENDIF
+(  811)       ENDIF
+(  812)       IF(.NOT.LMPOFF) THEN
+(  813)         CALL GSTATS(852,0)
+(  814)         DO JSETV=1,NPRTRV
+(  815)           CALL SET2PE(ISEND,0,0,MYSETW,JSETV)
+(  816)           CALL MPL_SEND(IRECVLENMAX,KDEST=NPRCIDS(ISEND),KTAG=ITAG1,CDSTRING='SULEG:')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 37
+
+(  817)         ENDDO
+(  818)         IRECVLENMAX=0
+(  819)         DO JSETV=1,NPRTRV ! ? should this be IPRTRV ?
+(  820)           CALL SET2PE(IRECV,0,0,MYSETW,JSETV)
+(  821)           CALL MPL_RECV(IRECVLENMAXV(JSETV),KSOURCE=NPRCIDS(IRECV),KTAG=ITAG1,CDSTRING='SULEG:')
+(  822)           IRECVLENMAX=MAX(IRECVLENMAX,IRECVLENMAXV(JSETV))
+(  823)         ENDDO
+(  824)         IF( MYPROC == 1 )THEN
+(  825)           IF( IRECVLENMAX > 2 )THEN
+(  826)             WRITE(NOUT,'("SULEG: ANTI-SYM MAX BUTTERFLY CLONE LEN=",I8)')IRECVLENMAX
+(  827)           ENDIF
+(  828)         ENDIF
+(  829)         IF( IRECVLENMAX == 0 )THEN
+(  830)           WRITE(NOUT,'("SULEG: ANTI-SYM WARNING CLONE LEN=",I8,I8)') MYPROC, IRECVLENMAX
+(  831)         ENDIF
+(  832)         IF( IRECVLENMAX > 0 )THEN
+(  833)            ALLOCATE (ZRCVBUTFV(IRECVLENMAX,IPRTRV))
+(  834)            DO JSETV=1,IPRTRV
+(  835)               IRREQ = IRREQ+1
+(  836)               CALL SET2PE(IRECV,0,0,MYSETW,JSETV)
+(  837)               CALL MPL_RECV(ZRCVBUTFV(:,JSETV),KSOURCE=NPRCIDS(IRECV), &
+(  838)                    &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IRECVREQ(IRREQ),&
+(  839)                    & KTAG=ITAG,CDSTRING='SULEG:')
+(  840)            ENDDO
+(  841)         END IF
+(  842)         IF(ISREQ > 0) THEN
+(  843)           CALL MPL_WAIT(KREQUEST=ISENDREQ(1:ISREQ), &
+(  844)            & CDSTRING='SUTRLE: SULEG')
+(  845)         ENDIF
+(  846)         IF(IRREQ > 0) THEN
+(  847)           CALL MPL_WAIT(KBYTES=IBYTES,KOUNT=IKOUNT(1:IRREQ),KREQUEST=IRECVREQ(1:IRREQ), &
+(  848)            & CDSTRING='SUTRLE: SULEG')
+(  849)         ENDIF
+(  850)         CALL GSTATS(852,1)
+(  851)         IF( IRECVLENMAX > 0 )THEN
+(  852)           CALL GSTATS(1252,0)
+(  853)           !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JSETV,IMLOC,IM,ILA,IDGLU,INX,ICLONELEN)
+(  854)           DO JSETV=1,IPRTRV
+(  855)             IMLOC=JMLOC+JSETV-1
+(  856)             IM = D%MYMS(IMLOC)
+(  857)             ILA = (R%NSMAX-IM+2)/2
+(  858)             IF( ILA > ITHRESHOLD ) THEN
+(  859)               IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  860)               INX=IDGLU
+(  861)               IF( .NOT.ALLOCATED(ZCLONEA(IMLOC)%COMMSBUF) )THEN
+(  862)                 ICLONELEN=IKOUNT(JSETV)
+(  863)                 ALLOCATE(ZCLONEA(IMLOC)%COMMSBUF(ICLONELEN))
+(  864)                 ZCLONEA(IMLOC)%COMMSBUF(1:ICLONELEN) = ZRCVBUTFV(1:ICLONELEN,JSETV)
+(  865)                 CALL UNPACK_BUTTERFLY_STRUCT(S%FA(IMLOC)%YBUT_STRUCT_A,ZCLONEA(IMLOC))
+(  866)               ENDIF
+(  867)               IF(ALLOCATED(ZCLONEA(IMLOC)%COMMSBUF) ) THEN
+(  868)                 IF( SIZEOF(ZCLONEA(IMLOC)%COMMSBUF) > 0 ) DEALLOCATE(ZCLONEA(IMLOC)%COMMSBUF)
+(  869)                 !              ZCLONEA(IMLOC)%COMMSBUF=>NULL()
+(  870)               ENDIF
+(  871)               IF( ASSOCIATED(S%FA(IMLOC)%RPNMA) .AND. .NOT. S%LKEEPRPNM ) DEALLOCATE(S%FA(IMLOC)%RPNMA)
+(  872)               IF( ASSOCIATED(S%FA(IMLOC)%RPNMDA) ) DEALLOCATE(S%FA(IMLOC)%RPNMDA)
+(  873)             ENDIF
+(  874)           ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 38
+
+(  875)           !$OMP END PARALLEL DO
+(  876)           CALL GSTATS(1252,1)
+(  877)           DEALLOCATE(ZRCVBUTFV)
+(  878)         ENDIF
+(  879)       ENDIF
+(  880)    ENDIF
+(  881) # 882 "suleg_mod.F90"
+(  882)     ! --------------------symmetric-----------------------
+(  883)     ! --------------------symmetric-----------------------
+(  884)     ! --------------------symmetric-----------------------
+(  885) # 886 "suleg_mod.F90"
+(  886)     DO JSETV=1,IPRTRV
+(  887)       IMLOC=JMLOC+JSETV-1
+(  888)       IM = D%MYMS(IMLOC)
+(  889)       ILS = (R%NSMAX-IM+3)/2
+(  890)       IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  891)       ALLOCATE(S%FA(IMLOC)%RPNMS(IDGLU,ILS))  
+(  892)     ENDDO
+(  893) # 894 "suleg_mod.F90"
+(  894)     IF( .NOT. S%LUSE_BELUSOV ) THEN 
+(  895) # 896 "suleg_mod.F90"
+(  896)       ISREQ = 0
+(  897)       IRREQ = 0
+(  898) # 899 "suleg_mod.F90"
+(  899)       ALLOCATE (ZRCVBUFV(IMAXRECVS,IPRTRV))
+(  900)       CALL GSTATS(851,0)
+(  901)       DO JSETV=1,IPRTRV
+(  902)         CALL SET2PE(IRECV,0,0,MYSETW,JSETV)
+(  903)         IF( .NOT.LMPOFF )THEN
+(  904)           IRREQ = IRREQ+1
+(  905)           CALL MPL_RECV(ZRCVBUFV(:,JSETV),KSOURCE=NPRCIDS(IRECV), &
+(  906)            & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IRECVREQ(IRREQ),&
+(  907)            & KTAG=ITAG,CDSTRING='SULEG:')
+(  908)         ENDIF
+(  909)       ENDDO
+(  910)       CALL GSTATS(851,1)
+(  911) # 912 "suleg_mod.F90"
+(  912)       IF( JMLOC+MYSETV-1 <= D%NUMP )THEN
+(  913) # 914 "suleg_mod.F90"
+(  914)         IMLOC=JMLOC+MYSETV-1
+(  915)         IM = D%MYMS(IMLOC)
+(  916)         ISL = MAX(R%NDGNH-G%NDGLU(IM)+1,1)
+(  917)         IS  = 1+MOD(R%NSMAX-IM+1,2)
+(  918)         ILS = (R%NSMAX-IM+3)/2
+(  919)         IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  920) # 921 "suleg_mod.F90"
+(  921)         ALLOCATE(ZSNDBUFV(IDGLU*ILS))
+(  922)       
+(  923)         IF(MOD(IMAXN-IM,2) == 0) THEN
+(  924)           INMAX=IMAXN
+(  925)         ELSE
+(  926)           INMAX=IMAXN+1
+(  927)         ENDIF
+(  928) # 929 "suleg_mod.F90"
+(  929)         IF (.NOT.ALLOCATED(ZLPOL)) ALLOCATE(ZLPOL(0:INMAX))
+(  930)         CALL GSTATS(1251,0)
+(  931)         !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JGL,ZLPOL,JI,JN)
+(  932)         DO JGL=1,IDGLU
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 39
+
+(  933)           CALL SUPOLF(IM,INMAX,ZLRMUZ(ISL+JGL-1),ZLPOL(0:INMAX),KCHEAP=2)
+(  934)           DO JI=1,ILS
+(  935)             JN=IM+2*(JI-1)
+(  936)             ZSNDBUFV((JGL-1)*ILS+JI)=ZLPOL(JN)
+(  937)           ENDDO
+(  938)         ENDDO
+(  939)         !$OMP END PARALLEL DO
+(  940)         CALL GSTATS(1251,1)
+(  941)         IF (ALLOCATED(ZLPOL)) DEALLOCATE(ZLPOL)
+(  942) # 943 "suleg_mod.F90"
+(  943)         CALL GSTATS(851,0)
+(  944)         DO JSETV=1,NPRTRV
+(  945)           CALL SET2PE(ISEND,0,0,MYSETW,JSETV)
+(  946)           IF( .NOT.LMPOFF )THEN
+(  947)             ISREQ = ISREQ+1
+(  948)             CALL MPL_SEND(ZSNDBUFV(:),KDEST=NPRCIDS(ISEND), &
+(  949)              & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(ISREQ),&
+(  950)              & KTAG=ITAG,CDSTRING='SULEG:')
+(  951)           ENDIF
+(  952)         ENDDO
+(  953)         CALL GSTATS(851,1)
+(  954) # 955 "suleg_mod.F90"
+(  955)       ENDIF
+(  956) # 957 "suleg_mod.F90"
+(  957)       CALL GSTATS(851,0)
+(  958)       IF(IRREQ > 0) THEN
+(  959)         CALL MPL_WAIT(KREQUEST=IRECVREQ(1:IRREQ), &
+(  960)          & CDSTRING='SUTRLE: SULEG')
+(  961)       ENDIF
+(  962) # 963 "suleg_mod.F90"
+(  963)       IF(ISREQ > 0) THEN
+(  964)         CALL MPL_WAIT(KREQUEST=ISENDREQ(1:ISREQ), &
+(  965)          & CDSTRING='SUTRLE: SULEG')
+(  966)       ENDIF
+(  967)       IF( NPROC==1.AND.LMPOFF )THEN
+(  968)         ZRCVBUFV(1:SIZE(ZSNDBUFV(:)),1)=ZSNDBUFV(:)
+(  969)       ENDIF
+(  970)       CALL GSTATS(851,1)
+(  971) # 972 "suleg_mod.F90"
+(  972)       CALL GSTATS(1251,0)
+(  973)       !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JSETV,IMLOC,IM,ISL,IS,ILS,IDGLU,JGL,JI)
+(  974)       DO JSETV=1,IPRTRV
+(  975)         IMLOC=JMLOC+JSETV-1
+(  976)         IM = D%MYMS(IMLOC)
+(  977)         ISL = MAX(R%NDGNH-G%NDGLU(IM)+1,1)
+(  978)         IS  = 1+MOD(R%NSMAX-IM+1,2)
+(  979)         ILS = (R%NSMAX-IM+3)/2
+(  980)         IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  981)         IF( S%LUSEFLT .AND. ILS > ITHRESHOLD ) THEN
+(  982)           IF( .NOT. S%LKEEPRPNM ) DEALLOCATE(S%FA(IMLOC)%RPNMS)
+(  983)           ALLOCATE(S%FA(IMLOC)%RPNMDS(IDGLU,ILS))
+(  984)           DO JGL=1,IDGLU
+(  985)             DO JI=1,ILS
+(  986)               S%FA(IMLOC)%RPNMDS(JGL,ILS-JI+1)=ZRCVBUFV((JGL-1)*ILS+JI,JSETV)
+(  987)             ENDDO
+(  988)           ENDDO
+(  989)           IF( S%LKEEPRPNM ) THEN
+(  990)             DO JGL=1,IDGLU
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 40
+
+(  991)               DO JI=1,ILS
+(  992)                 S%FA(IMLOC)%RPNMS(JGL,ILS-JI+1)=ZRCVBUFV((JGL-1)*ILS+JI,JSETV)
+(  993)               ENDDO
+(  994)             ENDDO
+(  995)           ENDIF
+(  996)         ELSE
+(  997)           DO JGL=1,IDGLU
+(  998)             DO JI=1,ILS
+(  999)               S%FA(IMLOC)%RPNMS(JGL,ILS-JI+1)=ZRCVBUFV((JGL-1)*ILS+JI,JSETV)
+( 1000)             ENDDO
+( 1001)           ENDDO
+( 1002)        ENDIF
+( 1003)     ENDDO
+( 1004)     !$OMP END PARALLEL DO
+( 1005)       CALL GSTATS(1251,1)
+( 1006)         
+( 1007)       IF( ALLOCATED(ZSNDBUFV) ) DEALLOCATE(ZSNDBUFV)
+( 1008)       IF( ALLOCATED(ZRCVBUFV) ) DEALLOCATE(ZRCVBUFV)
+( 1009) # 1010 "suleg_mod.F90"
+( 1010)     ELSE    
+( 1011)       CALL GSTATS(1251,0)
+( 1012)       !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JSETV,IMLOC,IM,ISL,IS,ILS,IDGLU,JGL,JI)
+( 1013)       DO JSETV=1,IPRTRV
+( 1014)         IMLOC=JMLOC+JSETV-1
+( 1015)         IM = D%MYMS(IMLOC)
+( 1016)         ISL = MAX(R%NDGNH-G%NDGLU(IM)+1,1)
+( 1017)         IS  = 1+MOD(R%NSMAX-IM+1,2)
+( 1018)         ILS = (R%NSMAX-IM+3)/2
+( 1019)         IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+( 1020)         IF( S%LUSEFLT .AND. ILS > ITHRESHOLD ) THEN
+( 1021)            IF( .NOT. S%LKEEPRPNM ) DEALLOCATE(S%FA(IMLOC)%RPNMS)
+( 1022)            ALLOCATE(S%FA(IMLOC)%RPNMDS(IDGLU,ILS))
+( 1023)            DO JI=1,ILS
+( 1024)               DO JGL=1,IDGLU
+( 1025)                  S%FA(IMLOC)%RPNMDS(JGL,JI) = F%RPNM(ISL+JGL-1,D%NPMS(IM)+IS+(JI-1)*2)
+( 1026)               ENDDO
+( 1027)            ENDDO
+( 1028)            IF( S%LKEEPRPNM ) THEN
+( 1029)              DO JI=1,ILS
+( 1030)                DO JGL=1,IDGLU
+( 1031)                  S%FA(IMLOC)%RPNMS(JGL,JI) = F%RPNM(ISL+JGL-1,D%NPMS(IM)+IS+(JI-1)*2)
+( 1032)                ENDDO
+( 1033)              ENDDO
+( 1034)            ENDIF
+( 1035)          ELSE
+( 1036)            DO JI=1,ILS
+( 1037)               DO JGL=1,IDGLU
+( 1038)                  S%FA(IMLOC)%RPNMS(JGL,JI) = F%RPNM(ISL+JGL-1,D%NPMS(IM)+IS+(JI-1)*2)
+( 1039)               ENDDO
+( 1040)            ENDDO
+( 1041)         END IF
+( 1042)      END DO
+( 1043)      !$OMP END PARALLEL DO
+( 1044)      CALL GSTATS(1251,1)
+( 1045)         
+( 1046)   ENDIF
+( 1047) # 1048 "suleg_mod.F90"
+( 1048)     ! -------------------- symmetric FLT iniitialisation -----------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 41
+
+( 1049) # 1050 "suleg_mod.F90"
+( 1050)     IF( S%LUSEFLT) THEN
+( 1051)       IRECVLENMAX=0
+( 1052)       ISREQ = 0
+( 1053)       IRREQ = 0
+( 1054)       IF( JMLOC+MYSETV-1 <= D%NUMP )THEN
+( 1055)          IMLOC=JMLOC+MYSETV-1
+( 1056)          IM = D%MYMS(IMLOC)
+( 1057)          ILS = (R%NSMAX-IM+3)/2
+( 1058)          IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+( 1059)          IF( ILS > ITHRESHOLD ) THEN
+( 1060)             S%LSYM = .TRUE.
+( 1061)             INX = IDGLU
+( 1062)             CALL CONSTRUCT_BUTTERFLY(ZEPS_INT_DEC,IMAXCOLS,INX,ILS,S%FA(IMLOC)%RPNMDS,&
+( 1063)                  & S%FA(IMLOC)%YBUT_STRUCT_S)
+( 1064)           CALL PACK_BUTTERFLY_STRUCT(S%FA(IMLOC)%YBUT_STRUCT_S,ZCLONES(IMLOC))
+( 1065)           IRECVLENMAX=SIZE(ZCLONES(IMLOC)%COMMSBUF)
+( 1066)           CALL GSTATS(852,0)
+( 1067)           DO JSETV=1,NPRTRV
+( 1068)             CALL SET2PE(ISEND,0,0,MYSETW,JSETV)
+( 1069)             IF(.NOT.LMPOFF) THEN
+( 1070)               ISREQ = ISREQ+1
+( 1071)               CALL MPL_SEND(ZCLONES(IMLOC)%COMMSBUF(:),KDEST=NPRCIDS(ISEND),&
+( 1072)                &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(ISREQ),&
+( 1073)                & KTAG=ITAG,CDSTRING='SULEG:')
+( 1074)             ENDIF
+( 1075)           ENDDO
+( 1076)           CALL GSTATS(852,1)
+( 1077)         ELSE
+( 1078)           IRECVLENMAX=2
+( 1079)           ZDUM(:)=0.0_JPRBT
+( 1080)           CALL GSTATS(852,0)
+( 1081)           DO JSETV=1,NPRTRV
+( 1082)             CALL SET2PE(ISEND,0,0,MYSETW,JSETV)
+( 1083)             IF(.NOT.LMPOFF) THEN
+( 1084)               ISREQ = ISREQ+1
+( 1085)               CALL MPL_SEND(ZDUM(:),KDEST=NPRCIDS(ISEND), &
+( 1086)                &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(ISREQ),&
+( 1087)                & KTAG=ITAG,CDSTRING='SULEG:')
+( 1088)             ENDIF
+( 1089)           ENDDO
+( 1090)           CALL GSTATS(852,1)
+( 1091)         ENDIF
+( 1092)       ENDIF
+( 1093)       IF(.NOT. LMPOFF) THEN
+( 1094)         CALL GSTATS(852,0)
+( 1095)         DO JSETV=1,NPRTRV
+( 1096)           CALL SET2PE(ISEND,0,0,MYSETW,JSETV)
+( 1097)           CALL MPL_SEND(IRECVLENMAX,KDEST=NPRCIDS(ISEND),KTAG=ITAG1,CDSTRING='SULEG:')
+( 1098)         ENDDO
+( 1099)         IRECVLENMAX=0
+( 1100)         DO JSETV=1,NPRTRV ! ? should this be IPRTRV ?
+( 1101)           CALL SET2PE(IRECV,0,0,MYSETW,JSETV)
+( 1102)           CALL MPL_RECV(IRECVLENMAXV(JSETV),KSOURCE=NPRCIDS(IRECV),KTAG=ITAG1,CDSTRING='SULEG:')
+( 1103)           IRECVLENMAX=MAX(IRECVLENMAX,IRECVLENMAXV(JSETV))
+( 1104)         ENDDO
+( 1105)         IF( MYPROC == 1 )THEN
+( 1106)           IF( IRECVLENMAX > 2 )THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 42
+
+( 1107)             WRITE(NOUT,'("SULEG: SYM      MAX BUTTERFLY CLONE LEN=",I8)')IRECVLENMAX
+( 1108)           ENDIF
+( 1109)         ENDIF
+( 1110)         IF( IRECVLENMAX == 0 )THEN
+( 1111)           WRITE(NOUT,'("SULEG: SYM WARNING CLONE LEN=",I8,I8)')MYPROC, IRECVLENMAX
+( 1112)         ENDIF
+( 1113)         IF( IRECVLENMAX > 0 )THEN
+( 1114)           ALLOCATE (ZRCVBUTFV(IRECVLENMAX,IPRTRV))
+( 1115)           DO JSETV=1,IPRTRV
+( 1116)             IRREQ = IRREQ+1
+( 1117)             CALL SET2PE(IRECV,0,0,MYSETW,JSETV)
+( 1118)             CALL MPL_RECV(ZRCVBUTFV(:,JSETV),KSOURCE=NPRCIDS(IRECV), &
+( 1119)              &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IRECVREQ(IRREQ),&
+( 1120)              & KTAG=ITAG,CDSTRING='SULEG:')
+( 1121)           ENDDO
+( 1122)         ENDIF
+( 1123)         IF(ISREQ > 0) THEN
+( 1124)           CALL MPL_WAIT(KREQUEST=ISENDREQ(1:ISREQ), &
+( 1125)            & CDSTRING='SUTRLE: SULEG')
+( 1126)         ENDIF
+( 1127)         IF(IRREQ > 0) THEN
+( 1128)           CALL MPL_WAIT(KBYTES=IBYTES,KOUNT=IKOUNT(1:IRREQ),KREQUEST=IRECVREQ(1:IRREQ), &
+( 1129)            & CDSTRING='SUTRLE: SULEG')
+( 1130)         ENDIF
+( 1131)         CALL GSTATS(852,1)
+( 1132) # 1134 "suleg_mod.F90"
+( 1134)         IF( IRECVLENMAX > 0 )THEN
+( 1135)           CALL GSTATS(1252,0)
+( 1136)           !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JSETV,IMLOC,IM,ILS,IDGLU,INX,ICLONELEN)
+( 1137)           DO JSETV=1,IPRTRV
+( 1138)             IMLOC=JMLOC+JSETV-1
+( 1139)             IM = D%MYMS(IMLOC)
+( 1140)             ILS = (R%NSMAX-IM+3)/2
+( 1141)             IF( ILS > ITHRESHOLD ) THEN
+( 1142)               IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+( 1143)               INX=IDGLU
+( 1144)               IF( .NOT.ALLOCATED(ZCLONES(IMLOC)%COMMSBUF) )THEN
+( 1145)                 ICLONELEN=IKOUNT(JSETV)
+( 1146)                 ALLOCATE(ZCLONES(IMLOC)%COMMSBUF(ICLONELEN))
+( 1147)                 ZCLONES(IMLOC)%COMMSBUF(1:ICLONELEN) = ZRCVBUTFV(1:ICLONELEN,JSETV)
+( 1148)                 CALL UNPACK_BUTTERFLY_STRUCT( S%FA(IMLOC)%YBUT_STRUCT_S,ZCLONES(IMLOC))
+( 1149)               ENDIF
+( 1150)               IF( ALLOCATED(ZCLONES(IMLOC)%COMMSBUF) ) THEN
+( 1151)                 IF( SIZEOF(ZCLONES(IMLOC)%COMMSBUF) > 0 ) DEALLOCATE(ZCLONES(IMLOC)%COMMSBUF)
+( 1152)                 !              ZCLONES(IMLOC)%COMMSBUF=>NULL()
+( 1153)               ENDIF
+( 1154)               IF( ASSOCIATED(S%FA(IMLOC)%RPNMS) .AND. .NOT. S%LKEEPRPNM ) DEALLOCATE(S%FA(IMLOC)%RPNMS)
+( 1155)               IF( ASSOCIATED(S%FA(IMLOC)%RPNMDS) ) DEALLOCATE(S%FA(IMLOC)%RPNMDS)
+( 1156)             ENDIF
+( 1157)           ENDDO
+( 1158)           !$OMP END PARALLEL DO
+( 1159)           CALL GSTATS(1252,1)
+( 1160)           DEALLOCATE(ZRCVBUTFV)
+( 1161)         ENDIF
+( 1162)       ENDIF
+( 1163)     ENDIF
+( 1164) # 1165 "suleg_mod.F90"
+( 1165)   ENDDO                     ! +++++++++++++++++++++ END JMLOC LOOP +++++++++++++++++++++++
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:03      page 43
+
+( 1166) # 1167 "suleg_mod.F90"
+( 1167) !  ENDIF ! (S%LUSE_BELUSOV.OR.S%LUSEFLT)
+( 1168)     
+( 1169)   IF( S%LUSEFLT )THEN
+( 1170)     DEALLOCATE(ZCLONEA)
+( 1171)     DEALLOCATE(ZCLONES)
+( 1172)   ENDIF
+( 1173) # 1174 "suleg_mod.F90"
+( 1174)   IF( LLP1 .AND. S%LUSEFLT ) THEN    
+( 1175)     WRITE(NOUT,*) '=== SULEG: Finished SETUP_BUTTERFLY ==='
+( 1176)   ENDIF
+( 1177)   ENDIF
+( 1178) # 1179 "suleg_mod.F90"
+( 1179)   CALL GSTATS(1801,3)
+( 1180)   IF(S%LUSE_BELUSOV) DEALLOCATE(F%RPNM)
+( 1181) # 1182 "suleg_mod.F90"
+( 1182)   IF(C%LWRITE_LEGPOL) CALL WRITE_LEGPOL
+( 1183)   IF(C%LREAD_LEGPOL)  CALL READ_LEGPOL
+( 1184) # 1186 "suleg_mod.F90"
+( 1186) ENDIF
+( 1187) CALL GSTATS(1801,1)
+( 1188) CALL GSTATS(140,1)
+( 1189) # 1190 "suleg_mod.F90"
+( 1190) !     ------------------------------------------------------------------
+( 1191) 9 FORMAT(1X,'ARRAY ',A10,' ALLOCATED ',8I8)
+( 1192) # 1193 "suleg_mod.F90"
+( 1193) !IF (S%LUSE_BELUSOV.OR.S%LUSEFLT) 
+( 1194) CALL END_POL
+( 1195) # 1196 "suleg_mod.F90"
+( 1196) END SUBROUTINE SULEG
+( 1197) END MODULE SULEG_MOD

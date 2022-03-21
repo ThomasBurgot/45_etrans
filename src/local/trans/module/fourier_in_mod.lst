@@ -1,0 +1,342 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:13      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: fourier_in_mod.F90
+
+(    1) MODULE FOURIER_IN_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE FOURIER_IN(PREEL,KFIELDS)
+(    4) 
+(    5) !**** *FOURIER_IN* - Copy fourier data from buffer to local array
+(    6) 
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Routine for copying fourier data from buffer to local array
+(   10) 
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !     CALL FOURIER_IN(...)
+(   14) 
+(   15) !     Explicit arguments :  PREEL - local fourier/GP array
+(   16) !     --------------------  KFIELDS - number of fields
+(   17) !
+(   18) !     Externals.  None.
+(   19) !     ----------
+(   20) 
+(   21) !     Author.
+(   22) !     -------
+(   23) !        Mats Hamrud *ECMWF*
+(   24) 
+(   25) !     Modifications.
+(   26) !     --------------
+(   27) !        Original : 2000-04-01
+(   28) 
+(   29) !     ------------------------------------------------------------------
+(   30) 
+(   31) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   32) 
+(   33) USE TPM_DISTR       ,ONLY : D, MYSETW, MYPROC, NPROC, D_NSTAGTF,D_MSTABF,D_NSTAGT0B,D_NPNTGTB0,D_NPROCM,D_NPTRLS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:13      page 2
+
+(   34) USE TPM_TRANS       ,ONLY : FOUBUF
+(   35) USE TPM_GEOMETRY    ,ONLY : G, G_NMEN,G_NMEN_MAX
+(   36) use tpm_gen, only: nout
+(   37) !
+(   38) 
+(   39) IMPLICIT NONE
+(   40) 
+(   41) INTEGER(KIND=JPIM),INTENT(IN) :: KFIELDS
+(   42) 
+(   43) INTEGER(KIND=JPIM) :: KGL
+(   44) 
+(   45) REAL(KIND=JPRBT), INTENT(OUT) :: PREEL(:,:)
+(   46) 
+(   47) INTEGER(KIND=JPIM) :: JM,JF,IGLG,IPROC,IR,II,ISTA
+(   48) INTEGER(KIND=JPIM) :: IBEG,IEND,IINC,iimax1,iimax2,iimax3,iunit
+(   49) 
+(   50) !     ------------------------------------------------------------------
+(   51) 
+(   52) IF(MYPROC > NPROC/2)THEN
+(   53)   IBEG=1
+(   54)   IEND=D%NDGL_FS
+(   55)   IINC=1
+(   56) ELSE
+(   57)   IBEG=D%NDGL_FS
+(   58)   IEND=1
+(   59)   IINC=-1
+(   60) ENDIF
+(   61) !$ACC data &
+(   62) !$ACC& copyin(D_NPTRLS,D_NSTAGTF,D_MSTABF,D_NSTAGT0B,D_NPNTGTB0,G_NMEN,G_NMEN_MAX,D_NPROCM) &
+(   63) !$ACC& present(PREEL,FOUBUF)
+(   64) 
+(   65) !$ACC parallel loop collapse(3) private(IGLG,IPROC,ISTA)
+(   66) DO KGL=IBEG,IEND,IINC
+(   67)    DO JM=0,G_NMEN_MAX      
+(   68)       DO JF=1,KFIELDS     
+(   69)          
+(   70)          IGLG = D_NPTRLS(MYSETW)+KGL-1
+(   71)          
+(   72)          if ( JM .le. G_NMEN(IGLG)) then
+(   73)             
+(   74)             IPROC = D_NPROCM(JM)
+(   75)             ISTA  = (D_NSTAGT0B(D_MSTABF(IPROC))+D_NPNTGTB0(JM,KGL))*2*KFIELDS
+(   76)             
+(   77)             PREEL(2*JF-1,2*JM+1+D_NSTAGTF(KGL)) = FOUBUF(ISTA+2*JF-1)
+(   78)             PREEL(2*JF,  2*JM+1+D_NSTAGTF(KGL)) = FOUBUF(ISTA+2*JF  )
+(   79)             !write(nout,*) , 'istart1 ...', KGL, JM, JF, ISTA+2*JF,ISTA,D_NSTAGT0B(D_MSTABF(IPROC)),IPROC,KFIELDS
+(   80)             !write(nout,*) , 'istart2 ...',D_NPNTGTB0(JM,KGL), FOUBUF(ISTA+2*JF-1), FOUBUF(ISTA+2*JF),2*JM+1+D_NSTAGTF(KGL)
+(   81)             !if(jf==1 .and. 2*JM+1+D_NSTAGTF(KGL)==7972) write(nout,*) 'fourier_in: fidx=7972, kgl=',kgl,' jm=',jm
+(   82)             !TODO (Andreas): should be able to remove the factor 2 in the second dimension (in front of jm)
+(   83)             !and reduce the size of the array. Will need to adapt fsc_mod accordingly! This is actually more
+(   84)             !difficult: d_nstagtf(kgl) is not necessarily even!
+(   85)             
+(   86)          end if
+(   87)          
+(   88)       ENDDO
+(   89)       
+(   90)    ENDDO
+(   91)    
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:13      page 3
+
+(   92) END DO
+(   93) !$ACC end data
+(   94) 
+(   95) !iimax1=0
+(   96) !iimax2=0
+(   97) !iimax3=0
+(   98) !iunit=myproc+300
+(   99) !DO KGL=IBEG,IEND,IINC
+(  100) !   DO JM=0,G_NMEN_MAX      
+(  101) !      DO JF=1,KFIELDS     
+(  102) !         
+(  103) !         IGLG = D_NPTRLS(MYSETW)+KGL-1
+(  104) !         
+(  105) !         if ( JM .le. G_NMEN(IGLG)) then
+(  106) !            
+(  107) !            IPROC = D_NPROCM(JM)
+(  108) !            ISTA  = (D_NSTAGT0B(D_MSTABF(IPROC))+D_NPNTGTB0(JM,KGL))*2*KFIELDS
+(  109) !           
+(  110) !            iimax1=max(iimax1,2*JF)
+(  111) !            iimax2=max(iimax2,2*JM+1+D_NSTAGTF(KGL))
+(  112) !            iimax3=max(iimax3,ISTA+2*JF)
+(  113) !
+(  114) !          endif
+(  115) !      ENDDO 
+(  116) !    ENDDO 
+(  117) !ENDDO 
+(  118) !write(iunit,*) 'max_in ',iimax1,size(PREEL,1),iimax2,size(PREEL,2),iimax3,size(FOUBUF)
+(  119) !     ------------------------------------------------------------------
+(  120) 
+(  121) END SUBROUTINE FOURIER_IN
+(  122) END MODULE FOURIER_IN_MOD
+(  123) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:13      page 4
+
+(    1) # 1 "fourier_in_mod.F90"
+(    1) MODULE FOURIER_IN_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE FOURIER_IN(PREEL,KFIELDS)
+(    4) # 5 "fourier_in_mod.F90"
+(    5) !**** *FOURIER_IN* - Copy fourier data from buffer to local array
+(    6) # 7 "fourier_in_mod.F90"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Routine for copying fourier data from buffer to local array
+(   10) # 11 "fourier_in_mod.F90"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !     CALL FOURIER_IN(...)
+(   14) # 15 "fourier_in_mod.F90"
+(   15) !     Explicit arguments :  PREEL - local fourier/GP array
+(   16) !     --------------------  KFIELDS - number of fields
+(   17) !
+(   18) !     Externals.  None.
+(   19) !     ----------
+(   20) # 21 "fourier_in_mod.F90"
+(   21) !     Author.
+(   22) !     -------
+(   23) !        Mats Hamrud *ECMWF*
+(   24) # 25 "fourier_in_mod.F90"
+(   25) !     Modifications.
+(   26) !     --------------
+(   27) !        Original : 2000-04-01
+(   28) # 29 "fourier_in_mod.F90"
+(   29) !     ------------------------------------------------------------------
+(   30) # 31 "fourier_in_mod.F90"
+(   31) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   32) # 33 "fourier_in_mod.F90"
+(   33) USE TPM_DISTR       ,ONLY : D, MYSETW, MYPROC, NPROC, D_NSTAGTF,D_MSTABF,D_NSTAGT0B,D_NPNTGTB0,D_NPROCM,D_NPTRLS
+(   34) USE TPM_TRANS       ,ONLY : FOUBUF
+(   35) USE TPM_GEOMETRY    ,ONLY : G, G_NMEN,G_NMEN_MAX
+(   36) use tpm_gen, only: nout
+(   37) !
+(   38) # 39 "fourier_in_mod.F90"
+(   39) IMPLICIT NONE
+(   40) # 41 "fourier_in_mod.F90"
+(   41) INTEGER(KIND=JPIM),INTENT(IN) :: KFIELDS
+(   42) # 43 "fourier_in_mod.F90"
+(   43) INTEGER(KIND=JPIM) :: KGL
+(   44) # 45 "fourier_in_mod.F90"
+(   45) REAL(KIND=JPRBT), INTENT(OUT) :: PREEL(:,:)
+(   46) # 47 "fourier_in_mod.F90"
+(   47) INTEGER(KIND=JPIM) :: JM,JF,IGLG,IPROC,IR,II,ISTA
+(   48) INTEGER(KIND=JPIM) :: IBEG,IEND,IINC,iimax1,iimax2,iimax3,iunit
+(   49) # 50 "fourier_in_mod.F90"
+(   50) !     ------------------------------------------------------------------
+(   51) # 52 "fourier_in_mod.F90"
+(   52) IF(MYPROC > NPROC/2)THEN
+(   53)   IBEG=1
+(   54)   IEND=D%NDGL_FS
+(   55)   IINC=1
+(   56) ELSE
+(   57)   IBEG=D%NDGL_FS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:13      page 5
+
+(   58)   IEND=1
+(   59)   IINC=-1
+(   60) ENDIF
+(   62) !$ACC& copyin(D_NPTRLS,D_NSTAGTF,D_MSTABF,D_NSTAGT0B,D_NPNTGTB0,G_NMEN,G_NMEN_MAX,D_NPROCM) &
+(   63) !$ACC& present(PREEL,FOUBUF)
+(   64) # 65 "fourier_in_mod.F90"
+(   65) !$ACC parallel loop collapse(3) private(IGLG,IPROC,ISTA)
+(   66) DO KGL=IBEG,IEND,IINC
+(   67)    DO JM=0,G_NMEN_MAX      
+(   68)       DO JF=1,KFIELDS     
+(   69)          
+(   70)          IGLG = D_NPTRLS(MYSETW)+KGL-1
+(   71)          
+(   72)          if ( JM .le. G_NMEN(IGLG)) then
+(   73)             
+(   74)             IPROC = D_NPROCM(JM)
+(   75)             ISTA  = (D_NSTAGT0B(D_MSTABF(IPROC))+D_NPNTGTB0(JM,KGL))*2*KFIELDS
+(   76)             
+(   77)             PREEL(2*JF-1,2*JM+1+D_NSTAGTF(KGL)) = FOUBUF(ISTA+2*JF-1)
+(   78)             PREEL(2*JF,  2*JM+1+D_NSTAGTF(KGL)) = FOUBUF(ISTA+2*JF  )
+(   79)             !write(nout,*) , 'istart1 ...', KGL, JM, JF, ISTA+2*JF,ISTA,D_NSTAGT0B(D_MSTABF(IPROC)),IPROC,KFIELDS
+(   80)             !write(nout,*) , 'istart2 ...',D_NPNTGTB0(JM,KGL), FOUBUF(ISTA+2*JF-1), FOUBUF(ISTA+2*JF),2*JM+1+D_NSTAGTF(KGL)
+(   81)             !if(jf==1 .and. 2*JM+1+D_NSTAGTF(KGL)==7972) write(nout,*) 'fourier_in: fidx=7972, kgl=',kgl,' jm=',jm
+(   82)             !TODO (Andreas): should be able to remove the factor 2 in the second dimension (in front of jm)
+(   83)             !and reduce the size of the array. Will need to adapt fsc_mod accordingly! This is actually more
+(   84)             !difficult: d_nstagtf(kgl) is not necessarily even!
+(   85)             
+(   86)          end if
+(   87)          
+(   88)       ENDDO
+(   89)       
+(   90)    ENDDO
+(   91)    
+(   92) END DO
+(   93) !$ACC end data
+(   94) # 95 "fourier_in_mod.F90"
+(   95) !iimax1=0
+(   96) !iimax2=0
+(   97) !iimax3=0
+(   98) !iunit=myproc+300
+(   99) !DO KGL=IBEG,IEND,IINC
+(  100) !   DO JM=0,G_NMEN_MAX      
+(  101) !      DO JF=1,KFIELDS     
+(  102) !         
+(  103) !         IGLG = D_NPTRLS(MYSETW)+KGL-1
+(  104) !         
+(  105) !         if ( JM .le. G_NMEN(IGLG)) then
+(  106) !            
+(  107) !            IPROC = D_NPROCM(JM)
+(  108) !            ISTA  = (D_NSTAGT0B(D_MSTABF(IPROC))+D_NPNTGTB0(JM,KGL))*2*KFIELDS
+(  109) !           
+(  110) !            iimax1=max(iimax1,2*JF)
+(  111) !            iimax2=max(iimax2,2*JM+1+D_NSTAGTF(KGL))
+(  112) !            iimax3=max(iimax3,ISTA+2*JF)
+(  113) !
+(  114) !          endif
+(  115) !      ENDDO 
+(  116) !    ENDDO 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:13      page 6
+
+(  117) !ENDDO 
+(  118) !write(iunit,*) 'max_in ',iimax1,size(PREEL,1),iimax2,size(PREEL,2),iimax3,size(FOUBUF)
+(  119) !     ------------------------------------------------------------------
+(  120) # 121 "fourier_in_mod.F90"
+(  121) END SUBROUTINE FOURIER_IN
+(  122) END MODULE FOURIER_IN_MOD

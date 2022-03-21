@@ -1,0 +1,608 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:04      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: sumplat_mod.F90
+
+(    1) MODULE SUMPLAT_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUMPLAT(KDGL,KPROC,KPROCA,KMYSETA,LDSPLIT,LDEQ_REGIONS,&
+(    4)                    &KFRSTLAT,KLSTLAT,KFRSTLOFF,KPTRLAT,&
+(    5)                    &KPTRFRSTLAT,KPTRLSTLAT,KPTRFLOFF,&
+(    6)                    &PWEIGHT,LDWEIGHTED_DISTR,PMEDIAP,KPROCAGP,&
+(    7)                    &KMEDIAP,KRESTM,LDSPLITLAT,KMYPROC,KLOEN)
+(    8) 
+(    9) !**** *SUMPLAT * - Initialize gridpoint distrbution in N-S direction
+(   10) 
+(   11) !     Purpose.
+(   12) !     --------
+(   13) 
+(   14) 
+(   15) !**   Interface.
+(   16) !     ----------
+(   17) !        *CALL* *SUMPLAT *
+(   18) 
+(   19) !     Explicit arguments - input :
+(   20) !     --------------------
+(   21) !                          KDGL       -last  latitude
+(   22) !                          KPROC      -total number of processors
+(   23) !                          KPROCA     -number of processors in A direction
+(   24) !                          KMYSETA    -process number in A direction
+(   25) !                          LDSPLIT    -true for latitudes shared between sets
+(   26) !                          LDEQ_REGIONS -true if eq_regions partitioning
+(   27) !                          PWEIGHT    -weight per grid-point if weighted distribution
+(   28) !                          LDWEIGHTED_DISTR -true if weighted distribution
+(   29) 
+(   30) !     Explicit arguments - output:
+(   31) !     --------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:04      page 2
+
+(   32) !                          PMEDIAP    -mean weight per PE if weighted distribution
+(   33) !                          KMEDIAP    -mean number of grid points per PE
+(   34) !                          KPROCAGP   -number of grid points per A set
+(   35) !                          KRESTM     -number of PEs with one extra point
+(   36) !                          KFRSTLAT   -first latitude row on processor
+(   37) !                          KLSTLAT    -last  latitude row on processor
+(   38) !                          KFRSTLOFF  -offset for first latitude in set
+(   39) !                          KPTRLAT    -pointer to start of latitude
+(   40) !                          KPTRFRSTLAT-pointer to first latitude
+(   41) !                          KPTRLSTLAT -pointer to last  latitude
+(   42) !                          KPTRFLOFF  -offset for pointer to first latitude
+(   43) !                          LDSPLITLAT -true for latitudes which are split
+(   44) 
+(   45) !        Implicit arguments :
+(   46) !        --------------------
+(   47) 
+(   48) 
+(   49) !     Method.
+(   50) !     -------
+(   51) !        See documentation
+(   52) 
+(   53) !     Externals.   SUMPLATB and SUEMPLATB.
+(   54) !     ----------
+(   55) 
+(   56) !     Reference.
+(   57) !     ----------
+(   58) !        ECMWF Research Department documentation of the IFS
+(   59) 
+(   60) !     Author.
+(   61) !     -------
+(   62) !        MPP Group *ECMWF*
+(   63) 
+(   64) !     Modifications.
+(   65) !     --------------
+(   66) !        Original : 95-10-01
+(   67) !        David Dent:97-06-02 parameters KFRSTLAT etc added
+(   68) !        JF. Estrade:97-11-13 Adaptation to ALADIN case
+(   69) !        J.Boutahar: 98-07-06  phasing with CY19
+(   70) !        Modified 98-08-10 by K. YESSAD: removal of LRPOLE option + cleanings
+(   71) !         (correct computation of extrapolar latitudes for KPROCL).
+(   72) !        Modified 98-12-07 by K. YESSAD and C. FISCHER: cleaning.
+(   73) !         - merge old sumplat.F and suemplat.F
+(   74) !         - gather 'lelam' code and 'not lelam' code.
+(   75) !         - clean (useless duplication of variables, non doctor features).
+(   76) !         - remodularise according to lelam/not lelam
+(   77) !           -> lelam features in new routine suemplatb.F,
+(   78) !              not lelam features in new routine sumplatb.F
+(   79) !     ------------------------------------------------------------------
+(   80) 
+(   81) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   82) 
+(   83) USE TPM_GEOMETRY    ,ONLY : G
+(   84) USE TPM_DISTR       ,ONLY : MYPROC
+(   85) 
+(   86) USE SUMPLATB_MOD    ,ONLY : SUMPLATB
+(   87) USE SUMPLATBEQ_MOD  ,ONLY : SUMPLATBEQ
+(   88) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   89) !
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:04      page 3
+
+(   90) 
+(   91) IMPLICIT NONE
+(   92) 
+(   93) 
+(   94) !     * DUMMY:
+(   95) REAL(KIND=JPRBT),INTENT(OUT)    :: PMEDIAP
+(   96) INTEGER(KIND=JPIM),INTENT(OUT) :: KMEDIAP
+(   97) INTEGER(KIND=JPIM),INTENT(OUT) :: KRESTM
+(   98) INTEGER(KIND=JPIM),INTENT(IN)  :: KDGL
+(   99) INTEGER(KIND=JPIM),INTENT(IN)  :: KPROC
+(  100) INTEGER(KIND=JPIM),INTENT(IN)  :: KPROCA
+(  101) INTEGER(KIND=JPIM),INTENT(IN)  :: KMYSETA
+(  102) REAL(KIND=JPRBT),INTENT(IN)     :: PWEIGHT(:)
+(  103) LOGICAL,INTENT(INOUT)          :: LDWEIGHTED_DISTR
+(  104) INTEGER(KIND=JPIM),INTENT(OUT) :: KFRSTLAT(:)
+(  105) INTEGER(KIND=JPIM),INTENT(OUT) :: KLSTLAT(:)
+(  106) INTEGER(KIND=JPIM),INTENT(OUT) :: KFRSTLOFF
+(  107) INTEGER(KIND=JPIM),INTENT(OUT) :: KPTRLAT(:)
+(  108) INTEGER(KIND=JPIM),INTENT(OUT) :: KPTRFRSTLAT(:)
+(  109) INTEGER(KIND=JPIM),INTENT(OUT) :: KPTRLSTLAT(:)
+(  110) INTEGER(KIND=JPIM),INTENT(OUT) :: KPTRFLOFF
+(  111) INTEGER(KIND=JPIM),INTENT(OUT) :: KPROCAGP(KPROCA)
+(  112) LOGICAL,INTENT(IN)  :: LDSPLIT
+(  113) LOGICAL,INTENT(IN)  :: LDEQ_REGIONS
+(  114) LOGICAL,INTENT(OUT) :: LDSPLITLAT(:)
+(  115) INTEGER(KIND=JPIM),INTENT(IN) :: KMYPROC
+(  116) INTEGER(KIND=JPIM),INTENT(IN) :: KLOEN(KDGL)
+(  117) 
+(  118) !     * LOCAL:
+(  119) ! === END OF INTERFACE BLOCK ===
+(  120) INTEGER(KIND=JPIM) :: INDIC(KPROCA),ILAST(KPROCA)
+(  121) 
+(  122) !     LOCAL INTEGER SCALARS
+(  123) INTEGER(KIND=JPIM) :: IPTRLATITUDE,  JA, JGL
+(  124) 
+(  125) LOGICAL :: LLFOURIER
+(  126) LOGICAL :: LLDEBUG=.FALSE.
+(  127) 
+(  128) !      -----------------------------------------------------------------
+(  129) 
+(  130) !*       1.    CODE DEPENDING ON 'LELAM': COMPUTATION OF
+(  131) !              KMEDIAP, KRESTM, INDIC, ILAST.
+(  132) !              -----------------------------------------
+(  133) INDIC(:)=0
+(  134) ILAST(:)=0
+(  135) 
+(  136) IF(LDWEIGHTED_DISTR.AND..NOT.LDEQ_REGIONS)THEN
+(  137)   CALL ABORT_TRANS ('SUMPLAT: LDWEIGHTED_DISTR=T AND  LDEQ_REGIONS=F NOT SUPPORTED')
+(  138) ENDIF
+(  139) 
+(  140) IF( LDEQ_REGIONS )THEN
+(  141)   CALL SUMPLATBEQ(1,KDGL,KPROC,KPROCA,KLOEN,LDSPLIT,LDEQ_REGIONS,&
+(  142)    &PWEIGHT,LDWEIGHTED_DISTR,PMEDIAP,KPROCAGP,&
+(  143)    &KMEDIAP,KRESTM,INDIC,ILAST)
+(  144) ELSE
+(  145)   LLFOURIER=.FALSE.
+(  146)   CALL SUMPLATB(1,KDGL,KPROCA,KLOEN,LDSPLIT,LLFOURIER,&
+(  147)    &KMEDIAP,KRESTM,INDIC,ILAST)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:04      page 4
+
+(  148) ENDIF
+(  149) 
+(  150) !      -----------------------------------------------------------------
+(  151) 
+(  152) !*       2.    CODE NOT DEPENDING ON 'LELAM': COMPUTATION OF
+(  153) !              KFRSTLAT TO LDSPLITLAT.
+(  154) !              ---------------------------------------------
+(  155) 
+(  156) 
+(  157) !     * Computation of first and last latitude of processor sets
+(  158) !       -----------  in grid-point-space -----------------------
+(  159) 
+(  160) IF(KMYPROC==1.AND.LLDEBUG)THEN
+(  161)   WRITE(0,'("")')
+(  162)   WRITE(0,'("SUMPLAT_MOD:LDWEIGHTED_DISTR=",L1)')LDWEIGHTED_DISTR
+(  163)   WRITE(0,'("")')
+(  164)   DO JA=1,KPROCA
+(  165)     WRITE(0,'("SUMPLAT_MOD: JA=",I5," ILAST=",I5," INDIC=",I5)')&
+(  166)     &JA,ILAST(JA),INDIC(JA)
+(  167)   ENDDO
+(  168)   WRITE(0,'("")')
+(  169)   IF( LDEQ_REGIONS .AND. LDSPLIT )THEN
+(  170)     DO JA=1,KPROCA
+(  171)       WRITE(0,'("SUMPLAT_MOD: JA=",I5," KPROCAGP=",I12)')&
+(  172)       &JA,KPROCAGP(JA)
+(  173)     ENDDO
+(  174)     WRITE(0,'("")')
+(  175)   ENDIF
+(  176) ENDIF
+(  177) 
+(  178) KFRSTLAT(1) = 1
+(  179) KLSTLAT(KPROCA) = KDGL
+(  180) DO JA=1,KPROCA-1
+(  181)   IF ((.NOT. LDSPLIT) .OR. INDIC(JA) == 0) THEN
+(  182)     KFRSTLAT(JA+1) = ILAST(JA) + 1
+(  183)     KLSTLAT(JA) = ILAST(JA)
+(  184)   ELSE
+(  185)     KFRSTLAT(JA+1) = INDIC(JA)
+(  186)     KLSTLAT(JA) = INDIC(JA)
+(  187)   ENDIF
+(  188) ENDDO
+(  189) KFRSTLOFF=KFRSTLAT(KMYSETA)-1
+(  190) 
+(  191) !     * Initialise following data structures:-
+(  192) !       NPTRLAT     (pointer to the start of each latitude)
+(  193) !       LSPLITLAT   (TRUE if latitude is split over two A sets)
+(  194) !       NPTRFRSTLAT (pointer to the first latitude of each A set)
+(  195) !       NPTRLSTLAT  (pointer to the last  latitude of each A set)
+(  196) 
+(  197) DO JGL=1,KDGL
+(  198)   KPTRLAT  (JGL)=-999
+(  199)   LDSPLITLAT(JGL)=.FALSE.
+(  200) ENDDO
+(  201) IPTRLATITUDE=0
+(  202) DO JA=1,KPROCA
+(  203)   DO JGL=KFRSTLAT(JA),KLSTLAT(JA)
+(  204)     IPTRLATITUDE=IPTRLATITUDE+1
+(  205)     LDSPLITLAT(JGL)=.TRUE.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:04      page 5
+
+(  206)     IF( KPTRLAT(JGL) == -999 )THEN
+(  207)       KPTRLAT(JGL)=IPTRLATITUDE
+(  208)       LDSPLITLAT(JGL)=.FALSE.
+(  209)     ENDIF
+(  210)   ENDDO
+(  211) ENDDO
+(  212) DO JA=1,KPROCA
+(  213)   IF( LDSPLITLAT(KFRSTLAT(JA)) .AND. JA /= 1)THEN
+(  214)     KPTRFRSTLAT(JA)=KPTRLAT(KFRSTLAT(JA))+1
+(  215)   ELSE
+(  216)     KPTRFRSTLAT(JA)=KPTRLAT(KFRSTLAT(JA))
+(  217)   ENDIF
+(  218)   IF( LDSPLITLAT(KLSTLAT(JA)) .AND. JA == KPROCA)THEN
+(  219)     KPTRLSTLAT(JA)=KPTRLAT(KLSTLAT(JA))+1
+(  220)   ELSE
+(  221)     KPTRLSTLAT(JA)=KPTRLAT(KLSTLAT(JA))
+(  222)   ENDIF
+(  223) ENDDO
+(  224) KPTRFLOFF=KPTRFRSTLAT(KMYSETA)-1
+(  225) 
+(  226) IF(KMYPROC==1.AND.LLDEBUG)THEN
+(  227)   DO JGL=1,KDGL
+(  228)     WRITE(0,'("SUMPLAT_MOD: JGL=",I5," KPTRLAT=",I5," LDSPLITLAT=",L4)')&
+(  229)     & JGL,KPTRLAT(JGL),LDSPLITLAT(JGL)
+(  230)   ENDDO
+(  231)   DO JA=1,KPROCA
+(  232)     WRITE(0,'("SUMPLAT_MOD: JA=",I5," KFRSTLAT=",I5," KLSTLAT=",I5,&
+(  233)     & " KPTRFRSTLAT=",I5," KPTRLSTLAT=",I5," KLSTLAT-KFRSTLAT=",I5,&
+(  234)     & " SUM(G%NLOEN(KFRSTLAT:KLSTLAT))=",I10)')&
+(  235)     & JA,KFRSTLAT(JA),KLSTLAT(JA),KPTRFRSTLAT(JA),KPTRLSTLAT(JA),&
+(  236)     & KLSTLAT(JA)-KFRSTLAT(JA),SUM(G%NLOEN(KFRSTLAT(JA):KLSTLAT(JA)))
+(  237)   ENDDO
+(  238) ENDIF
+(  239) 
+(  240) !     ------------------------------------------------------------------
+(  241) 
+(  242) END SUBROUTINE SUMPLAT
+(  243) END MODULE SUMPLAT_MOD
+(  244) 
+(  245) 
+(  246) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:04      page 6
+
+(    1) # 1 "sumplat_mod.F90"
+(    1) MODULE SUMPLAT_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUMPLAT(KDGL,KPROC,KPROCA,KMYSETA,LDSPLIT,LDEQ_REGIONS,&
+(    4)                    &KFRSTLAT,KLSTLAT,KFRSTLOFF,KPTRLAT,&
+(    5)                    &KPTRFRSTLAT,KPTRLSTLAT,KPTRFLOFF,&
+(    6)                    &PWEIGHT,LDWEIGHTED_DISTR,PMEDIAP,KPROCAGP,&
+(    7)                    &KMEDIAP,KRESTM,LDSPLITLAT,KMYPROC,KLOEN)
+(    8) # 9 "sumplat_mod.F90"
+(    9) !**** *SUMPLAT * - Initialize gridpoint distrbution in N-S direction
+(   10) # 11 "sumplat_mod.F90"
+(   11) !     Purpose.
+(   12) !     --------
+(   13) # 15 "sumplat_mod.F90"
+(   15) !**   Interface.
+(   16) !     ----------
+(   17) !        *CALL* *SUMPLAT *
+(   18) # 19 "sumplat_mod.F90"
+(   19) !     Explicit arguments - input :
+(   20) !     --------------------
+(   21) !                          KDGL       -last  latitude
+(   22) !                          KPROC      -total number of processors
+(   23) !                          KPROCA     -number of processors in A direction
+(   24) !                          KMYSETA    -process number in A direction
+(   25) !                          LDSPLIT    -true for latitudes shared between sets
+(   26) !                          LDEQ_REGIONS -true if eq_regions partitioning
+(   27) !                          PWEIGHT    -weight per grid-point if weighted distribution
+(   28) !                          LDWEIGHTED_DISTR -true if weighted distribution
+(   29) # 30 "sumplat_mod.F90"
+(   30) !     Explicit arguments - output:
+(   31) !     --------------------
+(   32) !                          PMEDIAP    -mean weight per PE if weighted distribution
+(   33) !                          KMEDIAP    -mean number of grid points per PE
+(   34) !                          KPROCAGP   -number of grid points per A set
+(   35) !                          KRESTM     -number of PEs with one extra point
+(   36) !                          KFRSTLAT   -first latitude row on processor
+(   37) !                          KLSTLAT    -last  latitude row on processor
+(   38) !                          KFRSTLOFF  -offset for first latitude in set
+(   39) !                          KPTRLAT    -pointer to start of latitude
+(   40) !                          KPTRFRSTLAT-pointer to first latitude
+(   41) !                          KPTRLSTLAT -pointer to last  latitude
+(   42) !                          KPTRFLOFF  -offset for pointer to first latitude
+(   43) !                          LDSPLITLAT -true for latitudes which are split
+(   44) # 45 "sumplat_mod.F90"
+(   45) !        Implicit arguments :
+(   46) !        --------------------
+(   47) # 49 "sumplat_mod.F90"
+(   49) !     Method.
+(   50) !     -------
+(   51) !        See documentation
+(   52) # 53 "sumplat_mod.F90"
+(   53) !     Externals.   SUMPLATB and SUEMPLATB.
+(   54) !     ----------
+(   55) # 56 "sumplat_mod.F90"
+(   56) !     Reference.
+(   57) !     ----------
+(   58) !        ECMWF Research Department documentation of the IFS
+(   59) # 60 "sumplat_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:04      page 7
+
+(   60) !     Author.
+(   61) !     -------
+(   62) !        MPP Group *ECMWF*
+(   63) # 64 "sumplat_mod.F90"
+(   64) !     Modifications.
+(   65) !     --------------
+(   66) !        Original : 95-10-01
+(   67) !        David Dent:97-06-02 parameters KFRSTLAT etc added
+(   68) !        JF. Estrade:97-11-13 Adaptation to ALADIN case
+(   69) !        J.Boutahar: 98-07-06  phasing with CY19
+(   70) !        Modified 98-08-10 by K. YESSAD: removal of LRPOLE option + cleanings
+(   71) !         (correct computation of extrapolar latitudes for KPROCL).
+(   72) !        Modified 98-12-07 by K. YESSAD and C. FISCHER: cleaning.
+(   73) !         - merge old sumplat.F and suemplat.F
+(   74) !         - gather 'lelam' code and 'not lelam' code.
+(   75) !         - clean (useless duplication of variables, non doctor features).
+(   76) !         - remodularise according to lelam/not lelam
+(   77) !           -> lelam features in new routine suemplatb.F,
+(   78) !              not lelam features in new routine sumplatb.F
+(   79) !     ------------------------------------------------------------------
+(   80) # 81 "sumplat_mod.F90"
+(   81) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   82) # 83 "sumplat_mod.F90"
+(   83) USE TPM_GEOMETRY    ,ONLY : G
+(   84) USE TPM_DISTR       ,ONLY : MYPROC
+(   85) # 86 "sumplat_mod.F90"
+(   86) USE SUMPLATB_MOD    ,ONLY : SUMPLATB
+(   87) USE SUMPLATBEQ_MOD  ,ONLY : SUMPLATBEQ
+(   88) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   89) !
+(   90) # 91 "sumplat_mod.F90"
+(   91) IMPLICIT NONE
+(   92) # 94 "sumplat_mod.F90"
+(   94) !     * DUMMY:
+(   95) REAL(KIND=JPRBT),INTENT(OUT)    :: PMEDIAP
+(   96) INTEGER(KIND=JPIM),INTENT(OUT) :: KMEDIAP
+(   97) INTEGER(KIND=JPIM),INTENT(OUT) :: KRESTM
+(   98) INTEGER(KIND=JPIM),INTENT(IN)  :: KDGL
+(   99) INTEGER(KIND=JPIM),INTENT(IN)  :: KPROC
+(  100) INTEGER(KIND=JPIM),INTENT(IN)  :: KPROCA
+(  101) INTEGER(KIND=JPIM),INTENT(IN)  :: KMYSETA
+(  102) REAL(KIND=JPRBT),INTENT(IN)     :: PWEIGHT(:)
+(  103) LOGICAL,INTENT(INOUT)          :: LDWEIGHTED_DISTR
+(  104) INTEGER(KIND=JPIM),INTENT(OUT) :: KFRSTLAT(:)
+(  105) INTEGER(KIND=JPIM),INTENT(OUT) :: KLSTLAT(:)
+(  106) INTEGER(KIND=JPIM),INTENT(OUT) :: KFRSTLOFF
+(  107) INTEGER(KIND=JPIM),INTENT(OUT) :: KPTRLAT(:)
+(  108) INTEGER(KIND=JPIM),INTENT(OUT) :: KPTRFRSTLAT(:)
+(  109) INTEGER(KIND=JPIM),INTENT(OUT) :: KPTRLSTLAT(:)
+(  110) INTEGER(KIND=JPIM),INTENT(OUT) :: KPTRFLOFF
+(  111) INTEGER(KIND=JPIM),INTENT(OUT) :: KPROCAGP(KPROCA)
+(  112) LOGICAL,INTENT(IN)  :: LDSPLIT
+(  113) LOGICAL,INTENT(IN)  :: LDEQ_REGIONS
+(  114) LOGICAL,INTENT(OUT) :: LDSPLITLAT(:)
+(  115) INTEGER(KIND=JPIM),INTENT(IN) :: KMYPROC
+(  116) INTEGER(KIND=JPIM),INTENT(IN) :: KLOEN(KDGL)
+(  117) # 118 "sumplat_mod.F90"
+(  118) !     * LOCAL:
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:04      page 8
+
+(  119) ! === END OF INTERFACE BLOCK ===
+(  120) INTEGER(KIND=JPIM) :: INDIC(KPROCA),ILAST(KPROCA)
+(  121) # 122 "sumplat_mod.F90"
+(  122) !     LOCAL INTEGER SCALARS
+(  123) INTEGER(KIND=JPIM) :: IPTRLATITUDE,  JA, JGL
+(  124) # 125 "sumplat_mod.F90"
+(  125) LOGICAL :: LLFOURIER
+(  126) LOGICAL :: LLDEBUG=.FALSE.
+(  127) # 128 "sumplat_mod.F90"
+(  128) !      -----------------------------------------------------------------
+(  129) # 130 "sumplat_mod.F90"
+(  130) !*       1.    CODE DEPENDING ON 'LELAM': COMPUTATION OF
+(  131) !              KMEDIAP, KRESTM, INDIC, ILAST.
+(  132) !              -----------------------------------------
+(  133) INDIC(:)=0
+(  134) ILAST(:)=0
+(  135) # 136 "sumplat_mod.F90"
+(  136) IF(LDWEIGHTED_DISTR.AND..NOT.LDEQ_REGIONS)THEN
+(  137)   CALL ABORT_TRANS ('SUMPLAT: LDWEIGHTED_DISTR=T AND  LDEQ_REGIONS=F NOT SUPPORTED')
+(  138) ENDIF
+(  139) # 140 "sumplat_mod.F90"
+(  140) IF( LDEQ_REGIONS )THEN
+(  141)   CALL SUMPLATBEQ(1,KDGL,KPROC,KPROCA,KLOEN,LDSPLIT,LDEQ_REGIONS,&
+(  142)    &PWEIGHT,LDWEIGHTED_DISTR,PMEDIAP,KPROCAGP,&
+(  143)    &KMEDIAP,KRESTM,INDIC,ILAST)
+(  144) ELSE
+(  145)   LLFOURIER=.FALSE.
+(  146)   CALL SUMPLATB(1,KDGL,KPROCA,KLOEN,LDSPLIT,LLFOURIER,&
+(  147)    &KMEDIAP,KRESTM,INDIC,ILAST)
+(  148) ENDIF
+(  149) # 150 "sumplat_mod.F90"
+(  150) !      -----------------------------------------------------------------
+(  151) # 152 "sumplat_mod.F90"
+(  152) !*       2.    CODE NOT DEPENDING ON 'LELAM': COMPUTATION OF
+(  153) !              KFRSTLAT TO LDSPLITLAT.
+(  154) !              ---------------------------------------------
+(  155) # 157 "sumplat_mod.F90"
+(  157) !     * Computation of first and last latitude of processor sets
+(  158) !       -----------  in grid-point-space -----------------------
+(  159) # 160 "sumplat_mod.F90"
+(  160) IF(KMYPROC==1.AND.LLDEBUG)THEN
+(  161)   WRITE(0,'("")')
+(  162)   WRITE(0,'("SUMPLAT_MOD:LDWEIGHTED_DISTR=",L1)')LDWEIGHTED_DISTR
+(  163)   WRITE(0,'("")')
+(  164)   DO JA=1,KPROCA
+(  165)     WRITE(0,'("SUMPLAT_MOD: JA=",I5," ILAST=",I5," INDIC=",I5)')&
+(  166)     &JA,ILAST(JA),INDIC(JA)
+(  167)   ENDDO
+(  168)   WRITE(0,'("")')
+(  169)   IF( LDEQ_REGIONS .AND. LDSPLIT )THEN
+(  170)     DO JA=1,KPROCA
+(  171)       WRITE(0,'("SUMPLAT_MOD: JA=",I5," KPROCAGP=",I12)')&
+(  172)       &JA,KPROCAGP(JA)
+(  173)     ENDDO
+(  174)     WRITE(0,'("")')
+(  175)   ENDIF
+(  176) ENDIF
+(  177) # 178 "sumplat_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:04      page 9
+
+(  178) KFRSTLAT(1) = 1
+(  179) KLSTLAT(KPROCA) = KDGL
+(  180) DO JA=1,KPROCA-1
+(  181)   IF ((.NOT. LDSPLIT) .OR. INDIC(JA) == 0) THEN
+(  182)     KFRSTLAT(JA+1) = ILAST(JA) + 1
+(  183)     KLSTLAT(JA) = ILAST(JA)
+(  184)   ELSE
+(  185)     KFRSTLAT(JA+1) = INDIC(JA)
+(  186)     KLSTLAT(JA) = INDIC(JA)
+(  187)   ENDIF
+(  188) ENDDO
+(  189) KFRSTLOFF=KFRSTLAT(KMYSETA)-1
+(  190) # 191 "sumplat_mod.F90"
+(  191) !     * Initialise following data structures:-
+(  192) !       NPTRLAT     (pointer to the start of each latitude)
+(  193) !       LSPLITLAT   (TRUE if latitude is split over two A sets)
+(  194) !       NPTRFRSTLAT (pointer to the first latitude of each A set)
+(  195) !       NPTRLSTLAT  (pointer to the last  latitude of each A set)
+(  196) # 197 "sumplat_mod.F90"
+(  197) DO JGL=1,KDGL
+(  198)   KPTRLAT  (JGL)=-999
+(  199)   LDSPLITLAT(JGL)=.FALSE.
+(  200) ENDDO
+(  201) IPTRLATITUDE=0
+(  202) DO JA=1,KPROCA
+(  203)   DO JGL=KFRSTLAT(JA),KLSTLAT(JA)
+(  204)     IPTRLATITUDE=IPTRLATITUDE+1
+(  205)     LDSPLITLAT(JGL)=.TRUE.
+(  206)     IF( KPTRLAT(JGL) == -999 )THEN
+(  207)       KPTRLAT(JGL)=IPTRLATITUDE
+(  208)       LDSPLITLAT(JGL)=.FALSE.
+(  209)     ENDIF
+(  210)   ENDDO
+(  211) ENDDO
+(  212) DO JA=1,KPROCA
+(  213)   IF( LDSPLITLAT(KFRSTLAT(JA)) .AND. JA /= 1)THEN
+(  214)     KPTRFRSTLAT(JA)=KPTRLAT(KFRSTLAT(JA))+1
+(  215)   ELSE
+(  216)     KPTRFRSTLAT(JA)=KPTRLAT(KFRSTLAT(JA))
+(  217)   ENDIF
+(  218)   IF( LDSPLITLAT(KLSTLAT(JA)) .AND. JA == KPROCA)THEN
+(  219)     KPTRLSTLAT(JA)=KPTRLAT(KLSTLAT(JA))+1
+(  220)   ELSE
+(  221)     KPTRLSTLAT(JA)=KPTRLAT(KLSTLAT(JA))
+(  222)   ENDIF
+(  223) ENDDO
+(  224) KPTRFLOFF=KPTRFRSTLAT(KMYSETA)-1
+(  225) # 226 "sumplat_mod.F90"
+(  226) IF(KMYPROC==1.AND.LLDEBUG)THEN
+(  227)   DO JGL=1,KDGL
+(  228)     WRITE(0,'("SUMPLAT_MOD: JGL=",I5," KPTRLAT=",I5," LDSPLITLAT=",L4)')&
+(  229)     & JGL,KPTRLAT(JGL),LDSPLITLAT(JGL)
+(  230)   ENDDO
+(  231)   DO JA=1,KPROCA
+(  232)     WRITE(0,'("SUMPLAT_MOD: JA=",I5," KFRSTLAT=",I5," KLSTLAT=",I5,&
+(  233)     & " KPTRFRSTLAT=",I5," KPTRLSTLAT=",I5," KLSTLAT-KFRSTLAT=",I5,&
+(  234)     & " SUM(G%NLOEN(KFRSTLAT:KLSTLAT))=",I10)')&
+(  235)     & JA,KFRSTLAT(JA),KLSTLAT(JA),KPTRFRSTLAT(JA),KPTRLSTLAT(JA),&
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:04      page 10
+
+(  236)     & KLSTLAT(JA)-KFRSTLAT(JA),SUM(G%NLOEN(KFRSTLAT(JA):KLSTLAT(JA)))
+(  237)   ENDDO
+(  238) ENDIF
+(  239) # 240 "sumplat_mod.F90"
+(  240) !     ------------------------------------------------------------------
+(  241) # 242 "sumplat_mod.F90"
+(  242) END SUBROUTINE SUMPLAT
+(  243) END MODULE SUMPLAT_MOD

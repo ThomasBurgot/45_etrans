@@ -1,0 +1,175 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:47      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: tpm_gen.F90
+
+(    1) MODULE TPM_GEN
+(    2) 
+(    3) ! Module for general control variables.
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    6) 
+(    7) IMPLICIT NONE
+(    8) 
+(    9) SAVE
+(   10) 
+(   11) INTEGER(KIND=JPIM) :: NOUT            ! Unit number for "standard" output
+(   12) INTEGER(KIND=JPIM) :: NERR            ! Unit number for error messages
+(   13) INTEGER(KIND=JPIM) :: NPRINTLEV       ! Printing level, 0=no print, 1=standard,2=debug
+(   14) 
+(   15) INTEGER(KIND=JPIM) :: MSETUP0 = 0     ! Control of setup calls
+(   16) INTEGER(KIND=JPIM) :: NMAX_RESOL = 0  ! Maximum allowed number of resolutions
+(   17) INTEGER(KIND=JPIM) :: NCUR_RESOL = 0  ! Current resolution
+(   18) INTEGER(KIND=JPIM) :: NDEF_RESOL = 0  ! Number of defined resolutions
+(   19) INTEGER(KIND=JPIM) :: NPROMATR        ! Packet size for transform (in no of fields)
+(   20)                              ! NPROMATR=0 means do all fields together (dflt)
+(   21) 
+(   22) LOGICAL   :: LALLOPERM       ! Allocate some shared data structures permanently
+(   23) LOGICAL   :: LALLOPERM2
+(   24) LOGICAL   :: LMPOFF          ! true: switch off message passing
+(   25) LOGICAL   :: LSYNC_TRANS     ! true: activate barriers in trmtol and trltom
+(   26) 
+(   27) ! Use of synchronization/blocking in Transpose (some networks do get flooded)
+(   28) ! 0 = Post IRECVs up-front, use ISENDs, use WAITANY to recv data (default)
+(   29) ! 1 = Use ISENDs, use blocking RECVs, add barrier at the end of each cycle
+(   30) ! 2 = Use buffered SENDs, use blocking RECVs, add barrier at the end of each cycle
+(   31) INTEGER(KIND=JPIM) :: NTRANS_SYNC_LEVEL = 0
+(   32) 
+(   33) LOGICAL, ALLOCATABLE :: LENABLED(:)   ! true: the resolution is enabled (it has been
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:47      page 2
+
+(   34)                                       ! initialised and has not been released afterward) 
+(   35) 
+(   36) END MODULE TPM_GEN
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:47      page 3
+
+(    1) # 1 "tpm_gen.F90"
+(    1) MODULE TPM_GEN
+(    2) # 3 "tpm_gen.F90"
+(    3) ! Module for general control variables.
+(    4) # 5 "tpm_gen.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    6) # 7 "tpm_gen.F90"
+(    7) IMPLICIT NONE
+(    8) # 9 "tpm_gen.F90"
+(    9) SAVE
+(   10) # 11 "tpm_gen.F90"
+(   11) INTEGER(KIND=JPIM) :: NOUT            ! Unit number for "standard" output
+(   12) INTEGER(KIND=JPIM) :: NERR            ! Unit number for error messages
+(   13) INTEGER(KIND=JPIM) :: NPRINTLEV       ! Printing level, 0=no print, 1=standard,2=debug
+(   14) # 15 "tpm_gen.F90"
+(   15) INTEGER(KIND=JPIM) :: MSETUP0 = 0     ! Control of setup calls
+(   16) INTEGER(KIND=JPIM) :: NMAX_RESOL = 0  ! Maximum allowed number of resolutions
+(   17) INTEGER(KIND=JPIM) :: NCUR_RESOL = 0  ! Current resolution
+(   18) INTEGER(KIND=JPIM) :: NDEF_RESOL = 0  ! Number of defined resolutions
+(   19) INTEGER(KIND=JPIM) :: NPROMATR        ! Packet size for transform (in no of fields)
+(   20)                              ! NPROMATR=0 means do all fields together (dflt)
+(   21) # 22 "tpm_gen.F90"
+(   22) LOGICAL   :: LALLOPERM       ! Allocate some shared data structures permanently
+(   23) LOGICAL   :: LALLOPERM2
+(   24) LOGICAL   :: LMPOFF          ! true: switch off message passing
+(   25) LOGICAL   :: LSYNC_TRANS     ! true: activate barriers in trmtol and trltom
+(   26) # 27 "tpm_gen.F90"
+(   27) ! Use of synchronization/blocking in Transpose (some networks do get flooded)
+(   28) ! 0 = Post IRECVs up-front, use ISENDs, use WAITANY to recv data (default)
+(   29) ! 1 = Use ISENDs, use blocking RECVs, add barrier at the end of each cycle
+(   30) ! 2 = Use buffered SENDs, use blocking RECVs, add barrier at the end of each cycle
+(   31) INTEGER(KIND=JPIM) :: NTRANS_SYNC_LEVEL = 0
+(   32) # 33 "tpm_gen.F90"
+(   33) LOGICAL, ALLOCATABLE :: LENABLED(:)   ! true: the resolution is enabled (it has been
+(   34)                                       ! initialised and has not been released afterward) 
+(   35) # 36 "tpm_gen.F90"
+(   36) END MODULE TPM_GEN

@@ -1,0 +1,344 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:55      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eupdspb_mod.F90
+
+(    1) MODULE EUPDSPB_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EUPDSPB(KFIELD,POA,PSPEC,KFLDPTR)
+(    4) 
+(    5) !**** *EUPDSPB* - Update spectral arrays after direct Legendre transform
+(    6) 
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        To update spectral arrays for a fixed zonal wave-number
+(   10) !         from values in POA.
+(   11) 
+(   12) !**   Interface.
+(   13) !     ----------
+(   14) !        CALL EUPDSPB(....)
+(   15) 
+(   16) !        Explicit arguments :  
+(   17) !        --------------------  KFIELD  - number of fields
+(   18) !                              POA - work array
+(   19) !                              PSPEC - spectral array
+(   20) 
+(   21) !        Implicit arguments :  None
+(   22) !        --------------------
+(   23) 
+(   24) !     Method.
+(   25) !     -------
+(   26) 
+(   27) !     Externals.
+(   28) !     ----------
+(   29) 
+(   30) !     Reference.
+(   31) !     ----------
+(   32) !        ECMWF Research Department documentation of the IFS
+(   33) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:55      page 2
+
+(   34) !     Author.
+(   35) !     -------
+(   36) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   37) 
+(   38) !     Modifications.
+(   39) !     --------------
+(   40) !        Original : 88-02-02
+(   41) !        D. Giard : 93-03-19 truncations NSMAX and NTMAX (see NOTE)
+(   42) !        R. El Khatib : 94-08-02 Replace number of fields by indexes of the
+(   43) !                       first and last field
+(   44) !        L. Isaksen : 95-06-06 Reordering of spectral arrays
+(   45) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   46) !     ------------------------------------------------------------------
+(   47) 
+(   48) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   49) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   50) 
+(   51) USE TPMALD_DISTR    ,ONLY : DALD, DALD_NESM0, DALD_NCPL2M
+(   52) USE TPM_DISTR       ,ONLY : D, D_MYMS
+(   53) !
+(   54) 
+(   55) IMPLICIT NONE
+(   56) 
+(   57) INTEGER(KIND=JPIM),INTENT(IN)  :: KFIELD
+(   58) REAL(KIND=JPRB)   ,INTENT(IN)  :: POA(:,:,:)
+(   59) REAL(KIND=JPRB)   ,INTENT(OUT) :: PSPEC(:,:)
+(   60) INTEGER(KIND=JPIM),INTENT(IN),OPTIONAL :: KFLDPTR(:)
+(   61) 
+(   62) INTEGER(KIND=JPIM) :: II, INM, IR, JFLD, JN,IFLD, JM, IM
+(   63) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   64) 
+(   65) 
+(   66) !     ------------------------------------------------------------------
+(   67) 
+(   68) !*       1.    UPDATE SPECTRAL FIELDS.
+(   69) !              -----------------------
+(   70) IF (LHOOK) CALL DR_HOOK('EUPDSPB_MOD:EUPDSPB',0,ZHOOK_HANDLE)
+(   71) 
+(   72) !$ACC data present (POA, PSPEC)
+(   73) 
+(   74) IF(PRESENT(KFLDPTR)) THEN
+(   75)   
+(   76)   ! TODO
+(   77) 
+(   78)   DO JM = 1, D%NUMP
+(   79)     IM = D%MYMS(JM)
+(   80)   
+(   81)     DO JN=1,DALD%NCPL2M(IM),2
+(   82)       INM=DALD%NESM0(IM)+(JN-1)*2
+(   83)       DO JFLD=1,KFIELD
+(   84)         IR= 2*JFLD-1
+(   85)         II=IR+1
+(   86)         IFLD = KFLDPTR(JFLD)
+(   87)         PSPEC(IFLD,INM)    =POA(JN  ,JM,IR)
+(   88)         PSPEC(IFLD,INM+1)  =POA(JN+1,JM,IR)
+(   89)         PSPEC(IFLD,INM+2)  =POA(JN  ,JM,II)
+(   90)         PSPEC(IFLD,INM+3)  =POA(JN+1,JM,II)
+(   91)       ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:55      page 3
+
+(   92)     ENDDO
+(   93) 
+(   94)   ENDDO
+(   95) 
+(   96) ELSE
+(   97)   !$ACC parallel loop
+(   98)   DO JM = 1, D%NUMP
+(   99)     IM = D_MYMS(JM)
+(  100)   
+(  101)     !$ACC loop
+(  102)     DO JN=1,DALD_NCPL2M(IM),2
+(  103)       INM=DALD_NESM0(IM)+(JN-1)*2
+(  104)       !$ACC loop
+(  105)       DO JFLD=1,KFIELD
+(  106)         IR= 2*JFLD-1
+(  107)         II=IR+1
+(  108)         PSPEC(JFLD,INM)    =POA(JN  ,JM,IR)
+(  109)         PSPEC(JFLD,INM+1)  =POA(JN+1,JM,IR)
+(  110)         PSPEC(JFLD,INM+2)  =POA(JN  ,JM,II)
+(  111)         PSPEC(JFLD,INM+3)  =POA(JN+1,JM,II)
+(  112)       ENDDO
+(  113)     ENDDO
+(  114)   
+(  115)   ENDDO
+(  116) 
+(  117) ENDIF
+(  118) 
+(  119) !$ACC end data
+(  120) 
+(  121) IF (LHOOK) CALL DR_HOOK('EUPDSPB_MOD:EUPDSPB',1,ZHOOK_HANDLE)
+(  122) 
+(  123) END SUBROUTINE EUPDSPB
+(  124) END MODULE EUPDSPB_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:55      page 4
+
+(    1) # 1 "eupdspb_mod.F90"
+(    1) MODULE EUPDSPB_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EUPDSPB(KFIELD,POA,PSPEC,KFLDPTR)
+(    4) # 5 "eupdspb_mod.F90"
+(    5) !**** *EUPDSPB* - Update spectral arrays after direct Legendre transform
+(    6) # 7 "eupdspb_mod.F90"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        To update spectral arrays for a fixed zonal wave-number
+(   10) !         from values in POA.
+(   11) # 12 "eupdspb_mod.F90"
+(   12) !**   Interface.
+(   13) !     ----------
+(   14) !        CALL EUPDSPB(....)
+(   15) # 16 "eupdspb_mod.F90"
+(   16) !        Explicit arguments :  
+(   17) !        --------------------  KFIELD  - number of fields
+(   18) !                              POA - work array
+(   19) !                              PSPEC - spectral array
+(   20) # 21 "eupdspb_mod.F90"
+(   21) !        Implicit arguments :  None
+(   22) !        --------------------
+(   23) # 24 "eupdspb_mod.F90"
+(   24) !     Method.
+(   25) !     -------
+(   26) # 27 "eupdspb_mod.F90"
+(   27) !     Externals.
+(   28) !     ----------
+(   29) # 30 "eupdspb_mod.F90"
+(   30) !     Reference.
+(   31) !     ----------
+(   32) !        ECMWF Research Department documentation of the IFS
+(   33) # 34 "eupdspb_mod.F90"
+(   34) !     Author.
+(   35) !     -------
+(   36) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   37) # 38 "eupdspb_mod.F90"
+(   38) !     Modifications.
+(   39) !     --------------
+(   40) !        Original : 88-02-02
+(   41) !        D. Giard : 93-03-19 truncations NSMAX and NTMAX (see NOTE)
+(   42) !        R. El Khatib : 94-08-02 Replace number of fields by indexes of the
+(   43) !                       first and last field
+(   44) !        L. Isaksen : 95-06-06 Reordering of spectral arrays
+(   45) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   46) !     ------------------------------------------------------------------
+(   47) # 48 "eupdspb_mod.F90"
+(   48) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   49) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   50) # 51 "eupdspb_mod.F90"
+(   51) USE TPMALD_DISTR    ,ONLY : DALD, DALD_NESM0, DALD_NCPL2M
+(   52) USE TPM_DISTR       ,ONLY : D, D_MYMS
+(   53) !
+(   54) # 55 "eupdspb_mod.F90"
+(   55) IMPLICIT NONE
+(   56) # 57 "eupdspb_mod.F90"
+(   57) INTEGER(KIND=JPIM),INTENT(IN)  :: KFIELD
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:55      page 5
+
+(   58) REAL(KIND=JPRB)   ,INTENT(IN)  :: POA(:,:,:)
+(   59) REAL(KIND=JPRB)   ,INTENT(OUT) :: PSPEC(:,:)
+(   60) INTEGER(KIND=JPIM),INTENT(IN),OPTIONAL :: KFLDPTR(:)
+(   61) # 62 "eupdspb_mod.F90"
+(   62) INTEGER(KIND=JPIM) :: II, INM, IR, JFLD, JN,IFLD, JM, IM
+(   63) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   64) # 66 "eupdspb_mod.F90"
+(   66) !     ------------------------------------------------------------------
+(   67) # 68 "eupdspb_mod.F90"
+(   68) !*       1.    UPDATE SPECTRAL FIELDS.
+(   69) !              -----------------------
+(   70) IF (LHOOK) CALL DR_HOOK('EUPDSPB_MOD:EUPDSPB',0,ZHOOK_HANDLE)
+(   71) # 72 "eupdspb_mod.F90"
+(   72) !$ACC data present (POA, PSPEC)
+(   73) # 74 "eupdspb_mod.F90"
+(   74) IF(PRESENT(KFLDPTR)) THEN
+(   75)   
+(   76)   ! TODO
+(   77) # 78 "eupdspb_mod.F90"
+(   78)   DO JM = 1, D%NUMP
+(   79)     IM = D%MYMS(JM)
+(   80)   
+(   81)     DO JN=1,DALD%NCPL2M(IM),2
+(   82)       INM=DALD%NESM0(IM)+(JN-1)*2
+(   83)       DO JFLD=1,KFIELD
+(   84)         IR= 2*JFLD-1
+(   85)         II=IR+1
+(   86)         IFLD = KFLDPTR(JFLD)
+(   87)         PSPEC(IFLD,INM)    =POA(JN  ,JM,IR)
+(   88)         PSPEC(IFLD,INM+1)  =POA(JN+1,JM,IR)
+(   89)         PSPEC(IFLD,INM+2)  =POA(JN  ,JM,II)
+(   90)         PSPEC(IFLD,INM+3)  =POA(JN+1,JM,II)
+(   91)       ENDDO
+(   92)     ENDDO
+(   93) # 94 "eupdspb_mod.F90"
+(   94)   ENDDO
+(   95) # 96 "eupdspb_mod.F90"
+(   96) ELSE
+(   97)   !$ACC parallel loop
+(   98)   DO JM = 1, D%NUMP
+(   99)     IM = D_MYMS(JM)
+(  100)   
+(  101)     !$ACC loop
+(  102)     DO JN=1,DALD_NCPL2M(IM),2
+(  103)       INM=DALD_NESM0(IM)+(JN-1)*2
+(  104)       !$ACC loop
+(  105)       DO JFLD=1,KFIELD
+(  106)         IR= 2*JFLD-1
+(  107)         II=IR+1
+(  108)         PSPEC(JFLD,INM)    =POA(JN  ,JM,IR)
+(  109)         PSPEC(JFLD,INM+1)  =POA(JN+1,JM,IR)
+(  110)         PSPEC(JFLD,INM+2)  =POA(JN  ,JM,II)
+(  111)         PSPEC(JFLD,INM+3)  =POA(JN+1,JM,II)
+(  112)       ENDDO
+(  113)     ENDDO
+(  114)   
+(  115)   ENDDO
+(  116) # 117 "eupdspb_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:55      page 6
+
+(  117) ENDIF
+(  118) # 119 "eupdspb_mod.F90"
+(  119) !$ACC end data
+(  120) # 121 "eupdspb_mod.F90"
+(  121) IF (LHOOK) CALL DR_HOOK('EUPDSPB_MOD:EUPDSPB',1,ZHOOK_HANDLE)
+(  122) # 123 "eupdspb_mod.F90"
+(  123) END SUBROUTINE EUPDSPB
+(  124) END MODULE EUPDSPB_MOD

@@ -1,0 +1,978 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:52      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: esetup_trans.F90
+
+(    1) SUBROUTINE ESETUP_TRANS(KMSMAX,KSMAX,KDGL,KDGUX,KLOEN,LDSPLIT,&
+(    2)  & KFLEV,KTMAX,KRESOL,PEXWN,PEYWN,PWEIGHT,LDGRIDONLY,KNOEXTZL,KNOEXTZG, &
+(    3)  & LDUSEFFTW)
+(    4) !**** *ESETUP_TRANS* - Setup transform package for specific resolution
+(    5) 
+(    6) !     Purpose.
+(    7) !     --------
+(    8) !     To setup for making spectral transforms. Each call to this routine
+(    9) !     creates a new resolution up to a maximum of NMAX_RESOL set up in
+(   10) !     SETUP_TRANS0. You need to call SETUP_TRANS0 before this routine can
+(   11) !     be called.
+(   12) 
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !     CALL ESETUP_TRANS(...)
+(   16) 
+(   17) !     Explicit arguments : KLOEN,LDSPLIT are optional arguments
+(   18) !     -------------------- 
+(   19) !     KSMAX - spectral truncation required
+(   20) !     KDGL  - number of Gaussian latitudes
+(   21) !     KLOEN(:) - number of points on each Gaussian latitude [2*KDGL]
+(   22) !     LDSPLIT - true if split latitudes in grid-point space [false]
+(   23) !     KTMAX - truncation order for tendencies?
+(   24) !     KRESOL - the resolution identifier
+(   25) !     KSMAX,KDGL,KTMAX and KLOEN are GLOBAL variables desribing the resolution
+(   26) !     in spectral and grid-point space
+(   27) !     LDGRIDONLY - true if only grid space is required
+(   28) 
+(   29) 
+(   30) !     LDSPLIT describe the distribution among processors of
+(   31) !     grid-point data and has no relevance if you are using a single processor
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:52      page 2
+
+(   32)  
+(   33) !     LDUSEFFTW   - Use FFTW for FFTs
+(   34) 
+(   35) !     Method.
+(   36) !     -------
+(   37) 
+(   38) !     Externals.  ESET_RESOL   - set resolution
+(   39) !     ----------  ESETUP_DIMS  - setup distribution independent dimensions
+(   40) !                 SUEMP_TRANS_PRELEG - first part of setup of distr. environment
+(   41) !                 SULEG - Compute Legandre polonomial and Gaussian
+(   42) !                         Latitudes and Weights
+(   43) !                 ESETUP_GEOM - Compute arrays related to grid-point geometry
+(   44) !                 SUEMP_TRANS - Second part of setup of distributed environment
+(   45) !                 SUEFFT - setup for FFT
+(   46) 
+(   47) !     Author.
+(   48) !     -------
+(   49) !        Mats Hamrud *ECMWF*
+(   50) 
+(   51) !     Modifications.
+(   52) !     --------------
+(   53) !        Original : 00-03-03
+(   54) !        02-04-11 A. Bogatchev: Passing of TCDIS
+(   55) !        02-11-14 C. Fischer: soften test on KDGL
+(   56) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   57) !        A.Nmiri       15-Nov-2007 Phasing with TFL 32R3
+(   58) !        A.Bogatchev   16-Sep-2010 Phasing cy37
+(   59) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   60) !        R. El Khatib 02-Mar-2012 Support for mixed multi-resolutions
+(   61) !        R. El Khatib 09-Aug-2012 %LAM in GEOM_TYPE
+(   62) !        R. El Khatib 14-Jun-2013 LENABLED
+(   63) !        R. El Khatib 01-Sep-2015 Support for FFTW
+(   64) !     ------------------------------------------------------------------
+(   65) 
+(   66) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   67) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   68) 
+(   69) !ifndef INTERFACE
+(   70) 
+(   71) USE TPM_GEN         ,ONLY : NERR, NOUT, NPRINTLEV, MSETUP0,    &
+(   72)      &                      NCUR_RESOL, NDEF_RESOL, NMAX_RESOL, LENABLED
+(   73) USE TPM_DIM         ,ONLY : R, DIM_RESOL, R_NSMAX,R_NTMAX, R_NDGNH, R_NDGL, R_NNOEXTZL
+(   74) USE TPM_DISTR       ,ONLY : D, DISTR_RESOL,NPROC,D_NUMP,D_MYMS,D_NSTAGT0B,D_NSTAGT1B,&
+(   75)      &                      D_NPROCL,D_NPNTGTB1,D_NASM0,D_NSTAGTF,D_MSTABF,D_NPNTGTB0,&
+(   76)      &                      D_NPROCM,D_NPTRLS
+(   77) USE TPM_GEOMETRY    ,ONLY : G, GEOM_RESOL, G_NDGLU, G_NMEN, G_NMEN_MAX,G_NLOEN, G_NLOEN_MAX
+(   78) USE TPM_FIELDS      ,ONLY : FIELDS_RESOL, F
+(   79) USE TPM_FFT         ,ONLY : T, FFT_RESOL, TB, FFTB_RESOL
+(   80) #ifdef WITH_FFTW
+(   81) USE TPM_FFTW        ,ONLY : TW, FFTW_RESOL
+(   82) #endif
+(   83) USE TPM_FFTC        ,ONLY : TC, FFTC_RESOL
+(   84) USE TPM_FLT         ,ONLY : FLT_RESOL
+(   85) 
+(   86) USE TPMALD_DIM      ,ONLY : RALD, ALDDIM_RESOL
+(   87) USE TPMALD_DISTR    ,ONLY : ALDDISTR_RESOL
+(   88) USE TPMALD_FFT      ,ONLY : TALD, ALDFFT_RESOL
+(   89) USE TPMALD_FIELDS   ,ONLY : ALDFIELDS_RESOL
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:52      page 3
+
+(   90) USE TPMALD_GEO      ,ONLY : GALD, ALDGEO_RESOL
+(   91) 
+(   92) USE ESET_RESOL_MOD  ,ONLY : ESET_RESOL
+(   93) USE ESETUP_DIMS_MOD ,ONLY : ESETUP_DIMS
+(   94) USE SUEMP_TRANS_MOD ,ONLY : SUEMP_TRANS
+(   95) USE SUEMP_TRANS_PRELEG_MOD ,ONLY : SUEMP_TRANS_PRELEG
+(   96) !USE SULEG_MOD
+(   97) USE ESETUP_GEOM_MOD ,ONLY : ESETUP_GEOM
+(   98) USE SUEFFT_MOD      ,ONLY : SUEFFT
+(   99) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(  100) #ifdef _OPENACC
+(  101) use openacc
+(  102) #endif
+(  103) 
+(  104) !endif INTERFACE
+(  105) 
+(  106) IMPLICIT NONE
+(  107) 
+(  108) ! Dummy arguments
+(  109) INTEGER(KIND=JPIM),INTENT(IN)    :: KMSMAX
+(  110) INTEGER(KIND=JPIM),INTENT(IN)    :: KSMAX
+(  111) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGL
+(  112) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGUX
+(  113) INTEGER(KIND=JPIM),INTENT(IN)    :: KLOEN(:)
+(  114) LOGICAL           ,OPTIONAL,INTENT(IN)    :: LDSPLIT
+(  115) LOGICAL           ,OPTIONAL,INTENT(IN)    :: LDGRIDONLY
+(  116) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KTMAX
+(  117) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLEV
+(  118) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KRESOL
+(  119) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)    :: PEXWN
+(  120) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)    :: PEYWN
+(  121) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)    :: PWEIGHT(:)
+(  122) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KNOEXTZL
+(  123) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KNOEXTZG
+(  124) LOGICAL   ,OPTIONAL,INTENT(IN)            :: LDUSEFFTW
+(  125) 
+(  126) !ifndef INTERFACE
+(  127) 
+(  128) ! Local variables
+(  129) LOGICAL :: LLP1,LLP2
+(  130) INTEGER(KIND=JPIM) :: I, J
+(  131) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  132) 
+(  133) !     ------------------------------------------------------------------
+(  134) 
+(  135) IF (LHOOK) CALL DR_HOOK('ESETUP_TRANS',0,ZHOOK_HANDLE)
+(  136) 
+(  137) IF(MSETUP0 == 0) THEN
+(  138)   CALL ABORT_TRANS('ESETUP_TRANS: SETUP_TRANS0 HAS TO BE CALLED BEFORE ESETUP_TRANS')
+(  139) ENDIF
+(  140) LLP1 = NPRINTLEV>0
+(  141) LLP2 = NPRINTLEV>1
+(  142) IF(LLP1) WRITE(NOUT,*) '=== ENTER ROUTINE ESETUP_TRANS ==='
+(  143) 
+(  144) ! Allocate resolution dependent structures common to global and LAM
+(  145) IF(.NOT. ALLOCATED(DIM_RESOL)) THEN
+(  146)   NDEF_RESOL = 1
+(  147)   ALLOCATE(DIM_RESOL(NMAX_RESOL))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:52      page 4
+
+(  148)   ALLOCATE(FIELDS_RESOL(NMAX_RESOL))
+(  149)   ALLOCATE(GEOM_RESOL(NMAX_RESOL))
+(  150)   ALLOCATE(DISTR_RESOL(NMAX_RESOL))
+(  151)   ALLOCATE(FFT_RESOL(NMAX_RESOL))
+(  152)   ALLOCATE(FFTB_RESOL(NMAX_RESOL))
+(  153) #ifdef WITH_FFTW
+(  154)   ALLOCATE(FFTW_RESOL(NMAX_RESOL))
+(  155) #endif
+(  156)   ALLOCATE(FFTC_RESOL(NMAX_RESOL))
+(  157)   ALLOCATE(FLT_RESOL(NMAX_RESOL))
+(  158)   GEOM_RESOL(:)%LAM=.FALSE.
+(  159)   ALLOCATE(LENABLED(NMAX_RESOL))
+(  160)   LENABLED(:)=.FALSE.
+(  161) ELSE
+(  162)   NDEF_RESOL = NDEF_RESOL+1
+(  163)   IF(NDEF_RESOL > NMAX_RESOL) THEN
+(  164)     CALL ABORT_TRANS('ESETUP_TRANS:NDEF_RESOL > NMAX_RESOL')
+(  165)   ENDIF
+(  166) ENDIF
+(  167) ! Allocate LAM-specific resolution dependent structures
+(  168) IF(.NOT. ALLOCATED(ALDDIM_RESOL)) THEN
+(  169)   ALLOCATE(ALDDIM_RESOL(NMAX_RESOL))
+(  170)   ALLOCATE(ALDFIELDS_RESOL(NMAX_RESOL))
+(  171)   ALLOCATE(ALDGEO_RESOL(NMAX_RESOL))
+(  172)   ALLOCATE(ALDDISTR_RESOL(NMAX_RESOL))
+(  173)   ALLOCATE(ALDFFT_RESOL(NMAX_RESOL))
+(  174) ENDIF
+(  175) 
+(  176) 
+(  177) IF (PRESENT(KRESOL)) THEN
+(  178)   KRESOL=NDEF_RESOL
+(  179) ENDIF
+(  180) 
+(  181) ! Point at structures due to be initialized
+(  182) CALL ESET_RESOL(NDEF_RESOL)
+(  183) IF(LLP1) WRITE(NOUT,*) '=== DEFINING RESOLUTION ',NCUR_RESOL
+(  184) 
+(  185) ! Defaults for optional arguments
+(  186) 
+(  187) G%LREDUCED_GRID = .FALSE.
+(  188) D%LGRIDONLY = .FALSE.
+(  189) D%LSPLIT = .FALSE.
+(  190) TALD%LFFT992=.TRUE. ! Use FFT992 interface for FFTs
+(  191) #ifdef WITH_FFTW
+(  192) TW%LFFTW=.FALSE. ! Use FFTW interface for FFTs
+(  193) #endif
+(  194) 
+(  195) ! NON-OPTIONAL ARGUMENTS
+(  196) R%NSMAX = KSMAX
+(  197) RALD%NMSMAX=KMSMAX
+(  198) RALD%NDGUX=KDGUX
+(  199) R%NDGL  = KDGL
+(  200) RALD%NDGLSUR=KDGL+2
+(  201) R%NDLON =KLOEN(1)
+(  202) 
+(  203) ! IMPLICIT argument :
+(  204) G%LAM = .TRUE.
+(  205) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:52      page 5
+
+(  206) IF (KDGL <= 0) THEN
+(  207)   CALL ABORT_TRANS ('ESETUP_TRANS: KDGL IS NOT A POSITIVE NUMBER')
+(  208) ENDIF
+(  209) 
+(  210) ! Optional arguments
+(  211) 
+(  212) ALLOCATE(G%NLOEN(R%NDGL))
+(  213) IF(LLP2)WRITE(NOUT,9) 'NLOEN   ',SIZE(G%NLOEN   ),SHAPE(G%NLOEN   )
+(  214) 
+(  215) IF (G%LREDUCED_GRID) THEN
+(  216)   G%NLOEN(:) = KLOEN(1:R%NDGL)
+(  217) ELSE
+(  218)   G%NLOEN(:) = R%NDLON
+(  219) ENDIF
+(  220) 
+(  221) IF(PRESENT(LDSPLIT)) THEN
+(  222)   D%LSPLIT = LDSPLIT
+(  223) ENDIF
+(  224) 
+(  225) IF(PRESENT(KTMAX)) THEN
+(  226)   R%NTMAX = KTMAX
+(  227) ELSE
+(  228)   R%NTMAX = R%NSMAX
+(  229) ENDIF
+(  230) IF(R%NTMAX /= R%NSMAX) THEN
+(  231)   !This SHOULD work but I don't know how to test it /MH
+(  232)   WRITE(NERR,*) 'R%NTMAX /= R%NSMAX',R%NTMAX,R%NSMAX
+(  233)   CALL ABORT_TRANS('ESETUP_TRANS:R%NTMAX /= R%NSMAX HAS NOT BEEN VALIDATED')
+(  234) ENDIF
+(  235) 
+(  236) IF(PRESENT(PWEIGHT)) THEN
+(  237)   D%LWEIGHTED_DISTR = .TRUE.
+(  238)   IF( D%LWEIGHTED_DISTR .AND. .NOT.D%LSPLIT )THEN
+(  239)     CALL ABORT_TRANS('SETUP_TRANS: LWEIGHTED_DISTR=T AND LSPLIT=F NOT SUPPORTED')
+(  240)   ENDIF
+(  241)   IF(SIZE(PWEIGHT) /= SUM(G%NLOEN(:)) )THEN
+(  242)     CALL ABORT_TRANS('SETUP_TRANS:SIZE(PWEIGHT) /= SUM(G%NLOEN(:))')
+(  243)   ENDIF
+(  244)   ALLOCATE(D%RWEIGHT(SIZE(PWEIGHT)))
+(  245)   D%RWEIGHT(:)=PWEIGHT(:)
+(  246) ELSE
+(  247)   D%LWEIGHTED_DISTR = .FALSE.
+(  248) ENDIF
+(  249) 
+(  250) IF(PRESENT(LDGRIDONLY)) THEN
+(  251)   D%LGRIDONLY=LDGRIDONLY
+(  252) ENDIF
+(  253) 
+(  254) IF (PRESENT(KNOEXTZL)) THEN
+(  255)   R%NNOEXTZL=KNOEXTZL
+(  256) ELSE
+(  257)   R%NNOEXTZL=0
+(  258) ENDIF
+(  259) 
+(  260) IF (PRESENT(KNOEXTZG)) THEN
+(  261)   R%NNOEXTZG=KNOEXTZG
+(  262) ELSE
+(  263)   R%NNOEXTZG=0
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:52      page 6
+
+(  264) ENDIF
+(  265) 
+(  266) #ifdef WITH_FFTW
+(  267) IF(PRESENT(LDUSEFFTW)) THEN
+(  268)   TW%LFFTW=LDUSEFFTW
+(  269) ENDIF
+(  270) #endif
+(  271) 
+(  272) IF(PRESENT(LDUSEFFTW)) THEN
+(  273)   TALD%LFFT992=.NOT.LDUSEFFTW
+(  274) ELSE
+(  275)   TALD%LFFT992=.TRUE.
+(  276) ENDIF
+(  277) 
+(  278) !     Setup resolution dependent structures
+(  279) !     -------------------------------------
+(  280) 
+(  281) ! Setup distribution independent dimensions
+(  282) CALL ESETUP_DIMS
+(  283) IF (PRESENT(PEXWN)) GALD%EXWN=PEXWN
+(  284) IF (PRESENT(PEYWN)) GALD%EYWN=PEYWN
+(  285) 
+(  286) ! First part of setup of distributed environment
+(  287) CALL SUEMP_TRANS_PRELEG
+(  288) 
+(  289) CALL GSTATS(1802,0)
+(  290) ! Compute arrays related to grid-point geometry
+(  291) CALL ESETUP_GEOM
+(  292) ! Second part of setup of distributed environment
+(  293) CALL SUEMP_TRANS
+(  294) ! Initialize Fast Fourier Transform package
+(  295) CALL SUEFFT
+(  296) CALL GSTATS(1802,1)
+(  297) 
+(  298) ! Signal the current resolution is active
+(  299) LENABLED(NDEF_RESOL)=.TRUE.
+(  300) 
+(  301) IF( .NOT.D%LGRIDONLY ) THEN
+(  302) 
+(  303) WRITE(NOUT,*) '===now going to allocate GPU arrays'
+(  304) 
+(  305) !$acc enter data &
+(  306) !$acc& copyin(F,F%RN,F%RLAPIN,D,D%NUMP,D%MYMS,R,R%NDGNH,R%NSMAX,G,G%NDGLU) &
+(  307) !$acc& copyin(D%NPNTGTB0,D%NPNTGTB1,D%NSTAGT0B,D%NSTAGT1B,D%NSTAGTF,G%NMEN,D%NPROCM,D%NPTRLS,G,G%NLOEN,D%MSTABF)
+(  308) 
+(  309) R_NSMAX=R%NSMAX
+(  310) R_NTMAX=R%NTMAX
+(  311) R_NDGNH=R%NDGNH
+(  312) R_NDGL=R%NDGL
+(  313) R_NNOEXTZL=R%NNOEXTZL
+(  314) 
+(  315) 
+(  316) ALLOCATE(D_NSTAGT0B(SIZE(D%NSTAGT0B)))
+(  317) ALLOCATE(D_NSTAGT1B(SIZE(D%NSTAGT1B)))
+(  318) ALLOCATE(D_NPNTGTB0(0:SIZE(D%NPNTGTB0,1)-1,SIZE(D%NPNTGTB0,2)))
+(  319) ALLOCATE(D_NPNTGTB1(SIZE(D%NPNTGTB1,1),SIZE(D%NPNTGTB1,2)))
+(  320) ALLOCATE(D_MYMS(SIZE(D%MYMS)))
+(  321) ALLOCATE(D_NPROCL(SIZE(D%NPROCL)))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:52      page 7
+
+(  322) ALLOCATE(D_NASM0(0:SIZE(D%NASM0)-1))
+(  323) ALLOCATE(D_NSTAGTF(SIZE(D%NSTAGTF)))
+(  324) ALLOCATE(D_MSTABF(SIZE(D%MSTABF)))
+(  325) ALLOCATE(D_NPROCM(0:SIZE(D%NPROCM)-1))
+(  326) ALLOCATE(D_NPTRLS(SIZE(D%NPTRLS)))
+(  327) 
+(  328) ALLOCATE(G_NDGLU(0:SIZE(G%NDGLU)-1))
+(  329) ALLOCATE(G_NMEN(SIZE(G%NMEN)))
+(  330) ALLOCATE(G_NLOEN(SIZE(G%NLOEN)))
+(  331) 
+(  332) DO I=0,SIZE(G%NDGLU)-1
+(  333)    G_NDGLU(I)=G%NDGLU(I)
+(  334) end DO
+(  335) 
+(  336) G_NMEN_MAX=0
+(  337) DO I=1,SIZE(G%NMEN)
+(  338)    G_NMEN(I)=G%NMEN(I)
+(  339)    if (G_NMEN(I) .gt. G_NMEN_MAX) G_NMEN_MAX=G_NMEN(I)
+(  340) end DO
+(  341) 
+(  342) G_NLOEN_MAX=0
+(  343) DO I=1,SIZE(G%NLOEN)
+(  344)    G_NLOEN(I)=G%NLOEN(I)
+(  345)    if (G_NLOEN(I) .gt. G_NLOEN_MAX) G_NLOEN_MAX=G_NLOEN(I)
+(  346) end DO
+(  347) 
+(  348) DO I=1,SIZE(D%NSTAGT0B)
+(  349)    D_NSTAGT0B(I)=D%NSTAGT0B(I)
+(  350) END DO
+(  351) 
+(  352) DO I=1,SIZE(D%NSTAGT1B)
+(  353)    D_NSTAGT1B(I)=D%NSTAGT1B(I)
+(  354) END DO
+(  355) 
+(  356) DO I=1,SIZE(D%NPROCL)
+(  357)    D_NPROCL(I)=D%NPROCL(I)
+(  358) END DO
+(  359) 
+(  360) DO I=0,SIZE(D%NASM0)-1
+(  361)    D_NASM0(I)=D%NASM0(I)
+(  362) END DO
+(  363) 
+(  364) DO I=1,SIZE(D%NSTAGTF)
+(  365)    D_NSTAGTF(I)=D%NSTAGTF(I)
+(  366) END DO
+(  367) 
+(  368) DO I=1,SIZE(D%MSTABF)
+(  369)    D_MSTABF(I)=D%MSTABF(I)
+(  370) END DO
+(  371) 
+(  372) DO I=0,SIZE(D%NPROCM)-1
+(  373)    D_NPROCM(I)=D%NPROCM(I)
+(  374) END DO
+(  375) 
+(  376) DO I=1,SIZE(D%NPTRLS)
+(  377)    D_NPTRLS(I)=D%NPTRLS(I)
+(  378) END DO
+(  379) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:52      page 8
+
+(  380) DO I=1,SIZE(D%NPNTGTB0,2)
+(  381)    DO J=0,SIZE(D%NPNTGTB0,1)-1
+(  382)       D_NPNTGTB0(J,I)=D%NPNTGTB0(J,I)
+(  383)    end DO
+(  384) END DO
+(  385) 
+(  386) DO I=1,SIZE(D%NPNTGTB1,2)
+(  387)    DO J=1,SIZE(D%NPNTGTB1,1)
+(  388)       D_NPNTGTB1(J,I)=D%NPNTGTB1(J,I)
+(  389)    end DO
+(  390) END DO
+(  391) 
+(  392) D_NUMP=D%NUMP
+(  393) 
+(  394) DO I=1,SIZE(D%MYMS)
+(  395)    D_MYMS(I)=D%MYMS(I)
+(  396) end DO
+(  397) 
+(  398) !$ACC enter data create(R_NSMAX,R_NTMAX,R_NDGL,R_NNOEXTZL,R_NDGNH,D_NSTAGT0B,D_NSTAGT1B,D_NPNTGTB1,D_NPROCL,D_NUMP,D_MYMS,D_
+(  399) 
+(  400) !$ACC update device(R_NSMAX,R_NTMAX,R_NDGL,R_NNOEXTZL,R_NDGNH,D_NSTAGT0B,D_NSTAGT1B,D_NPNTGTB1,D_NPROCL,D_NUMP,D_MYMS,D_NASM
+(  401) 
+(  402) WRITE(NOUT,*) '===GPU arrays successfully allocated'
+(  403) !endif INTERFACE
+(  404) 
+(  405) ENDIF
+(  406) 
+(  407) IF (LHOOK) CALL DR_HOOK('ESETUP_TRANS',1,ZHOOK_HANDLE)
+(  408) !     ------------------------------------------------------------------
+(  409) 9 FORMAT(1X,'ARRAY ',A10,' ALLOCATED ',8I8)
+(  410) 
+(  411) !endif INTERFACE
+(  412) 
+(  413) END SUBROUTINE ESETUP_TRANS
+(  414) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:52      page 9
+
+(    1) # 1 "esetup_trans.F90"
+(    1) SUBROUTINE ESETUP_TRANS(KMSMAX,KSMAX,KDGL,KDGUX,KLOEN,LDSPLIT,&
+(    2)  & KFLEV,KTMAX,KRESOL,PEXWN,PEYWN,PWEIGHT,LDGRIDONLY,KNOEXTZL,KNOEXTZG, &
+(    3)  & LDUSEFFTW)
+(    4) !**** *ESETUP_TRANS* - Setup transform package for specific resolution
+(    5) # 6 "esetup_trans.F90"
+(    6) !     Purpose.
+(    7) !     --------
+(    8) !     To setup for making spectral transforms. Each call to this routine
+(    9) !     creates a new resolution up to a maximum of NMAX_RESOL set up in
+(   10) !     SETUP_TRANS0. You need to call SETUP_TRANS0 before this routine can
+(   11) !     be called.
+(   12) # 13 "esetup_trans.F90"
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !     CALL ESETUP_TRANS(...)
+(   16) # 17 "esetup_trans.F90"
+(   17) !     Explicit arguments : KLOEN,LDSPLIT are optional arguments
+(   18) !     -------------------- 
+(   19) !     KSMAX - spectral truncation required
+(   20) !     KDGL  - number of Gaussian latitudes
+(   21) !     KLOEN(:) - number of points on each Gaussian latitude [2*KDGL]
+(   22) !     LDSPLIT - true if split latitudes in grid-point space [false]
+(   23) !     KTMAX - truncation order for tendencies?
+(   24) !     KRESOL - the resolution identifier
+(   25) !     KSMAX,KDGL,KTMAX and KLOEN are GLOBAL variables desribing the resolution
+(   26) !     in spectral and grid-point space
+(   27) !     LDGRIDONLY - true if only grid space is required
+(   28) # 30 "esetup_trans.F90"
+(   30) !     LDSPLIT describe the distribution among processors of
+(   31) !     grid-point data and has no relevance if you are using a single processor
+(   32)  
+(   33) !     LDUSEFFTW   - Use FFTW for FFTs
+(   34) # 35 "esetup_trans.F90"
+(   35) !     Method.
+(   36) !     -------
+(   37) # 38 "esetup_trans.F90"
+(   38) !     Externals.  ESET_RESOL   - set resolution
+(   39) !     ----------  ESETUP_DIMS  - setup distribution independent dimensions
+(   40) !                 SUEMP_TRANS_PRELEG - first part of setup of distr. environment
+(   41) !                 SULEG - Compute Legandre polonomial and Gaussian
+(   42) !                         Latitudes and Weights
+(   43) !                 ESETUP_GEOM - Compute arrays related to grid-point geometry
+(   44) !                 SUEMP_TRANS - Second part of setup of distributed environment
+(   45) !                 SUEFFT - setup for FFT
+(   46) # 47 "esetup_trans.F90"
+(   47) !     Author.
+(   48) !     -------
+(   49) !        Mats Hamrud *ECMWF*
+(   50) # 51 "esetup_trans.F90"
+(   51) !     Modifications.
+(   52) !     --------------
+(   53) !        Original : 00-03-03
+(   54) !        02-04-11 A. Bogatchev: Passing of TCDIS
+(   55) !        02-11-14 C. Fischer: soften test on KDGL
+(   56) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   57) !        A.Nmiri       15-Nov-2007 Phasing with TFL 32R3
+(   58) !        A.Bogatchev   16-Sep-2010 Phasing cy37
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:52      page 10
+
+(   59) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   60) !        R. El Khatib 02-Mar-2012 Support for mixed multi-resolutions
+(   61) !        R. El Khatib 09-Aug-2012 %LAM in GEOM_TYPE
+(   62) !        R. El Khatib 14-Jun-2013 LENABLED
+(   63) !        R. El Khatib 01-Sep-2015 Support for FFTW
+(   64) !     ------------------------------------------------------------------
+(   65) # 66 "esetup_trans.F90"
+(   66) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   67) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   68) # 69 "esetup_trans.F90"
+(   69) !ifndef INTERFACE
+(   70) # 71 "esetup_trans.F90"
+(   71) USE TPM_GEN         ,ONLY : NERR, NOUT, NPRINTLEV, MSETUP0,    &
+(   72)      &                      NCUR_RESOL, NDEF_RESOL, NMAX_RESOL, LENABLED
+(   73) USE TPM_DIM         ,ONLY : R, DIM_RESOL, R_NSMAX,R_NTMAX, R_NDGNH, R_NDGL, R_NNOEXTZL
+(   74) USE TPM_DISTR       ,ONLY : D, DISTR_RESOL,NPROC,D_NUMP,D_MYMS,D_NSTAGT0B,D_NSTAGT1B,&
+(   75)      &                      D_NPROCL,D_NPNTGTB1,D_NASM0,D_NSTAGTF,D_MSTABF,D_NPNTGTB0,&
+(   76)      &                      D_NPROCM,D_NPTRLS
+(   77) USE TPM_GEOMETRY    ,ONLY : G, GEOM_RESOL, G_NDGLU, G_NMEN, G_NMEN_MAX,G_NLOEN, G_NLOEN_MAX
+(   78) USE TPM_FIELDS      ,ONLY : FIELDS_RESOL, F
+(   79) USE TPM_FFT         ,ONLY : T, FFT_RESOL, TB, FFTB_RESOL
+(   80) # 83 "esetup_trans.F90"
+(   83) USE TPM_FFTC        ,ONLY : TC, FFTC_RESOL
+(   84) USE TPM_FLT         ,ONLY : FLT_RESOL
+(   85) # 86 "esetup_trans.F90"
+(   86) USE TPMALD_DIM      ,ONLY : RALD, ALDDIM_RESOL
+(   87) USE TPMALD_DISTR    ,ONLY : ALDDISTR_RESOL
+(   88) USE TPMALD_FFT      ,ONLY : TALD, ALDFFT_RESOL
+(   89) USE TPMALD_FIELDS   ,ONLY : ALDFIELDS_RESOL
+(   90) USE TPMALD_GEO      ,ONLY : GALD, ALDGEO_RESOL
+(   91) # 92 "esetup_trans.F90"
+(   92) USE ESET_RESOL_MOD  ,ONLY : ESET_RESOL
+(   93) USE ESETUP_DIMS_MOD ,ONLY : ESETUP_DIMS
+(   94) USE SUEMP_TRANS_MOD ,ONLY : SUEMP_TRANS
+(   95) USE SUEMP_TRANS_PRELEG_MOD ,ONLY : SUEMP_TRANS_PRELEG
+(   96) !USE SULEG_MOD
+(   97) USE ESETUP_GEOM_MOD ,ONLY : ESETUP_GEOM
+(   98) USE SUEFFT_MOD      ,ONLY : SUEFFT
+(   99) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(  100) # 101 "esetup_trans.F90"
+(  101) use openacc
+(  102) # 104 "esetup_trans.F90"
+(  104) !endif INTERFACE
+(  105) # 106 "esetup_trans.F90"
+(  106) IMPLICIT NONE
+(  107) # 108 "esetup_trans.F90"
+(  108) ! Dummy arguments
+(  109) INTEGER(KIND=JPIM),INTENT(IN)    :: KMSMAX
+(  110) INTEGER(KIND=JPIM),INTENT(IN)    :: KSMAX
+(  111) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGL
+(  112) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGUX
+(  113) INTEGER(KIND=JPIM),INTENT(IN)    :: KLOEN(:)
+(  114) LOGICAL           ,OPTIONAL,INTENT(IN)    :: LDSPLIT
+(  115) LOGICAL           ,OPTIONAL,INTENT(IN)    :: LDGRIDONLY
+(  116) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KTMAX
+(  117) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLEV
+(  118) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KRESOL
+(  119) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)    :: PEXWN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:52      page 11
+
+(  120) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)    :: PEYWN
+(  121) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)    :: PWEIGHT(:)
+(  122) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KNOEXTZL
+(  123) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KNOEXTZG
+(  124) LOGICAL   ,OPTIONAL,INTENT(IN)            :: LDUSEFFTW
+(  125) # 126 "esetup_trans.F90"
+(  126) !ifndef INTERFACE
+(  127) # 128 "esetup_trans.F90"
+(  128) ! Local variables
+(  129) LOGICAL :: LLP1,LLP2
+(  130) INTEGER(KIND=JPIM) :: I, J
+(  131) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  132) # 133 "esetup_trans.F90"
+(  133) !     ------------------------------------------------------------------
+(  134) # 135 "esetup_trans.F90"
+(  135) IF (LHOOK) CALL DR_HOOK('ESETUP_TRANS',0,ZHOOK_HANDLE)
+(  136) # 137 "esetup_trans.F90"
+(  137) IF(MSETUP0 == 0) THEN
+(  138)   CALL ABORT_TRANS('ESETUP_TRANS: SETUP_TRANS0 HAS TO BE CALLED BEFORE ESETUP_TRANS')
+(  139) ENDIF
+(  140) LLP1 = NPRINTLEV>0
+(  141) LLP2 = NPRINTLEV>1
+(  142) IF(LLP1) WRITE(NOUT,*) '=== ENTER ROUTINE ESETUP_TRANS ==='
+(  143) # 144 "esetup_trans.F90"
+(  144) ! Allocate resolution dependent structures common to global and LAM
+(  145) IF(.NOT. ALLOCATED(DIM_RESOL)) THEN
+(  146)   NDEF_RESOL = 1
+(  147)   ALLOCATE(DIM_RESOL(NMAX_RESOL))
+(  148)   ALLOCATE(FIELDS_RESOL(NMAX_RESOL))
+(  149)   ALLOCATE(GEOM_RESOL(NMAX_RESOL))
+(  150)   ALLOCATE(DISTR_RESOL(NMAX_RESOL))
+(  151)   ALLOCATE(FFT_RESOL(NMAX_RESOL))
+(  152)   ALLOCATE(FFTB_RESOL(NMAX_RESOL))
+(  153) # 156 "esetup_trans.F90"
+(  156)   ALLOCATE(FFTC_RESOL(NMAX_RESOL))
+(  157)   ALLOCATE(FLT_RESOL(NMAX_RESOL))
+(  158)   GEOM_RESOL(:)%LAM=.FALSE.
+(  159)   ALLOCATE(LENABLED(NMAX_RESOL))
+(  160)   LENABLED(:)=.FALSE.
+(  161) ELSE
+(  162)   NDEF_RESOL = NDEF_RESOL+1
+(  163)   IF(NDEF_RESOL > NMAX_RESOL) THEN
+(  164)     CALL ABORT_TRANS('ESETUP_TRANS:NDEF_RESOL > NMAX_RESOL')
+(  165)   ENDIF
+(  166) ENDIF
+(  167) ! Allocate LAM-specific resolution dependent structures
+(  168) IF(.NOT. ALLOCATED(ALDDIM_RESOL)) THEN
+(  169)   ALLOCATE(ALDDIM_RESOL(NMAX_RESOL))
+(  170)   ALLOCATE(ALDFIELDS_RESOL(NMAX_RESOL))
+(  171)   ALLOCATE(ALDGEO_RESOL(NMAX_RESOL))
+(  172)   ALLOCATE(ALDDISTR_RESOL(NMAX_RESOL))
+(  173)   ALLOCATE(ALDFFT_RESOL(NMAX_RESOL))
+(  174) ENDIF
+(  175) # 177 "esetup_trans.F90"
+(  177) IF (PRESENT(KRESOL)) THEN
+(  178)   KRESOL=NDEF_RESOL
+(  179) ENDIF
+(  180) # 181 "esetup_trans.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:52      page 12
+
+(  181) ! Point at structures due to be initialized
+(  182) CALL ESET_RESOL(NDEF_RESOL)
+(  183) IF(LLP1) WRITE(NOUT,*) '=== DEFINING RESOLUTION ',NCUR_RESOL
+(  184) # 185 "esetup_trans.F90"
+(  185) ! Defaults for optional arguments
+(  186) # 187 "esetup_trans.F90"
+(  187) G%LREDUCED_GRID = .FALSE.
+(  188) D%LGRIDONLY = .FALSE.
+(  189) D%LSPLIT = .FALSE.
+(  190) TALD%LFFT992=.TRUE. ! Use FFT992 interface for FFTs
+(  191) # 195 "esetup_trans.F90"
+(  195) ! NON-OPTIONAL ARGUMENTS
+(  196) R%NSMAX = KSMAX
+(  197) RALD%NMSMAX=KMSMAX
+(  198) RALD%NDGUX=KDGUX
+(  199) R%NDGL  = KDGL
+(  200) RALD%NDGLSUR=KDGL+2
+(  201) R%NDLON =KLOEN(1)
+(  202) # 203 "esetup_trans.F90"
+(  203) ! IMPLICIT argument :
+(  204) G%LAM = .TRUE.
+(  205) # 206 "esetup_trans.F90"
+(  206) IF (KDGL <= 0) THEN
+(  207)   CALL ABORT_TRANS ('ESETUP_TRANS: KDGL IS NOT A POSITIVE NUMBER')
+(  208) ENDIF
+(  209) # 210 "esetup_trans.F90"
+(  210) ! Optional arguments
+(  211) # 212 "esetup_trans.F90"
+(  212) ALLOCATE(G%NLOEN(R%NDGL))
+(  213) IF(LLP2)WRITE(NOUT,9) 'NLOEN   ',SIZE(G%NLOEN   ),SHAPE(G%NLOEN   )
+(  214) # 215 "esetup_trans.F90"
+(  215) IF (G%LREDUCED_GRID) THEN
+(  216)   G%NLOEN(:) = KLOEN(1:R%NDGL)
+(  217) ELSE
+(  218)   G%NLOEN(:) = R%NDLON
+(  219) ENDIF
+(  220) # 221 "esetup_trans.F90"
+(  221) IF(PRESENT(LDSPLIT)) THEN
+(  222)   D%LSPLIT = LDSPLIT
+(  223) ENDIF
+(  224) # 225 "esetup_trans.F90"
+(  225) IF(PRESENT(KTMAX)) THEN
+(  226)   R%NTMAX = KTMAX
+(  227) ELSE
+(  228)   R%NTMAX = R%NSMAX
+(  229) ENDIF
+(  230) IF(R%NTMAX /= R%NSMAX) THEN
+(  231)   !This SHOULD work but I don't know how to test it /MH
+(  232)   WRITE(NERR,*) 'R%NTMAX /= R%NSMAX',R%NTMAX,R%NSMAX
+(  233)   CALL ABORT_TRANS('ESETUP_TRANS:R%NTMAX /= R%NSMAX HAS NOT BEEN VALIDATED')
+(  234) ENDIF
+(  235) # 236 "esetup_trans.F90"
+(  236) IF(PRESENT(PWEIGHT)) THEN
+(  237)   D%LWEIGHTED_DISTR = .TRUE.
+(  238)   IF( D%LWEIGHTED_DISTR .AND. .NOT.D%LSPLIT )THEN
+(  239)     CALL ABORT_TRANS('SETUP_TRANS: LWEIGHTED_DISTR=T AND LSPLIT=F NOT SUPPORTED')
+(  240)   ENDIF
+(  241)   IF(SIZE(PWEIGHT) /= SUM(G%NLOEN(:)) )THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:52      page 13
+
+(  242)     CALL ABORT_TRANS('SETUP_TRANS:SIZE(PWEIGHT) /= SUM(G%NLOEN(:))')
+(  243)   ENDIF
+(  244)   ALLOCATE(D%RWEIGHT(SIZE(PWEIGHT)))
+(  245)   D%RWEIGHT(:)=PWEIGHT(:)
+(  246) ELSE
+(  247)   D%LWEIGHTED_DISTR = .FALSE.
+(  248) ENDIF
+(  249) # 250 "esetup_trans.F90"
+(  250) IF(PRESENT(LDGRIDONLY)) THEN
+(  251)   D%LGRIDONLY=LDGRIDONLY
+(  252) ENDIF
+(  253) # 254 "esetup_trans.F90"
+(  254) IF (PRESENT(KNOEXTZL)) THEN
+(  255)   R%NNOEXTZL=KNOEXTZL
+(  256) ELSE
+(  257)   R%NNOEXTZL=0
+(  258) ENDIF
+(  259) # 260 "esetup_trans.F90"
+(  260) IF (PRESENT(KNOEXTZG)) THEN
+(  261)   R%NNOEXTZG=KNOEXTZG
+(  262) ELSE
+(  263)   R%NNOEXTZG=0
+(  264) ENDIF
+(  265) # 272 "esetup_trans.F90"
+(  272) IF(PRESENT(LDUSEFFTW)) THEN
+(  273)   TALD%LFFT992=.NOT.LDUSEFFTW
+(  274) ELSE
+(  275)   TALD%LFFT992=.TRUE.
+(  276) ENDIF
+(  277) # 278 "esetup_trans.F90"
+(  278) !     Setup resolution dependent structures
+(  279) !     -------------------------------------
+(  280) # 281 "esetup_trans.F90"
+(  281) ! Setup distribution independent dimensions
+(  282) CALL ESETUP_DIMS
+(  283) IF (PRESENT(PEXWN)) GALD%EXWN=PEXWN
+(  284) IF (PRESENT(PEYWN)) GALD%EYWN=PEYWN
+(  285) # 286 "esetup_trans.F90"
+(  286) ! First part of setup of distributed environment
+(  287) CALL SUEMP_TRANS_PRELEG
+(  288) # 289 "esetup_trans.F90"
+(  289) CALL GSTATS(1802,0)
+(  290) ! Compute arrays related to grid-point geometry
+(  291) CALL ESETUP_GEOM
+(  292) ! Second part of setup of distributed environment
+(  293) CALL SUEMP_TRANS
+(  294) ! Initialize Fast Fourier Transform package
+(  295) CALL SUEFFT
+(  296) CALL GSTATS(1802,1)
+(  297) # 298 "esetup_trans.F90"
+(  298) ! Signal the current resolution is active
+(  299) LENABLED(NDEF_RESOL)=.TRUE.
+(  300) # 301 "esetup_trans.F90"
+(  301) IF( .NOT.D%LGRIDONLY ) THEN
+(  302) # 303 "esetup_trans.F90"
+(  303) WRITE(NOUT,*) '===now going to allocate GPU arrays'
+(  304) # 305 "esetup_trans.F90"
+(  306) !$acc& copyin(F,F%RN,F%RLAPIN,D,D%NUMP,D%MYMS,R,R%NDGNH,R%NSMAX,G,G%NDGLU) &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:52      page 14
+
+(  307) !$acc& copyin(D%NPNTGTB0,D%NPNTGTB1,D%NSTAGT0B,D%NSTAGT1B,D%NSTAGTF,G%NMEN,D%NPROCM,D%NPTRLS,G,G%NLOEN,D%MSTABF)
+(  308) # 309 "esetup_trans.F90"
+(  309) R_NSMAX=R%NSMAX
+(  310) R_NTMAX=R%NTMAX
+(  311) R_NDGNH=R%NDGNH
+(  312) R_NDGL=R%NDGL
+(  313) R_NNOEXTZL=R%NNOEXTZL
+(  314) # 316 "esetup_trans.F90"
+(  316) ALLOCATE(D_NSTAGT0B(SIZE(D%NSTAGT0B)))
+(  317) ALLOCATE(D_NSTAGT1B(SIZE(D%NSTAGT1B)))
+(  318) ALLOCATE(D_NPNTGTB0(0:SIZE(D%NPNTGTB0,1)-1,SIZE(D%NPNTGTB0,2)))
+(  319) ALLOCATE(D_NPNTGTB1(SIZE(D%NPNTGTB1,1),SIZE(D%NPNTGTB1,2)))
+(  320) ALLOCATE(D_MYMS(SIZE(D%MYMS)))
+(  321) ALLOCATE(D_NPROCL(SIZE(D%NPROCL)))
+(  322) ALLOCATE(D_NASM0(0:SIZE(D%NASM0)-1))
+(  323) ALLOCATE(D_NSTAGTF(SIZE(D%NSTAGTF)))
+(  324) ALLOCATE(D_MSTABF(SIZE(D%MSTABF)))
+(  325) ALLOCATE(D_NPROCM(0:SIZE(D%NPROCM)-1))
+(  326) ALLOCATE(D_NPTRLS(SIZE(D%NPTRLS)))
+(  327) # 328 "esetup_trans.F90"
+(  328) ALLOCATE(G_NDGLU(0:SIZE(G%NDGLU)-1))
+(  329) ALLOCATE(G_NMEN(SIZE(G%NMEN)))
+(  330) ALLOCATE(G_NLOEN(SIZE(G%NLOEN)))
+(  331) # 332 "esetup_trans.F90"
+(  332) DO I=0,SIZE(G%NDGLU)-1
+(  333)    G_NDGLU(I)=G%NDGLU(I)
+(  334) end DO
+(  335) # 336 "esetup_trans.F90"
+(  336) G_NMEN_MAX=0
+(  337) DO I=1,SIZE(G%NMEN)
+(  338)    G_NMEN(I)=G%NMEN(I)
+(  339)    if (G_NMEN(I) .gt. G_NMEN_MAX) G_NMEN_MAX=G_NMEN(I)
+(  340) end DO
+(  341) # 342 "esetup_trans.F90"
+(  342) G_NLOEN_MAX=0
+(  343) DO I=1,SIZE(G%NLOEN)
+(  344)    G_NLOEN(I)=G%NLOEN(I)
+(  345)    if (G_NLOEN(I) .gt. G_NLOEN_MAX) G_NLOEN_MAX=G_NLOEN(I)
+(  346) end DO
+(  347) # 348 "esetup_trans.F90"
+(  348) DO I=1,SIZE(D%NSTAGT0B)
+(  349)    D_NSTAGT0B(I)=D%NSTAGT0B(I)
+(  350) END DO
+(  351) # 352 "esetup_trans.F90"
+(  352) DO I=1,SIZE(D%NSTAGT1B)
+(  353)    D_NSTAGT1B(I)=D%NSTAGT1B(I)
+(  354) END DO
+(  355) # 356 "esetup_trans.F90"
+(  356) DO I=1,SIZE(D%NPROCL)
+(  357)    D_NPROCL(I)=D%NPROCL(I)
+(  358) END DO
+(  359) # 360 "esetup_trans.F90"
+(  360) DO I=0,SIZE(D%NASM0)-1
+(  361)    D_NASM0(I)=D%NASM0(I)
+(  362) END DO
+(  363) # 364 "esetup_trans.F90"
+(  364) DO I=1,SIZE(D%NSTAGTF)
+(  365)    D_NSTAGTF(I)=D%NSTAGTF(I)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:52      page 15
+
+(  366) END DO
+(  367) # 368 "esetup_trans.F90"
+(  368) DO I=1,SIZE(D%MSTABF)
+(  369)    D_MSTABF(I)=D%MSTABF(I)
+(  370) END DO
+(  371) # 372 "esetup_trans.F90"
+(  372) DO I=0,SIZE(D%NPROCM)-1
+(  373)    D_NPROCM(I)=D%NPROCM(I)
+(  374) END DO
+(  375) # 376 "esetup_trans.F90"
+(  376) DO I=1,SIZE(D%NPTRLS)
+(  377)    D_NPTRLS(I)=D%NPTRLS(I)
+(  378) END DO
+(  379) # 380 "esetup_trans.F90"
+(  380) DO I=1,SIZE(D%NPNTGTB0,2)
+(  381)    DO J=0,SIZE(D%NPNTGTB0,1)-1
+(  382)       D_NPNTGTB0(J,I)=D%NPNTGTB0(J,I)
+(  383)    end DO
+(  384) END DO
+(  385) # 386 "esetup_trans.F90"
+(  386) DO I=1,SIZE(D%NPNTGTB1,2)
+(  387)    DO J=1,SIZE(D%NPNTGTB1,1)
+(  388)       D_NPNTGTB1(J,I)=D%NPNTGTB1(J,I)
+(  389)    end DO
+(  390) END DO
+(  391) # 392 "esetup_trans.F90"
+(  392) D_NUMP=D%NUMP
+(  393) # 394 "esetup_trans.F90"
+(  394) DO I=1,SIZE(D%MYMS)
+(  395)    D_MYMS(I)=D%MYMS(I)
+(  396) end DO
+(  397) # 398 "esetup_trans.F90"
+(  398) !$ACC enter data create(R_NSMAX,R_NTMAX,R_NDGL,R_NNOEXTZL,R_NDGNH,D_NSTAGT0B,D_NSTAGT1B,D_NPNTGTB1,D_NPROCL,D_NUMP,D_MYMS,D_NASM0,D_NSTAGTF,D_MSTABF,D_NPNTGTB0,D_NPROCM,D_NPTRLS,G_NDGLU,G_NMEN,G_NMEN_MAX,G_NLOEN,G_NLOEN_MAX)
+(  399) # 400 "esetup_trans.F90"
+(  400) !$ACC update device(R_NSMAX,R_NTMAX,R_NDGL,R_NNOEXTZL,R_NDGNH,D_NSTAGT0B,D_NSTAGT1B,D_NPNTGTB1,D_NPROCL,D_NUMP,D_MYMS,D_NASM0,D_NSTAGTF,D_MSTABF,D_NPNTGTB0,D_NPROCM,D_NPTRLS,G_NDGLU,G_NMEN,G_NMEN_MAX,G_NLOEN,G_NLOEN_MAX)
+(  401) # 402 "esetup_trans.F90"
+(  402) WRITE(NOUT,*) '===GPU arrays successfully allocated'
+(  403) !endif INTERFACE
+(  404) # 405 "esetup_trans.F90"
+(  405) ENDIF
+(  406) # 407 "esetup_trans.F90"
+(  407) IF (LHOOK) CALL DR_HOOK('ESETUP_TRANS',1,ZHOOK_HANDLE)
+(  408) !     ------------------------------------------------------------------
+(  409) 9 FORMAT(1X,'ARRAY ',A10,' ALLOCATED ',8I8)
+(  410) # 411 "esetup_trans.F90"
+(  411) !endif INTERFACE
+(  412) # 413 "esetup_trans.F90"
+(  413) END SUBROUTINE ESETUP_TRANS

@@ -1,0 +1,174 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:48      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: ellips64.F90
+
+(    1) ! Oct-2012 P. Marguinaud 64b LFI
+(    2) 
+(    3) #undef JLIK
+(    4) #undef _ELLIPS_
+(    5) #define JLIK JPLIKB
+(    6) #define _ELLIPS_  ELLIPS64 
+(    7) #include "ellips.h"
+(    8) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:48      page 2
+
+(    1) # 1 "ellips64.F90"
+(    1) ! Oct-2012 P. Marguinaud 64b LFI
+(    2) # 7 "ellips64.F90"
+(    7) # 1 ".D[7]/ellips.h"
+(    1) ! Jan-2011 P. Marguinaud Interface to thread-safe FA
+(    2) SUBROUTINE ELLIPS64 (KSMAX,KMSMAX,KNTMP,KMTMP)
+(    3) USE PARKIND1, ONLY : JPRB
+(    4) USE YOMHOOK , ONLY : LHOOK, DR_HOOK
+(    5) USE LFI_PRECISION
+(    6) IMPLICIT NONE
+(    7) !
+(    8) ! ***ELLIPS*** - General routine for computing elliptic truncation
+(    9) !
+(   10) !    Purpose.
+(   11) !    --------
+(   12) !       Computation of zonal and meridional limit wavenumbers within the ellipse
+(   13) !    Interface:
+(   14) !    ----------
+(   15) !                   *CALL* *ELLIPS *
+(   16) !
+(   17) !        Explicit arguments :
+(   18) !        --------------------
+(   19) !
+(   20) !        Implicit arguments :
+(   21) !        --------------------
+(   22) !
+(   23) !
+(   24) !     Method.
+(   25) !     -------
+(   26) !        See documentation
+(   27) !
+(   28) !     Externals.   NONE.
+(   29) !     ----------
+(   30) !
+(   31) !     Reference.
+(   32) !     ----------
+(   33) !        ARPEGE/ALADIN documentation
+(   34) !
+(   35) !     Author.
+(   36) !     -------
+(   37) !        G. Radnoti LACE 97/04/04
+(   38) !
+(   39) !     Modifications.
+(   40) !-------------------------------------------------------------
+(   41) !        J.Vivoda, 99/05/19  treating NSMAX=0 and NMSMAX=0
+(   42) !
+(   43) !
+(   44) INTEGER (KIND=JPLIKB) KSMAX, KMSMAX
+(   45) INTEGER (KIND=JPLIKB) KNTMP(0:KMSMAX),KMTMP(0:KSMAX)
+(   46) !
+(   47) INTEGER (KIND=JPLIKB) JM, JN
+(   48) !
+(   49) REAL (KIND=JPDBLR) ZEPS, ZKN, ZKM, ZAUXIL
+(   50) !
+(   51) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   52) IF (LHOOK) CALL DR_HOOK('ELLIPS',0,ZHOOK_HANDLE)
+(   53) # 54 ".D[7]/ellips.h"
+(   54) ZEPS=1.E-10
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:48      page 3
+
+(   55) ZAUXIL=0.
+(   56) !
+(   57) ! 1. Computing meridional limit wavenumbers along zonal wavenumbers
+(   58) !
+(   59) DO JM=1,KMSMAX-1
+(   60) ZKN = REAL(KSMAX,JPDBLR)/REAL(KMSMAX,JPDBLR)* &
+(   61) & SQRT(MAX(ZAUXIL,REAL(KMSMAX**2-JM**2,JPDBLR)))
+(   62)   KNTMP(JM)=INT(ZKN+ZEPS, JPLIKB)
+(   63) ENDDO
+(   64) # 65 ".D[7]/ellips.h"
+(   65) IF( KMSMAX.EQ.0 )THEN
+(   66)    KNTMP(0)=KSMAX
+(   67) ELSE
+(   68)    KNTMP(0)=KSMAX
+(   69)    KNTMP(KMSMAX)=0
+(   70) ENDIF
+(   71) !
+(   72) ! 2. Computing zonal limit wavenumbers along meridional wavenumbers
+(   73) !             
+(   74) DO JN=1,KSMAX-1
+(   75)  ZKM = REAL(KMSMAX,JPDBLR)/REAL(KSMAX,JPDBLR)* &
+(   76)      & SQRT(MAX(ZAUXIL,REAL(KSMAX**2-JN**2,JPDBLR)))
+(   77)   KMTMP(JN)=INT(ZKM+ZEPS, JPLIKB)
+(   78) ENDDO   
+(   79) # 80 ".D[7]/ellips.h"
+(   80) IF( KSMAX.EQ.0 )THEN
+(   81)    KMTMP(0)=KMSMAX
+(   82) ELSE
+(   83)    KMTMP(0)=KMSMAX
+(   84)    KMTMP(KSMAX)=0
+(   85) ENDIF
+(   86) # 87 ".D[7]/ellips.h"
+(   87) !
+(   88) IF (LHOOK) CALL DR_HOOK('ELLIPS',1,ZHOOK_HANDLE)
+(   89) END      
+(   90) # 8 "ellips64.F90"

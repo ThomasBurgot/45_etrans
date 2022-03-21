@@ -1,0 +1,476 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:19      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: fadcpl.F90
+
+(    1) SUBROUTINE FADCPL_MT64                                          &
+(    2) &                     (FA, KREP, KRANG, CDNOMA, KVALCO, KLONGA, &
+(    3) &                      PCHAMP, LDCOSP, LDUNDF, PUNDF)
+(    4) USE FA_MOD, ONLY : FA_COM, JPNIIL
+(    5) USE PARKIND1, ONLY : JPRB
+(    6) USE YOMHOOK , ONLY : LHOOK, DR_HOOK
+(    7) USE LFI_PRECISION
+(    8) USE GRIB_API_INTERFACE
+(    9) USE GRIB_API
+(   10) IMPLICIT NONE
+(   11) TYPE(FA_COM) :: FA
+(   12) INTEGER (KIND=JPLIKB) KREP, KRANG, KLONGA
+(   13) !
+(   14) INTEGER (KIND=JPLIKB) KVALCO(*)
+(   15) REAL (KIND=JPDBLR)    PCHAMP(*)
+(   16) REAL (KIND=JPDBLR)    PUNDF
+(   17) !
+(   18) LOGICAL LDCOSP, LDUNDF
+(   19) !
+(   20) CHARACTER CDNOMA*(*)
+(   21) !
+(   22) !
+(   23) REAL (KIND=JPDBLR) :: Z1, Z2, Z3, Z4
+(   24) INTEGER (KIND=JPLIKB) IRANGC
+(   25) INTEGER (KIND=JPLIKB) INLATI, INXLON, IDLUXG, IDGUXG, IDZONL, IDZONG
+(   26) INTEGER (KIND=JPLIKB) ILCHAM
+(   27) INTEGER (KIND=JPLIKB) ICPLSIZE, INBITS
+(   28) INTEGER (KIND=JPLIKB) ILAT, ILON, IPACK
+(   29) INTEGER (KIND=JPLIKB) ILAT1, ILAT2, ILAT3, ILAT4
+(   30) INTEGER (KIND=JPLIKB) ILON1, ILON2, ILON3, ILON4
+(   31) INTEGER (KIND=JPLIKB) ILATMIN, ILATMAX, ILONMIN, ILONMAX
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:19      page 2
+
+(   32) INTEGER (KIND=JPLIKB) INIMES, INUMER
+(   33) !
+(   34) CHARACTER(LEN=FA%JPLMES) CLMESS
+(   35) CHARACTER(LEN=FA%JPLSPX) CLNSPR
+(   36) LOGICAL :: LLFATA
+(   37) !
+(   38) REAL (KIND=JPDBLR) :: ZUNDF, ZMULTI
+(   39) INTEGER (KIND=JPLIKM) :: ILGRIB, IGRIBH, IRET
+(   40) INTEGER (KIND=JPLIKB) :: INOD, INOV
+(   41) CHARACTER, ALLOCATABLE :: CLGRIB (:)
+(   42) !
+(   43) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   44) 
+(   45) IF (LHOOK) CALL DR_HOOK('FADCPL_MT',0,ZHOOK_HANDLE)
+(   46) 
+(   47) IF (LDCOSP) THEN
+(   48)   KREP=-200
+(   49)   GOTO 1001
+(   50) ENDIF
+(   51) 
+(   52) KREP=0
+(   53) 
+(   54) IRANGC=FA%FICHIER(KRANG)%NUCADR
+(   55) INLATI=FA%CADRE(IRANGC)%NLATIT
+(   56) INXLON=FA%CADRE(IRANGC)%NXLOPA
+(   57) 
+(   58) ILCHAM = INLATI * INXLON
+(   59) IDLUXG  = FA%CADRE(IRANGC)%NLOPAR (4)  ! lon
+(   60) IDGUXG  = FA%CADRE(IRANGC)%NLOPAR (6)  ! lat
+(   61) IDZONL  = FA%CADRE(IRANGC)%NLOPAR (7)  
+(   62) IDZONG  = FA%CADRE(IRANGC)%NLOPAR (8)
+(   63) 
+(   64) ICPLSIZE = KVALCO (3)
+(   65) INBITS   = KVALCO (4)
+(   66) 
+(   67) ILONMIN=IDZONL+ICPLSIZE
+(   68) ILONMAX=IDLUXG-ICPLSIZE-IDZONL+1
+(   69) ILATMIN=IDZONG+ICPLSIZE
+(   70) ILATMAX=IDGUXG-ICPLSIZE-IDZONG+1
+(   71) 
+(   72) 
+(   73) ILGRIB = (KLONGA-3)*8
+(   74) 
+(   75) ALLOCATE (CLGRIB (ILGRIB))
+(   76) CLGRIB = TRANSFER (KVALCO (5:KLONGA), CLGRIB)
+(   77) CALL GRIB_NEW_FROM_MESSAGE_CHAR (IGRIBH, CLGRIB, STATUS=IRET)
+(   78) DEALLOCATE (CLGRIB)
+(   79) IF (IRET /= GRIB_SUCCESS) THEN
+(   80)   KREP=-1000-IRET
+(   81)   GOTO 1001
+(   82) ENDIF
+(   83) 
+(   84) CALL IGRIB_GET_VALUE (IGRIBH, 'FMULTI', ZMULTI)
+(   85) CALL IGRIB_GET_VALUE (IGRIBH, 'numberOfValues', INOV) 
+(   86) CALL IGRIB_GET_VALUE (IGRIBH, 'numberOfDataPoints', INOD) 
+(   87) CALL IGRIB_GET_VALUE (IGRIBH, 'values', PCHAMP (1:ILCHAM))
+(   88) CALL IGRIB_GET_VALUE (IGRIBH, 'missingValue',  ZUNDF)
+(   89) CALL IGRIB_RELEASE (IGRIBH)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:19      page 3
+
+(   90) 
+(   91) 
+(   92) ! Basic check on dimensions
+(   93) 
+(   94) IF ((INOD < ILCHAM) .OR. &
+(   95)   & (INOV < (ILCHAM-(ILATMAX-ILATMIN-1)*(ILONMAX-ILONMIN-1)))) THEN
+(   96)   KREP=-93
+(   97)   GOTO 1001
+(   98) ELSEIF ((INOD > ILCHAM) .OR. &
+(   99)   & (INOV > (ILCHAM-(ILATMAX-ILATMIN-1)*(ILONMAX-ILONMIN-1)))) THEN
+(  100)   KREP=-94
+(  101)   GOTO 1001
+(  102) ENDIF
+(  103) 
+(  104) ! Apply scaling factor
+(  105) 
+(  106) IF (ZMULTI /= REAL (1._4, JPDBLR)) THEN
+(  107)   PCHAMP (1:ILCHAM) = PCHAMP (1:ILCHAM) / ZMULTI
+(  108)   ZUNDF             = ZUNDF             / ZMULTI
+(  109) ENDIF
+(  110) 
+(  111) DO ILAT = ILATMIN+1, ILATMAX-1
+(  112)   DO ILON = ILONMIN+1, ILONMAX-1
+(  113) 
+(  114)     IF (LDUNDF) THEN
+(  115)       PCHAMP ((ILAT-1)*INXLON+ILON) = PUNDF
+(  116)     ELSE
+(  117)       ILAT1=ILAT
+(  118)       ILON1=ILONMIN
+(  119) 
+(  120)       ILAT2=ILAT
+(  121)       ILON2=ILONMAX
+(  122) 
+(  123)       ILAT3=ILATMIN
+(  124)       ILON3=ILON
+(  125) 
+(  126)       ILAT4=ILATMAX
+(  127)       ILON4=ILON
+(  128) 
+(  129)       Z1 = 1.0_JPRB / (ILON-ILON1)
+(  130)       Z2 = 1.0_JPRB / (ILON2-ILON)
+(  131)       Z3 = 1.0_JPRB / (ILAT-ILAT3)
+(  132)       Z4 = 1.0_JPRB / (ILAT4-ILAT)
+(  133) 
+(  134)       PCHAMP ((ILAT-1)*INXLON+ILON) = &
+(  135)                     & (Z1*PCHAMP((ILAT1-1)*INXLON+ILON1)   &
+(  136)                     & +Z2*PCHAMP((ILAT2-1)*INXLON+ILON2)   &
+(  137)                     & +Z3*PCHAMP((ILAT3-1)*INXLON+ILON3)   &
+(  138)                     & +Z4*PCHAMP((ILAT4-1)*INXLON+ILON4))  &
+(  139)                     & /(Z1+Z2+Z3+Z4) 
+(  140)     ENDIF
+(  141) 
+(  142)   ENDDO
+(  143) ENDDO
+(  144) 
+(  145) 1001 CONTINUE
+(  146) 
+(  147) LLFATA=LLMOER (KREP,KRANG)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:19      page 4
+
+(  148) 
+(  149) IF (FA%LFAMOP.OR.LLFATA) THEN
+(  150)   INIMES=2
+(  151)   CLNSPR='FADCPL'
+(  152)   INUMER=JPNIIL
+(  153) 
+(  154)   WRITE (UNIT=CLMESS,FMT="('KREP=',I4,', KRANG=',I4,', CDPREF=''',A,'''')") &
+(  155) &             KREP, KRANG, CDNOMA
+(  156)   CALL FAIPAR_MT64                                       &
+(  157) &                 (FA,INUMER,INIMES,KREP,.FALSE.,CLMESS, &
+(  158) &                  CLNSPR, '',.FALSE.)
+(  159) ENDIF
+(  160) 
+(  161) !
+(  162) IF (LHOOK) CALL DR_HOOK('FADCPL_MT',1,ZHOOK_HANDLE)
+(  163) 
+(  164) CONTAINS
+(  165) 
+(  166) #include "facom2.llmoer.h"
+(  167) 
+(  168) END SUBROUTINE
+(  169) 
+(  170) 
+(  171) 
+(  172) 
+(  173) 
+(  174) 
+(  175) 
+(  176) 
+(  177) 
+(  178)  
+(  179) 
+(  180) 
+(  181) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:19      page 5
+
+(    1) # 1 "fadcpl.F90"
+(    1) SUBROUTINE FADCPL_MT64                                          &
+(    2) &                     (FA, KREP, KRANG, CDNOMA, KVALCO, KLONGA, &
+(    3) &                      PCHAMP, LDCOSP, LDUNDF, PUNDF)
+(    4) USE FA_MOD, ONLY : FA_COM, JPNIIL
+(    5) USE PARKIND1, ONLY : JPRB
+(    6) USE YOMHOOK , ONLY : LHOOK, DR_HOOK
+(    7) USE LFI_PRECISION
+(    8) USE GRIB_API_INTERFACE
+(    9) USE GRIB_API
+(   10) IMPLICIT NONE
+(   11) TYPE(FA_COM) :: FA
+(   12) INTEGER (KIND=JPLIKB) KREP, KRANG, KLONGA
+(   13) !
+(   14) INTEGER (KIND=JPLIKB) KVALCO(*)
+(   15) REAL (KIND=JPDBLR)    PCHAMP(*)
+(   16) REAL (KIND=JPDBLR)    PUNDF
+(   17) !
+(   18) LOGICAL LDCOSP, LDUNDF
+(   19) !
+(   20) CHARACTER CDNOMA*(*)
+(   21) !
+(   22) !
+(   23) REAL (KIND=JPDBLR) :: Z1, Z2, Z3, Z4
+(   24) INTEGER (KIND=JPLIKB) IRANGC
+(   25) INTEGER (KIND=JPLIKB) INLATI, INXLON, IDLUXG, IDGUXG, IDZONL, IDZONG
+(   26) INTEGER (KIND=JPLIKB) ILCHAM
+(   27) INTEGER (KIND=JPLIKB) ICPLSIZE, INBITS
+(   28) INTEGER (KIND=JPLIKB) ILAT, ILON, IPACK
+(   29) INTEGER (KIND=JPLIKB) ILAT1, ILAT2, ILAT3, ILAT4
+(   30) INTEGER (KIND=JPLIKB) ILON1, ILON2, ILON3, ILON4
+(   31) INTEGER (KIND=JPLIKB) ILATMIN, ILATMAX, ILONMIN, ILONMAX
+(   32) INTEGER (KIND=JPLIKB) INIMES, INUMER
+(   33) !
+(   34) CHARACTER(LEN=FA%JPLMES) CLMESS
+(   35) CHARACTER(LEN=FA%JPLSPX) CLNSPR
+(   36) LOGICAL :: LLFATA
+(   37) !
+(   38) REAL (KIND=JPDBLR) :: ZUNDF, ZMULTI
+(   39) INTEGER (KIND=JPLIKM) :: ILGRIB, IGRIBH, IRET
+(   40) INTEGER (KIND=JPLIKB) :: INOD, INOV
+(   41) CHARACTER, ALLOCATABLE :: CLGRIB (:)
+(   42) !
+(   43) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   44) # 45 "fadcpl.F90"
+(   45) IF (LHOOK) CALL DR_HOOK('FADCPL_MT',0,ZHOOK_HANDLE)
+(   46) # 47 "fadcpl.F90"
+(   47) IF (LDCOSP) THEN
+(   48)   KREP=-200
+(   49)   GOTO 1001
+(   50) ENDIF
+(   51) # 52 "fadcpl.F90"
+(   52) KREP=0
+(   53) # 54 "fadcpl.F90"
+(   54) IRANGC=FA%FICHIER(KRANG)%NUCADR
+(   55) INLATI=FA%CADRE(IRANGC)%NLATIT
+(   56) INXLON=FA%CADRE(IRANGC)%NXLOPA
+(   57) # 58 "fadcpl.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:19      page 6
+
+(   58) ILCHAM = INLATI * INXLON
+(   59) IDLUXG  = FA%CADRE(IRANGC)%NLOPAR (4)  ! lon
+(   60) IDGUXG  = FA%CADRE(IRANGC)%NLOPAR (6)  ! lat
+(   61) IDZONL  = FA%CADRE(IRANGC)%NLOPAR (7)  
+(   62) IDZONG  = FA%CADRE(IRANGC)%NLOPAR (8)
+(   63) # 64 "fadcpl.F90"
+(   64) ICPLSIZE = KVALCO (3)
+(   65) INBITS   = KVALCO (4)
+(   66) # 67 "fadcpl.F90"
+(   67) ILONMIN=IDZONL+ICPLSIZE
+(   68) ILONMAX=IDLUXG-ICPLSIZE-IDZONL+1
+(   69) ILATMIN=IDZONG+ICPLSIZE
+(   70) ILATMAX=IDGUXG-ICPLSIZE-IDZONG+1
+(   71) # 73 "fadcpl.F90"
+(   73) ILGRIB = (KLONGA-3)*8
+(   74) # 75 "fadcpl.F90"
+(   75) ALLOCATE (CLGRIB (ILGRIB))
+(   76) CLGRIB = TRANSFER (KVALCO (5:KLONGA), CLGRIB)
+(   77) CALL GRIB_NEW_FROM_MESSAGE_CHAR (IGRIBH, CLGRIB, STATUS=IRET)
+(   78) DEALLOCATE (CLGRIB)
+(   79) IF (IRET /= GRIB_SUCCESS) THEN
+(   80)   KREP=-1000-IRET
+(   81)   GOTO 1001
+(   82) ENDIF
+(   83) # 84 "fadcpl.F90"
+(   84) CALL IGRIB_GET_VALUE (IGRIBH, 'FMULTI', ZMULTI)
+(   85) CALL IGRIB_GET_VALUE (IGRIBH, 'numberOfValues', INOV) 
+(   86) CALL IGRIB_GET_VALUE (IGRIBH, 'numberOfDataPoints', INOD) 
+(   87) CALL IGRIB_GET_VALUE (IGRIBH, 'values', PCHAMP (1:ILCHAM))
+(   88) CALL IGRIB_GET_VALUE (IGRIBH, 'missingValue',  ZUNDF)
+(   89) CALL IGRIB_RELEASE (IGRIBH)
+(   90) # 92 "fadcpl.F90"
+(   92) ! Basic check on dimensions
+(   93) # 94 "fadcpl.F90"
+(   94) IF ((INOD < ILCHAM) .OR. &
+(   95)   & (INOV < (ILCHAM-(ILATMAX-ILATMIN-1)*(ILONMAX-ILONMIN-1)))) THEN
+(   96)   KREP=-93
+(   97)   GOTO 1001
+(   98) ELSEIF ((INOD > ILCHAM) .OR. &
+(   99)   & (INOV > (ILCHAM-(ILATMAX-ILATMIN-1)*(ILONMAX-ILONMIN-1)))) THEN
+(  100)   KREP=-94
+(  101)   GOTO 1001
+(  102) ENDIF
+(  103) # 104 "fadcpl.F90"
+(  104) ! Apply scaling factor
+(  105) # 106 "fadcpl.F90"
+(  106) IF (ZMULTI /= REAL (1._4, JPDBLR)) THEN
+(  107)   PCHAMP (1:ILCHAM) = PCHAMP (1:ILCHAM) / ZMULTI
+(  108)   ZUNDF             = ZUNDF             / ZMULTI
+(  109) ENDIF
+(  110) # 111 "fadcpl.F90"
+(  111) DO ILAT = ILATMIN+1, ILATMAX-1
+(  112)   DO ILON = ILONMIN+1, ILONMAX-1
+(  113) # 114 "fadcpl.F90"
+(  114)     IF (LDUNDF) THEN
+(  115)       PCHAMP ((ILAT-1)*INXLON+ILON) = PUNDF
+(  116)     ELSE
+(  117)       ILAT1=ILAT
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:19      page 7
+
+(  118)       ILON1=ILONMIN
+(  119) # 120 "fadcpl.F90"
+(  120)       ILAT2=ILAT
+(  121)       ILON2=ILONMAX
+(  122) # 123 "fadcpl.F90"
+(  123)       ILAT3=ILATMIN
+(  124)       ILON3=ILON
+(  125) # 126 "fadcpl.F90"
+(  126)       ILAT4=ILATMAX
+(  127)       ILON4=ILON
+(  128) # 129 "fadcpl.F90"
+(  129)       Z1 = 1.0_JPRB / (ILON-ILON1)
+(  130)       Z2 = 1.0_JPRB / (ILON2-ILON)
+(  131)       Z3 = 1.0_JPRB / (ILAT-ILAT3)
+(  132)       Z4 = 1.0_JPRB / (ILAT4-ILAT)
+(  133) # 134 "fadcpl.F90"
+(  134)       PCHAMP ((ILAT-1)*INXLON+ILON) = &
+(  135)                     & (Z1*PCHAMP((ILAT1-1)*INXLON+ILON1)   &
+(  136)                     & +Z2*PCHAMP((ILAT2-1)*INXLON+ILON2)   &
+(  137)                     & +Z3*PCHAMP((ILAT3-1)*INXLON+ILON3)   &
+(  138)                     & +Z4*PCHAMP((ILAT4-1)*INXLON+ILON4))  &
+(  139)                     & /(Z1+Z2+Z3+Z4) 
+(  140)     ENDIF
+(  141) # 142 "fadcpl.F90"
+(  142)   ENDDO
+(  143) ENDDO
+(  144) # 145 "fadcpl.F90"
+(  145) 1001 CONTINUE
+(  146) # 147 "fadcpl.F90"
+(  147) LLFATA=LLMOER (KREP,KRANG)
+(  148) # 149 "fadcpl.F90"
+(  149) IF (FA%LFAMOP.OR.LLFATA) THEN
+(  150)   INIMES=2
+(  151)   CLNSPR='FADCPL'
+(  152)   INUMER=JPNIIL
+(  153) # 154 "fadcpl.F90"
+(  154)   WRITE (UNIT=CLMESS,FMT="('KREP=',I4,', KRANG=',I4,', CDPREF=''',A,'''')") &
+(  155) &             KREP, KRANG, CDNOMA
+(  156)   CALL FAIPAR_MT64                                       &
+(  157) &                 (FA,INUMER,INIMES,KREP,.FALSE.,CLMESS, &
+(  158) &                  CLNSPR, '',.FALSE.)
+(  159) ENDIF
+(  160) # 161 "fadcpl.F90"
+(  161) !
+(  162) IF (LHOOK) CALL DR_HOOK('FADCPL_MT',1,ZHOOK_HANDLE)
+(  163) # 164 "fadcpl.F90"
+(  164) CONTAINS
+(  165) # 166 "fadcpl.F90"
+(  166) # 1 ".D[17]/facom2.llmoer.h"
+(    1) !
+(    2) !       Fonction servant a rendre fatale ou non une erreur detectee,
+(    3) !       a l'aide du code reponse courant, du niveau de filtrage global,
+(    4) !       et de l'option d'erreur fatale propre au fichier.
+(    5) !       s'il n'y a pas de fichier (I5678=0, d'ou dimensionnement de
+(    6) !          *LERRFA*), le niveau de filtrage joue le role principal.
+(    7) !
+(    8) LOGICAL FUNCTION LLMOER (I1234,I5678)
+(    9) INTEGER (KIND=JPLIKB) :: I1234,I5678
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:19      page 8
+
+(   10) LLMOER=I1234.EQ.-66_JPLIKB .OR. (I1234.NE.0_JPLIKB .AND.(FA%NRFAGA.EQ.0_JPLIKB &
+(   11)      & .OR. (FA%NRFAGA.EQ.1_JPLIKB .AND.FA%FICHIER(I5678)%LERRFA)))
+(   12) END FUNCTION
+(   13) # 167 "fadcpl.F90"
+(  167) # 168 "fadcpl.F90"
+(  168) END SUBROUTINE
+(  169) # 178 "fadcpl.F90"
+(  178)  

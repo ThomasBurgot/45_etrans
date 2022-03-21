@@ -1,0 +1,459 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:50      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: fpbipere.F90
+
+(    1) SUBROUTINE FPBIPERE(KDLUX,KDGUX,KDLON,KDGL,KNUBI,KD1,PGPBI,KDADD,LDZON, &
+(    2)  & LDBOYD, KDBOYD, PLBOYD)
+(    3) 
+(    4) !****   *FPBIPERE*  - Full-POS interface for double periodicisation
+(    5) 
+(    6) !   purpose  :
+(    7) !   --------
+(    8) !     To bi-periodicise the post-processed fields, or just fill the extension zone
+(    9) !      with the mean value of C+I area
+(   10) 
+(   11) !**   INTERFACE.
+(   12) !     ----------
+(   13) !         *CALL*   *FPBIPERE*(...)
+(   14) 
+(   15) !        EXPLICIT ARGUMENTS
+(   16) !        --------------------
+(   17) !         KDLUX : upper bound for the x (or longitude) dimension of  C U I.
+(   18) !         KDGUX : upper bound for the y (or latitude) dimension of  C U I.
+(   19) !         KDLON : upper bound for the x (or longitude) dimension of the gridpoint array on C U I U E
+(   20) !         KDGL  : upper bound for the y (or latitude) dimension of the gridpoint array on C U I U E
+(   21) !         KNUBI : number of horizontal fields to doubly-periodicise.
+(   22) !         KD1   : dimension of input/output array
+(   23) !         PGPBI : input/output gridpoint array on C U I U E.
+(   24) !         LDZON : .true. if input grid on C U I U E (.false. if C U I)
+(   25) !         KDADD : 1 to test biperiodiz.
+(   26) !         LDBOYD: perform boyd periodization (inside C U I)
+(   27) !         KDBOYD: array containing dimensions of boyd domain
+(   28) !         PLBOYD: scalar parameter for boyd (variable L in paper)
+(   29) 
+(   30) !        IMPLICIT ARGUMENTS
+(   31) !        --------------------
+(   32) 
+(   33) !     METHOD.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:50      page 2
+
+(   34) !     -------
+(   35) !        SEE DOCUMENTATION
+(   36) 
+(   37) !     EXTERNALS.
+(   38) !     ----------
+(   39) !        ESPLINE  spline extension
+(   40) !        ESMOOTHE smoothing across to get isotropy.
+(   41) 
+(   42) !     REFERENCE.
+(   43) !     ----------
+(   44) !        ECMWF Research Department documentation of the IFS
+(   45) 
+(   46) !     AUTHOR.
+(   47) !     -------
+(   48) !      RYAD EL KHATIB *METEO-FRANCE*
+(   49) 
+(   50) !     MODIFICATIONS.
+(   51) !     --------------
+(   52) !      R. El Khatib : 01-08-07 Pruning options
+(   53) !      M.Hamrud     : 01-Oct-2003 CY28 Cleaning
+(   54) !      F. Taillefer : 04-10-21 Add LDZON
+(   55) !      A. Stanesic  : 28-03-08: KDADD - test of externalized biper.
+(   56) !      D. Degrauwe  : feb 2012 Boyd periodization
+(   57) !      R. El Khatib 27-Sep-2013 Boyd periodization in Fullpos-2
+(   58) !      R. El Khatib 04-Aug-2016 new interface to ewindowe + cleaning
+(   59) !     ------------------------------------------------------------------
+(   60) 
+(   61) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   62) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   63) USE ESPLINE_MOD
+(   64) USE ESMOOTHE_MOD
+(   65) USE EWINDOWE_MOD
+(   66) !     ------------------------------------------------------------------
+(   67) 
+(   68) IMPLICIT NONE
+(   69) 
+(   70) INTEGER(KIND=JPIM),INTENT(IN)    :: KNUBI 
+(   71) INTEGER(KIND=JPIM),INTENT(IN)    :: KD1 
+(   72) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLUX 
+(   73) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGUX 
+(   74) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLON 
+(   75) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGL 
+(   76) INTEGER(KIND=JPIM),INTENT(IN)    :: KDADD
+(   77) REAL(KIND=JPRB)   ,INTENT(INOUT) :: PGPBI(KD1,KNUBI) 
+(   78) LOGICAL, OPTIONAL ,INTENT(IN)    :: LDZON
+(   79) LOGICAL           ,INTENT(IN) ,OPTIONAL :: LDBOYD
+(   80) INTEGER(KIND=JPIM),INTENT(IN) ,OPTIONAL :: KDBOYD(6)
+(   81) REAL(KIND=JPRB)   ,INTENT(IN) ,OPTIONAL :: PLBOYD
+(   82) 
+(   83) !     ------------------------------------------------------------------
+(   84) 
+(   85) REAL(KIND=JPRB), ALLOCATABLE :: ZGPBI(:,:,:)
+(   86) INTEGER(KIND=JPIM) :: IND, ISTAE, JGL, JLON, JNUBI, ILONF, ILATF, IBWX, IBWY
+(   87) INTEGER(KIND=JPIM) :: IBWXH, IBWYH, IND1
+(   88) INTEGER(KIND=JPIM) :: ILONI(KDLON), ILATI(KDGL)
+(   89) INTEGER(KIND=JPIM) :: IDLUN, IDGUN, IDLUX, IDGUX
+(   90) LOGICAL         :: LLZON, LLBOYD
+(   91) REAL(KIND=JPRB) :: ZALFA
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:50      page 3
+
+(   92) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   93) 
+(   94) #include "abor1.intfb.h"
+(   95) 
+(   96) !     ------------------------------------------------------------------
+(   97) IF (LHOOK) CALL DR_HOOK('FPBIPERE',0,ZHOOK_HANDLE)
+(   98) !     ------------------------------------------------------------------
+(   99) 
+(  100) LLBOYD=.FALSE.
+(  101) IF (PRESENT(LDBOYD)) LLBOYD=LDBOYD
+(  102) 
+(  103) 
+(  104) !*         2. DOUBLY-PERIODICISE
+(  105) !             ------------------
+(  106) 
+(  107) IF (LLBOYD) THEN
+(  108)   IF (.NOT.PRESENT(KDBOYD)) CALL ABOR1('FPBIPERE: Boyd periodization requires KDBOYD argument')
+(  109)   IF (.NOT.PRESENT(PLBOYD)) CALL ABOR1('FPBIPERE: Boyd periodization requires PLBOYD argument')
+(  110)   IBWX=KDBOYD(3)
+(  111)   IBWY=KDBOYD(6)
+(  112)   CALL EWINDOWE(KDLON,KDLUX,IBWX,KDGL,KDGUX,IBWY,KNUBI,PGPBI,PLBOYD,.TRUE.,.TRUE.)
+(  113) ELSE
+(  114)   LLZON=.FALSE.
+(  115)   IF(PRESENT(LDZON)) LLZON=LDZON
+(  116)   ALLOCATE(ZGPBI(KDLON+KDADD,KNUBI,KDGL+KDADD))
+(  117)   IF(LLZON) THEN
+(  118) !   Copy C+I+E
+(  119)     IND=KDLON
+(  120)   ELSE
+(  121) !   Copy C+I
+(  122)     IND=KDLUX
+(  123)   ENDIF
+(  124) !$OMP PARALLEL DO SCHEDULE(STATIC,1) PRIVATE(JNUBI,ISTAE,JGL,JLON)
+(  125)   DO JNUBI=1,KNUBI
+(  126)     ISTAE=0
+(  127)     DO JGL=1,KDGUX
+(  128)       DO JLON=1,KDLUX
+(  129)         ZGPBI(JLON,JNUBI,JGL)=PGPBI(ISTAE+JLON,JNUBI)
+(  130)       ENDDO
+(  131)       ISTAE=ISTAE+IND
+(  132)     ENDDO
+(  133)   ENDDO 
+(  134) !$OMP END PARALLEL DO
+(  135)   ZALFA = 0.0_JPRB
+(  136)   CALL ESPLINE(1,KDLON,1,KDGL,KDLUX,KDGUX,1,KDLON+KDADD,1,KDGL+KDADD,KNUBI,ZGPBI,&
+(  137)    & ZALFA,.TRUE.,.TRUE.,KDADD)
+(  138)   CALL ESMOOTHE(1,KDLON,1,KDGL,KDLUX,KDGUX,1,KDLON+KDADD,1,KDGL+KDADD,KNUBI,ZGPBI,&
+(  139)    & .TRUE.,.TRUE.)
+(  140) !$OMP PARALLEL DO SCHEDULE(STATIC,1) PRIVATE(JNUBI,ISTAE,JGL,JLON)
+(  141)   DO JNUBI=1,KNUBI 
+(  142)     ISTAE=0
+(  143)     DO JGL=1,KDGL
+(  144)       DO JLON=1,KDLON
+(  145)         PGPBI(ISTAE+JLON,JNUBI)=ZGPBI(JLON,JNUBI,JGL)
+(  146)       ENDDO
+(  147)       ISTAE=ISTAE+KDLON
+(  148)     ENDDO
+(  149)   ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:50      page 4
+
+(  150) !$OMP END PARALLEL DO
+(  151)   DEALLOCATE(ZGPBI)
+(  152) ENDIF
+(  153) 
+(  154) 
+(  155) !     ------------------------------------------------------------------
+(  156) IF (LHOOK) CALL DR_HOOK('FPBIPERE',1,ZHOOK_HANDLE)
+(  157) END SUBROUTINE FPBIPERE
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:50      page 5
+
+(    1) # 1 "fpbipere.F90"
+(    1) SUBROUTINE FPBIPERE(KDLUX,KDGUX,KDLON,KDGL,KNUBI,KD1,PGPBI,KDADD,LDZON, &
+(    2)  & LDBOYD, KDBOYD, PLBOYD)
+(    3) # 4 "fpbipere.F90"
+(    4) !****   *FPBIPERE*  - Full-POS interface for double periodicisation
+(    5) # 6 "fpbipere.F90"
+(    6) !   purpose  :
+(    7) !   --------
+(    8) !     To bi-periodicise the post-processed fields, or just fill the extension zone
+(    9) !      with the mean value of C+I area
+(   10) # 11 "fpbipere.F90"
+(   11) !**   INTERFACE.
+(   12) !     ----------
+(   13) !         *CALL*   *FPBIPERE*(...)
+(   14) # 15 "fpbipere.F90"
+(   15) !        EXPLICIT ARGUMENTS
+(   16) !        --------------------
+(   17) !         KDLUX : upper bound for the x (or longitude) dimension of  C U I.
+(   18) !         KDGUX : upper bound for the y (or latitude) dimension of  C U I.
+(   19) !         KDLON : upper bound for the x (or longitude) dimension of the gridpoint array on C U I U E
+(   20) !         KDGL  : upper bound for the y (or latitude) dimension of the gridpoint array on C U I U E
+(   21) !         KNUBI : number of horizontal fields to doubly-periodicise.
+(   22) !         KD1   : dimension of input/output array
+(   23) !         PGPBI : input/output gridpoint array on C U I U E.
+(   24) !         LDZON : .true. if input grid on C U I U E (.false. if C U I)
+(   25) !         KDADD : 1 to test biperiodiz.
+(   26) !         LDBOYD: perform boyd periodization (inside C U I)
+(   27) !         KDBOYD: array containing dimensions of boyd domain
+(   28) !         PLBOYD: scalar parameter for boyd (variable L in paper)
+(   29) # 30 "fpbipere.F90"
+(   30) !        IMPLICIT ARGUMENTS
+(   31) !        --------------------
+(   32) # 33 "fpbipere.F90"
+(   33) !     METHOD.
+(   34) !     -------
+(   35) !        SEE DOCUMENTATION
+(   36) # 37 "fpbipere.F90"
+(   37) !     EXTERNALS.
+(   38) !     ----------
+(   39) !        ESPLINE  spline extension
+(   40) !        ESMOOTHE smoothing across to get isotropy.
+(   41) # 42 "fpbipere.F90"
+(   42) !     REFERENCE.
+(   43) !     ----------
+(   44) !        ECMWF Research Department documentation of the IFS
+(   45) # 46 "fpbipere.F90"
+(   46) !     AUTHOR.
+(   47) !     -------
+(   48) !      RYAD EL KHATIB *METEO-FRANCE*
+(   49) # 50 "fpbipere.F90"
+(   50) !     MODIFICATIONS.
+(   51) !     --------------
+(   52) !      R. El Khatib : 01-08-07 Pruning options
+(   53) !      M.Hamrud     : 01-Oct-2003 CY28 Cleaning
+(   54) !      F. Taillefer : 04-10-21 Add LDZON
+(   55) !      A. Stanesic  : 28-03-08: KDADD - test of externalized biper.
+(   56) !      D. Degrauwe  : feb 2012 Boyd periodization
+(   57) !      R. El Khatib 27-Sep-2013 Boyd periodization in Fullpos-2
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:50      page 6
+
+(   58) !      R. El Khatib 04-Aug-2016 new interface to ewindowe + cleaning
+(   59) !     ------------------------------------------------------------------
+(   60) # 61 "fpbipere.F90"
+(   61) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   62) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   63) USE ESPLINE_MOD
+(   64) USE ESMOOTHE_MOD
+(   65) USE EWINDOWE_MOD
+(   66) !     ------------------------------------------------------------------
+(   67) # 68 "fpbipere.F90"
+(   68) IMPLICIT NONE
+(   69) # 70 "fpbipere.F90"
+(   70) INTEGER(KIND=JPIM),INTENT(IN)    :: KNUBI 
+(   71) INTEGER(KIND=JPIM),INTENT(IN)    :: KD1 
+(   72) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLUX 
+(   73) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGUX 
+(   74) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLON 
+(   75) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGL 
+(   76) INTEGER(KIND=JPIM),INTENT(IN)    :: KDADD
+(   77) REAL(KIND=JPRB)   ,INTENT(INOUT) :: PGPBI(KD1,KNUBI) 
+(   78) LOGICAL, OPTIONAL ,INTENT(IN)    :: LDZON
+(   79) LOGICAL           ,INTENT(IN) ,OPTIONAL :: LDBOYD
+(   80) INTEGER(KIND=JPIM),INTENT(IN) ,OPTIONAL :: KDBOYD(6)
+(   81) REAL(KIND=JPRB)   ,INTENT(IN) ,OPTIONAL :: PLBOYD
+(   82) # 83 "fpbipere.F90"
+(   83) !     ------------------------------------------------------------------
+(   84) # 85 "fpbipere.F90"
+(   85) REAL(KIND=JPRB), ALLOCATABLE :: ZGPBI(:,:,:)
+(   86) INTEGER(KIND=JPIM) :: IND, ISTAE, JGL, JLON, JNUBI, ILONF, ILATF, IBWX, IBWY
+(   87) INTEGER(KIND=JPIM) :: IBWXH, IBWYH, IND1
+(   88) INTEGER(KIND=JPIM) :: ILONI(KDLON), ILATI(KDGL)
+(   89) INTEGER(KIND=JPIM) :: IDLUN, IDGUN, IDLUX, IDGUX
+(   90) LOGICAL         :: LLZON, LLBOYD
+(   91) REAL(KIND=JPRB) :: ZALFA
+(   92) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   93) # 94 "fpbipere.F90"
+(   94) # 1 ".D[15]/abor1.intfb.h"
+(    1) INTERFACE
+(    2) # 3 ".D[15]/abor1.intfb.h"
+(    3) SUBROUTINE ABOR1(CDTEXT)
+(    4) CHARACTER(LEN=*), INTENT(IN) :: CDTEXT
+(    5) END SUBROUTINE ABOR1
+(    6) # 7 ".D[15]/abor1.intfb.h"
+(    7) SUBROUTINE ABOR1FL(CDFILE, KLINENUM, CDTEXT)
+(    8) USE PARKIND1  ,ONLY : JPIM
+(    9) CHARACTER(LEN=*), INTENT(IN) :: CDFILE,CDTEXT
+(   10) INTEGER(KIND=JPIM), INTENT(IN) :: KLINENUM
+(   11) END SUBROUTINE ABOR1FL
+(   12) # 13 ".D[15]/abor1.intfb.h"
+(   13) SUBROUTINE ABOR1_EXCEPTION_HANDLER()
+(   14) END SUBROUTINE ABOR1_EXCEPTION_HANDLER
+(   15) # 16 ".D[15]/abor1.intfb.h"
+(   16) END INTERFACE
+(   17) # 95 "fpbipere.F90"
+(   95) # 96 "fpbipere.F90"
+(   96) !     ------------------------------------------------------------------
+(   97) IF (LHOOK) CALL DR_HOOK('FPBIPERE',0,ZHOOK_HANDLE)
+(   98) !     ------------------------------------------------------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:50      page 7
+
+(   99) # 100 "fpbipere.F90"
+(  100) LLBOYD=.FALSE.
+(  101) IF (PRESENT(LDBOYD)) LLBOYD=LDBOYD
+(  102) # 104 "fpbipere.F90"
+(  104) !*         2. DOUBLY-PERIODICISE
+(  105) !             ------------------
+(  106) # 107 "fpbipere.F90"
+(  107) IF (LLBOYD) THEN
+(  108)   IF (.NOT.PRESENT(KDBOYD)) CALL ABOR1('FPBIPERE: Boyd periodization requires KDBOYD argument')
+(  109)   IF (.NOT.PRESENT(PLBOYD)) CALL ABOR1('FPBIPERE: Boyd periodization requires PLBOYD argument')
+(  110)   IBWX=KDBOYD(3)
+(  111)   IBWY=KDBOYD(6)
+(  112)   CALL EWINDOWE(KDLON,KDLUX,IBWX,KDGL,KDGUX,IBWY,KNUBI,PGPBI,PLBOYD,.TRUE.,.TRUE.)
+(  113) ELSE
+(  114)   LLZON=.FALSE.
+(  115)   IF(PRESENT(LDZON)) LLZON=LDZON
+(  116)   ALLOCATE(ZGPBI(KDLON+KDADD,KNUBI,KDGL+KDADD))
+(  117)   IF(LLZON) THEN
+(  118) !   Copy C+I+E
+(  119)     IND=KDLON
+(  120)   ELSE
+(  121) !   Copy C+I
+(  122)     IND=KDLUX
+(  123)   ENDIF
+(  124) !$OMP PARALLEL DO SCHEDULE(STATIC,1) PRIVATE(JNUBI,ISTAE,JGL,JLON)
+(  125)   DO JNUBI=1,KNUBI
+(  126)     ISTAE=0
+(  127)     DO JGL=1,KDGUX
+(  128)       DO JLON=1,KDLUX
+(  129)         ZGPBI(JLON,JNUBI,JGL)=PGPBI(ISTAE+JLON,JNUBI)
+(  130)       ENDDO
+(  131)       ISTAE=ISTAE+IND
+(  132)     ENDDO
+(  133)   ENDDO 
+(  134) !$OMP END PARALLEL DO
+(  135)   ZALFA = 0.0_JPRB
+(  136)   CALL ESPLINE(1,KDLON,1,KDGL,KDLUX,KDGUX,1,KDLON+KDADD,1,KDGL+KDADD,KNUBI,ZGPBI,&
+(  137)    & ZALFA,.TRUE.,.TRUE.,KDADD)
+(  138)   CALL ESMOOTHE(1,KDLON,1,KDGL,KDLUX,KDGUX,1,KDLON+KDADD,1,KDGL+KDADD,KNUBI,ZGPBI,&
+(  139)    & .TRUE.,.TRUE.)
+(  140) !$OMP PARALLEL DO SCHEDULE(STATIC,1) PRIVATE(JNUBI,ISTAE,JGL,JLON)
+(  141)   DO JNUBI=1,KNUBI 
+(  142)     ISTAE=0
+(  143)     DO JGL=1,KDGL
+(  144)       DO JLON=1,KDLON
+(  145)         PGPBI(ISTAE+JLON,JNUBI)=ZGPBI(JLON,JNUBI,JGL)
+(  146)       ENDDO
+(  147)       ISTAE=ISTAE+KDLON
+(  148)     ENDDO
+(  149)   ENDDO
+(  150) !$OMP END PARALLEL DO
+(  151)   DEALLOCATE(ZGPBI)
+(  152) ENDIF
+(  153) # 155 "fpbipere.F90"
+(  155) !     ------------------------------------------------------------------
+(  156) IF (LHOOK) CALL DR_HOOK('FPBIPERE',1,ZHOOK_HANDLE)
+(  157) END SUBROUTINE FPBIPERE

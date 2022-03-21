@@ -1,0 +1,950 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:23      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: fadgra.F90
+
+(    1) ! Oct-2012 P. Marguinaud 64b LFI
+(    2) ! Jan-2011 P. Marguinaud Thread-safe FA
+(    3) SUBROUTINE FADGRA_MT64                                          &
+(    4) &                     (FA, KREP, KRANG, CDNOMA, KVALCO, KLONGA, &
+(    5) &                      PCHAMP, LDCOSP, CDPREF, KNIVAU, CDSUFF,  &
+(    6) &                      LDUNDF, PUNDF)
+(    7) USE FA_MOD, ONLY : FA_COM, JPNIIL, FAFICH, FACADR
+(    8) USE PARKIND1, ONLY : JPRB
+(    9) USE YOMHOOK , ONLY : LHOOK, DR_HOOK
+(   10) USE LFI_PRECISION
+(   11) USE GRIB_API_INTERFACE
+(   12) USE GRIB_API
+(   13) IMPLICIT NONE
+(   14) !****
+(   15) !      Sous-programme INTERNE du logiciel de Fichiers ARPEGE:
+(   16) !**
+(   17) !    Arguments : KREP   (Sortie) ==> Code-reponse du sous-programme;
+(   18) !                KRANG  (Entree) ==> Rang de l'unite logique;
+(   19) !                CDNOMA (Entree) ==> Nom d'article (prefabrique);
+(   20) !    ( Tableau ) KVALCO (Entree) ==> Donnees issues de la lecture;
+(   21) !                KLONGA (Entree) ==> Nombre de mots lus;
+(   22) !    ( Tableau ) PCHAMP (Sortie) ==> Valeurs REELLES du champ lu;
+(   23) !                LDCOSP (Entree) ==> Vrai si le champ est represente
+(   24) !                                    par des coefficients spectraux;
+(   25) !                CDPREF (Entree) ==> Prefixe au sens FA
+(   26) !                KNIVAU (Entree) ==> Niveau au sens FA
+(   27) !                CDSUFF (Entree) ==> Suffixe au sens FA
+(   28) !                LDUNDF (Entree) ==> Si ce champ a des valeurs indefinies
+(   29) !                                    alors inserer PUNDF sur les points
+(   30) !                                    manquants
+(   31) !                PUNDF  (Entree) ==> Dans le cas ou LDUNDF est vrai,
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:23      page 2
+
+(   32) !                                    valeur non definie a inserer dans le champ
+(   33) !                LDUNDF (Sortie) ==> Vrai si ce champ a des valeurs 
+(   34) !                                    indefinies
+(   35) !                PUNDF  (Sortie) ==> Dans le cas ou LDUNDF est vrai (en sortie),
+(   36) !                                    valeur non definie a inserer dans le champ
+(   37) !
+(   38) !
+(   39) TYPE(FA_COM)   :: FA
+(   40) INTEGER (KIND=JPLIKB) KREP, KRANG, KLONGA, KNIVAU
+(   41) !
+(   42) INTEGER (KIND=JPLIKB), TARGET :: KVALCO(KLONGA)
+(   43) REAL (KIND=JPDBLR) PCHAMP(*)
+(   44) !
+(   45) REAL (KIND=JPDBLR) PUNDF
+(   46) !
+(   47) LOGICAL LDCOSP, LDUNDF, LLUNDF, LLLTLN 
+(   48) !
+(   49) CHARACTER CDNOMA*(*), CDPREF*(*), CDSUFF*(*)
+(   50) !
+(   51) REAL (KIND=JPDBLR) ZUNDF
+(   52) !
+(   53) INTEGER (KIND=JPLIKB) ILCHAM
+(   54) INTEGER (KIND=JPLIKB) INIMES
+(   55) INTEGER (KIND=JPLIKB) INUMER
+(   56) !
+(   57) LOGICAL LLMLAM, LLCOSP, LLMGLO
+(   58) !
+(   59) TYPE (FAFICH), POINTER :: YLFICH
+(   60) TYPE (FACADR), POINTER :: YLCADR
+(   61) !
+(   62) CHARACTER, ALLOCATABLE :: CLGRIB (:)
+(   63) !
+(   64) REAL (KIND=JPDBLR), ALLOCATABLE :: ZCHAMP (:)
+(   65) !
+(   66) INTEGER (KIND=JPLIKB) ILGRIB, IRANGC
+(   67) INTEGER (KIND=JPLIKB) JLAT, JLON, JN, IDX, J
+(   68) INTEGER (KIND=JPLIKM) IGRIBH, IRET, IBITMAP, INDATV, IBTMP
+(   69) CHARACTER(LEN=FA%JPLSPX)   CLNSPR
+(   70) CHARACTER(LEN=FA%JPLMES)   CLMESS 
+(   71) CHARACTER(LEN=FA%JPXNOM)   CLNOMU
+(   72) !
+(   73) INTEGER (KIND=JPLIKB)    IMULTM, IMULTE
+(   74) LOGICAL                  LLFATA
+(   75) REAL (KIND=JPDBLR)       ZMULTI
+(   76) INTEGER                  IEDITION, IPARAM
+(   77) LOGICAL                  LLLOCSEC, LLGRIB1
+(   78) INTEGER (KIND=JPLIKB)    IVERSI, INGRIB, ITRONC, ISUBTR, IDECSF
+(   79) INTEGER (KIND=JPLIKB)    II
+(   80) LOGICAL                  LLBUG_SH_DEC
+(   81) 
+(   82) !**
+(   83) !     1.  -  CONTROLES ET INITIALISATIONS.
+(   84) !-----------------------------------------------------------------------
+(   85) !
+(   86) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   87) IF (LHOOK) CALL DR_HOOK('FADGRA_MT',0,ZHOOK_HANDLE)
+(   88) 
+(   89) KREP = 0
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:23      page 3
+
+(   90) 
+(   91) YLFICH => FA%FICHIER(KRANG)
+(   92) IRANGC = YLFICH%NUCADR
+(   93) YLCADR => FA%CADRE(IRANGC)
+(   94) !
+(   95) LLMLAM = YLCADR%LIMLAM
+(   96) LLLTLN = YLCADR%SINLAT(2) < 0 .AND. LLMLAM
+(   97) LLMGLO = (.NOT. LLLTLN) .AND. (.NOT. LLMLAM)
+(   98) !
+(   99) LLCOSP = LDCOSP
+(  100) !
+(  101) INUMER=YLFICH%NULOGI
+(  102) !
+(  103) !**
+(  104) !     2.  -  CONTROLE DES DONNEES DE L'ARTICLE
+(  105) !-----------------------------------------------------------------------
+(  106) !
+(  107) IF ((.NOT. FALGRA (KVALCO(1))).OR.                     &
+(  108) &   KVALCO(2).LT.0.OR.KVALCO(2).GT.1) THEN
+(  109)   KREP=-91
+(  110)   GOTO 1001
+(  111) ELSE
+(  112)   LLCOSP=KVALCO(2).EQ.1
+(  113) ENDIF
+(  114) !
+(  115) IF ((LLCOSP.AND..NOT.LDCOSP).OR.(.NOT.LLCOSP.AND.LDCOSP)) THEN
+(  116)   KREP=-92
+(  117)   GOTO 1001
+(  118) ENDIF
+(  119) !
+(  120) IF (LLCOSP) THEN
+(  121)   IF (LLMLAM) THEN
+(  122)     ILCHAM = YLCADR%NSFLAM
+(  123)   ELSE    
+(  124)     ILCHAM =(1+YLCADR%MTRONC)*(2+YLCADR%MTRONC)
+(  125)   ENDIF   
+(  126) ELSE
+(  127)   ILCHAM=YLCADR%NVAPDG
+(  128) ENDIF
+(  129) !
+(  130) !**
+(  131) !     3.  -  DECODAGE GRIB_API DES DONNEES DE L'ARTICLE
+(  132) !-----------------------------------------------------------------------
+(  133) !
+(  134) 
+(  135) ILGRIB = (KLONGA-3)*8
+(  136) 
+(  137) ALLOCATE (CLGRIB (ILGRIB))
+(  138) CLGRIB = TRANSFER (KVALCO (4:KLONGA), CLGRIB)
+(  139) CALL GRIB_NEW_FROM_MESSAGE_CHAR (IGRIBH, CLGRIB, STATUS=IRET)
+(  140) DEALLOCATE (CLGRIB)
+(  141) 
+(  142) CALL IGRIB_GET_VALUE (IGRIBH, 'editionNumber', IEDITION)
+(  143) LLGRIB1 = IEDITION == 1
+(  144) 
+(  145) IF (LLGRIB1) THEN
+(  146)   CALL IGRIB_SET_VALUE (IGRIBH, 'setLocalDefinition', 1)
+(  147)   LLLOCSEC = .FALSE.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:23      page 4
+
+(  148) ELSE
+(  149) ! Scaling factor may be encoded in the message
+(  150)   CALL IGRIB_IS_DEFINED (IGRIBH, 'grib2LocalSectionNumber', LLLOCSEC)
+(  151)   IF (.NOT. LLLOCSEC) THEN
+(  152)     CALL IGRIB_SET_VALUE (IGRIBH, 'grib2LocalSectionPresent', 1)
+(  153)     CALL IGRIB_SET_VALUE (IGRIBH, 'grib2LocalSectionNumber', 1)
+(  154)   ENDIF
+(  155) ENDIF
+(  156) 
+(  157) IF (.NOT. LLLOCSEC) THEN
+(  158) ! Restore encoding parameters if needed
+(  159)   IF (KNIVAU > 0) THEN
+(  160)     CALL STRU (CDSUFF, CLNOMU)
+(  161)   ELSE
+(  162)     CALL STRU (CDNOMA, CLNOMU)
+(  163)   ENDIF
+(  164)   CALL IGRIB_SET_VALUE (IGRIBH, 'faFieldName', TRIM (CLNOMU))
+(  165) ENDIF
+(  166) 
+(  167) IF (LLGRIB1) THEN
+(  168)   CALL IGRIB_GET_VALUE (IGRIBH, 'indicatorOfParameter', IPARAM)
+(  169) ELSE
+(  170)   CALL IGRIB_GET_VALUE (IGRIBH, 'parameterNumber', IPARAM)
+(  171) ENDIF
+(  172) 
+(  173) IF (IPARAM == 255) THEN
+(  174)   WRITE (FA%NULOUT, '(" FADGRA: Field `",A,"'' is not &
+(  175)        &declared in `faFieldName.def'' and has no encoded &
+(  176)        &FMULTM and FMULTE")') TRIM (CDNOMA)
+(  177) ENDIF
+(  178) 
+(  179) CALL IGRIB_GET_VALUE (IGRIBH, 'FMULTM', IMULTM)
+(  180) CALL IGRIB_GET_VALUE (IGRIBH, 'FMULTE', IMULTE)
+(  181) 
+(  182) ZMULTI = REAL (IMULTM, JPDBLR) * 10._JPDBLR ** IMULTE
+(  183) 
+(  184) CALL IGRIB_GET_VALUE (IGRIBH, 'bitmapPresent', IBTMP)
+(  185) IF (IBTMP == 0) THEN
+(  186) ! When there is not bitmap, numberOfDataPoints may be broken; in this case we
+(  187) ! use numberOfValues
+(  188)   CALL IGRIB_GET_VALUE (IGRIBH, 'numberOfValues', INDATV) 
+(  189) ELSE
+(  190) ! numberOfValues = number of non-missing values when a bitmap is present
+(  191)   CALL IGRIB_GET_VALUE (IGRIBH, 'numberOfDataPoints', INDATV) 
+(  192) ENDIF
+(  193) 
+(  194) ! Basic check
+(  195) 
+(  196) IF (INDATV < ILCHAM) THEN
+(  197)   KREP=-93
+(  198)   GOTO 1001
+(  199) ELSEIF (INDATV > ILCHAM) THEN
+(  200)   KREP=-94
+(  201)   GOTO 1001
+(  202) ENDIF
+(  203) 
+(  204) IF (LLLTLN) THEN
+(  205) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:23      page 5
+
+(  206)   ALLOCATE (ZCHAMP (ILCHAM))
+(  207)   CALL IGRIB_GET_VALUE (IGRIBH, 'values', ZCHAMP (1:ILCHAM))
+(  208) 
+(  209)   DO JLAT = 1, YLCADR%NLATIT
+(  210)     DO JLON = 1, YLCADR%NXLOPA
+(  211)       JN  = JLON+YLCADR%NXLOPA*(JLAT-1)
+(  212)       IDX = JLON+YLCADR%NXLOPA*(YLCADR%NLATIT-JLAT)
+(  213)       PCHAMP (JN) = ZCHAMP (IDX)
+(  214)     ENDDO
+(  215)   ENDDO
+(  216) 
+(  217)   DEALLOCATE (ZCHAMP)
+(  218) 
+(  219) ELSE
+(  220)   CALL IGRIB_GET_VALUE (IGRIBH, 'values', PCHAMP (1:ILCHAM))
+(  221) ENDIF
+(  222) 
+(  223) CALL IGRIB_GET_VALUE (IGRIBH, 'bitmapPresent', IBITMAP)
+(  224) LLUNDF = IBITMAP /= 0
+(  225) 
+(  226) IF (LLUNDF) THEN
+(  227)   CALL IGRIB_GET_VALUE (IGRIBH, 'missingValue',  ZUNDF)
+(  228) ENDIF
+(  229) 
+(  230) INGRIB = KVALCO (1)
+(  231) CALL GRIB_GET_API_VERSION (IVERSI)
+(  232) 
+(  233) LLBUG_SH_DEC = (INGRIB == 101) .AND. (IVERSI /= 11400) .AND. LDCOSP
+(  234) 
+(  235) IF (LLBUG_SH_DEC) THEN
+(  236)   CALL IGRIB_GET_VALUE (IGRIBH, 'subSetJ',            ISUBTR)
+(  237)   CALL IGRIB_GET_VALUE (IGRIBH, 'J',                  ITRONC)
+(  238)   CALL IGRIB_GET_VALUE (IGRIBH, 'decimalScaleFactor', IDECSF)
+(  239)   LLBUG_SH_DEC = (ISUBTR /= ITRONC) .AND. (IDECSF /= 0)
+(  240) ENDIF
+(  241) 
+(  242) CALL IGRIB_RELEASE (IGRIBH)
+(  243) 
+(  244) IF (LLBUG_SH_DEC) CALL FIXBUG_SH_DEC 
+(  245) 
+(  246) !
+(  247) ! Facteur d'echelle eventuel
+(  248) !
+(  249) IF (ZMULTI /= REAL (1._4, JPDBLR)) THEN
+(  250)   PCHAMP (1:ILCHAM) = PCHAMP (1:ILCHAM) / ZMULTI
+(  251)   ZUNDF             = ZUNDF             / ZMULTI
+(  252) ENDIF
+(  253) !
+(  254) IF (LDUNDF .AND. LLUNDF) THEN
+(  255)   DO J = 1, ILCHAM
+(  256)     IF (PCHAMP (J) == ZUNDF) THEN
+(  257)       PCHAMP (J) = PUNDF
+(  258)     ENDIF
+(  259)   ENDDO
+(  260)   ZUNDF = PUNDF
+(  261) ENDIF
+(  262) !
+(  263) LDUNDF = LLUNDF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:23      page 6
+
+(  264) PUNDF  = ZUNDF
+(  265) 
+(  266) !**
+(  267) !    10.  -  PHASE TERMINALE : MESSAGERIE, AVEC "ABORT" EVENTUEL,
+(  268) !            VIA LE SOUS-PROGRAMME "FAIPAR" .
+(  269) !-----------------------------------------------------------------------
+(  270) !
+(  271) 1001 CONTINUE
+(  272) LLFATA=LLMOER (KREP,KRANG)
+(  273) !
+(  274) IF (FA%LFAMOP.OR.LLFATA) THEN
+(  275)   INIMES=2
+(  276)   CLNSPR='FADGRA'
+(  277)   INUMER=YLFICH%NULOGI
+(  278) !
+(  279)   WRITE (UNIT=CLMESS,FMT='(''KREP='',I5,'', KRANG='',I4,  &
+(  280) &         '', CDNOMA='''''',A,'''''', KLONGA= '',I8,      &
+(  281) &         '', LDCOSP='',L1)')                             &
+(  282) &     KREP, KRANG, CDNOMA, KLONGA, LDCOSP
+(  283)   CALL FAIPAR_MT64                                        &
+(  284) &                 (FA, INUMER,INIMES,KREP,.FALSE.,CLMESS, &
+(  285) &                  CLNSPR,CDNOMA,.FALSE.)
+(  286) ENDIF
+(  287) !
+(  288) IF (LHOOK) CALL DR_HOOK('FADGRA_MT',1,ZHOOK_HANDLE)
+(  289) 
+(  290) CONTAINS
+(  291) 
+(  292) SUBROUTINE FIXBUG_SH_DEC 
+(  293) 
+(  294) INTEGER (KIND=JPLIKB) :: ISP, JN, JM, IM
+(  295) REAL (KIND=JPDBLR) :: ZDEC
+(  296) 
+(  297) ZDEC = 10._JPDBLR ** (-IDECSF)
+(  298) 
+(  299) DO JN = 0, ITRONC
+(  300)   DO JM = -JN, JN
+(  301)     IM = ABS (JM)
+(  302)     IF (JM < 0) THEN
+(  303)       ISP = FA%CADRE(IRANGC)%NDIM0GG (IM) + (JN - IM) * 2 + 1
+(  304)     ELSE
+(  305)       ISP = FA%CADRE(IRANGC)%NDIM0GG (IM) + (JN - IM) * 2
+(  306)     ENDIF
+(  307)     IF ((JN <= ISUBTR) .AND. (JM <= ISUBTR)) THEN
+(  308)       PCHAMP (ISP) = PCHAMP (ISP) * ZDEC
+(  309)     ENDIF
+(  310)   ENDDO
+(  311) ENDDO
+(  312) 
+(  313) END SUBROUTINE
+(  314) 
+(  315) #include "facom2.llmoer.h"
+(  316) #include "falgra.h"
+(  317) 
+(  318) SUBROUTINE STRU (CDS, CDU)
+(  319) CHARACTER (LEN=*) :: CDS, CDU
+(  320) INTEGER (KIND=JPLIKB) :: J
+(  321) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:23      page 7
+
+(  322) DO J = 1, LEN (CDU)
+(  323)   CDU (J:J) = ' '
+(  324) ENDDO
+(  325) 
+(  326) DO J = 1, LEN_TRIM (CDS)
+(  327)   IF (CDS (J:J) == ' ') THEN
+(  328)     CDU (J:J) = '_'
+(  329)   ELSE
+(  330)     CDU (J:J) = CDS (J:J)
+(  331)   ENDIF
+(  332) ENDDO
+(  333) 
+(  334) END SUBROUTINE STRU
+(  335) 
+(  336) END SUBROUTINE
+(  337) 
+(  338) !INTF KREP            OUT                                                              
+(  339) !INTF KRANG         IN                                                                 
+(  340) !INTF CDNOMA        IN                                                                 
+(  341) !INTF KVALCO        IN    DIMS=*                         KIND=JPLIKB                   
+(  342) !INTF KLONGA        IN                                                                 
+(  343) !INTF PCHAMP          OUT DIMS=*                                                       
+(  344) !INTF LDCOSP        IN                                                                 
+(  345) !INTF LDUNDF          OUT                                                              
+(  346) !INTF PUNDF           OUT                                                              
+(  347) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:23      page 8
+
+(    1) # 1 "fadgra.F90"
+(    1) ! Oct-2012 P. Marguinaud 64b LFI
+(    2) ! Jan-2011 P. Marguinaud Thread-safe FA
+(    3) SUBROUTINE FADGRA_MT64                                          &
+(    4) &                     (FA, KREP, KRANG, CDNOMA, KVALCO, KLONGA, &
+(    5) &                      PCHAMP, LDCOSP, CDPREF, KNIVAU, CDSUFF,  &
+(    6) &                      LDUNDF, PUNDF)
+(    7) USE FA_MOD, ONLY : FA_COM, JPNIIL, FAFICH, FACADR
+(    8) USE PARKIND1, ONLY : JPRB
+(    9) USE YOMHOOK , ONLY : LHOOK, DR_HOOK
+(   10) USE LFI_PRECISION
+(   11) USE GRIB_API_INTERFACE
+(   12) USE GRIB_API
+(   13) IMPLICIT NONE
+(   14) !****
+(   15) !      Sous-programme INTERNE du logiciel de Fichiers ARPEGE:
+(   16) !**
+(   17) !    Arguments : KREP   (Sortie) ==> Code-reponse du sous-programme;
+(   18) !                KRANG  (Entree) ==> Rang de l'unite logique;
+(   19) !                CDNOMA (Entree) ==> Nom d'article (prefabrique);
+(   20) !    ( Tableau ) KVALCO (Entree) ==> Donnees issues de la lecture;
+(   21) !                KLONGA (Entree) ==> Nombre de mots lus;
+(   22) !    ( Tableau ) PCHAMP (Sortie) ==> Valeurs REELLES du champ lu;
+(   23) !                LDCOSP (Entree) ==> Vrai si le champ est represente
+(   24) !                                    par des coefficients spectraux;
+(   25) !                CDPREF (Entree) ==> Prefixe au sens FA
+(   26) !                KNIVAU (Entree) ==> Niveau au sens FA
+(   27) !                CDSUFF (Entree) ==> Suffixe au sens FA
+(   28) !                LDUNDF (Entree) ==> Si ce champ a des valeurs indefinies
+(   29) !                                    alors inserer PUNDF sur les points
+(   30) !                                    manquants
+(   31) !                PUNDF  (Entree) ==> Dans le cas ou LDUNDF est vrai,
+(   32) !                                    valeur non definie a inserer dans le champ
+(   33) !                LDUNDF (Sortie) ==> Vrai si ce champ a des valeurs 
+(   34) !                                    indefinies
+(   35) !                PUNDF  (Sortie) ==> Dans le cas ou LDUNDF est vrai (en sortie),
+(   36) !                                    valeur non definie a inserer dans le champ
+(   37) !
+(   38) !
+(   39) TYPE(FA_COM)   :: FA
+(   40) INTEGER (KIND=JPLIKB) KREP, KRANG, KLONGA, KNIVAU
+(   41) !
+(   42) INTEGER (KIND=JPLIKB), TARGET :: KVALCO(KLONGA)
+(   43) REAL (KIND=JPDBLR) PCHAMP(*)
+(   44) !
+(   45) REAL (KIND=JPDBLR) PUNDF
+(   46) !
+(   47) LOGICAL LDCOSP, LDUNDF, LLUNDF, LLLTLN 
+(   48) !
+(   49) CHARACTER CDNOMA*(*), CDPREF*(*), CDSUFF*(*)
+(   50) !
+(   51) REAL (KIND=JPDBLR) ZUNDF
+(   52) !
+(   53) INTEGER (KIND=JPLIKB) ILCHAM
+(   54) INTEGER (KIND=JPLIKB) INIMES
+(   55) INTEGER (KIND=JPLIKB) INUMER
+(   56) !
+(   57) LOGICAL LLMLAM, LLCOSP, LLMGLO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:23      page 9
+
+(   58) !
+(   59) TYPE (FAFICH), POINTER :: YLFICH
+(   60) TYPE (FACADR), POINTER :: YLCADR
+(   61) !
+(   62) CHARACTER, ALLOCATABLE :: CLGRIB (:)
+(   63) !
+(   64) REAL (KIND=JPDBLR), ALLOCATABLE :: ZCHAMP (:)
+(   65) !
+(   66) INTEGER (KIND=JPLIKB) ILGRIB, IRANGC
+(   67) INTEGER (KIND=JPLIKB) JLAT, JLON, JN, IDX, J
+(   68) INTEGER (KIND=JPLIKM) IGRIBH, IRET, IBITMAP, INDATV, IBTMP
+(   69) CHARACTER(LEN=FA%JPLSPX)   CLNSPR
+(   70) CHARACTER(LEN=FA%JPLMES)   CLMESS 
+(   71) CHARACTER(LEN=FA%JPXNOM)   CLNOMU
+(   72) !
+(   73) INTEGER (KIND=JPLIKB)    IMULTM, IMULTE
+(   74) LOGICAL                  LLFATA
+(   75) REAL (KIND=JPDBLR)       ZMULTI
+(   76) INTEGER                  IEDITION, IPARAM
+(   77) LOGICAL                  LLLOCSEC, LLGRIB1
+(   78) INTEGER (KIND=JPLIKB)    IVERSI, INGRIB, ITRONC, ISUBTR, IDECSF
+(   79) INTEGER (KIND=JPLIKB)    II
+(   80) LOGICAL                  LLBUG_SH_DEC
+(   81) # 82 "fadgra.F90"
+(   82) !**
+(   83) !     1.  -  CONTROLES ET INITIALISATIONS.
+(   84) !-----------------------------------------------------------------------
+(   85) !
+(   86) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   87) IF (LHOOK) CALL DR_HOOK('FADGRA_MT',0,ZHOOK_HANDLE)
+(   88) # 89 "fadgra.F90"
+(   89) KREP = 0
+(   90) # 91 "fadgra.F90"
+(   91) YLFICH => FA%FICHIER(KRANG)
+(   92) IRANGC = YLFICH%NUCADR
+(   93) YLCADR => FA%CADRE(IRANGC)
+(   94) !
+(   95) LLMLAM = YLCADR%LIMLAM
+(   96) LLLTLN = YLCADR%SINLAT(2) < 0 .AND. LLMLAM
+(   97) LLMGLO = (.NOT. LLLTLN) .AND. (.NOT. LLMLAM)
+(   98) !
+(   99) LLCOSP = LDCOSP
+(  100) !
+(  101) INUMER=YLFICH%NULOGI
+(  102) !
+(  103) !**
+(  104) !     2.  -  CONTROLE DES DONNEES DE L'ARTICLE
+(  105) !-----------------------------------------------------------------------
+(  106) !
+(  107) IF ((.NOT. FALGRA (KVALCO(1))).OR.                     &
+(  108) &   KVALCO(2).LT.0.OR.KVALCO(2).GT.1) THEN
+(  109)   KREP=-91
+(  110)   GOTO 1001
+(  111) ELSE
+(  112)   LLCOSP=KVALCO(2).EQ.1
+(  113) ENDIF
+(  114) !
+(  115) IF ((LLCOSP.AND..NOT.LDCOSP).OR.(.NOT.LLCOSP.AND.LDCOSP)) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:23      page 10
+
+(  116)   KREP=-92
+(  117)   GOTO 1001
+(  118) ENDIF
+(  119) !
+(  120) IF (LLCOSP) THEN
+(  121)   IF (LLMLAM) THEN
+(  122)     ILCHAM = YLCADR%NSFLAM
+(  123)   ELSE    
+(  124)     ILCHAM =(1+YLCADR%MTRONC)*(2+YLCADR%MTRONC)
+(  125)   ENDIF   
+(  126) ELSE
+(  127)   ILCHAM=YLCADR%NVAPDG
+(  128) ENDIF
+(  129) !
+(  130) !**
+(  131) !     3.  -  DECODAGE GRIB_API DES DONNEES DE L'ARTICLE
+(  132) !-----------------------------------------------------------------------
+(  133) !
+(  134) # 135 "fadgra.F90"
+(  135) ILGRIB = (KLONGA-3)*8
+(  136) # 137 "fadgra.F90"
+(  137) ALLOCATE (CLGRIB (ILGRIB))
+(  138) CLGRIB = TRANSFER (KVALCO (4:KLONGA), CLGRIB)
+(  139) CALL GRIB_NEW_FROM_MESSAGE_CHAR (IGRIBH, CLGRIB, STATUS=IRET)
+(  140) DEALLOCATE (CLGRIB)
+(  141) # 142 "fadgra.F90"
+(  142) CALL IGRIB_GET_VALUE (IGRIBH, 'editionNumber', IEDITION)
+(  143) LLGRIB1 = IEDITION == 1
+(  144) # 145 "fadgra.F90"
+(  145) IF (LLGRIB1) THEN
+(  146)   CALL IGRIB_SET_VALUE (IGRIBH, 'setLocalDefinition', 1)
+(  147)   LLLOCSEC = .FALSE.
+(  148) ELSE
+(  149) ! Scaling factor may be encoded in the message
+(  150)   CALL IGRIB_IS_DEFINED (IGRIBH, 'grib2LocalSectionNumber', LLLOCSEC)
+(  151)   IF (.NOT. LLLOCSEC) THEN
+(  152)     CALL IGRIB_SET_VALUE (IGRIBH, 'grib2LocalSectionPresent', 1)
+(  153)     CALL IGRIB_SET_VALUE (IGRIBH, 'grib2LocalSectionNumber', 1)
+(  154)   ENDIF
+(  155) ENDIF
+(  156) # 157 "fadgra.F90"
+(  157) IF (.NOT. LLLOCSEC) THEN
+(  158) ! Restore encoding parameters if needed
+(  159)   IF (KNIVAU > 0) THEN
+(  160)     CALL STRU (CDSUFF, CLNOMU)
+(  161)   ELSE
+(  162)     CALL STRU (CDNOMA, CLNOMU)
+(  163)   ENDIF
+(  164)   CALL IGRIB_SET_VALUE (IGRIBH, 'faFieldName', TRIM (CLNOMU))
+(  165) ENDIF
+(  166) # 167 "fadgra.F90"
+(  167) IF (LLGRIB1) THEN
+(  168)   CALL IGRIB_GET_VALUE (IGRIBH, 'indicatorOfParameter', IPARAM)
+(  169) ELSE
+(  170)   CALL IGRIB_GET_VALUE (IGRIBH, 'parameterNumber', IPARAM)
+(  171) ENDIF
+(  172) # 173 "fadgra.F90"
+(  173) IF (IPARAM == 255) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:23      page 11
+
+(  174)   WRITE (FA%NULOUT, '(" FADGRA: Field `",A,"'' is not &
+(  175)        &declared in `faFieldName.def'' and has no encoded &
+(  176)        &FMULTM and FMULTE")') TRIM (CDNOMA)
+(  177) ENDIF
+(  178) # 179 "fadgra.F90"
+(  179) CALL IGRIB_GET_VALUE (IGRIBH, 'FMULTM', IMULTM)
+(  180) CALL IGRIB_GET_VALUE (IGRIBH, 'FMULTE', IMULTE)
+(  181) # 182 "fadgra.F90"
+(  182) ZMULTI = REAL (IMULTM, JPDBLR) * 10._JPDBLR ** IMULTE
+(  183) # 184 "fadgra.F90"
+(  184) CALL IGRIB_GET_VALUE (IGRIBH, 'bitmapPresent', IBTMP)
+(  185) IF (IBTMP == 0) THEN
+(  186) ! When there is not bitmap, numberOfDataPoints may be broken; in this case we
+(  187) ! use numberOfValues
+(  188)   CALL IGRIB_GET_VALUE (IGRIBH, 'numberOfValues', INDATV) 
+(  189) ELSE
+(  190) ! numberOfValues = number of non-missing values when a bitmap is present
+(  191)   CALL IGRIB_GET_VALUE (IGRIBH, 'numberOfDataPoints', INDATV) 
+(  192) ENDIF
+(  193) # 194 "fadgra.F90"
+(  194) ! Basic check
+(  195) # 196 "fadgra.F90"
+(  196) IF (INDATV < ILCHAM) THEN
+(  197)   KREP=-93
+(  198)   GOTO 1001
+(  199) ELSEIF (INDATV > ILCHAM) THEN
+(  200)   KREP=-94
+(  201)   GOTO 1001
+(  202) ENDIF
+(  203) # 204 "fadgra.F90"
+(  204) IF (LLLTLN) THEN
+(  205) # 206 "fadgra.F90"
+(  206)   ALLOCATE (ZCHAMP (ILCHAM))
+(  207)   CALL IGRIB_GET_VALUE (IGRIBH, 'values', ZCHAMP (1:ILCHAM))
+(  208) # 209 "fadgra.F90"
+(  209)   DO JLAT = 1, YLCADR%NLATIT
+(  210)     DO JLON = 1, YLCADR%NXLOPA
+(  211)       JN  = JLON+YLCADR%NXLOPA*(JLAT-1)
+(  212)       IDX = JLON+YLCADR%NXLOPA*(YLCADR%NLATIT-JLAT)
+(  213)       PCHAMP (JN) = ZCHAMP (IDX)
+(  214)     ENDDO
+(  215)   ENDDO
+(  216) # 217 "fadgra.F90"
+(  217)   DEALLOCATE (ZCHAMP)
+(  218) # 219 "fadgra.F90"
+(  219) ELSE
+(  220)   CALL IGRIB_GET_VALUE (IGRIBH, 'values', PCHAMP (1:ILCHAM))
+(  221) ENDIF
+(  222) # 223 "fadgra.F90"
+(  223) CALL IGRIB_GET_VALUE (IGRIBH, 'bitmapPresent', IBITMAP)
+(  224) LLUNDF = IBITMAP /= 0
+(  225) # 226 "fadgra.F90"
+(  226) IF (LLUNDF) THEN
+(  227)   CALL IGRIB_GET_VALUE (IGRIBH, 'missingValue',  ZUNDF)
+(  228) ENDIF
+(  229) # 230 "fadgra.F90"
+(  230) INGRIB = KVALCO (1)
+(  231) CALL GRIB_GET_API_VERSION (IVERSI)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:23      page 12
+
+(  232) # 233 "fadgra.F90"
+(  233) LLBUG_SH_DEC = (INGRIB == 101) .AND. (IVERSI /= 11400) .AND. LDCOSP
+(  234) # 235 "fadgra.F90"
+(  235) IF (LLBUG_SH_DEC) THEN
+(  236)   CALL IGRIB_GET_VALUE (IGRIBH, 'subSetJ',            ISUBTR)
+(  237)   CALL IGRIB_GET_VALUE (IGRIBH, 'J',                  ITRONC)
+(  238)   CALL IGRIB_GET_VALUE (IGRIBH, 'decimalScaleFactor', IDECSF)
+(  239)   LLBUG_SH_DEC = (ISUBTR /= ITRONC) .AND. (IDECSF /= 0)
+(  240) ENDIF
+(  241) # 242 "fadgra.F90"
+(  242) CALL IGRIB_RELEASE (IGRIBH)
+(  243) # 244 "fadgra.F90"
+(  244) IF (LLBUG_SH_DEC) CALL FIXBUG_SH_DEC 
+(  245) # 246 "fadgra.F90"
+(  246) !
+(  247) ! Facteur d'echelle eventuel
+(  248) !
+(  249) IF (ZMULTI /= REAL (1._4, JPDBLR)) THEN
+(  250)   PCHAMP (1:ILCHAM) = PCHAMP (1:ILCHAM) / ZMULTI
+(  251)   ZUNDF             = ZUNDF             / ZMULTI
+(  252) ENDIF
+(  253) !
+(  254) IF (LDUNDF .AND. LLUNDF) THEN
+(  255)   DO J = 1, ILCHAM
+(  256)     IF (PCHAMP (J) == ZUNDF) THEN
+(  257)       PCHAMP (J) = PUNDF
+(  258)     ENDIF
+(  259)   ENDDO
+(  260)   ZUNDF = PUNDF
+(  261) ENDIF
+(  262) !
+(  263) LDUNDF = LLUNDF
+(  264) PUNDF  = ZUNDF
+(  265) # 266 "fadgra.F90"
+(  266) !**
+(  267) !    10.  -  PHASE TERMINALE : MESSAGERIE, AVEC "ABORT" EVENTUEL,
+(  268) !            VIA LE SOUS-PROGRAMME "FAIPAR" .
+(  269) !-----------------------------------------------------------------------
+(  270) !
+(  271) 1001 CONTINUE
+(  272) LLFATA=LLMOER (KREP,KRANG)
+(  273) !
+(  274) IF (FA%LFAMOP.OR.LLFATA) THEN
+(  275)   INIMES=2
+(  276)   CLNSPR='FADGRA'
+(  277)   INUMER=YLFICH%NULOGI
+(  278) !
+(  279)   WRITE (UNIT=CLMESS,FMT='(''KREP='',I5,'', KRANG='',I4,  &
+(  280) &         '', CDNOMA='''''',A,'''''', KLONGA= '',I8,      &
+(  281) &         '', LDCOSP='',L1)')                             &
+(  282) &     KREP, KRANG, CDNOMA, KLONGA, LDCOSP
+(  283)   CALL FAIPAR_MT64                                        &
+(  284) &                 (FA, INUMER,INIMES,KREP,.FALSE.,CLMESS, &
+(  285) &                  CLNSPR,CDNOMA,.FALSE.)
+(  286) ENDIF
+(  287) !
+(  288) IF (LHOOK) CALL DR_HOOK('FADGRA_MT',1,ZHOOK_HANDLE)
+(  289) # 290 "fadgra.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:23      page 13
+
+(  290) CONTAINS
+(  291) # 292 "fadgra.F90"
+(  292) SUBROUTINE FIXBUG_SH_DEC 
+(  293) # 294 "fadgra.F90"
+(  294) INTEGER (KIND=JPLIKB) :: ISP, JN, JM, IM
+(  295) REAL (KIND=JPDBLR) :: ZDEC
+(  296) # 297 "fadgra.F90"
+(  297) ZDEC = 10._JPDBLR ** (-IDECSF)
+(  298) # 299 "fadgra.F90"
+(  299) DO JN = 0, ITRONC
+(  300)   DO JM = -JN, JN
+(  301)     IM = ABS (JM)
+(  302)     IF (JM < 0) THEN
+(  303)       ISP = FA%CADRE(IRANGC)%NDIM0GG (IM) + (JN - IM) * 2 + 1
+(  304)     ELSE
+(  305)       ISP = FA%CADRE(IRANGC)%NDIM0GG (IM) + (JN - IM) * 2
+(  306)     ENDIF
+(  307)     IF ((JN <= ISUBTR) .AND. (JM <= ISUBTR)) THEN
+(  308)       PCHAMP (ISP) = PCHAMP (ISP) * ZDEC
+(  309)     ENDIF
+(  310)   ENDDO
+(  311) ENDDO
+(  312) # 313 "fadgra.F90"
+(  313) END SUBROUTINE
+(  314) # 315 "fadgra.F90"
+(  315) # 1 ".D[17]/facom2.llmoer.h"
+(    1) !
+(    2) !       Fonction servant a rendre fatale ou non une erreur detectee,
+(    3) !       a l'aide du code reponse courant, du niveau de filtrage global,
+(    4) !       et de l'option d'erreur fatale propre au fichier.
+(    5) !       s'il n'y a pas de fichier (I5678=0, d'ou dimensionnement de
+(    6) !          *LERRFA*), le niveau de filtrage joue le role principal.
+(    7) !
+(    8) LOGICAL FUNCTION LLMOER (I1234,I5678)
+(    9) INTEGER (KIND=JPLIKB) :: I1234,I5678
+(   10) LLMOER=I1234.EQ.-66_JPLIKB .OR. (I1234.NE.0_JPLIKB .AND.(FA%NRFAGA.EQ.0_JPLIKB &
+(   11)      & .OR. (FA%NRFAGA.EQ.1_JPLIKB .AND.FA%FICHIER(I5678)%LERRFA)))
+(   12) END FUNCTION
+(   13) # 316 "fadgra.F90"
+(  316) # 316 "fadgra.F90"
+(  316) # 1 ".D[17]/falgra.h"
+(    1) LOGICAL FUNCTION FALGRA (KNGRIB)
+(    2) !****
+(    3) !    Cette fonction renvoie une valeur vraie si la methode d'encodage passee en argument fait appel a grib_api
+(    4) !**
+(    5) !    Arguments : KNGRIB (Entree) ==> Methode d'encodage
+(    6) !
+(    7) !
+(    8) INTEGER (KIND=JPLIKB) KNGRIB
+(    9) INTEGER (KIND=JPLIKB) INGRIB_SP, INGRIB_GP
+(   10) LOGICAL LLFALGRA_SP, LLFALGRA_GP
+(   11) # 12 ".D[17]/falgra.h"
+(   12) FALGRA = .FALSE.
+(   13) # 14 ".D[17]/falgra.h"
+(   14) IF (100 <= KNGRIB .AND. KNGRIB <= 200) THEN
+(   15) # 16 ".D[17]/falgra.h"
+(   16)   INGRIB_SP = FALGRA_SP (KNGRIB)
+(   17)   INGRIB_GP = FALGRA_GP (KNGRIB)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:23      page 14
+
+(   18)   
+(   19)   LLFALGRA_SP = &
+(   20)    & (INGRIB_SP - 100 ==  1) .OR. &      ! GRIB2 complex packing (bug)
+(   21)    & (INGRIB_SP - 100 ==  2) .OR. &      ! GRIB0 
+(   22)    & (INGRIB_SP - 100 ==  3)             ! GRIB2 complex packing
+(   23)   
+(   24)   LLFALGRA_GP = &
+(   25)    & ((INGRIB_GP-100) / 20 ==  1) .OR. & ! GRIB2 simple packing
+(   26)    & ((INGRIB_GP-100) / 20 ==  2) .OR. & ! GRIB2 second order packing
+(   27)    & ((INGRIB_GP-100) / 20 ==  3) .OR. & ! GRIB1 simple packing
+(   28)    & ((INGRIB_GP-100) / 20 ==  4) .OR. & ! GRIB1 second order packing
+(   29)    & ((INGRIB_GP-100) / 20 ==  5)        ! GRIB2 complex packing
+(   30)    
+(   31) # 32 ".D[17]/falgra.h"
+(   32)   IF (LLFALGRA_GP .AND. LLFALGRA_SP) THEN
+(   33)     FALGRA = .TRUE.
+(   34)   ELSEIF (LLFALGRA_GP) THEN
+(   35)     FALGRA = INGRIB_SP == 100
+(   36)   ELSEIF (LLFALGRA_SP) THEN
+(   37)     FALGRA = INGRIB_GP == 100
+(   38)   ENDIF
+(   39) # 40 ".D[17]/falgra.h"
+(   40) ENDIF
+(   41) # 42 ".D[17]/falgra.h"
+(   42) END FUNCTION FALGRA
+(   43) # 44 ".D[17]/falgra.h"
+(   44) INTEGER (KIND=JPLIKB) FUNCTION FALGRA_SP (KNGRIB)
+(   45) INTEGER (KIND=JPLIKB) KNGRIB
+(   46) FALGRA_SP = 100+MODULO ((KNGRIB-100),20)
+(   47) END FUNCTION FALGRA_SP
+(   48) # 49 ".D[17]/falgra.h"
+(   49) INTEGER (KIND=JPLIKB) FUNCTION FALGRA_GP (KNGRIB)
+(   50) INTEGER (KIND=JPLIKB) KNGRIB
+(   51) FALGRA_GP = 100+20*((KNGRIB-100)/20)
+(   52) END FUNCTION FALGRA_GP
+(   53) # 54 ".D[17]/falgra.h"
+(   54) INTEGER (KIND=JPLIKB) FUNCTION FALGRA_ED (KNGRIB)
+(   55) INTEGER (KIND=JPLIKB) KNGRIB
+(   56) # 57 ".D[17]/falgra.h"
+(   57) SELECT CASE (KNGRIB)
+(   58)   CASE (160, 180)
+(   59)     FALGRA_ED = 1
+(   60)   CASE DEFAULT
+(   61)     FALGRA_ED = 2
+(   62) END SELECT 
+(   63) # 64 ".D[17]/falgra.h"
+(   64) END FUNCTION FALGRA_ED
+(   65) # 317 "fadgra.F90"
+(  317) # 318 "fadgra.F90"
+(  318) SUBROUTINE STRU (CDS, CDU)
+(  319) CHARACTER (LEN=*) :: CDS, CDU
+(  320) INTEGER (KIND=JPLIKB) :: J
+(  321) # 322 "fadgra.F90"
+(  322) DO J = 1, LEN (CDU)
+(  323)   CDU (J:J) = ' '
+(  324) ENDDO
+(  325) # 326 "fadgra.F90"
+(  326) DO J = 1, LEN_TRIM (CDS)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:23      page 15
+
+(  327)   IF (CDS (J:J) == ' ') THEN
+(  328)     CDU (J:J) = '_'
+(  329)   ELSE
+(  330)     CDU (J:J) = CDS (J:J)
+(  331)   ENDIF
+(  332) ENDDO
+(  333) # 334 "fadgra.F90"
+(  334) END SUBROUTINE STRU
+(  335) # 336 "fadgra.F90"
+(  336) END SUBROUTINE
+(  337) # 338 "fadgra.F90"
+(  338) !INTF KREP            OUT                                                              
+(  339) !INTF KRANG         IN                                                                 
+(  340) !INTF CDNOMA        IN                                                                 
+(  341) !INTF KVALCO        IN    DIMS=*                         KIND=JPLIKB                   
+(  342) !INTF KLONGA        IN                                                                 
+(  343) !INTF PCHAMP          OUT DIMS=*                                                       
+(  344) !INTF LDCOSP        IN                                                                 
+(  345) !INTF LDUNDF          OUT                                                              
+(  346) !INTF PUNDF           OUT                                                              

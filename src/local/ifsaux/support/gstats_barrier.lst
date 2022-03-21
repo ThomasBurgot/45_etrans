@@ -1,0 +1,91 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:38      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: gstats_barrier.F90
+
+(    1) SUBROUTINE GSTATS_BARRIER(KNUM)
+(    2) 
+(    3) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    4) 
+(    5) USE YOMGSTATS, ONLY : LBARRIER_STATS
+(    6) USE MPL_MODULE  , ONLY : MPL_BARRIER
+(    7) 
+(    8) IMPLICIT NONE
+(    9) 
+(   10) INTEGER(KIND=JPIM) :: KNUM
+(   11) 
+(   12) IF(LBARRIER_STATS)THEN
+(   13)   CALL GSTATS(KNUM,0)
+(   14)   CALL MPL_BARRIER()
+(   15)   CALL GSTATS(KNUM,1)
+(   16) ENDIF
+(   17) 
+(   18) END SUBROUTINE GSTATS_BARRIER
+(   19) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:38      page 2
+
+(    1) # 1 "gstats_barrier.F90"
+(    1) SUBROUTINE GSTATS_BARRIER(KNUM)
+(    2) # 3 "gstats_barrier.F90"
+(    3) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    4) # 5 "gstats_barrier.F90"
+(    5) USE YOMGSTATS, ONLY : LBARRIER_STATS
+(    6) USE MPL_MODULE  , ONLY : MPL_BARRIER
+(    7) # 8 "gstats_barrier.F90"
+(    8) IMPLICIT NONE
+(    9) # 10 "gstats_barrier.F90"
+(   10) INTEGER(KIND=JPIM) :: KNUM
+(   11) # 12 "gstats_barrier.F90"
+(   12) IF(LBARRIER_STATS)THEN
+(   13)   CALL GSTATS(KNUM,0)
+(   14)   CALL MPL_BARRIER()
+(   15)   CALL GSTATS(KNUM,1)
+(   16) ENDIF
+(   17) # 18 "gstats_barrier.F90"
+(   18) END SUBROUTINE GSTATS_BARRIER

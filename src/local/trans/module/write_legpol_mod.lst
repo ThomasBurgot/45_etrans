@@ -1,0 +1,580 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:37      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: write_legpol_mod.F90
+
+(    1) MODULE WRITE_LEGPOL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE WRITE_LEGPOL
+(    4) USE PARKIND1  ,ONLY : JPIM, JPRBT
+(    5) USE TPM_GEN
+(    6) USE TPM_DISTR
+(    7) USE TPM_DIM
+(    8) USE TPM_GEOMETRY
+(    9) USE TPM_FLT
+(   10) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   11) USE TPM_CTL
+(   12) USE BUTTERFLY_ALG_MOD
+(   13) USE BYTES_IO_MOD
+(   14) 
+(   15) !**** *WRITE_LEGPOL * - write out Leg.Pol. and assocciated arrays to file
+(   16) 
+(   17) !     Purpose.
+(   18) !     --------
+(   19) !           
+(   20) 
+(   21) !**   Interface.
+(   22) !     ----------
+(   23) !        *CALL* *WRITE_LEGPOL*
+(   24) 
+(   25) !        Explicit arguments : None
+(   26) !        --------------------
+(   27) 
+(   28) !        Implicit arguments :
+(   29) !        --------------------
+(   30) !            
+(   31) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:37      page 2
+
+(   32) !     Method.
+(   33) !     -------
+(   34) !        See documentation
+(   35) 
+(   36) !     Externals.
+(   37) !     ----------
+(   38) 
+(   39) !     Reference.
+(   40) !     ----------
+(   41) !        ECMWF Research Department documentation of the IFS
+(   42) !     
+(   43) 
+(   44) !     -------
+(   45) !        Mats Hamrud and Willem Deconinck  *ECMWF*
+(   46) 
+(   47) !     Modifications.
+(   48) !     --------------
+(   49) !        Original : July 2015
+(   50) 
+(   51) IMPLICIT NONE
+(   52) 
+(   53) INTEGER(KIND=JPIM),PARAMETER :: JPIBUFL=4
+(   54) INTEGER(KIND=JPIM) :: IRBYTES,IIBYTES,JMLOC,IPRTRV,IMLOC,IM,ILA,ILS,IFILE,JSETV
+(   55) INTEGER(KIND=JPIM) :: IDGLU,ISIZE,IBYTES,IRET,IBUF(JPIBUFL),IDUM,JGL,II
+(   56) INTEGER(KIND=JPIM) :: IDGLU2
+(   57) TYPE(CLONE) :: YLCLONE
+(   58) REAL(KIND=JPRBT) ,ALLOCATABLE :: ZBUF(:)
+(   59) INTEGER(KIND=JPIM) ,ALLOCATABLE :: IBUFA(:)
+(   60) !     ------------------------------------------------------------------
+(   61) 
+(   62) IRBYTES = 8
+(   63) IIBYTES = 4
+(   64) IDUM = 3141
+(   65) 
+(   66) IF(C%CIO_TYPE == 'file') THEN
+(   67)   CALL BYTES_IO_OPEN(IFILE,C%CLEGPOLFNAME,'W',IRET)
+(   68)   IF ( IRET < JPBYTES_IO_SUCCESS ) CALL ABORT_TRANS('WRITE_LEGPOL: BYTES_IO_OPEN FAILED')
+(   69) ENDIF
+(   70) IF( S%LUSEFLT ) THEN
+(   71)   IBUF(1:2) = TRANSFER('LEGPOLBF',IBUF(1:2))
+(   72) ELSE
+(   73)   IBUF(1:2) = TRANSFER('LEGPOL  ',IBUF(1:2))
+(   74) ENDIF
+(   75) IBUF(3) = R%NSMAX
+(   76) IBUF(4) = R%NDGNH
+(   77) CALL BYTES_IO_WRITE(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(   78) IF ( IRET < JPBYTES_IO_SUCCESS ) CALL ABORT_TRANS('WRITE_LEGPOL: BYTES_IO_WRITE FAILED')
+(   79) ALLOCATE(IBUFA(2*R%NDGNH))
+(   80) II = 0
+(   81) DO JGL=1,R%NDGNH
+(   82)   II = II+1
+(   83)   IBUFA(II) = G%NLOEN(JGL)
+(   84)   II=II+1
+(   85)   IBUFA(II) = G%NMEN(JGL)
+(   86) ENDDO
+(   87) CALL BYTES_IO_WRITE(IFILE,IBUFA,2*R%NDGNH*IIBYTES,IRET)
+(   88) IF ( IRET < JPBYTES_IO_SUCCESS ) CALL ABORT_TRANS('WRITE_LEGPOL: BYTES_IO_WRITE FAILED')
+(   89) DEALLOCATE(IBUFA)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:37      page 3
+
+(   90) DO JMLOC=1,D%NUMP,NPRTRV  ! +++++++++++++++++++++ JMLOC LOOP ++++++++++
+(   91)   IPRTRV=MIN(NPRTRV,D%NUMP-JMLOC+1)
+(   92)   DO JSETV=1,IPRTRV
+(   93)     IMLOC=JMLOC+JSETV-1
+(   94)     IM = D%MYMS(IMLOC)
+(   95)     ILA = (R%NSMAX-IM+2)/2
+(   96)     ILS = (R%NSMAX-IM+3)/2
+(   97)     IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(   98) ! Anti-symmetric
+(   99)     IF( S%LUSEFLT .AND. ILA > S%ITHRESHOLD) THEN
+(  100)       CALL PACK_BUTTERFLY_STRUCT(S%FA(IMLOC)%YBUT_STRUCT_A,YLCLONE)
+(  101)       ISIZE = SIZE(YLCLONE%COMMSBUF)
+(  102)       IBUF(:) = (/IDGLU,ILA,ISIZE,IDUM/)
+(  103)       CALL BYTES_IO_WRITE(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  104)       IF(IRET < JPBYTES_IO_SUCCESS ) THEN
+(  105)         WRITE(0,*) 'BYTES_IO_WRITE ',IFILE,' ',IIBYTES,' FAILED',IRET
+(  106)         CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  107)       ENDIF
+(  108)       IBYTES = ISIZE*IRBYTES
+(  109)       CALL BYTES_IO_WRITE(IFILE,YLCLONE%COMMSBUF,IBYTES,IRET)
+(  110)       IF(IRET < JPBYTES_IO_SUCCESS ) THEN
+(  111)         WRITE(0,*) 'BYTES_IO_WRITE ',IFILE,' ',IBYTES,' FAILED',IRET
+(  112)         CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  113)       ENDIF
+(  114)       DEALLOCATE(YLCLONE%COMMSBUF)
+(  115)     ELSE
+(  116)       ISIZE = IDGLU*ILA
+(  117)       IBYTES = ISIZE*IRBYTES
+(  118)       ALLOCATE(ZBUF(ISIZE))
+(  119)       ZBUF(:) = RESHAPE(S%FA(IMLOC)%RPNMA,(/ISIZE/))
+(  120)       CALL BYTES_IO_WRITE(IFILE,ZBUF,IBYTES,IRET)
+(  121)       IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  122)         WRITE(0,*) 'BYTES_IO_WRITE ',IFILE,' ',IBYTES,' FAILED',IRET
+(  123)         CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  124)       ENDIF
+(  125)       DEALLOCATE(ZBUF)
+(  126)     ENDIF
+(  127) ! Symmetric
+(  128)     IF( S%LUSEFLT .AND. ILS > S%ITHRESHOLD) THEN
+(  129)       CALL PACK_BUTTERFLY_STRUCT(S%FA(IMLOC)%YBUT_STRUCT_S,YLCLONE)
+(  130)       ISIZE = SIZE(YLCLONE%COMMSBUF)
+(  131)       IBUF(:) = (/IDGLU,ILS,ISIZE,IDUM/)
+(  132)       CALL BYTES_IO_WRITE(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  133)       IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  134)         WRITE(0,*) 'BYTES_IO_WRITE ',IFILE,' ',IIBYTES,' FAILED',IRET
+(  135)         CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  136)       ENDIF
+(  137)       IBYTES = ISIZE*IRBYTES
+(  138)       CALL BYTES_IO_WRITE(IFILE,YLCLONE%COMMSBUF,IBYTES,IRET)
+(  139)       IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  140)         WRITE(0,*) 'BYTES_IO_WRITE ',IFILE,' ',IBYTES,' FAILED',IRET
+(  141)         CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  142)       ENDIF
+(  143)       DEALLOCATE(YLCLONE%COMMSBUF)
+(  144)     ELSE
+(  145)       ISIZE = IDGLU*ILS
+(  146)       IBYTES = ISIZE*IRBYTES
+(  147)       ALLOCATE(ZBUF(ISIZE))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:37      page 4
+
+(  148)       ZBUF(:) = RESHAPE(S%FA(IMLOC)%RPNMS,(/ISIZE/))
+(  149)       CALL BYTES_IO_WRITE(IFILE,ZBUF,IBYTES,IRET)
+(  150)       IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  151)         WRITE(0,*) 'BYTES_IO_WRITE ',IFILE,' ',IBYTES,' FAILED',IRET
+(  152)         CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  153)       ENDIF
+(  154)       DEALLOCATE(ZBUF)
+(  155)     ENDIF
+(  156)   ENDDO
+(  157) ENDDO
+(  158) 
+(  159) ! Lat-lon grid
+(  160) 
+(  161) IF(S%LDLL) THEN
+(  162)   IBUF(:) = TRANSFER('LATLON---BEG-BEG',IBUF(1:4))
+(  163)   CALL BYTES_IO_WRITE(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  164)   IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  165)     CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  166)   ENDIF
+(  167)    DO JMLOC=1,D%NUMP
+(  168)     IM = D%MYMS(JMLOC)
+(  169)     ILA = (R%NSMAX-IM+2)/2
+(  170)     ILS = (R%NSMAX-IM+3)/2
+(  171)     IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  172)     IDGLU2 = S%NDGNHD
+(  173)     IBUF(:) = (/IM,IDGLU,IDGLU2,IDUM/)
+(  174)     CALL BYTES_IO_WRITE(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  175)     IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  176)       WRITE(0,*) 'BYTES_IO_WRITE ',IFILE,' ',IIBYTES,' FAILED',IRET
+(  177)       CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  178)     ENDIF
+(  179) 
+(  180)     ISIZE = 2*IDGLU*2
+(  181)     IBYTES = ISIZE*IRBYTES
+(  182)     ALLOCATE(ZBUF(ISIZE))
+(  183)     ZBUF(:) = RESHAPE(S%FA(JMLOC)%RPNMWI,(/ISIZE/))    
+(  184)     CALL BYTES_IO_WRITE(IFILE,ZBUF,IBYTES,IRET)
+(  185)     IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  186)       WRITE(0,*) 'BYTES_IO_WRITE ',IFILE,' ',IBYTES,' FAILED',IRET
+(  187)       CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  188)     ENDIF
+(  189)     DEALLOCATE(ZBUF)
+(  190) 
+(  191)     ISIZE = 2*IDGLU2*2
+(  192)     IBYTES = ISIZE*IRBYTES
+(  193)     ALLOCATE(ZBUF(ISIZE))
+(  194)     ZBUF(:) = RESHAPE(S%FA(JMLOC)%RPNMWO,(/ISIZE/))    
+(  195)     CALL BYTES_IO_WRITE(IFILE,ZBUF,IBYTES,IRET)
+(  196)     IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  197)       WRITE(0,*) 'BYTES_IO_WRITE ',IFILE,' ',IBYTES,' FAILED',IRET
+(  198)       CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  199)     ENDIF
+(  200)     DEALLOCATE(ZBUF)
+(  201) 
+(  202)   ENDDO
+(  203) ENDIF
+(  204) !End marker
+(  205) IBUF(:) = TRANSFER('LEGPOL---EOF-EOF',IBUF(1:4))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:37      page 5
+
+(  206) CALL BYTES_IO_WRITE(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  207) IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  208)   CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  209) ENDIF
+(  210) 
+(  211) IF(C%CIO_TYPE == 'file') THEN
+(  212)   CALL BYTES_IO_CLOSE(IFILE,IRET)
+(  213)   IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  214)     CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_CLOSE FAILED')
+(  215)   ENDIF
+(  216) ENDIF
+(  217) 
+(  218) END SUBROUTINE WRITE_LEGPOL
+(  219) END MODULE WRITE_LEGPOL_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:37      page 6
+
+(    1) # 1 "write_legpol_mod.F90"
+(    1) MODULE WRITE_LEGPOL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE WRITE_LEGPOL
+(    4) USE PARKIND1  ,ONLY : JPIM, JPRBT
+(    5) USE TPM_GEN
+(    6) USE TPM_DISTR
+(    7) USE TPM_DIM
+(    8) USE TPM_GEOMETRY
+(    9) USE TPM_FLT
+(   10) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   11) USE TPM_CTL
+(   12) USE BUTTERFLY_ALG_MOD
+(   13) USE BYTES_IO_MOD
+(   14) # 15 "write_legpol_mod.F90"
+(   15) !**** *WRITE_LEGPOL * - write out Leg.Pol. and assocciated arrays to file
+(   16) # 17 "write_legpol_mod.F90"
+(   17) !     Purpose.
+(   18) !     --------
+(   19) !           
+(   20) # 21 "write_legpol_mod.F90"
+(   21) !**   Interface.
+(   22) !     ----------
+(   23) !        *CALL* *WRITE_LEGPOL*
+(   24) # 25 "write_legpol_mod.F90"
+(   25) !        Explicit arguments : None
+(   26) !        --------------------
+(   27) # 28 "write_legpol_mod.F90"
+(   28) !        Implicit arguments :
+(   29) !        --------------------
+(   30) !            
+(   31) # 32 "write_legpol_mod.F90"
+(   32) !     Method.
+(   33) !     -------
+(   34) !        See documentation
+(   35) # 36 "write_legpol_mod.F90"
+(   36) !     Externals.
+(   37) !     ----------
+(   38) # 39 "write_legpol_mod.F90"
+(   39) !     Reference.
+(   40) !     ----------
+(   41) !        ECMWF Research Department documentation of the IFS
+(   42) !     
+(   43) # 44 "write_legpol_mod.F90"
+(   44) !     -------
+(   45) !        Mats Hamrud and Willem Deconinck  *ECMWF*
+(   46) # 47 "write_legpol_mod.F90"
+(   47) !     Modifications.
+(   48) !     --------------
+(   49) !        Original : July 2015
+(   50) # 51 "write_legpol_mod.F90"
+(   51) IMPLICIT NONE
+(   52) # 53 "write_legpol_mod.F90"
+(   53) INTEGER(KIND=JPIM),PARAMETER :: JPIBUFL=4
+(   54) INTEGER(KIND=JPIM) :: IRBYTES,IIBYTES,JMLOC,IPRTRV,IMLOC,IM,ILA,ILS,IFILE,JSETV
+(   55) INTEGER(KIND=JPIM) :: IDGLU,ISIZE,IBYTES,IRET,IBUF(JPIBUFL),IDUM,JGL,II
+(   56) INTEGER(KIND=JPIM) :: IDGLU2
+(   57) TYPE(CLONE) :: YLCLONE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:37      page 7
+
+(   58) REAL(KIND=JPRBT) ,ALLOCATABLE :: ZBUF(:)
+(   59) INTEGER(KIND=JPIM) ,ALLOCATABLE :: IBUFA(:)
+(   60) !     ------------------------------------------------------------------
+(   61) # 62 "write_legpol_mod.F90"
+(   62) IRBYTES = 8
+(   63) IIBYTES = 4
+(   64) IDUM = 3141
+(   65) # 66 "write_legpol_mod.F90"
+(   66) IF(C%CIO_TYPE == 'file') THEN
+(   67)   CALL BYTES_IO_OPEN(IFILE,C%CLEGPOLFNAME,'W',IRET)
+(   68)   IF ( IRET < JPBYTES_IO_SUCCESS ) CALL ABORT_TRANS('WRITE_LEGPOL: BYTES_IO_OPEN FAILED')
+(   69) ENDIF
+(   70) IF( S%LUSEFLT ) THEN
+(   71)   IBUF(1:2) = TRANSFER('LEGPOLBF',IBUF(1:2))
+(   72) ELSE
+(   73)   IBUF(1:2) = TRANSFER('LEGPOL  ',IBUF(1:2))
+(   74) ENDIF
+(   75) IBUF(3) = R%NSMAX
+(   76) IBUF(4) = R%NDGNH
+(   77) CALL BYTES_IO_WRITE(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(   78) IF ( IRET < JPBYTES_IO_SUCCESS ) CALL ABORT_TRANS('WRITE_LEGPOL: BYTES_IO_WRITE FAILED')
+(   79) ALLOCATE(IBUFA(2*R%NDGNH))
+(   80) II = 0
+(   81) DO JGL=1,R%NDGNH
+(   82)   II = II+1
+(   83)   IBUFA(II) = G%NLOEN(JGL)
+(   84)   II=II+1
+(   85)   IBUFA(II) = G%NMEN(JGL)
+(   86) ENDDO
+(   87) CALL BYTES_IO_WRITE(IFILE,IBUFA,2*R%NDGNH*IIBYTES,IRET)
+(   88) IF ( IRET < JPBYTES_IO_SUCCESS ) CALL ABORT_TRANS('WRITE_LEGPOL: BYTES_IO_WRITE FAILED')
+(   89) DEALLOCATE(IBUFA)
+(   90) DO JMLOC=1,D%NUMP,NPRTRV  ! +++++++++++++++++++++ JMLOC LOOP ++++++++++
+(   91)   IPRTRV=MIN(NPRTRV,D%NUMP-JMLOC+1)
+(   92)   DO JSETV=1,IPRTRV
+(   93)     IMLOC=JMLOC+JSETV-1
+(   94)     IM = D%MYMS(IMLOC)
+(   95)     ILA = (R%NSMAX-IM+2)/2
+(   96)     ILS = (R%NSMAX-IM+3)/2
+(   97)     IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(   98) ! Anti-symmetric
+(   99)     IF( S%LUSEFLT .AND. ILA > S%ITHRESHOLD) THEN
+(  100)       CALL PACK_BUTTERFLY_STRUCT(S%FA(IMLOC)%YBUT_STRUCT_A,YLCLONE)
+(  101)       ISIZE = SIZE(YLCLONE%COMMSBUF)
+(  102)       IBUF(:) = (/IDGLU,ILA,ISIZE,IDUM/)
+(  103)       CALL BYTES_IO_WRITE(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  104)       IF(IRET < JPBYTES_IO_SUCCESS ) THEN
+(  105)         WRITE(0,*) 'BYTES_IO_WRITE ',IFILE,' ',IIBYTES,' FAILED',IRET
+(  106)         CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  107)       ENDIF
+(  108)       IBYTES = ISIZE*IRBYTES
+(  109)       CALL BYTES_IO_WRITE(IFILE,YLCLONE%COMMSBUF,IBYTES,IRET)
+(  110)       IF(IRET < JPBYTES_IO_SUCCESS ) THEN
+(  111)         WRITE(0,*) 'BYTES_IO_WRITE ',IFILE,' ',IBYTES,' FAILED',IRET
+(  112)         CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  113)       ENDIF
+(  114)       DEALLOCATE(YLCLONE%COMMSBUF)
+(  115)     ELSE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:37      page 8
+
+(  116)       ISIZE = IDGLU*ILA
+(  117)       IBYTES = ISIZE*IRBYTES
+(  118)       ALLOCATE(ZBUF(ISIZE))
+(  119)       ZBUF(:) = RESHAPE(S%FA(IMLOC)%RPNMA,(/ISIZE/))
+(  120)       CALL BYTES_IO_WRITE(IFILE,ZBUF,IBYTES,IRET)
+(  121)       IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  122)         WRITE(0,*) 'BYTES_IO_WRITE ',IFILE,' ',IBYTES,' FAILED',IRET
+(  123)         CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  124)       ENDIF
+(  125)       DEALLOCATE(ZBUF)
+(  126)     ENDIF
+(  127) ! Symmetric
+(  128)     IF( S%LUSEFLT .AND. ILS > S%ITHRESHOLD) THEN
+(  129)       CALL PACK_BUTTERFLY_STRUCT(S%FA(IMLOC)%YBUT_STRUCT_S,YLCLONE)
+(  130)       ISIZE = SIZE(YLCLONE%COMMSBUF)
+(  131)       IBUF(:) = (/IDGLU,ILS,ISIZE,IDUM/)
+(  132)       CALL BYTES_IO_WRITE(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  133)       IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  134)         WRITE(0,*) 'BYTES_IO_WRITE ',IFILE,' ',IIBYTES,' FAILED',IRET
+(  135)         CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  136)       ENDIF
+(  137)       IBYTES = ISIZE*IRBYTES
+(  138)       CALL BYTES_IO_WRITE(IFILE,YLCLONE%COMMSBUF,IBYTES,IRET)
+(  139)       IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  140)         WRITE(0,*) 'BYTES_IO_WRITE ',IFILE,' ',IBYTES,' FAILED',IRET
+(  141)         CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  142)       ENDIF
+(  143)       DEALLOCATE(YLCLONE%COMMSBUF)
+(  144)     ELSE
+(  145)       ISIZE = IDGLU*ILS
+(  146)       IBYTES = ISIZE*IRBYTES
+(  147)       ALLOCATE(ZBUF(ISIZE))
+(  148)       ZBUF(:) = RESHAPE(S%FA(IMLOC)%RPNMS,(/ISIZE/))
+(  149)       CALL BYTES_IO_WRITE(IFILE,ZBUF,IBYTES,IRET)
+(  150)       IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  151)         WRITE(0,*) 'BYTES_IO_WRITE ',IFILE,' ',IBYTES,' FAILED',IRET
+(  152)         CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  153)       ENDIF
+(  154)       DEALLOCATE(ZBUF)
+(  155)     ENDIF
+(  156)   ENDDO
+(  157) ENDDO
+(  158) # 159 "write_legpol_mod.F90"
+(  159) ! Lat-lon grid
+(  160) # 161 "write_legpol_mod.F90"
+(  161) IF(S%LDLL) THEN
+(  162)   IBUF(:) = TRANSFER('LATLON---BEG-BEG',IBUF(1:4))
+(  163)   CALL BYTES_IO_WRITE(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  164)   IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  165)     CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  166)   ENDIF
+(  167)    DO JMLOC=1,D%NUMP
+(  168)     IM = D%MYMS(JMLOC)
+(  169)     ILA = (R%NSMAX-IM+2)/2
+(  170)     ILS = (R%NSMAX-IM+3)/2
+(  171)     IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  172)     IDGLU2 = S%NDGNHD
+(  173)     IBUF(:) = (/IM,IDGLU,IDGLU2,IDUM/)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:37      page 9
+
+(  174)     CALL BYTES_IO_WRITE(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  175)     IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  176)       WRITE(0,*) 'BYTES_IO_WRITE ',IFILE,' ',IIBYTES,' FAILED',IRET
+(  177)       CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  178)     ENDIF
+(  179) # 180 "write_legpol_mod.F90"
+(  180)     ISIZE = 2*IDGLU*2
+(  181)     IBYTES = ISIZE*IRBYTES
+(  182)     ALLOCATE(ZBUF(ISIZE))
+(  183)     ZBUF(:) = RESHAPE(S%FA(JMLOC)%RPNMWI,(/ISIZE/))    
+(  184)     CALL BYTES_IO_WRITE(IFILE,ZBUF,IBYTES,IRET)
+(  185)     IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  186)       WRITE(0,*) 'BYTES_IO_WRITE ',IFILE,' ',IBYTES,' FAILED',IRET
+(  187)       CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  188)     ENDIF
+(  189)     DEALLOCATE(ZBUF)
+(  190) # 191 "write_legpol_mod.F90"
+(  191)     ISIZE = 2*IDGLU2*2
+(  192)     IBYTES = ISIZE*IRBYTES
+(  193)     ALLOCATE(ZBUF(ISIZE))
+(  194)     ZBUF(:) = RESHAPE(S%FA(JMLOC)%RPNMWO,(/ISIZE/))    
+(  195)     CALL BYTES_IO_WRITE(IFILE,ZBUF,IBYTES,IRET)
+(  196)     IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  197)       WRITE(0,*) 'BYTES_IO_WRITE ',IFILE,' ',IBYTES,' FAILED',IRET
+(  198)       CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  199)     ENDIF
+(  200)     DEALLOCATE(ZBUF)
+(  201) # 202 "write_legpol_mod.F90"
+(  202)   ENDDO
+(  203) ENDIF
+(  204) !End marker
+(  205) IBUF(:) = TRANSFER('LEGPOL---EOF-EOF',IBUF(1:4))
+(  206) CALL BYTES_IO_WRITE(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  207) IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  208)   CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_WRITE FAILED')
+(  209) ENDIF
+(  210) # 211 "write_legpol_mod.F90"
+(  211) IF(C%CIO_TYPE == 'file') THEN
+(  212)   CALL BYTES_IO_CLOSE(IFILE,IRET)
+(  213)   IF( IRET < JPBYTES_IO_SUCCESS ) THEN
+(  214)     CALL ABORT_TRANS('WRITE_LEGPOL:BYTES_IO_CLOSE FAILED')
+(  215)   ENDIF
+(  216) ENDIF
+(  217) # 218 "write_legpol_mod.F90"
+(  218) END SUBROUTINE WRITE_LEGPOL
+(  219) END MODULE WRITE_LEGPOL_MOD

@@ -1,0 +1,623 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:03      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: suemp_trans_preleg_mod.F90
+
+(    1) MODULE SUEMP_TRANS_PRELEG_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUEMP_TRANS_PRELEG
+(    4) 
+(    5) ! Set up distributed environment for the transform package (part 1)
+(    6) 
+(    7) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    8) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    9) 
+(   10) USE TPM_GEN         ,ONLY : NOUT, NPRINTLEV
+(   11) USE TPM_DIM         ,ONLY : R
+(   12) USE TPM_DISTR       ,ONLY : D, NPRTRW, NPRTRV, MYSETW
+(   13) 
+(   14) USE TPMALD_DISTR    ,ONLY : DALD, DALD_NCPL2M, DALD_NPME, DALD_NESM0
+(   15) USE TPMALD_DIM      ,ONLY : RALD
+(   16) USE TPMALD_FIELDS   ,ONLY : FALD, FALD_RLEPINM
+(   17) USE TPMALD_GEO      ,ONLY : GALD
+(   18) 
+(   19) !USE SUWAVEDI_MOD
+(   20) !USE ABORT_TRANS_MOD
+(   21) 
+(   22) IMPLICIT NONE
+(   23) 
+(   24) INTEGER(KIND=JPIM) :: JA,JM,JMLOC,JW,JV,ILATPP,IRESTL,IMLOC,IDT,INM,JN,IM,ILAST
+(   25) 
+(   26) LOGICAL :: LLP1,LLP2
+(   27) 
+(   28) INTEGER(KIND=JPIM) :: ISPEC(NPRTRW),IMYMS(RALD%NMSMAX+1),IKNTMP(0:RALD%NMSMAX)
+(   29) INTEGER(KIND=JPIM) :: IKMTMP(0:R%NSMAX),ISPEC2P
+(   30) INTEGER(KIND=JPIM) :: IC(NPRTRW)
+(   31) INTEGER(KIND=JPIM) :: IMDIM,IL,IND,IK,IPOS,IKM
+(   32) REAL(KIND=JPRB) :: ZLEPDIM
+(   33) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:03      page 2
+
+(   34) 
+(   35) !     ------------------------------------------------------------------
+(   36) 
+(   37) IF (LHOOK) CALL DR_HOOK('SUEMP_TRANS_PRELEG_MOD:SUEMP_TRANS_PRELEG',0,ZHOOK_HANDLE)
+(   38)         
+(   39) IF(.NOT.D%LGRIDONLY) THEN
+(   40)                 
+(   41)   LLP1 = NPRINTLEV>0
+(   42)   LLP2 = NPRINTLEV>1
+(   43)   IF(LLP1) WRITE(NOUT,*) '=== ENTER ROUTINE SUEMP_TRANS_PRELEG ==='
+(   44)   
+(   45)   !*       1.    Initialize partitioning of wave numbers to PEs ! 
+(   46)   !             ----------------------------------------------
+(   47)   
+(   48)   ALLOCATE(D%NASM0(0:R%NSMAX))
+(   49)   IF(LLP2)WRITE(NOUT,9) 'D%NASM0 ',SIZE(D%NASM0   ),SHAPE(D%NASM0   )
+(   50)   
+(   51)   ALLOCATE(DALD%NESM0(0:RALD%NMSMAX))
+(   52)   IF(LLP2)WRITE(NOUT,9) 'DALD%NESM0 ',SIZE(DALD%NESM0   ),SHAPE(DALD%NESM0   )
+(   53)   
+(   54)   ALLOCATE(D%NATM0(0:R%NTMAX))
+(   55)   IF(LLP2)WRITE(NOUT,9) 'D%NATM0 ',SIZE(D%NATM0   ),SHAPE(D%NATM0   )
+(   56)   ALLOCATE(D%NUMPP(NPRTRW))
+(   57)   IF(LLP2)WRITE(NOUT,9) 'D%NUMPP ',SIZE(D%NUMPP   ),SHAPE(D%NUMPP   )
+(   58)   ALLOCATE(D%NPOSSP(NPRTRW+1))
+(   59)   IF(LLP2)WRITE(NOUT,9) 'D%NPOSSP',SIZE(D%NPOSSP  ),SHAPE(D%NPOSSP  )
+(   60)   
+(   61)   ALLOCATE(D%NPROCM(0:RALD%NMSMAX))
+(   62)   IF(LLP2)WRITE(NOUT,9) 'D%NPROCM',SIZE(D%NPROCM  ),SHAPE(D%NPROCM  )
+(   63)   
+(   64)   ALLOCATE(DALD%NPME(0:RALD%NMSMAX))
+(   65)   IF(LLP2)WRITE(NOUT,9) 'DALD%NPME',SIZE(DALD%NPME),SHAPE(DALD%NPME)
+(   66)   ALLOCATE(DALD%NCPL2M(0:RALD%NMSMAX))
+(   67)   IF(LLP2)WRITE(NOUT,9) 'DALD%NCPL2M',SIZE(DALD%NCPL2M),SHAPE(DALD%NCPL2M)
+(   68)   CALL ELLIPS(R%NSMAX,RALD%NMSMAX,IKNTMP,IKMTMP)
+(   69)   DALD%NPME(0)=1
+(   70)   DO JM=1,RALD%NMSMAX
+(   71)     DALD%NPME(JM)=DALD%NPME(JM-1)+IKNTMP(JM-1)+1
+(   72)   ENDDO
+(   73)   ALLOCATE (DALD_NPME (0:RALD%NMSMAX))
+(   74)   DALD_NPME = DALD%NPME
+(   75)   !$acc enter data create (DALD_NPME)
+(   76)   !$acc update device (DALD_NPME)
+(   77)   DO JM=0,RALD%NMSMAX
+(   78)     DALD%NCPL2M(JM) = 2*(IKNTMP(JM)+1)
+(   79)   ENDDO
+(   80)   ALLOCATE (DALD_NCPL2M (0:RALD%NMSMAX))
+(   81)   DALD_NCPL2M = DALD%NCPL2M
+(   82)   !$acc enter data create (DALD_NCPL2M)
+(   83)   !$acc update device (DALD_NCPL2M)
+(   84)   ALLOCATE(FALD%RLEPINM(R%NSPEC_G/2))
+(   85)   IF(LLP2)WRITE(NOUT,9) 'FALD%RLEPINM',SIZE(FALD%RLEPINM),SHAPE(FALD%RLEPINM)
+(   86)   DO JM=0,RALD%NMSMAX
+(   87)     DO JN=1,IKNTMP(JM)
+(   88)       ZLEPDIM=-((REAL(JM,JPRB)**2)*(GALD%EXWN**2)+&
+(   89)        & (REAL(JN,JPRB)**2)*(GALD%EYWN**2))  
+(   90)       FALD%RLEPINM(DALD%NPME(JM)+JN)=1./ZLEPDIM
+(   91)     ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:03      page 3
+
+(   92)   ENDDO
+(   93)   DO JM=1,RALD%NMSMAX
+(   94)     ZLEPDIM=-(REAL(JM,JPRB)**2)*(GALD%EXWN**2)
+(   95)     FALD%RLEPINM(DALD%NPME(JM))=1./ZLEPDIM
+(   96)   ENDDO
+(   97)   FALD%RLEPINM(DALD%NPME(0))=0.
+(   98)   ALLOCATE (FALD_RLEPINM (R%NSPEC_G/2))
+(   99)   FALD_RLEPINM = FALD%RLEPINM
+(  100)   !$acc enter data create (FALD_RLEPINM)
+(  101)   !$acc update device (FALD_RLEPINM)
+(  102)   D%NUMPP(:) = 0
+(  103)   ISPEC(:) = 0
+(  104)   DALD%NESM0(:)=-99
+(  105)   
+(  106)   IMDIM = 0
+(  107)   IL = 1
+(  108)   IND = 1
+(  109)   IK  = 0
+(  110)   IPOS = 1
+(  111)   DO JM=0,RALD%NMSMAX
+(  112)     IK = IK + IND
+(  113)     IF (IK > NPRTRW) THEN
+(  114)       IK = NPRTRW
+(  115)       IND = -1
+(  116)     ELSEIF (IK < 1) THEN
+(  117)       IK = 1
+(  118)       IND = 1
+(  119)     ENDIF
+(  120)   
+(  121)     IKM =DALD%NCPL2M(JM)/2 -1
+(  122)     D%NPROCM(JM) = IK
+(  123)     ISPEC(IK) = ISPEC(IK)+IKM+1
+(  124)     D%NUMPP(IK) = D%NUMPP(IK)+1
+(  125)     IF (IK == MYSETW) THEN
+(  126)       IMDIM = IMDIM + IKM+1
+(  127)       IMYMS(IL) = JM
+(  128)       DALD%NESM0(JM) = IPOS
+(  129)       IPOS = IPOS+(IKM+1)*4
+(  130)       IL = IL+1
+(  131)     ENDIF
+(  132)   ENDDO
+(  133)   ALLOCATE (DALD_NESM0(0:RALD%NMSMAX))
+(  134)   DALD_NESM0 = DALD%NESM0
+(  135)   !$acc enter data copyin (DALD_NESM0)
+(  136)   D%NPOSSP(1) = 1
+(  137)   ISPEC2P = 4*ISPEC(1)
+(  138)   D%NSPEC2MX = ISPEC2P
+(  139)   DO JA=2,NPRTRW
+(  140)     D%NPOSSP(JA) = D%NPOSSP(JA-1)+ISPEC2P
+(  141)     ISPEC2P = 4*ISPEC(JA)
+(  142)     D%NSPEC2MX=MAX(D%NSPEC2MX,ISPEC2P)
+(  143)   ENDDO
+(  144)   D%NPOSSP(NPRTRW+1) = D%NPOSSP(NPRTRW)+ISPEC2P
+(  145)   
+(  146)   D%NSPEC2 = 4*IMDIM
+(  147)   D%NSPEC=D%NSPEC2
+(  148)   
+(  149)   D%NUMP  = D%NUMPP (MYSETW)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:03      page 4
+
+(  150)   ALLOCATE(D%MYMS(D%NUMP))
+(  151)   IF(LLP2)WRITE(NOUT,9) 'D%MYMS    ',SIZE(D%MYMS   ),SHAPE(D%MYMS   )
+(  152)   D%MYMS(:) = IMYMS(1:D%NUMP)
+(  153)   D%NUMTP = D%NUMP 
+(  154)   
+(  155)   ! pointer to the first wave number of a given wave-set in NALLMS array
+(  156)   ALLOCATE(D%NPTRMS(NPRTRW))
+(  157)   IF(LLP2)WRITE(NOUT,9) 'D%NPTRMS   ',SIZE(D%NPTRMS   ),SHAPE(D%NPTRMS   )
+(  158)   D%NPTRMS(:) = 1
+(  159)   DO JA=2,NPRTRW
+(  160)     D%NPTRMS(JA) = D%NPTRMS(JA-1)+D%NUMPP(JA-1)
+(  161)   ENDDO
+(  162)   !  D%NALLMS :  wave numbers for all wave-set concatenated together to give all
+(  163)   !            wave numbers in wave-set order.
+(  164)   ALLOCATE(D%NALLMS(RALD%NMSMAX+1))
+(  165)   IF(LLP2)WRITE(NOUT,9) 'D%NALLMS   ',SIZE(D%NALLMS   ),SHAPE(D%NALLMS   )
+(  166)   IC(:) = 0
+(  167)   DO JM=0,RALD%NMSMAX
+(  168)     D%NALLMS(IC(D%NPROCM(JM))+D%NPTRMS(D%NPROCM(JM))) = JM
+(  169)     IC(D%NPROCM(JM)) = IC(D%NPROCM(JM))+1
+(  170)   ENDDO
+(  171)   ALLOCATE(D%NDIM0G(0:RALD%NMSMAX))
+(  172)   IF(LLP2)WRITE(NOUT,9) 'D%NDIM0G   ',SIZE(D%NDIM0G   ),SHAPE(D%NDIM0G   )
+(  173)   IPOS = 1
+(  174)   DO JA=1,NPRTRW
+(  175)     DO JMLOC=1,D%NUMPP(JA)
+(  176)       IM = D%NALLMS(D%NPTRMS(JA)+JMLOC-1)
+(  177)       D%NDIM0G(IM) = IPOS
+(  178)       IPOS = IPOS+2*DALD%NCPL2M(IM)
+(  179)     ENDDO
+(  180)   ENDDO
+(  181) 
+(  182)   ALLOCATE(D%NLATLS(NPRTRW,NPRTRV))
+(  183)   IF(LLP2)WRITE(NOUT,9) 'D%NLATLS',SIZE(D%NLATLS   ),SHAPE(D%NLATLS )
+(  184)   ALLOCATE(D%NLATLE(NPRTRW,NPRTRV))
+(  185)   IF(LLP2)WRITE(NOUT,9) 'D%NLATLE',SIZE(D%NLATLE   ),SHAPE(D%NLATLE )
+(  186)   
+(  187)   D%NLATLS(:,:) = 9999
+(  188)   D%NLATLE(:,:) = -1
+(  189)   
+(  190)   ILATPP = R%NDGL/NPRTRW
+(  191)   IRESTL  = R%NDGL-NPRTRW*ILATPP
+(  192)   DO JW=1,NPRTRW
+(  193)     IF (JW > IRESTL) THEN
+(  194)       D%NLATLS(JW,1) = IRESTL*(ILATPP+1)+(JA-IRESTL-1)*ILATPP+1
+(  195)       D%NLATLE(JW,1) = D%NLATLS(JW,1)+ILATPP-1
+(  196)     ELSE
+(  197)       D%NLATLS(JW,1) = (JA-1)*(ILATPP+1)+1
+(  198)       D%NLATLE(JW,1) = D%NLATLS(JW,1)+ILATPP
+(  199)     ENDIF
+(  200)   ENDDO
+(  201)   ILAST=0
+(  202)   DO JW=1,NPRTRW
+(  203)     ILATPP = (D%NLATLE(JW,1)-D%NLATLS(JW,1)+1)/NPRTRV
+(  204)     IRESTL  = (D%NLATLE(JW,1)-D%NLATLS(JW,1)+1)-NPRTRV*ILATPP
+(  205)     DO JV=1,NPRTRV
+(  206)       IF (JV > IRESTL) THEN
+(  207)         D%NLATLS(JW,JV) = IRESTL*(ILATPP+1)+(JV-IRESTL-1)*ILATPP+1+ILAST
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:03      page 5
+
+(  208)         D%NLATLE(JW,JV) = D%NLATLS(JW,JV)+ILATPP-1
+(  209)       ELSE
+(  210)         D%NLATLS(JW,JV) = (JV-1)*(ILATPP+1)+1+ILAST
+(  211)         D%NLATLE(JW,JV) = D%NLATLS(JW,JV)+ILATPP
+(  212)       ENDIF
+(  213)     ENDDO
+(  214)     ILAST=D%NLATLE(JW,NPRTRV)
+(  215)   ENDDO
+(  216)   IF (LLP1) THEN
+(  217)     DO JW=1,NPRTRW
+(  218)       DO JV=1,NPRTRV
+(  219)         WRITE(NOUT,'(" JW=",I6," JV=",I6," D%NLATLS=",I6," D%NLATLE=",I6)')&
+(  220)            & JW,JV,D%NLATLS(JW,JV),D%NLATLE(JW,JV)
+(  221)       ENDDO
+(  222)     ENDDO
+(  223)   ENDIF
+(  224)   
+(  225)   ALLOCATE(D%NPMT(0:R%NSMAX))
+(  226)   IF(LLP2)WRITE(NOUT,9) 'D%NPMT   ',SIZE(D%NPMT   ),SHAPE(D%NPMT   )
+(  227)   ALLOCATE(D%NPMS(0:R%NSMAX))
+(  228)   IF(LLP2)WRITE(NOUT,9) 'D%NPMS   ',SIZE(D%NPMS   ),SHAPE(D%NPMS   )
+(  229)   ALLOCATE(D%NPMG(0:R%NSMAX))
+(  230)   IF(LLP2)WRITE(NOUT,9) 'D%NPMG   ',SIZE(D%NPMG   ),SHAPE(D%NPMG   )
+(  231)   IDT = R%NTMAX-R%NSMAX
+(  232)   INM = 0
+(  233)   DO JMLOC=1,D%NUMP
+(  234)     IMLOC = D%MYMS(JMLOC)
+(  235)   
+(  236)     INM = INM+R%NTMAX+2-IMLOC
+(  237)   ENDDO
+(  238)   INM = 0
+(  239)   DO JM=0,R%NSMAX
+(  240)   
+(  241)     INM = INM+R%NTMAX+2-JM
+(  242)   ENDDO
+(  243)   
+(  244)   D%NLEI3D = (R%NLEI3-1)/NPRTRW+1
+(  245) 
+(  246) ENDIF
+(  247) 
+(  248) 
+(  249) IF (LHOOK) CALL DR_HOOK('SUEMP_TRANS_PRELEG_MOD:SUEMP_TRANS_PRELEG',1,ZHOOK_HANDLE)
+(  250) 
+(  251) !     ------------------------------------------------------------------
+(  252) 9 FORMAT(1X,'ARRAY ',A10,' ALLOCATED ',8I8)
+(  253) 
+(  254) END SUBROUTINE SUEMP_TRANS_PRELEG
+(  255) END MODULE SUEMP_TRANS_PRELEG_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:03      page 6
+
+(    1) # 1 "suemp_trans_preleg_mod.F90"
+(    1) MODULE SUEMP_TRANS_PRELEG_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUEMP_TRANS_PRELEG
+(    4) # 5 "suemp_trans_preleg_mod.F90"
+(    5) ! Set up distributed environment for the transform package (part 1)
+(    6) # 7 "suemp_trans_preleg_mod.F90"
+(    7) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    8) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    9) # 10 "suemp_trans_preleg_mod.F90"
+(   10) USE TPM_GEN         ,ONLY : NOUT, NPRINTLEV
+(   11) USE TPM_DIM         ,ONLY : R
+(   12) USE TPM_DISTR       ,ONLY : D, NPRTRW, NPRTRV, MYSETW
+(   13) # 14 "suemp_trans_preleg_mod.F90"
+(   14) USE TPMALD_DISTR    ,ONLY : DALD, DALD_NCPL2M, DALD_NPME, DALD_NESM0
+(   15) USE TPMALD_DIM      ,ONLY : RALD
+(   16) USE TPMALD_FIELDS   ,ONLY : FALD, FALD_RLEPINM
+(   17) USE TPMALD_GEO      ,ONLY : GALD
+(   18) # 19 "suemp_trans_preleg_mod.F90"
+(   19) !USE SUWAVEDI_MOD
+(   20) !USE ABORT_TRANS_MOD
+(   21) # 22 "suemp_trans_preleg_mod.F90"
+(   22) IMPLICIT NONE
+(   23) # 24 "suemp_trans_preleg_mod.F90"
+(   24) INTEGER(KIND=JPIM) :: JA,JM,JMLOC,JW,JV,ILATPP,IRESTL,IMLOC,IDT,INM,JN,IM,ILAST
+(   25) # 26 "suemp_trans_preleg_mod.F90"
+(   26) LOGICAL :: LLP1,LLP2
+(   27) # 28 "suemp_trans_preleg_mod.F90"
+(   28) INTEGER(KIND=JPIM) :: ISPEC(NPRTRW),IMYMS(RALD%NMSMAX+1),IKNTMP(0:RALD%NMSMAX)
+(   29) INTEGER(KIND=JPIM) :: IKMTMP(0:R%NSMAX),ISPEC2P
+(   30) INTEGER(KIND=JPIM) :: IC(NPRTRW)
+(   31) INTEGER(KIND=JPIM) :: IMDIM,IL,IND,IK,IPOS,IKM
+(   32) REAL(KIND=JPRB) :: ZLEPDIM
+(   33) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   34) # 35 "suemp_trans_preleg_mod.F90"
+(   35) !     ------------------------------------------------------------------
+(   36) # 37 "suemp_trans_preleg_mod.F90"
+(   37) IF (LHOOK) CALL DR_HOOK('SUEMP_TRANS_PRELEG_MOD:SUEMP_TRANS_PRELEG',0,ZHOOK_HANDLE)
+(   38)         
+(   39) IF(.NOT.D%LGRIDONLY) THEN
+(   40)                 
+(   41)   LLP1 = NPRINTLEV>0
+(   42)   LLP2 = NPRINTLEV>1
+(   43)   IF(LLP1) WRITE(NOUT,*) '=== ENTER ROUTINE SUEMP_TRANS_PRELEG ==='
+(   44)   
+(   45)   !*       1.    Initialize partitioning of wave numbers to PEs ! 
+(   46)   !             ----------------------------------------------
+(   47)   
+(   48)   ALLOCATE(D%NASM0(0:R%NSMAX))
+(   49)   IF(LLP2)WRITE(NOUT,9) 'D%NASM0 ',SIZE(D%NASM0   ),SHAPE(D%NASM0   )
+(   50)   
+(   51)   ALLOCATE(DALD%NESM0(0:RALD%NMSMAX))
+(   52)   IF(LLP2)WRITE(NOUT,9) 'DALD%NESM0 ',SIZE(DALD%NESM0   ),SHAPE(DALD%NESM0   )
+(   53)   
+(   54)   ALLOCATE(D%NATM0(0:R%NTMAX))
+(   55)   IF(LLP2)WRITE(NOUT,9) 'D%NATM0 ',SIZE(D%NATM0   ),SHAPE(D%NATM0   )
+(   56)   ALLOCATE(D%NUMPP(NPRTRW))
+(   57)   IF(LLP2)WRITE(NOUT,9) 'D%NUMPP ',SIZE(D%NUMPP   ),SHAPE(D%NUMPP   )
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:03      page 7
+
+(   58)   ALLOCATE(D%NPOSSP(NPRTRW+1))
+(   59)   IF(LLP2)WRITE(NOUT,9) 'D%NPOSSP',SIZE(D%NPOSSP  ),SHAPE(D%NPOSSP  )
+(   60)   
+(   61)   ALLOCATE(D%NPROCM(0:RALD%NMSMAX))
+(   62)   IF(LLP2)WRITE(NOUT,9) 'D%NPROCM',SIZE(D%NPROCM  ),SHAPE(D%NPROCM  )
+(   63)   
+(   64)   ALLOCATE(DALD%NPME(0:RALD%NMSMAX))
+(   65)   IF(LLP2)WRITE(NOUT,9) 'DALD%NPME',SIZE(DALD%NPME),SHAPE(DALD%NPME)
+(   66)   ALLOCATE(DALD%NCPL2M(0:RALD%NMSMAX))
+(   67)   IF(LLP2)WRITE(NOUT,9) 'DALD%NCPL2M',SIZE(DALD%NCPL2M),SHAPE(DALD%NCPL2M)
+(   68)   CALL ELLIPS(R%NSMAX,RALD%NMSMAX,IKNTMP,IKMTMP)
+(   69)   DALD%NPME(0)=1
+(   70)   DO JM=1,RALD%NMSMAX
+(   71)     DALD%NPME(JM)=DALD%NPME(JM-1)+IKNTMP(JM-1)+1
+(   72)   ENDDO
+(   73)   ALLOCATE (DALD_NPME (0:RALD%NMSMAX))
+(   74)   DALD_NPME = DALD%NPME
+(   75)   !$acc enter data create (DALD_NPME)
+(   76)   !$acc update device (DALD_NPME)
+(   77)   DO JM=0,RALD%NMSMAX
+(   78)     DALD%NCPL2M(JM) = 2*(IKNTMP(JM)+1)
+(   79)   ENDDO
+(   80)   ALLOCATE (DALD_NCPL2M (0:RALD%NMSMAX))
+(   81)   DALD_NCPL2M = DALD%NCPL2M
+(   82)   !$acc enter data create (DALD_NCPL2M)
+(   83)   !$acc update device (DALD_NCPL2M)
+(   84)   ALLOCATE(FALD%RLEPINM(R%NSPEC_G/2))
+(   85)   IF(LLP2)WRITE(NOUT,9) 'FALD%RLEPINM',SIZE(FALD%RLEPINM),SHAPE(FALD%RLEPINM)
+(   86)   DO JM=0,RALD%NMSMAX
+(   87)     DO JN=1,IKNTMP(JM)
+(   88)       ZLEPDIM=-((REAL(JM,JPRB)**2)*(GALD%EXWN**2)+&
+(   89)        & (REAL(JN,JPRB)**2)*(GALD%EYWN**2))  
+(   90)       FALD%RLEPINM(DALD%NPME(JM)+JN)=1./ZLEPDIM
+(   91)     ENDDO
+(   92)   ENDDO
+(   93)   DO JM=1,RALD%NMSMAX
+(   94)     ZLEPDIM=-(REAL(JM,JPRB)**2)*(GALD%EXWN**2)
+(   95)     FALD%RLEPINM(DALD%NPME(JM))=1./ZLEPDIM
+(   96)   ENDDO
+(   97)   FALD%RLEPINM(DALD%NPME(0))=0.
+(   98)   ALLOCATE (FALD_RLEPINM (R%NSPEC_G/2))
+(   99)   FALD_RLEPINM = FALD%RLEPINM
+(  100)   !$acc enter data create (FALD_RLEPINM)
+(  101)   !$acc update device (FALD_RLEPINM)
+(  102)   D%NUMPP(:) = 0
+(  103)   ISPEC(:) = 0
+(  104)   DALD%NESM0(:)=-99
+(  105)   
+(  106)   IMDIM = 0
+(  107)   IL = 1
+(  108)   IND = 1
+(  109)   IK  = 0
+(  110)   IPOS = 1
+(  111)   DO JM=0,RALD%NMSMAX
+(  112)     IK = IK + IND
+(  113)     IF (IK > NPRTRW) THEN
+(  114)       IK = NPRTRW
+(  115)       IND = -1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:03      page 8
+
+(  116)     ELSEIF (IK < 1) THEN
+(  117)       IK = 1
+(  118)       IND = 1
+(  119)     ENDIF
+(  120)   
+(  121)     IKM =DALD%NCPL2M(JM)/2 -1
+(  122)     D%NPROCM(JM) = IK
+(  123)     ISPEC(IK) = ISPEC(IK)+IKM+1
+(  124)     D%NUMPP(IK) = D%NUMPP(IK)+1
+(  125)     IF (IK == MYSETW) THEN
+(  126)       IMDIM = IMDIM + IKM+1
+(  127)       IMYMS(IL) = JM
+(  128)       DALD%NESM0(JM) = IPOS
+(  129)       IPOS = IPOS+(IKM+1)*4
+(  130)       IL = IL+1
+(  131)     ENDIF
+(  132)   ENDDO
+(  133)   ALLOCATE (DALD_NESM0(0:RALD%NMSMAX))
+(  134)   DALD_NESM0 = DALD%NESM0
+(  135)   !$acc enter data copyin (DALD_NESM0)
+(  136)   D%NPOSSP(1) = 1
+(  137)   ISPEC2P = 4*ISPEC(1)
+(  138)   D%NSPEC2MX = ISPEC2P
+(  139)   DO JA=2,NPRTRW
+(  140)     D%NPOSSP(JA) = D%NPOSSP(JA-1)+ISPEC2P
+(  141)     ISPEC2P = 4*ISPEC(JA)
+(  142)     D%NSPEC2MX=MAX(D%NSPEC2MX,ISPEC2P)
+(  143)   ENDDO
+(  144)   D%NPOSSP(NPRTRW+1) = D%NPOSSP(NPRTRW)+ISPEC2P
+(  145)   
+(  146)   D%NSPEC2 = 4*IMDIM
+(  147)   D%NSPEC=D%NSPEC2
+(  148)   
+(  149)   D%NUMP  = D%NUMPP (MYSETW)
+(  150)   ALLOCATE(D%MYMS(D%NUMP))
+(  151)   IF(LLP2)WRITE(NOUT,9) 'D%MYMS    ',SIZE(D%MYMS   ),SHAPE(D%MYMS   )
+(  152)   D%MYMS(:) = IMYMS(1:D%NUMP)
+(  153)   D%NUMTP = D%NUMP 
+(  154)   
+(  155)   ! pointer to the first wave number of a given wave-set in NALLMS array
+(  156)   ALLOCATE(D%NPTRMS(NPRTRW))
+(  157)   IF(LLP2)WRITE(NOUT,9) 'D%NPTRMS   ',SIZE(D%NPTRMS   ),SHAPE(D%NPTRMS   )
+(  158)   D%NPTRMS(:) = 1
+(  159)   DO JA=2,NPRTRW
+(  160)     D%NPTRMS(JA) = D%NPTRMS(JA-1)+D%NUMPP(JA-1)
+(  161)   ENDDO
+(  162)   !  D%NALLMS :  wave numbers for all wave-set concatenated together to give all
+(  163)   !            wave numbers in wave-set order.
+(  164)   ALLOCATE(D%NALLMS(RALD%NMSMAX+1))
+(  165)   IF(LLP2)WRITE(NOUT,9) 'D%NALLMS   ',SIZE(D%NALLMS   ),SHAPE(D%NALLMS   )
+(  166)   IC(:) = 0
+(  167)   DO JM=0,RALD%NMSMAX
+(  168)     D%NALLMS(IC(D%NPROCM(JM))+D%NPTRMS(D%NPROCM(JM))) = JM
+(  169)     IC(D%NPROCM(JM)) = IC(D%NPROCM(JM))+1
+(  170)   ENDDO
+(  171)   ALLOCATE(D%NDIM0G(0:RALD%NMSMAX))
+(  172)   IF(LLP2)WRITE(NOUT,9) 'D%NDIM0G   ',SIZE(D%NDIM0G   ),SHAPE(D%NDIM0G   )
+(  173)   IPOS = 1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:03      page 9
+
+(  174)   DO JA=1,NPRTRW
+(  175)     DO JMLOC=1,D%NUMPP(JA)
+(  176)       IM = D%NALLMS(D%NPTRMS(JA)+JMLOC-1)
+(  177)       D%NDIM0G(IM) = IPOS
+(  178)       IPOS = IPOS+2*DALD%NCPL2M(IM)
+(  179)     ENDDO
+(  180)   ENDDO
+(  181) # 182 "suemp_trans_preleg_mod.F90"
+(  182)   ALLOCATE(D%NLATLS(NPRTRW,NPRTRV))
+(  183)   IF(LLP2)WRITE(NOUT,9) 'D%NLATLS',SIZE(D%NLATLS   ),SHAPE(D%NLATLS )
+(  184)   ALLOCATE(D%NLATLE(NPRTRW,NPRTRV))
+(  185)   IF(LLP2)WRITE(NOUT,9) 'D%NLATLE',SIZE(D%NLATLE   ),SHAPE(D%NLATLE )
+(  186)   
+(  187)   D%NLATLS(:,:) = 9999
+(  188)   D%NLATLE(:,:) = -1
+(  189)   
+(  190)   ILATPP = R%NDGL/NPRTRW
+(  191)   IRESTL  = R%NDGL-NPRTRW*ILATPP
+(  192)   DO JW=1,NPRTRW
+(  193)     IF (JW > IRESTL) THEN
+(  194)       D%NLATLS(JW,1) = IRESTL*(ILATPP+1)+(JA-IRESTL-1)*ILATPP+1
+(  195)       D%NLATLE(JW,1) = D%NLATLS(JW,1)+ILATPP-1
+(  196)     ELSE
+(  197)       D%NLATLS(JW,1) = (JA-1)*(ILATPP+1)+1
+(  198)       D%NLATLE(JW,1) = D%NLATLS(JW,1)+ILATPP
+(  199)     ENDIF
+(  200)   ENDDO
+(  201)   ILAST=0
+(  202)   DO JW=1,NPRTRW
+(  203)     ILATPP = (D%NLATLE(JW,1)-D%NLATLS(JW,1)+1)/NPRTRV
+(  204)     IRESTL  = (D%NLATLE(JW,1)-D%NLATLS(JW,1)+1)-NPRTRV*ILATPP
+(  205)     DO JV=1,NPRTRV
+(  206)       IF (JV > IRESTL) THEN
+(  207)         D%NLATLS(JW,JV) = IRESTL*(ILATPP+1)+(JV-IRESTL-1)*ILATPP+1+ILAST
+(  208)         D%NLATLE(JW,JV) = D%NLATLS(JW,JV)+ILATPP-1
+(  209)       ELSE
+(  210)         D%NLATLS(JW,JV) = (JV-1)*(ILATPP+1)+1+ILAST
+(  211)         D%NLATLE(JW,JV) = D%NLATLS(JW,JV)+ILATPP
+(  212)       ENDIF
+(  213)     ENDDO
+(  214)     ILAST=D%NLATLE(JW,NPRTRV)
+(  215)   ENDDO
+(  216)   IF (LLP1) THEN
+(  217)     DO JW=1,NPRTRW
+(  218)       DO JV=1,NPRTRV
+(  219)         WRITE(NOUT,'(" JW=",I6," JV=",I6," D%NLATLS=",I6," D%NLATLE=",I6)')&
+(  220)            & JW,JV,D%NLATLS(JW,JV),D%NLATLE(JW,JV)
+(  221)       ENDDO
+(  222)     ENDDO
+(  223)   ENDIF
+(  224)   
+(  225)   ALLOCATE(D%NPMT(0:R%NSMAX))
+(  226)   IF(LLP2)WRITE(NOUT,9) 'D%NPMT   ',SIZE(D%NPMT   ),SHAPE(D%NPMT   )
+(  227)   ALLOCATE(D%NPMS(0:R%NSMAX))
+(  228)   IF(LLP2)WRITE(NOUT,9) 'D%NPMS   ',SIZE(D%NPMS   ),SHAPE(D%NPMS   )
+(  229)   ALLOCATE(D%NPMG(0:R%NSMAX))
+(  230)   IF(LLP2)WRITE(NOUT,9) 'D%NPMG   ',SIZE(D%NPMG   ),SHAPE(D%NPMG   )
+(  231)   IDT = R%NTMAX-R%NSMAX
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:03      page 10
+
+(  232)   INM = 0
+(  233)   DO JMLOC=1,D%NUMP
+(  234)     IMLOC = D%MYMS(JMLOC)
+(  235)   
+(  236)     INM = INM+R%NTMAX+2-IMLOC
+(  237)   ENDDO
+(  238)   INM = 0
+(  239)   DO JM=0,R%NSMAX
+(  240)   
+(  241)     INM = INM+R%NTMAX+2-JM
+(  242)   ENDDO
+(  243)   
+(  244)   D%NLEI3D = (R%NLEI3-1)/NPRTRW+1
+(  245) # 246 "suemp_trans_preleg_mod.F90"
+(  246) ENDIF
+(  247) # 249 "suemp_trans_preleg_mod.F90"
+(  249) IF (LHOOK) CALL DR_HOOK('SUEMP_TRANS_PRELEG_MOD:SUEMP_TRANS_PRELEG',1,ZHOOK_HANDLE)
+(  250) # 251 "suemp_trans_preleg_mod.F90"
+(  251) !     ------------------------------------------------------------------
+(  252) 9 FORMAT(1X,'ARRAY ',A10,' ALLOCATED ',8I8)
+(  253) # 254 "suemp_trans_preleg_mod.F90"
+(  254) END SUBROUTINE SUEMP_TRANS_PRELEG
+(  255) END MODULE SUEMP_TRANS_PRELEG_MOD

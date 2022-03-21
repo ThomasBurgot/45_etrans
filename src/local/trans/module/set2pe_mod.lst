@@ -1,0 +1,340 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:28      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: set2pe_mod.F90
+
+(    1) MODULE SET2PE_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SET2PE(KPE,KPRGPNS,KPRGPEW,KPRTRW,KPRTRV)
+(    4) 
+(    5) 
+(    6) !**** *SET2PE* - Convert from set numbers to PE number
+(    7) 
+(    8) !     Purpose.
+(    9) !     --------
+(   10) !        Convert from set numbers in either grid-point space or spectral space
+(   11) !        to PE number
+(   12) 
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !        *CALL* *SET2PE(KPRGPNS,KPRGPEW,KPRTRW,KPRTRV,KPE)
+(   16) 
+(   17) !        Explicit arguments :
+(   18) !        --------------------
+(   19) 
+(   20) !                  input :  KPRGPNS - integer A set number in grid space
+(   21) !                                     in the range 1 .. NPRGPNS
+(   22) !                           KPRGPEW - integer B set number in grid space
+(   23) !                                     in the range 1 .. NPRGPEW
+(   24) !                           KPRTRW  - integer A set number in spectral space
+(   25) !                                     in the range 1 .. NPRTRW
+(   26) !                           KPRTRV  - integer B set number in spectral space
+(   27) !                                     in the range 1 .. NPRTRV
+(   28) !                  output:  KPE     - integer processor number
+(   29) !                                     in the range 1 .. NPROC
+(   30) 
+(   31) !                  Normally, one pair of input set numbers will be set to zero
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:28      page 2
+
+(   32) !                  SET2PE will compute KPE from the first pair if they are valid numbers.
+(   33) !                  else from the other pair,
+(   34) 
+(   35) !        Implicit arguments :  YOMMP parameters
+(   36) !                              NPRGPNS,NPRGPEW,NPRTRW,NPRTRV,NPROC
+(   37) 
+(   38) !        --------------------
+(   39) !     Method.
+(   40) !     -------
+(   41) 
+(   42) !     Externals.
+(   43) !     ----------
+(   44) !         NONE
+(   45) 
+(   46) !     Reference.
+(   47) !     ----------
+(   48) !        ECMWF Research Department documentation of the IFS
+(   49) 
+(   50) !     Author.
+(   51) !     -------
+(   52) !        David Dent *ECMWF*
+(   53) 
+(   54) !     Modifications.
+(   55) !     --------------
+(   56) !        Original : 98-08-19
+(   57) !     ------------------------------------------------------------------
+(   58) 
+(   59) 
+(   60) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   61) 
+(   62) USE TPM_DISTR       ,ONLY : LEQ_REGIONS, NPRGPEW, NPRGPNS, NPRTRV, NPRTRW
+(   63) USE EQ_REGIONS_MOD  ,ONLY : N_REGIONS, N_REGIONS_NS
+(   64) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   65) !
+(   66) 
+(   67) IMPLICIT NONE
+(   68) INTEGER(KIND=JPIM),INTENT(IN) :: KPRGPNS,KPRGPEW,KPRTRW,KPRTRV
+(   69) INTEGER(KIND=JPIM),INTENT(OUT)  :: KPE
+(   70) 
+(   71) INTEGER(KIND=JPIM) :: IPE,JA
+(   72) !     ------------------------------------------------------------------
+(   73) 
+(   74) !*       1.    Choose from input parameters
+(   75) !              ----------------------------
+(   76) 
+(   77) IF(KPRGPNS > 0.AND.KPRGPEW > 0) THEN
+(   78) 
+(   79)   IF( LEQ_REGIONS )THEN
+(   80)     IF( KPRGPNS > N_REGIONS_NS )THEN
+(   81)       WRITE(*,'(A,2I8)') ' SET2PE INVALID ARGUMENT ',KPRGPNS,N_REGIONS_NS
+(   82)       CALL ABOR1(' SET2PE INVALID ARGUMENT ')
+(   83)     ENDIF
+(   84)     IF( KPRGPEW > N_REGIONS(KPRGPNS) )THEN
+(   85)       WRITE(*,'(A,2I8)') ' SET2PE INVALID ARGUMENT ',KPRGPEW,N_REGIONS(KPRGPNS)
+(   86)       CALL ABOR1(' SET2PE INVALID ARGUMENT ')
+(   87)     ENDIF
+(   88)     KPE=0
+(   89)     DO JA=1,KPRGPNS-1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:28      page 3
+
+(   90)       KPE=KPE+N_REGIONS(JA)
+(   91)     ENDDO
+(   92)     KPE=KPE+KPRGPEW
+(   93)   ELSE
+(   94)     IF(KPRGPNS <= NPRGPNS.AND.KPRGPEW <= NPRGPEW) THEN
+(   95) 
+(   96) !*       2.    Grid-space set values supplied
+(   97) !              ------------------------------
+(   98) 
+(   99)       KPE=(KPRGPNS-1)*NPRGPEW + KPRGPEW
+(  100)     ELSE
+(  101)       WRITE(*,'(A,2I8)') ' SET2PE INVALID ARGUMENT ',KPRGPNS,KPRGPEW
+(  102)       CALL ABORT_TRANS(' SET2PE INVALID ARGUMENT ')
+(  103)     ENDIF
+(  104)   ENDIF
+(  105) 
+(  106) ELSE
+(  107) 
+(  108) !*       3.    Spectral space set values supplied
+(  109) !              ----------------------------------
+(  110) 
+(  111)   IF(KPRTRW <= NPRTRW.AND.KPRTRV <= NPRTRV) THEN
+(  112)     KPE=(KPRTRW-1)*NPRTRV + KPRTRV
+(  113)   ELSE
+(  114)     WRITE(*,'(A,2I8)') ' SET2PE INVALID ARGUMENT ',KPRTRW,KPRTRV
+(  115)     CALL ABORT_TRANS(' SET2PE INVALID ARGUMENT ')
+(  116)   ENDIF
+(  117) 
+(  118) ENDIF
+(  119) 
+(  120) END SUBROUTINE SET2PE
+(  121) END MODULE SET2PE_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:28      page 4
+
+(    1) # 1 "set2pe_mod.F90"
+(    1) MODULE SET2PE_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SET2PE(KPE,KPRGPNS,KPRGPEW,KPRTRW,KPRTRV)
+(    4) # 6 "set2pe_mod.F90"
+(    6) !**** *SET2PE* - Convert from set numbers to PE number
+(    7) # 8 "set2pe_mod.F90"
+(    8) !     Purpose.
+(    9) !     --------
+(   10) !        Convert from set numbers in either grid-point space or spectral space
+(   11) !        to PE number
+(   12) # 13 "set2pe_mod.F90"
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !        *CALL* *SET2PE(KPRGPNS,KPRGPEW,KPRTRW,KPRTRV,KPE)
+(   16) # 17 "set2pe_mod.F90"
+(   17) !        Explicit arguments :
+(   18) !        --------------------
+(   19) # 20 "set2pe_mod.F90"
+(   20) !                  input :  KPRGPNS - integer A set number in grid space
+(   21) !                                     in the range 1 .. NPRGPNS
+(   22) !                           KPRGPEW - integer B set number in grid space
+(   23) !                                     in the range 1 .. NPRGPEW
+(   24) !                           KPRTRW  - integer A set number in spectral space
+(   25) !                                     in the range 1 .. NPRTRW
+(   26) !                           KPRTRV  - integer B set number in spectral space
+(   27) !                                     in the range 1 .. NPRTRV
+(   28) !                  output:  KPE     - integer processor number
+(   29) !                                     in the range 1 .. NPROC
+(   30) # 31 "set2pe_mod.F90"
+(   31) !                  Normally, one pair of input set numbers will be set to zero
+(   32) !                  SET2PE will compute KPE from the first pair if they are valid numbers.
+(   33) !                  else from the other pair,
+(   34) # 35 "set2pe_mod.F90"
+(   35) !        Implicit arguments :  YOMMP parameters
+(   36) !                              NPRGPNS,NPRGPEW,NPRTRW,NPRTRV,NPROC
+(   37) # 38 "set2pe_mod.F90"
+(   38) !        --------------------
+(   39) !     Method.
+(   40) !     -------
+(   41) # 42 "set2pe_mod.F90"
+(   42) !     Externals.
+(   43) !     ----------
+(   44) !         NONE
+(   45) # 46 "set2pe_mod.F90"
+(   46) !     Reference.
+(   47) !     ----------
+(   48) !        ECMWF Research Department documentation of the IFS
+(   49) # 50 "set2pe_mod.F90"
+(   50) !     Author.
+(   51) !     -------
+(   52) !        David Dent *ECMWF*
+(   53) # 54 "set2pe_mod.F90"
+(   54) !     Modifications.
+(   55) !     --------------
+(   56) !        Original : 98-08-19
+(   57) !     ------------------------------------------------------------------
+(   58) # 60 "set2pe_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:28      page 5
+
+(   60) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   61) # 62 "set2pe_mod.F90"
+(   62) USE TPM_DISTR       ,ONLY : LEQ_REGIONS, NPRGPEW, NPRGPNS, NPRTRV, NPRTRW
+(   63) USE EQ_REGIONS_MOD  ,ONLY : N_REGIONS, N_REGIONS_NS
+(   64) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   65) !
+(   66) # 67 "set2pe_mod.F90"
+(   67) IMPLICIT NONE
+(   68) INTEGER(KIND=JPIM),INTENT(IN) :: KPRGPNS,KPRGPEW,KPRTRW,KPRTRV
+(   69) INTEGER(KIND=JPIM),INTENT(OUT)  :: KPE
+(   70) # 71 "set2pe_mod.F90"
+(   71) INTEGER(KIND=JPIM) :: IPE,JA
+(   72) !     ------------------------------------------------------------------
+(   73) # 74 "set2pe_mod.F90"
+(   74) !*       1.    Choose from input parameters
+(   75) !              ----------------------------
+(   76) # 77 "set2pe_mod.F90"
+(   77) IF(KPRGPNS > 0.AND.KPRGPEW > 0) THEN
+(   78) # 79 "set2pe_mod.F90"
+(   79)   IF( LEQ_REGIONS )THEN
+(   80)     IF( KPRGPNS > N_REGIONS_NS )THEN
+(   81)       WRITE(*,'(A,2I8)') ' SET2PE INVALID ARGUMENT ',KPRGPNS,N_REGIONS_NS
+(   82)       CALL ABOR1(' SET2PE INVALID ARGUMENT ')
+(   83)     ENDIF
+(   84)     IF( KPRGPEW > N_REGIONS(KPRGPNS) )THEN
+(   85)       WRITE(*,'(A,2I8)') ' SET2PE INVALID ARGUMENT ',KPRGPEW,N_REGIONS(KPRGPNS)
+(   86)       CALL ABOR1(' SET2PE INVALID ARGUMENT ')
+(   87)     ENDIF
+(   88)     KPE=0
+(   89)     DO JA=1,KPRGPNS-1
+(   90)       KPE=KPE+N_REGIONS(JA)
+(   91)     ENDDO
+(   92)     KPE=KPE+KPRGPEW
+(   93)   ELSE
+(   94)     IF(KPRGPNS <= NPRGPNS.AND.KPRGPEW <= NPRGPEW) THEN
+(   95) # 96 "set2pe_mod.F90"
+(   96) !*       2.    Grid-space set values supplied
+(   97) !              ------------------------------
+(   98) # 99 "set2pe_mod.F90"
+(   99)       KPE=(KPRGPNS-1)*NPRGPEW + KPRGPEW
+(  100)     ELSE
+(  101)       WRITE(*,'(A,2I8)') ' SET2PE INVALID ARGUMENT ',KPRGPNS,KPRGPEW
+(  102)       CALL ABORT_TRANS(' SET2PE INVALID ARGUMENT ')
+(  103)     ENDIF
+(  104)   ENDIF
+(  105) # 106 "set2pe_mod.F90"
+(  106) ELSE
+(  107) # 108 "set2pe_mod.F90"
+(  108) !*       3.    Spectral space set values supplied
+(  109) !              ----------------------------------
+(  110) # 111 "set2pe_mod.F90"
+(  111)   IF(KPRTRW <= NPRTRW.AND.KPRTRV <= NPRTRV) THEN
+(  112)     KPE=(KPRTRW-1)*NPRTRV + KPRTRV
+(  113)   ELSE
+(  114)     WRITE(*,'(A,2I8)') ' SET2PE INVALID ARGUMENT ',KPRTRW,KPRTRV
+(  115)     CALL ABORT_TRANS(' SET2PE INVALID ARGUMENT ')
+(  116)   ENDIF
+(  117) # 118 "set2pe_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:28      page 6
+
+(  118) ENDIF
+(  119) # 120 "set2pe_mod.F90"
+(  120) END SUBROUTINE SET2PE
+(  121) END MODULE SET2PE_MOD

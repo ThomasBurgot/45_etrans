@@ -1,0 +1,718 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:21      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eftinv_ctlad_mod.F90
+
+(    1) MODULE EFTINV_CTLAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EFTINV_CTLAD(KF_UV_G,KF_SCALARS_G,&
+(    4)  & KF_UV,KF_SCALARS,KF_SCDERS,KF_GP,KF_FS,KF_OUT_LT,KVSETUV,KVSETSC,KPTRGP, &
+(    5)  & KVSETSC3A,KVSETSC3B,KVSETSC2,&
+(    6)  & PGP,PGPUV,PGP3A,PGP3B,PGP2)
+(    7) 
+(    8) !**** *EFTINV_CTLAD - Inverse Fourier transform control - adjoint
+(    9) 
+(   10) !     Purpose. Control routine for Fourier to Gridpoint transform
+(   11) !     --------
+(   12) 
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !        CALL EFTINV_CTLAD(..)
+(   16) 
+(   17) !        Explicit arguments :
+(   18) !        --------------------
+(   19) !        PGP     -  gridpoint array
+(   20) !        KF_UV_G      - global number of spectral u-v fields
+(   21) !        KF_SCALARS_G - global number of scalar spectral fields
+(   22) !        KF_UV        - local number of spectral u-v fields
+(   23) !        KF_SCALARS   - local number of scalar spectral fields
+(   24) !        KF_SCDERS    - local number of derivatives of scalar spectral fields
+(   25) !        KF_GP        - total number of output gridpoint fields
+(   26) !        KF_FS        - total number of fields in fourier space
+(   27) !        KF_OUT_LT    - total number of fields coming out from inverse LT
+(   28) !        KVSETUV - "B"  set in spectral/fourier space for
+(   29) !                   u and v variables
+(   30) !        KVSETSC - "B" set in spectral/fourier space for
+(   31) !                  scalar variables
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:21      page 2
+
+(   32) !        KPTRGP - pointer array to fi3elds in gridpoint space
+(   33) 
+(   34) !     Method.
+(   35) !     -------
+(   36) 
+(   37) !     Externals.  TRLTOG      - transposition routine
+(   38) !     ----------  FOURIER_IN  - copy fourier data from Fourier buffer
+(   39) !                 FTINV       - fourier transform
+(   40) !                 FSC         - Fourier space computations
+(   41) 
+(   42) !     Author.
+(   43) !     -------
+(   44) !        Mats Hamrud *ECMWF*
+(   45) 
+(   46) !     Modifications.
+(   47) !     --------------
+(   48) !        Original : 00-03-03
+(   49) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   50) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   51) 
+(   52) !     ------------------------------------------------------------------
+(   53) 
+(   54) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   55) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   56) 
+(   57) USE TPM_GEN         ,ONLY : NERR
+(   58) USE TPM_DIM         ,ONLY : R
+(   59) !USE TPM_GEOMETRY
+(   60) USE TPM_TRANS       ,ONLY : FOUBUF, LDIVGP, LSCDERS, LUVDER, LVORGP
+(   61) USE TPM_DISTR       ,ONLY : D
+(   62) 
+(   63) USE FOURIER_INAD_MOD ,ONLY : FOURIER_INAD
+(   64) USE EFSCAD_MOD      ,ONLY : EFSCAD
+(   65) USE EFTINVAD_MOD    ,ONLY : EFTINVAD
+(   66) USE TRGTOL_MOD      ,ONLY : TRGTOL
+(   67) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   68) 
+(   69) USE EXTPER_MOD      ,ONLY : EXTPER
+(   70) !
+(   71) 
+(   72) IMPLICIT NONE
+(   73) 
+(   74) INTEGER(KIND=JPIM) ,INTENT(IN) :: KF_UV_G
+(   75) INTEGER(KIND=JPIM) ,INTENT(IN) :: KF_SCALARS_G
+(   76) INTEGER(KIND=JPIM) ,INTENT(IN) :: KF_UV
+(   77) INTEGER(KIND=JPIM) ,INTENT(IN) :: KF_SCALARS
+(   78) INTEGER(KIND=JPIM) ,INTENT(IN) :: KF_SCDERS
+(   79) INTEGER(KIND=JPIM) ,INTENT(IN) :: KF_GP
+(   80) INTEGER(KIND=JPIM) ,INTENT(IN) :: KF_FS
+(   81) INTEGER(KIND=JPIM) ,INTENT(IN) :: KF_OUT_LT
+(   82) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETUV(:)
+(   83) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC(:)
+(   84) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3A(:)
+(   85) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3B(:)
+(   86) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC2(:)
+(   87) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KPTRGP(:)
+(   88) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP(:,:,:)
+(   89) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGPUV(:,:,:,:)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:21      page 3
+
+(   90) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP3A(:,:,:,:)
+(   91) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP3B(:,:,:,:)
+(   92) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP2(:,:,:)
+(   93) 
+(   94) !     ------------------------------------------------------------------
+(   95) 
+(   96) REAL(KIND=JPRB),TARGET  :: ZGTF(KF_FS,D%NLENGTF)
+(   97) REAL(KIND=JPRB),TARGET  :: ZDUM(1,D%NLENGTF)
+(   98) REAL(KIND=JPRB),POINTER :: ZUV(:,:)
+(   99) REAL(KIND=JPRB),POINTER :: ZSCALAR(:,:)
+(  100) REAL(KIND=JPRB),POINTER :: ZNSDERS(:,:)
+(  101) REAL(KIND=JPRB),POINTER :: ZEWDERS(:,:)
+(  102) REAL(KIND=JPRB),POINTER :: ZUVDERS(:,:)
+(  103) 
+(  104) INTEGER(KIND=JPIM) :: IST, IBLEN
+(  105) INTEGER(KIND=JPIM) :: IVSETUV(KF_UV_G)
+(  106) INTEGER(KIND=JPIM) :: IVSETSC(KF_SCALARS_G)
+(  107) INTEGER(KIND=JPIM) :: IVSET(KF_GP)
+(  108) INTEGER(KIND=JPIM) :: J3,JGL,IGL,IOFF,IFGP2,IFGP3A,IFGP3B,IGP3APAR,IGP3BPAR
+(  109) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  110) 
+(  111) !     ------------------------------------------------------------------
+(  112) 
+(  113) !   4.  Transposition
+(  114) 
+(  115) IF (LHOOK) CALL DR_HOOK('EFTINV_CTLAD_MOD:EFTINV_CTLAD',0,ZHOOK_HANDLE)
+(  116) 
+(  117) ZGTF(:,:)=0._JPRB
+(  118) 
+(  119) IF(PRESENT(KVSETUV)) THEN
+(  120)   IVSETUV(:) = KVSETUV(:)
+(  121) ELSE
+(  122)   IVSETUV(:) = -1
+(  123) ENDIF
+(  124) 
+(  125) IVSETSC(:)=-1
+(  126) IF(PRESENT(KVSETSC)) THEN
+(  127)   IVSETSC(:) = KVSETSC(:)
+(  128) ELSE
+(  129)   IOFF=0
+(  130)   IF(PRESENT(KVSETSC2)) THEN
+(  131)     IFGP2=UBOUND(KVSETSC2,1)
+(  132)     IVSETSC(1:IFGP2)=KVSETSC2(:)
+(  133)     IOFF=IOFF+IFGP2
+(  134)   ENDIF
+(  135)   IF(PRESENT(KVSETSC3A)) THEN
+(  136)     IFGP3A=UBOUND(KVSETSC3A,1)
+(  137)     IGP3APAR=UBOUND(PGP3A,3)
+(  138)     IF(LSCDERS) IGP3APAR=IGP3APAR/3
+(  139)     DO J3=1,IGP3APAR
+(  140)       IVSETSC(IOFF+1:IOFF+IFGP3A)=KVSETSC3A(:)
+(  141)       IOFF=IOFF+IFGP3A
+(  142)     ENDDO
+(  143)   ENDIF
+(  144)   IF(PRESENT(KVSETSC3B)) THEN
+(  145)     IFGP3B=UBOUND(KVSETSC3B,1)
+(  146)     IGP3BPAR=UBOUND(PGP3B,3)
+(  147)     IF(LSCDERS) IGP3BPAR=IGP3BPAR/3
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:21      page 4
+
+(  148)     DO J3=1,IGP3BPAR
+(  149)       IVSETSC(IOFF+1:IOFF+IFGP3B)=KVSETSC3B(:)
+(  150)       IOFF=IOFF+IFGP3B
+(  151)     ENDDO
+(  152)   ENDIF
+(  153)   IF(IOFF /= KF_SCALARS_G ) THEN
+(  154)     WRITE(NERR,*)'FTINV_CTLAD:IOFF,KF_SCALARS_G ',IOFF,KF_SCALARS_G
+(  155)     CALL ABORT_TRANS('FTINV_CTLAD_MOD:IOFF /= KF_SCALARS_G')
+(  156)   ENDIF
+(  157) ENDIF
+(  158) 
+(  159) IST = 1
+(  160) IF(KF_UV_G > 0) THEN
+(  161)   IF( LVORGP) THEN
+(  162)     IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  163)     IST = IST+KF_UV_G
+(  164)   ENDIF
+(  165)   IF( LDIVGP) THEN
+(  166)     IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  167)     IST = IST+KF_UV_G
+(  168)   ENDIF
+(  169)   IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  170)   IST = IST+KF_UV_G
+(  171)   IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  172)   IST = IST+KF_UV_G
+(  173) ENDIF
+(  174) IF(KF_SCALARS_G > 0) THEN
+(  175)   IVSET(IST:IST+KF_SCALARS_G-1) = IVSETSC(:)
+(  176)   IST = IST+KF_SCALARS_G
+(  177)   IF(LSCDERS) THEN
+(  178)     IVSET(IST:IST+KF_SCALARS_G-1) = IVSETSC(:)
+(  179)     IST = IST+KF_SCALARS_G
+(  180)   ENDIF
+(  181) ENDIF
+(  182) IF(KF_UV_G > 0 .AND. LUVDER) THEN
+(  183)   IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  184)   IST = IST+KF_UV_G
+(  185)   IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  186)   IST = IST+KF_UV_G
+(  187) ENDIF
+(  188) IF(KF_SCALARS_G > 0) THEN
+(  189)   IF(LSCDERS) THEN
+(  190)     IVSET(IST:IST+KF_SCALARS_G-1) = IVSETSC(:)
+(  191)     IST = IST+KF_SCALARS_G
+(  192)   ENDIF
+(  193) ENDIF
+(  194) 
+(  195) CALL GSTATS(182,0)
+(  196) CALL TRGTOL(ZGTF,KF_FS,KF_GP,KF_SCALARS_G,IVSET,KPTRGP,&
+(  197)  & PGP,PGPUV,PGP3A,PGP3B,PGP2)
+(  198) CALL GSTATS(182,1)
+(  199) 
+(  200) ! Periodization of auxiliary fields in x direction
+(  201) IF(R%NNOEXTZL>0) THEN
+(  202)   CALL EXTPER(ZGTF,R%NDLON+R%NNOEXTZL,1,R%NDLON,KF_FS,D%NDGL_FS,D%NSTAGTF,0)
+(  203) ENDIF
+(  204) 
+(  205) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:21      page 5
+
+(  206) !   3.  Fourier transform
+(  207) 
+(  208) IF(KF_UV > 0 .OR. KF_SCDERS > 0) THEN
+(  209)   IST = 1
+(  210)   IF(LVORGP) THEN
+(  211)     IST = IST+KF_UV
+(  212)   ENDIF
+(  213)   IF(LDIVGP) THEN
+(  214)     IST = IST+KF_UV
+(  215)   ENDIF
+(  216)   ZUV => ZGTF(IST:IST+2*KF_UV-1,:)
+(  217)   IST = IST+2*KF_UV
+(  218)   ZSCALAR => ZGTF(IST:IST+KF_SCALARS-1,:)
+(  219)   IST = IST+KF_SCALARS
+(  220)   ZNSDERS => ZGTF(IST:IST+KF_SCDERS-1,:)
+(  221)   IST = IST+KF_SCDERS
+(  222)   IF(LUVDER) THEN
+(  223)     ZUVDERS => ZGTF(IST:IST+2*KF_UV-1,:)
+(  224)     IST = IST+2*KF_UV
+(  225)   ELSE
+(  226)     ZUVDERS => ZDUM(1:1,:)
+(  227)   ENDIF
+(  228)   IF(KF_SCDERS > 0) THEN
+(  229)     ZEWDERS => ZGTF(IST:IST+KF_SCDERS-1,:)
+(  230)   ELSE
+(  231)     ZEWDERS => ZDUM(1:1,:)
+(  232)   ENDIF
+(  233) ENDIF
+(  234) 
+(  235) IBLEN = D%NLENGT0B*2*KF_OUT_LT
+(  236) IF (ALLOCATED(FOUBUF)) THEN
+(  237)   IF (MAX(1,IBLEN) > SIZE(FOUBUF)) THEN
+(  238)     DEALLOCATE(FOUBUF)
+(  239)     ALLOCATE(FOUBUF(MAX(1,IBLEN)))
+(  240)   ENDIF
+(  241) ELSE
+(  242)   ALLOCATE(FOUBUF(MAX(1,IBLEN)))
+(  243) ENDIF
+(  244) 
+(  245) CALL GSTATS(132,0)
+(  246) 
+(  247) CALL GSTATS(1641,0)
+(  248) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JGL,IGL)
+(  249) DO JGL=1,D%NDGL_FS
+(  250)   IGL = JGL
+(  251)   IF(KF_FS > 0) THEN
+(  252)     CALL EFTINVAD(ZGTF,KF_FS,IGL)
+(  253)   ENDIF
+(  254) 
+(  255) !   2.  Fourier space computations
+(  256) 
+(  257)   IF(KF_UV > 0 .OR. KF_SCDERS > 0) THEN
+(  258)     CALL EFSCAD(IGL,KF_UV,KF_SCALARS,KF_SCDERS,&
+(  259)      & ZUV,ZSCALAR,ZNSDERS,ZEWDERS,ZUVDERS)
+(  260)   ENDIF
+(  261) 
+(  262) !   1. Copy Fourier data to local array
+(  263) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:21      page 6
+
+(  264)   CALL FOURIER_INAD(ZGTF,KF_OUT_LT,IGL)
+(  265) 
+(  266) ENDDO
+(  267) !$OMP END PARALLEL DO
+(  268) CALL GSTATS(1641,1)
+(  269) 
+(  270) IF(KF_UV > 0 .OR. KF_SCDERS > 0) THEN
+(  271)   NULLIFY(ZUV)
+(  272)   NULLIFY(ZSCALAR)
+(  273)   NULLIFY(ZNSDERS)
+(  274)   NULLIFY(ZUVDERS)
+(  275)   NULLIFY(ZEWDERS)
+(  276) ENDIF
+(  277) 
+(  278) CALL GSTATS(132,1)
+(  279) IF (LHOOK) CALL DR_HOOK('EFTINV_CTLAD_MOD:EFTINV_CTLAD',1,ZHOOK_HANDLE)
+(  280) 
+(  281) !     ------------------------------------------------------------------
+(  282) 
+(  283) END SUBROUTINE EFTINV_CTLAD
+(  284) END MODULE EFTINV_CTLAD_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:21      page 7
+
+(    1) # 1 "eftinv_ctlad_mod.F90"
+(    1) MODULE EFTINV_CTLAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EFTINV_CTLAD(KF_UV_G,KF_SCALARS_G,&
+(    4)  & KF_UV,KF_SCALARS,KF_SCDERS,KF_GP,KF_FS,KF_OUT_LT,KVSETUV,KVSETSC,KPTRGP, &
+(    5)  & KVSETSC3A,KVSETSC3B,KVSETSC2,&
+(    6)  & PGP,PGPUV,PGP3A,PGP3B,PGP2)
+(    7) # 8 "eftinv_ctlad_mod.F90"
+(    8) !**** *EFTINV_CTLAD - Inverse Fourier transform control - adjoint
+(    9) # 10 "eftinv_ctlad_mod.F90"
+(   10) !     Purpose. Control routine for Fourier to Gridpoint transform
+(   11) !     --------
+(   12) # 13 "eftinv_ctlad_mod.F90"
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !        CALL EFTINV_CTLAD(..)
+(   16) # 17 "eftinv_ctlad_mod.F90"
+(   17) !        Explicit arguments :
+(   18) !        --------------------
+(   19) !        PGP     -  gridpoint array
+(   20) !        KF_UV_G      - global number of spectral u-v fields
+(   21) !        KF_SCALARS_G - global number of scalar spectral fields
+(   22) !        KF_UV        - local number of spectral u-v fields
+(   23) !        KF_SCALARS   - local number of scalar spectral fields
+(   24) !        KF_SCDERS    - local number of derivatives of scalar spectral fields
+(   25) !        KF_GP        - total number of output gridpoint fields
+(   26) !        KF_FS        - total number of fields in fourier space
+(   27) !        KF_OUT_LT    - total number of fields coming out from inverse LT
+(   28) !        KVSETUV - "B"  set in spectral/fourier space for
+(   29) !                   u and v variables
+(   30) !        KVSETSC - "B" set in spectral/fourier space for
+(   31) !                  scalar variables
+(   32) !        KPTRGP - pointer array to fi3elds in gridpoint space
+(   33) # 34 "eftinv_ctlad_mod.F90"
+(   34) !     Method.
+(   35) !     -------
+(   36) # 37 "eftinv_ctlad_mod.F90"
+(   37) !     Externals.  TRLTOG      - transposition routine
+(   38) !     ----------  FOURIER_IN  - copy fourier data from Fourier buffer
+(   39) !                 FTINV       - fourier transform
+(   40) !                 FSC         - Fourier space computations
+(   41) # 42 "eftinv_ctlad_mod.F90"
+(   42) !     Author.
+(   43) !     -------
+(   44) !        Mats Hamrud *ECMWF*
+(   45) # 46 "eftinv_ctlad_mod.F90"
+(   46) !     Modifications.
+(   47) !     --------------
+(   48) !        Original : 00-03-03
+(   49) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   50) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   51) # 52 "eftinv_ctlad_mod.F90"
+(   52) !     ------------------------------------------------------------------
+(   53) # 54 "eftinv_ctlad_mod.F90"
+(   54) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   55) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   56) # 57 "eftinv_ctlad_mod.F90"
+(   57) USE TPM_GEN         ,ONLY : NERR
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:21      page 8
+
+(   58) USE TPM_DIM         ,ONLY : R
+(   59) !USE TPM_GEOMETRY
+(   60) USE TPM_TRANS       ,ONLY : FOUBUF, LDIVGP, LSCDERS, LUVDER, LVORGP
+(   61) USE TPM_DISTR       ,ONLY : D
+(   62) # 63 "eftinv_ctlad_mod.F90"
+(   63) USE FOURIER_INAD_MOD ,ONLY : FOURIER_INAD
+(   64) USE EFSCAD_MOD      ,ONLY : EFSCAD
+(   65) USE EFTINVAD_MOD    ,ONLY : EFTINVAD
+(   66) USE TRGTOL_MOD      ,ONLY : TRGTOL
+(   67) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   68) # 69 "eftinv_ctlad_mod.F90"
+(   69) USE EXTPER_MOD      ,ONLY : EXTPER
+(   70) !
+(   71) # 72 "eftinv_ctlad_mod.F90"
+(   72) IMPLICIT NONE
+(   73) # 74 "eftinv_ctlad_mod.F90"
+(   74) INTEGER(KIND=JPIM) ,INTENT(IN) :: KF_UV_G
+(   75) INTEGER(KIND=JPIM) ,INTENT(IN) :: KF_SCALARS_G
+(   76) INTEGER(KIND=JPIM) ,INTENT(IN) :: KF_UV
+(   77) INTEGER(KIND=JPIM) ,INTENT(IN) :: KF_SCALARS
+(   78) INTEGER(KIND=JPIM) ,INTENT(IN) :: KF_SCDERS
+(   79) INTEGER(KIND=JPIM) ,INTENT(IN) :: KF_GP
+(   80) INTEGER(KIND=JPIM) ,INTENT(IN) :: KF_FS
+(   81) INTEGER(KIND=JPIM) ,INTENT(IN) :: KF_OUT_LT
+(   82) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETUV(:)
+(   83) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC(:)
+(   84) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3A(:)
+(   85) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3B(:)
+(   86) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC2(:)
+(   87) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KPTRGP(:)
+(   88) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP(:,:,:)
+(   89) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGPUV(:,:,:,:)
+(   90) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP3A(:,:,:,:)
+(   91) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP3B(:,:,:,:)
+(   92) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP2(:,:,:)
+(   93) # 94 "eftinv_ctlad_mod.F90"
+(   94) !     ------------------------------------------------------------------
+(   95) # 96 "eftinv_ctlad_mod.F90"
+(   96) REAL(KIND=JPRB),TARGET  :: ZGTF(KF_FS,D%NLENGTF)
+(   97) REAL(KIND=JPRB),TARGET  :: ZDUM(1,D%NLENGTF)
+(   98) REAL(KIND=JPRB),POINTER :: ZUV(:,:)
+(   99) REAL(KIND=JPRB),POINTER :: ZSCALAR(:,:)
+(  100) REAL(KIND=JPRB),POINTER :: ZNSDERS(:,:)
+(  101) REAL(KIND=JPRB),POINTER :: ZEWDERS(:,:)
+(  102) REAL(KIND=JPRB),POINTER :: ZUVDERS(:,:)
+(  103) # 104 "eftinv_ctlad_mod.F90"
+(  104) INTEGER(KIND=JPIM) :: IST, IBLEN
+(  105) INTEGER(KIND=JPIM) :: IVSETUV(KF_UV_G)
+(  106) INTEGER(KIND=JPIM) :: IVSETSC(KF_SCALARS_G)
+(  107) INTEGER(KIND=JPIM) :: IVSET(KF_GP)
+(  108) INTEGER(KIND=JPIM) :: J3,JGL,IGL,IOFF,IFGP2,IFGP3A,IFGP3B,IGP3APAR,IGP3BPAR
+(  109) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  110) # 111 "eftinv_ctlad_mod.F90"
+(  111) !     ------------------------------------------------------------------
+(  112) # 113 "eftinv_ctlad_mod.F90"
+(  113) !   4.  Transposition
+(  114) # 115 "eftinv_ctlad_mod.F90"
+(  115) IF (LHOOK) CALL DR_HOOK('EFTINV_CTLAD_MOD:EFTINV_CTLAD',0,ZHOOK_HANDLE)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:21      page 9
+
+(  116) # 117 "eftinv_ctlad_mod.F90"
+(  117) ZGTF(:,:)=0._JPRB
+(  118) # 119 "eftinv_ctlad_mod.F90"
+(  119) IF(PRESENT(KVSETUV)) THEN
+(  120)   IVSETUV(:) = KVSETUV(:)
+(  121) ELSE
+(  122)   IVSETUV(:) = -1
+(  123) ENDIF
+(  124) # 125 "eftinv_ctlad_mod.F90"
+(  125) IVSETSC(:)=-1
+(  126) IF(PRESENT(KVSETSC)) THEN
+(  127)   IVSETSC(:) = KVSETSC(:)
+(  128) ELSE
+(  129)   IOFF=0
+(  130)   IF(PRESENT(KVSETSC2)) THEN
+(  131)     IFGP2=UBOUND(KVSETSC2,1)
+(  132)     IVSETSC(1:IFGP2)=KVSETSC2(:)
+(  133)     IOFF=IOFF+IFGP2
+(  134)   ENDIF
+(  135)   IF(PRESENT(KVSETSC3A)) THEN
+(  136)     IFGP3A=UBOUND(KVSETSC3A,1)
+(  137)     IGP3APAR=UBOUND(PGP3A,3)
+(  138)     IF(LSCDERS) IGP3APAR=IGP3APAR/3
+(  139)     DO J3=1,IGP3APAR
+(  140)       IVSETSC(IOFF+1:IOFF+IFGP3A)=KVSETSC3A(:)
+(  141)       IOFF=IOFF+IFGP3A
+(  142)     ENDDO
+(  143)   ENDIF
+(  144)   IF(PRESENT(KVSETSC3B)) THEN
+(  145)     IFGP3B=UBOUND(KVSETSC3B,1)
+(  146)     IGP3BPAR=UBOUND(PGP3B,3)
+(  147)     IF(LSCDERS) IGP3BPAR=IGP3BPAR/3
+(  148)     DO J3=1,IGP3BPAR
+(  149)       IVSETSC(IOFF+1:IOFF+IFGP3B)=KVSETSC3B(:)
+(  150)       IOFF=IOFF+IFGP3B
+(  151)     ENDDO
+(  152)   ENDIF
+(  153)   IF(IOFF /= KF_SCALARS_G ) THEN
+(  154)     WRITE(NERR,*)'FTINV_CTLAD:IOFF,KF_SCALARS_G ',IOFF,KF_SCALARS_G
+(  155)     CALL ABORT_TRANS('FTINV_CTLAD_MOD:IOFF /= KF_SCALARS_G')
+(  156)   ENDIF
+(  157) ENDIF
+(  158) # 159 "eftinv_ctlad_mod.F90"
+(  159) IST = 1
+(  160) IF(KF_UV_G > 0) THEN
+(  161)   IF( LVORGP) THEN
+(  162)     IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  163)     IST = IST+KF_UV_G
+(  164)   ENDIF
+(  165)   IF( LDIVGP) THEN
+(  166)     IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  167)     IST = IST+KF_UV_G
+(  168)   ENDIF
+(  169)   IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  170)   IST = IST+KF_UV_G
+(  171)   IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  172)   IST = IST+KF_UV_G
+(  173) ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:21      page 10
+
+(  174) IF(KF_SCALARS_G > 0) THEN
+(  175)   IVSET(IST:IST+KF_SCALARS_G-1) = IVSETSC(:)
+(  176)   IST = IST+KF_SCALARS_G
+(  177)   IF(LSCDERS) THEN
+(  178)     IVSET(IST:IST+KF_SCALARS_G-1) = IVSETSC(:)
+(  179)     IST = IST+KF_SCALARS_G
+(  180)   ENDIF
+(  181) ENDIF
+(  182) IF(KF_UV_G > 0 .AND. LUVDER) THEN
+(  183)   IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  184)   IST = IST+KF_UV_G
+(  185)   IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  186)   IST = IST+KF_UV_G
+(  187) ENDIF
+(  188) IF(KF_SCALARS_G > 0) THEN
+(  189)   IF(LSCDERS) THEN
+(  190)     IVSET(IST:IST+KF_SCALARS_G-1) = IVSETSC(:)
+(  191)     IST = IST+KF_SCALARS_G
+(  192)   ENDIF
+(  193) ENDIF
+(  194) # 195 "eftinv_ctlad_mod.F90"
+(  195) CALL GSTATS(182,0)
+(  196) CALL TRGTOL(ZGTF,KF_FS,KF_GP,KF_SCALARS_G,IVSET,KPTRGP,&
+(  197)  & PGP,PGPUV,PGP3A,PGP3B,PGP2)
+(  198) CALL GSTATS(182,1)
+(  199) # 200 "eftinv_ctlad_mod.F90"
+(  200) ! Periodization of auxiliary fields in x direction
+(  201) IF(R%NNOEXTZL>0) THEN
+(  202)   CALL EXTPER(ZGTF,R%NDLON+R%NNOEXTZL,1,R%NDLON,KF_FS,D%NDGL_FS,D%NSTAGTF,0)
+(  203) ENDIF
+(  204) # 206 "eftinv_ctlad_mod.F90"
+(  206) !   3.  Fourier transform
+(  207) # 208 "eftinv_ctlad_mod.F90"
+(  208) IF(KF_UV > 0 .OR. KF_SCDERS > 0) THEN
+(  209)   IST = 1
+(  210)   IF(LVORGP) THEN
+(  211)     IST = IST+KF_UV
+(  212)   ENDIF
+(  213)   IF(LDIVGP) THEN
+(  214)     IST = IST+KF_UV
+(  215)   ENDIF
+(  216)   ZUV => ZGTF(IST:IST+2*KF_UV-1,:)
+(  217)   IST = IST+2*KF_UV
+(  218)   ZSCALAR => ZGTF(IST:IST+KF_SCALARS-1,:)
+(  219)   IST = IST+KF_SCALARS
+(  220)   ZNSDERS => ZGTF(IST:IST+KF_SCDERS-1,:)
+(  221)   IST = IST+KF_SCDERS
+(  222)   IF(LUVDER) THEN
+(  223)     ZUVDERS => ZGTF(IST:IST+2*KF_UV-1,:)
+(  224)     IST = IST+2*KF_UV
+(  225)   ELSE
+(  226)     ZUVDERS => ZDUM(1:1,:)
+(  227)   ENDIF
+(  228)   IF(KF_SCDERS > 0) THEN
+(  229)     ZEWDERS => ZGTF(IST:IST+KF_SCDERS-1,:)
+(  230)   ELSE
+(  231)     ZEWDERS => ZDUM(1:1,:)
+(  232)   ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:21      page 11
+
+(  233) ENDIF
+(  234) # 235 "eftinv_ctlad_mod.F90"
+(  235) IBLEN = D%NLENGT0B*2*KF_OUT_LT
+(  236) IF (ALLOCATED(FOUBUF)) THEN
+(  237)   IF (MAX(1,IBLEN) > SIZE(FOUBUF)) THEN
+(  238)     DEALLOCATE(FOUBUF)
+(  239)     ALLOCATE(FOUBUF(MAX(1,IBLEN)))
+(  240)   ENDIF
+(  241) ELSE
+(  242)   ALLOCATE(FOUBUF(MAX(1,IBLEN)))
+(  243) ENDIF
+(  244) # 245 "eftinv_ctlad_mod.F90"
+(  245) CALL GSTATS(132,0)
+(  246) # 247 "eftinv_ctlad_mod.F90"
+(  247) CALL GSTATS(1641,0)
+(  248) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JGL,IGL)
+(  249) DO JGL=1,D%NDGL_FS
+(  250)   IGL = JGL
+(  251)   IF(KF_FS > 0) THEN
+(  252)     CALL EFTINVAD(ZGTF,KF_FS,IGL)
+(  253)   ENDIF
+(  254) # 255 "eftinv_ctlad_mod.F90"
+(  255) !   2.  Fourier space computations
+(  256) # 257 "eftinv_ctlad_mod.F90"
+(  257)   IF(KF_UV > 0 .OR. KF_SCDERS > 0) THEN
+(  258)     CALL EFSCAD(IGL,KF_UV,KF_SCALARS,KF_SCDERS,&
+(  259)      & ZUV,ZSCALAR,ZNSDERS,ZEWDERS,ZUVDERS)
+(  260)   ENDIF
+(  261) # 262 "eftinv_ctlad_mod.F90"
+(  262) !   1. Copy Fourier data to local array
+(  263) # 264 "eftinv_ctlad_mod.F90"
+(  264)   CALL FOURIER_INAD(ZGTF,KF_OUT_LT,IGL)
+(  265) # 266 "eftinv_ctlad_mod.F90"
+(  266) ENDDO
+(  267) !$OMP END PARALLEL DO
+(  268) CALL GSTATS(1641,1)
+(  269) # 270 "eftinv_ctlad_mod.F90"
+(  270) IF(KF_UV > 0 .OR. KF_SCDERS > 0) THEN
+(  271)   NULLIFY(ZUV)
+(  272)   NULLIFY(ZSCALAR)
+(  273)   NULLIFY(ZNSDERS)
+(  274)   NULLIFY(ZUVDERS)
+(  275)   NULLIFY(ZEWDERS)
+(  276) ENDIF
+(  277) # 278 "eftinv_ctlad_mod.F90"
+(  278) CALL GSTATS(132,1)
+(  279) IF (LHOOK) CALL DR_HOOK('EFTINV_CTLAD_MOD:EFTINV_CTLAD',1,ZHOOK_HANDLE)
+(  280) # 281 "eftinv_ctlad_mod.F90"
+(  281) !     ------------------------------------------------------------------
+(  282) # 283 "eftinv_ctlad_mod.F90"
+(  283) END SUBROUTINE EFTINV_CTLAD
+(  284) END MODULE EFTINV_CTLAD_MOD

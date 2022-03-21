@@ -1,0 +1,316 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:00      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: sump_trans0_mod.F90
+
+(    1) MODULE SUMP_TRANS0_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUMP_TRANS0
+(    4) 
+(    5) ! Set up distributed environment for the transform package (part 0)
+(    6) 
+(    7) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    8) USE MPL_MODULE  ,ONLY : MPL_GROUPS_CREATE, MPL_MYRANK, MPL_NPROC
+(    9) 
+(   10) USE TPM_GEN         ,ONLY : NOUT, LMPOFF, NPRINTLEV
+(   11) USE TPM_DISTR       ,ONLY : LEQ_REGIONS, MTAGDISTGP, MTAGDISTSP, MTAGGL, &
+(   12)      &                      MTAGLETR, MTAGLG, MTAGLM, MTAGML, MTAGPART,  &
+(   13)      &                      MYSETV, MYSETW, NPRCIDS,                     &
+(   14)      &                      NPRGPEW, NPRGPNS, NPRTRNS, NPRTRV, NPRTRW,   &
+(   15)      &                      MYPROC, NPROC
+(   16) 
+(   17) USE EQ_REGIONS_MOD  ,ONLY : EQ_REGIONS, MY_REGION_EW, MY_REGION_NS,      &
+(   18)      &                      N_REGIONS, N_REGIONS_EW, N_REGIONS_NS
+(   19) USE PE2SET_MOD      ,ONLY : PE2SET
+(   20) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   21) 
+(   22) IMPLICIT NONE
+(   23) 
+(   24) LOGICAL :: LLP1,LLP2
+(   25) INTEGER(KIND=JPIM) :: IPROC,JJ
+(   26) 
+(   27) !     ------------------------------------------------------------------
+(   28) 
+(   29) LLP1 = NPRINTLEV>0
+(   30) LLP2 = NPRINTLEV>1
+(   31) IF(LLP1) WRITE(NOUT,*) '=== ENTER ROUTINE SUMP_TRANS0 ==='
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:00      page 2
+
+(   32) 
+(   33) 
+(   34) NPROC = NPRGPNS*NPRGPEW
+(   35) NPRTRNS = NPRTRW
+(   36) IF(MOD(NPROC,NPRTRW) /= 0 .OR. NPRTRW > NPROC) THEN
+(   37)   CALL ABORT_TRANS('SUMP_TRANS0: NPROC INCONSISTENT WITH NPRTRW')
+(   38) ENDIF
+(   39) NPRTRV = NPROC/NPRTRW
+(   40) IF(LLP1) WRITE(NOUT,*)'NPROC =',NPROC,' NPRGPNS=',NPRGPNS,' NPRGPEW=',&
+(   41)  & NPRGPEW,' NPRTRW=',NPRTRW,' NPRTRV=',NPRTRV
+(   42) 
+(   43) IF(NPROC > 1 ) THEN
+(   44)   IPROC = MPL_NPROC()
+(   45)   IF(IPROC /= NPROC) THEN
+(   46)     WRITE(NOUT,*) 'SUMP_TRANS0: NPROC=',NPROC,' BUT MPL_NPROC RETURNS',&
+(   47)                  &  IPROC
+(   48)     CALL ABORT_TRANS('SUMP_TRANS0: NPROC INCONSISTENT WITH MPL_NPROC')
+(   49)   ENDIF
+(   50)   MYPROC = MPL_MYRANK()
+(   51) ELSE
+(   52)   MYPROC = 1
+(   53) ENDIF
+(   54) 
+(   55) IF (MYPROC > NPROC) THEN
+(   56)   CALL ABORT_TRANS('SUMP_TRANS0: INCONSISTENCY IN NUMBER OF PROCESSORS USED')
+(   57) ENDIF
+(   58) 
+(   59) IF( LEQ_REGIONS )THEN
+(   60)   ALLOCATE(N_REGIONS(NPROC+2))
+(   61)   N_REGIONS(:)=0
+(   62)   CALL EQ_REGIONS(NPROC)
+(   63) ELSE
+(   64)   N_REGIONS_NS=NPRGPNS
+(   65)   ALLOCATE(N_REGIONS(N_REGIONS_NS))
+(   66)   N_REGIONS(:)=NPRGPEW
+(   67)   N_REGIONS_EW=NPRGPEW
+(   68) ENDIF
+(   69) CALL PE2SET(MYPROC,MY_REGION_NS,MY_REGION_EW,MYSETW,MYSETV)
+(   70) IF(LLP1) WRITE(NOUT,*)'MYPROC=',MYPROC,'MY_REGION_NS =',MY_REGION_NS,&
+(   71)  & ' MY_REGION_EW=',MY_REGION_EW,' MYSETW=',MYSETW,' MYSETV=',MYSETV
+(   72) 
+(   73) 
+(   74) ALLOCATE(NPRCIDS(NPROC))
+(   75) IF(LLP2)WRITE(NOUT,9) 'NPRCIDS   ',SIZE(NPRCIDS   ),SHAPE(NPRCIDS   )
+(   76) DO JJ=1,NPROC
+(   77)   NPRCIDS(JJ) = JJ
+(   78) ENDDO
+(   79) 
+(   80) ! Message passing tags
+(   81) 
+(   82) MTAGLETR = 18000
+(   83) MTAGML   = 19000
+(   84) MTAGLG   = 20000
+(   85) MTAGPART = 21000
+(   86) MTAGDISTSP = 22000
+(   87) MTAGGL   = 23000
+(   88) MTAGLM   = 24000
+(   89) MTAGDISTGP = 25000
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:00      page 3
+
+(   90) 
+(   91) ! Create communicators for MPI groups
+(   92) 
+(   93) IF (.NOT.LMPOFF) THEN
+(   94)   CALL MPL_GROUPS_CREATE(NPRTRW, NPRTRV)
+(   95) ENDIF
+(   96) 
+(   97) ! Setup labels for timing package (gstats)
+(   98) 
+(   99) ! CF ifs/utility    GSTATS_OUTPUT_IFS
+(  100) 
+(  101) !     ------------------------------------------------------------------
+(  102) 9 FORMAT(1X,'ARRAY ',A10,' ALLOCATED ',8I8)
+(  103)  
+(  104) END SUBROUTINE SUMP_TRANS0
+(  105) END MODULE SUMP_TRANS0_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:00      page 4
+
+(    1) # 1 "sump_trans0_mod.F90"
+(    1) MODULE SUMP_TRANS0_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUMP_TRANS0
+(    4) # 5 "sump_trans0_mod.F90"
+(    5) ! Set up distributed environment for the transform package (part 0)
+(    6) # 7 "sump_trans0_mod.F90"
+(    7) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    8) USE MPL_MODULE  ,ONLY : MPL_GROUPS_CREATE, MPL_MYRANK, MPL_NPROC
+(    9) # 10 "sump_trans0_mod.F90"
+(   10) USE TPM_GEN         ,ONLY : NOUT, LMPOFF, NPRINTLEV
+(   11) USE TPM_DISTR       ,ONLY : LEQ_REGIONS, MTAGDISTGP, MTAGDISTSP, MTAGGL, &
+(   12)      &                      MTAGLETR, MTAGLG, MTAGLM, MTAGML, MTAGPART,  &
+(   13)      &                      MYSETV, MYSETW, NPRCIDS,                     &
+(   14)      &                      NPRGPEW, NPRGPNS, NPRTRNS, NPRTRV, NPRTRW,   &
+(   15)      &                      MYPROC, NPROC
+(   16) # 17 "sump_trans0_mod.F90"
+(   17) USE EQ_REGIONS_MOD  ,ONLY : EQ_REGIONS, MY_REGION_EW, MY_REGION_NS,      &
+(   18)      &                      N_REGIONS, N_REGIONS_EW, N_REGIONS_NS
+(   19) USE PE2SET_MOD      ,ONLY : PE2SET
+(   20) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   21) # 22 "sump_trans0_mod.F90"
+(   22) IMPLICIT NONE
+(   23) # 24 "sump_trans0_mod.F90"
+(   24) LOGICAL :: LLP1,LLP2
+(   25) INTEGER(KIND=JPIM) :: IPROC,JJ
+(   26) # 27 "sump_trans0_mod.F90"
+(   27) !     ------------------------------------------------------------------
+(   28) # 29 "sump_trans0_mod.F90"
+(   29) LLP1 = NPRINTLEV>0
+(   30) LLP2 = NPRINTLEV>1
+(   31) IF(LLP1) WRITE(NOUT,*) '=== ENTER ROUTINE SUMP_TRANS0 ==='
+(   32) # 34 "sump_trans0_mod.F90"
+(   34) NPROC = NPRGPNS*NPRGPEW
+(   35) NPRTRNS = NPRTRW
+(   36) IF(MOD(NPROC,NPRTRW) /= 0 .OR. NPRTRW > NPROC) THEN
+(   37)   CALL ABORT_TRANS('SUMP_TRANS0: NPROC INCONSISTENT WITH NPRTRW')
+(   38) ENDIF
+(   39) NPRTRV = NPROC/NPRTRW
+(   40) IF(LLP1) WRITE(NOUT,*)'NPROC =',NPROC,' NPRGPNS=',NPRGPNS,' NPRGPEW=',&
+(   41)  & NPRGPEW,' NPRTRW=',NPRTRW,' NPRTRV=',NPRTRV
+(   42) # 43 "sump_trans0_mod.F90"
+(   43) IF(NPROC > 1 ) THEN
+(   44)   IPROC = MPL_NPROC()
+(   45)   IF(IPROC /= NPROC) THEN
+(   46)     WRITE(NOUT,*) 'SUMP_TRANS0: NPROC=',NPROC,' BUT MPL_NPROC RETURNS',&
+(   47)                  &  IPROC
+(   48)     CALL ABORT_TRANS('SUMP_TRANS0: NPROC INCONSISTENT WITH MPL_NPROC')
+(   49)   ENDIF
+(   50)   MYPROC = MPL_MYRANK()
+(   51) ELSE
+(   52)   MYPROC = 1
+(   53) ENDIF
+(   54) # 55 "sump_trans0_mod.F90"
+(   55) IF (MYPROC > NPROC) THEN
+(   56)   CALL ABORT_TRANS('SUMP_TRANS0: INCONSISTENCY IN NUMBER OF PROCESSORS USED')
+(   57) ENDIF
+(   58) # 59 "sump_trans0_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:00      page 5
+
+(   59) IF( LEQ_REGIONS )THEN
+(   60)   ALLOCATE(N_REGIONS(NPROC+2))
+(   61)   N_REGIONS(:)=0
+(   62)   CALL EQ_REGIONS(NPROC)
+(   63) ELSE
+(   64)   N_REGIONS_NS=NPRGPNS
+(   65)   ALLOCATE(N_REGIONS(N_REGIONS_NS))
+(   66)   N_REGIONS(:)=NPRGPEW
+(   67)   N_REGIONS_EW=NPRGPEW
+(   68) ENDIF
+(   69) CALL PE2SET(MYPROC,MY_REGION_NS,MY_REGION_EW,MYSETW,MYSETV)
+(   70) IF(LLP1) WRITE(NOUT,*)'MYPROC=',MYPROC,'MY_REGION_NS =',MY_REGION_NS,&
+(   71)  & ' MY_REGION_EW=',MY_REGION_EW,' MYSETW=',MYSETW,' MYSETV=',MYSETV
+(   72) # 74 "sump_trans0_mod.F90"
+(   74) ALLOCATE(NPRCIDS(NPROC))
+(   75) IF(LLP2)WRITE(NOUT,9) 'NPRCIDS   ',SIZE(NPRCIDS   ),SHAPE(NPRCIDS   )
+(   76) DO JJ=1,NPROC
+(   77)   NPRCIDS(JJ) = JJ
+(   78) ENDDO
+(   79) # 80 "sump_trans0_mod.F90"
+(   80) ! Message passing tags
+(   81) # 82 "sump_trans0_mod.F90"
+(   82) MTAGLETR = 18000
+(   83) MTAGML   = 19000
+(   84) MTAGLG   = 20000
+(   85) MTAGPART = 21000
+(   86) MTAGDISTSP = 22000
+(   87) MTAGGL   = 23000
+(   88) MTAGLM   = 24000
+(   89) MTAGDISTGP = 25000
+(   90) # 91 "sump_trans0_mod.F90"
+(   91) ! Create communicators for MPI groups
+(   92) # 93 "sump_trans0_mod.F90"
+(   93) IF (.NOT.LMPOFF) THEN
+(   94)   CALL MPL_GROUPS_CREATE(NPRTRW, NPRTRV)
+(   95) ENDIF
+(   96) # 97 "sump_trans0_mod.F90"
+(   97) ! Setup labels for timing package (gstats)
+(   98) # 99 "sump_trans0_mod.F90"
+(   99) ! CF ifs/utility    GSTATS_OUTPUT_IFS
+(  100) # 101 "sump_trans0_mod.F90"
+(  101) !     ------------------------------------------------------------------
+(  102) 9 FORMAT(1X,'ARRAY ',A10,' ALLOCATED ',8I8)
+(  103)  
+(  104) END SUBROUTINE SUMP_TRANS0
+(  105) END MODULE SUMP_TRANS0_MOD

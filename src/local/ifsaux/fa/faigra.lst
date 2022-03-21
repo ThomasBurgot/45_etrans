@@ -1,0 +1,225 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:18      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: faigra.F90
+
+(    1) SUBROUTINE FAIGRA_MT64 (FA)
+(    2) 
+(    3) USE FA_MOD, ONLY : NGRIB2_GLO_SH, NGRIB2_GLO_GP, NGRIB2_LAM_GP, &
+(    4)                  & NGRIB2_LAM_BF, NGRIB2_LATLON, NGRIB1_LATLON, &
+(    5)                  & LGRIB2_LAM_EX, LGRIB2_LAM_BF, LGRIB2_INIT,   &
+(    6)                  & FA_COM
+(    7) USE PARKIND1, ONLY : JPRB
+(    8) USE YOMHOOK , ONLY : LHOOK, DR_HOOK
+(    9) USE LFI_PRECISION
+(   10) USE GRIB_API_INTERFACE
+(   11) USE GRIB_API
+(   12) 
+(   13) IMPLICIT NONE
+(   14) 
+(   15) !****
+(   16) !      Sous-programme de lecture des templates GRIB2.
+(   17) !**
+(   18) !
+(   19) 
+(   20) TYPE (FA_COM) :: FA
+(   21) 
+(   22) INTEGER :: IGRIB2_LAM_BF, IRET, IGRIBH
+(   23) 
+(   24) REAL (KIND=JPRB) :: ZHOOK_HANDLE
+(   25) 
+(   26) IF (LHOOK) CALL DR_HOOK('FAIGRA_MT',0,ZHOOK_HANDLE)
+(   27) 
+(   28) #define FAGRIB2
+(   29) #ifdef FAGRIB2
+(   30) !$OMP CRITICAL
+(   31) IF (.NOT. LGRIB2_INIT) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:18      page 2
+
+(   32)   CALL IGRIB_NEW_FROM_SAMPLES (NGRIB1_LATLON,  'regular_ll_pl_grib1')
+(   33)   CALL IGRIB_NEW_FROM_SAMPLES (NGRIB2_LATLON,  'regular_ll_pl_grib2')
+(   34)   CALL IGRIB_NEW_FROM_SAMPLES (NGRIB2_GLO_SH,  'sh_ml_grib2')
+(   35)   CALL IGRIB_NEW_FROM_SAMPLES (NGRIB2_GLO_GP,  'reduced_gg_ml_grib2')
+(   36)   CALL IGRIB_NEW_FROM_SAMPLES (NGRIB2_LAM_GP,  'reduced_gg_ml_grib2')
+(   37)   CALL IGRIB_NEW_FROM_SAMPLES (IGRIB2_LAM_BF,  'lambert_bf_grib2', KRET=IRET)
+(   38)   IF (IRET == 0) THEN
+(   39)     NGRIB2_LAM_BF = IGRIB2_LAM_BF
+(   40)     LGRIB2_LAM_BF = .TRUE.
+(   41)   ELSE
+(   42)     WRITE (FA%NULOUT, '(A)') "FAIGRA: grib_api template `lambert_bf_grib2' was not found; &
+(   43)                             &it will not be possible to encode spectral LAM fields with grib_api"
+(   44)   ENDIF
+(   45) 
+(   46) ! See if lambert_lam is available
+(   47)   CALL IGRIB_CLONE (NGRIB2_LAM_GP, IGRIBH)
+(   48)   CALL IGRIB_SET_VALUE (IGRIBH, 'gridType', 'lambert_lam', KRET=IRET)
+(   49)   LGRIB2_LAM_EX = IRET == 0
+(   50)   CALL IGRIB_RELEASE (IGRIBH)
+(   51) 
+(   52)   LGRIB2_INIT = .TRUE.
+(   53) ENDIF
+(   54) !$OMP END CRITICAL
+(   55) #endif
+(   56) 
+(   57) IF (LHOOK) CALL DR_HOOK('FAIGRA_MT',1,ZHOOK_HANDLE)
+(   58) 
+(   59) END SUBROUTINE
+(   60) 
+(   61) SUBROUTINE FAIGRA
+(   62) USE FA_MOD, ONLY : FA => FA_COM_DEFAULT, &
+(   63) &                  FA_COM_DEFAULT_INIT,  &
+(   64) &                  NEW_FA_DEFAULT
+(   65) IF (.NOT. FA_COM_DEFAULT_INIT) CALL NEW_FA_DEFAULT ()
+(   66) CALL FAIGRA_MT64 (FA)
+(   67) END SUBROUTINE
+(   68) 
+(   69) SUBROUTINE FAIGRA64
+(   70) USE FA_MOD, ONLY : FA => FA_COM_DEFAULT, &
+(   71) &                  FA_COM_DEFAULT_INIT,  &
+(   72) &                  NEW_FA_DEFAULT
+(   73) IF (.NOT. FA_COM_DEFAULT_INIT) CALL NEW_FA_DEFAULT ()
+(   74) CALL FAIGRA_MT64 (FA)
+(   75) END SUBROUTINE
+(   76) 
+(   77) SUBROUTINE FAIGRA_MT (FA)
+(   78) USE FA_MOD, ONLY : FA_COM
+(   79) TYPE (FA_COM) :: FA
+(   80) CALL FAIGRA_MT64 (FA)
+(   81) END SUBROUTINE
+(   82) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:18      page 3
+
+(    1) # 1 "faigra.F90"
+(    1) SUBROUTINE FAIGRA_MT64 (FA)
+(    2) # 3 "faigra.F90"
+(    3) USE FA_MOD, ONLY : NGRIB2_GLO_SH, NGRIB2_GLO_GP, NGRIB2_LAM_GP, &
+(    4)                  & NGRIB2_LAM_BF, NGRIB2_LATLON, NGRIB1_LATLON, &
+(    5)                  & LGRIB2_LAM_EX, LGRIB2_LAM_BF, LGRIB2_INIT,   &
+(    6)                  & FA_COM
+(    7) USE PARKIND1, ONLY : JPRB
+(    8) USE YOMHOOK , ONLY : LHOOK, DR_HOOK
+(    9) USE LFI_PRECISION
+(   10) USE GRIB_API_INTERFACE
+(   11) USE GRIB_API
+(   12) # 13 "faigra.F90"
+(   13) IMPLICIT NONE
+(   14) # 15 "faigra.F90"
+(   15) !****
+(   16) !      Sous-programme de lecture des templates GRIB2.
+(   17) !**
+(   18) !
+(   19) # 20 "faigra.F90"
+(   20) TYPE (FA_COM) :: FA
+(   21) # 22 "faigra.F90"
+(   22) INTEGER :: IGRIB2_LAM_BF, IRET, IGRIBH
+(   23) # 24 "faigra.F90"
+(   24) REAL (KIND=JPRB) :: ZHOOK_HANDLE
+(   25) # 26 "faigra.F90"
+(   26) IF (LHOOK) CALL DR_HOOK('FAIGRA_MT',0,ZHOOK_HANDLE)
+(   27) # 30 "faigra.F90"
+(   30) !$OMP CRITICAL
+(   31) IF (.NOT. LGRIB2_INIT) THEN
+(   32)   CALL IGRIB_NEW_FROM_SAMPLES (NGRIB1_LATLON,  'regular_ll_pl_grib1')
+(   33)   CALL IGRIB_NEW_FROM_SAMPLES (NGRIB2_LATLON,  'regular_ll_pl_grib2')
+(   34)   CALL IGRIB_NEW_FROM_SAMPLES (NGRIB2_GLO_SH,  'sh_ml_grib2')
+(   35)   CALL IGRIB_NEW_FROM_SAMPLES (NGRIB2_GLO_GP,  'reduced_gg_ml_grib2')
+(   36)   CALL IGRIB_NEW_FROM_SAMPLES (NGRIB2_LAM_GP,  'reduced_gg_ml_grib2')
+(   37)   CALL IGRIB_NEW_FROM_SAMPLES (IGRIB2_LAM_BF,  'lambert_bf_grib2', KRET=IRET)
+(   38)   IF (IRET == 0) THEN
+(   39)     NGRIB2_LAM_BF = IGRIB2_LAM_BF
+(   40)     LGRIB2_LAM_BF = .TRUE.
+(   41)   ELSE
+(   42)     WRITE (FA%NULOUT, '(A)') "FAIGRA: grib_api template `lambert_bf_grib2' was not found; &
+(   43)                             &it will not be possible to encode spectral LAM fields with grib_api"
+(   44)   ENDIF
+(   45) # 46 "faigra.F90"
+(   46) ! See if lambert_lam is available
+(   47)   CALL IGRIB_CLONE (NGRIB2_LAM_GP, IGRIBH)
+(   48)   CALL IGRIB_SET_VALUE (IGRIBH, 'gridType', 'lambert_lam', KRET=IRET)
+(   49)   LGRIB2_LAM_EX = IRET == 0
+(   50)   CALL IGRIB_RELEASE (IGRIBH)
+(   51) # 52 "faigra.F90"
+(   52)   LGRIB2_INIT = .TRUE.
+(   53) ENDIF
+(   54) !$OMP END CRITICAL
+(   55) # 57 "faigra.F90"
+(   57) IF (LHOOK) CALL DR_HOOK('FAIGRA_MT',1,ZHOOK_HANDLE)
+(   58) # 59 "faigra.F90"
+(   59) END SUBROUTINE
+(   60) # 61 "faigra.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:18      page 4
+
+(   61) SUBROUTINE FAIGRA
+(   62) USE FA_MOD, ONLY : FA => FA_COM_DEFAULT, &
+(   63) &                  FA_COM_DEFAULT_INIT,  &
+(   64) &                  NEW_FA_DEFAULT
+(   65) IF (.NOT. FA_COM_DEFAULT_INIT) CALL NEW_FA_DEFAULT ()
+(   66) CALL FAIGRA_MT64 (FA)
+(   67) END SUBROUTINE
+(   68) # 69 "faigra.F90"
+(   69) SUBROUTINE FAIGRA64
+(   70) USE FA_MOD, ONLY : FA => FA_COM_DEFAULT, &
+(   71) &                  FA_COM_DEFAULT_INIT,  &
+(   72) &                  NEW_FA_DEFAULT
+(   73) IF (.NOT. FA_COM_DEFAULT_INIT) CALL NEW_FA_DEFAULT ()
+(   74) CALL FAIGRA_MT64 (FA)
+(   75) END SUBROUTINE
+(   76) # 77 "faigra.F90"
+(   77) SUBROUTINE FAIGRA_MT (FA)
+(   78) USE FA_MOD, ONLY : FA_COM
+(   79) TYPE (FA_COM) :: FA
+(   80) CALL FAIGRA_MT64 (FA)
+(   81) END SUBROUTINE

@@ -1,0 +1,484 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:15      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: dealloc_resol_mod.F90
+
+(    1) MODULE DEALLOC_RESOL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE DEALLOC_RESOL(KRESOL)
+(    4) 
+(    5) !**** *DEALLOC_RESOL* - Deallocations of a resolution
+(    6) 
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !     Release allocated arrays for a given resolution
+(   10) 
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !     CALL DEALLOC_RESOL
+(   14) 
+(   15) !     Explicit arguments : KRESOL : resolution tag
+(   16) !     --------------------
+(   17) 
+(   18) !     Method.
+(   19) !     -------
+(   20) 
+(   21) !     Externals.  None
+(   22) !     ----------
+(   23) 
+(   24) !     Author.
+(   25) !     -------
+(   26) !        R. El Khatib *METEO-FRANCE*
+(   27) 
+(   28) !     Modifications.
+(   29) !     --------------
+(   30) !        Original : 09-Jul-2013 from trans_end
+(   31) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:15      page 2
+
+(   32) !     ------------------------------------------------------------------
+(   33) 
+(   34) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   35) 
+(   36) USE TPM_DIM         ,ONLY : R
+(   37) USE TPM_GEN         ,ONLY : LENABLED, NOUT,NDEF_RESOL
+(   38) USE TPM_DISTR       ,ONLY : D,NPRTRV
+(   39) USE TPM_GEOMETRY    ,ONLY : G
+(   40) USE TPM_FIELDS      ,ONLY : F
+(   41) USE TPM_FFT         ,ONLY : T, TB
+(   42) USE BLUESTEIN_MOD   ,ONLY : BLUESTEIN_TERM
+(   43) #ifdef WITH_FFTW
+(   44) USE TPM_FFTW        ,ONLY : TW,DESTROY_PLANS_FFTW
+(   45) #endif
+(   46) USE TPM_FLT         ,ONLY : S
+(   47) USE TPM_CTL         ,ONLY : C
+(   48) USE SEEFMM_MIX
+(   49) 
+(   50) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(   51) !
+(   52) 
+(   53) IMPLICIT NONE
+(   54) 
+(   55) INTEGER(KIND=JPIM),  INTENT(IN) :: KRESOL
+(   56) INTEGER(KIND=JPIM) :: JMLOC,IPRTRV,JSETV,IMLOC,IM,ILA,ILS, JRESOL
+(   57) 
+(   58) !     ------------------------------------------------------------------
+(   59) 
+(   60) IF (.NOT.LENABLED(KRESOL)) THEN
+(   61) 
+(   62)   WRITE(UNIT=NOUT,FMT='('' DEALLOC_RESOL WARNING : KRESOL = '',I3,'' ALREADY DISABLED '')') KRESOL
+(   63) 
+(   64) ELSE
+(   65) 
+(   66)   CALL SET_RESOL(KRESOL)
+(   67) 
+(   68)   !TPM_FLT
+(   69)   IF( ALLOCATED(S%FA) ) THEN
+(   70)     DO JMLOC=1,D%NUMP,NPRTRV  ! +++++++++++++++++++++ JMLOC LOOP ++++++++++
+(   71)       IPRTRV=MIN(NPRTRV,D%NUMP-JMLOC+1)
+(   72)       DO JSETV=1,IPRTRV
+(   73)         IMLOC=JMLOC+JSETV-1
+(   74)         IM = D%MYMS(IMLOC)
+(   75)         ILA = (R%NSMAX-IM+2)/2
+(   76)         ILS = (R%NSMAX-IM+3)/2
+(   77)         IF( S%LUSEFLT .AND. ILA > S%ITHRESHOLD) THEN
+(   78)         ELSE
+(   79)           IF(.NOT.C%CIO_TYPE == 'mbuf' .AND. ASSOCIATED(S%FA(IMLOC)%RPNMA)) DEALLOCATE(S%FA(IMLOC)%RPNMA)
+(   80)         ENDIF
+(   81)         IF( S%LUSEFLT .AND. ILS > S%ITHRESHOLD) THEN
+(   82)         ELSE
+(   83)           IF(.NOT.C%CIO_TYPE == 'mbuf' .AND. ASSOCIATED(S%FA(IMLOC)%RPNMS)) DEALLOCATE(S%FA(IMLOC)%RPNMS)
+(   84)         ENDIF
+(   85)         IF(S%LDLL) THEN
+(   86)           IF(.NOT.C%CIO_TYPE == 'mbuf' .AND. ASSOCIATED(S%FA(IMLOC)%RPNMWI)) DEALLOCATE(S%FA(IMLOC)%RPNMWI)
+(   87)           IF(.NOT.C%CIO_TYPE == 'mbuf' .AND. ASSOCIATED(S%FA(IMLOC)%RPNMWO)) DEALLOCATE(S%FA(IMLOC)%RPNMWO)
+(   88)         ENDIF
+(   89)       ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:15      page 3
+
+(   90)     ENDDO
+(   91)     DEALLOCATE(S%FA)
+(   92)   ENDIF
+(   93)   IF(S%LDLL) THEN
+(   94)     CALL FREE_SEEFMM(S%FMM_INTI)
+(   95)     IF(ASSOCIATED(S%FMM_INTI)) DEALLOCATE(S%FMM_INTI)
+(   96)   ENDIF
+(   97) 
+(   98)   !TPM_DISTR
+(   99)   IF(ALLOCATED(D%NFRSTLAT)) DEALLOCATE(D%NFRSTLAT)
+(  100)   IF(ALLOCATED(D%NLSTLAT)) DEALLOCATE(D%NLSTLAT)
+(  101)   IF(ALLOCATED(D%NPTRLAT)) DEALLOCATE(D%NPTRLAT)
+(  102)   IF(ALLOCATED(D%NPTRFRSTLAT)) DEALLOCATE(D%NPTRFRSTLAT)
+(  103)   IF(ALLOCATED(D%NPTRLSTLAT)) DEALLOCATE(D%NPTRLSTLAT)
+(  104)   IF(ALLOCATED(D%LSPLITLAT)) DEALLOCATE(D%LSPLITLAT)
+(  105)   IF(ALLOCATED(D%NSTA)) DEALLOCATE(D%NSTA)
+(  106)   IF(ALLOCATED(D%NONL)) DEALLOCATE(D%NONL)
+(  107)   IF(ALLOCATED(D%NGPTOTL)) DEALLOCATE(D%NGPTOTL)
+(  108)   IF(ALLOCATED(D%NPROCA_GP)) DEALLOCATE(D%NPROCA_GP)
+(  109) 
+(  110)   IF(D%LWEIGHTED_DISTR) THEN
+(  111)     IF(ALLOCATED(D%RWEIGHT)) DEALLOCATE(D%RWEIGHT)
+(  112)   ENDIF
+(  113) 
+(  114)   IF(ALLOCATED(D%MYMS)) DEALLOCATE(D%MYMS)
+(  115)   IF(ALLOCATED(D%NUMPP)) DEALLOCATE(D%NUMPP)
+(  116)   IF(ALLOCATED(D%NPOSSP)) DEALLOCATE(D%NPOSSP)
+(  117)   IF(ALLOCATED(D%NPROCM)) DEALLOCATE(D%NPROCM)
+(  118)   IF(ALLOCATED(D%NDIM0G)) DEALLOCATE(D%NDIM0G)
+(  119)   IF(ALLOCATED(D%NASM0)) DEALLOCATE(D%NASM0)
+(  120)   IF(ALLOCATED(D%NATM0)) DEALLOCATE(D%NATM0)
+(  121)   IF(ALLOCATED(D%NLATLS)) DEALLOCATE(D%NLATLS)
+(  122)   IF(ALLOCATED(D%NLATLE)) DEALLOCATE(D%NLATLE)
+(  123)   IF(ALLOCATED(D%NPMT)) DEALLOCATE(D%NPMT)
+(  124)   IF(ALLOCATED(D%NPMS)) DEALLOCATE(D%NPMS)
+(  125)   IF(ALLOCATED(D%NPMG)) DEALLOCATE(D%NPMG)
+(  126)   IF(ALLOCATED(D%NULTPP)) DEALLOCATE(D%NULTPP)
+(  127)   IF(ALLOCATED(D%NPROCL)) DEALLOCATE(D%NPROCL)
+(  128)   IF(ALLOCATED(D%NPTRLS)) DEALLOCATE(D%NPTRLS)
+(  129)   IF(ALLOCATED(D%NALLMS)) DEALLOCATE(D%NALLMS)
+(  130)   IF(ALLOCATED(D%NPTRMS)) DEALLOCATE(D%NPTRMS)
+(  131)   IF(ALLOCATED(D%NSTAGT0B)) DEALLOCATE(D%NSTAGT0B)
+(  132)   IF(ALLOCATED(D%NSTAGT1B)) DEALLOCATE(D%NSTAGT1B)
+(  133)   IF(ALLOCATED(D%NPNTGTB0)) DEALLOCATE(D%NPNTGTB0)
+(  134)   IF(ALLOCATED(D%NPNTGTB1)) DEALLOCATE(D%NPNTGTB1)
+(  135)   IF(ALLOCATED(D%NLTSFTB)) DEALLOCATE(D%NLTSFTB)
+(  136)   IF(ALLOCATED(D%NLTSGTB)) DEALLOCATE(D%NLTSGTB)
+(  137)   IF(ALLOCATED(D%MSTABF)) DEALLOCATE(D%MSTABF)
+(  138)   IF(ALLOCATED(D%NSTAGTF)) DEALLOCATE(D%NSTAGTF)
+(  139) 
+(  140)   !TPM_FFT
+(  141)   IF (.NOT.D%LCPNMONLY) THEN
+(  142)     IF( ASSOCIATED(T) ) THEN
+(  143)       IF( ALLOCATED(T%TRIGS) ) DEALLOCATE(T%TRIGS)
+(  144)       IF( ALLOCATED(T%NFAX) )  DEALLOCATE(T%NFAX)
+(  145)       IF( ALLOCATED(T%LUSEFFT992)) DEALLOCATE(T%LUSEFFT992)
+(  146)     ENDIF
+(  147)     IF( ASSOCIATED(TB) ) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:15      page 4
+
+(  148)        IF( T%LBLUESTEIN )THEN
+(  149)          CALL BLUESTEIN_TERM(TB)
+(  150)          T%LBLUESTEIN = .FALSE.
+(  151)        ENDIF
+(  152)     ENDIF
+(  153)   ENDIF
+(  154) 
+(  155) #ifdef WITH_FFTW
+(  156)   !TPM_FFTW
+(  157)   IF( TW%LFFTW )THEN
+(  158)     CALL DESTROY_PLANS_FFTW
+(  159)   ENDIF
+(  160) #endif
+(  161) 
+(  162) 
+(  163)   !TPM_FIELDS
+(  164)   IF(ALLOCATED(F%RMU)) DEALLOCATE(F%RMU)
+(  165)   IF(ALLOCATED(F%RW)) DEALLOCATE(F%RW)
+(  166)   IF(ALLOCATED(F%R1MU2)) DEALLOCATE(F%R1MU2)
+(  167)   IF(ALLOCATED(F%RACTHE)) DEALLOCATE(F%RACTHE)
+(  168)   IF(ALLOCATED(F%REPSNM)) DEALLOCATE(F%REPSNM)
+(  169)   IF(ALLOCATED(F%RN)) DEALLOCATE(F%RN)
+(  170)   IF(ALLOCATED(F%RLAPIN)) DEALLOCATE(F%RLAPIN)
+(  171)   IF(ALLOCATED(F%NLTN)) DEALLOCATE(F%NLTN)
+(  172)   IF( S%LKEEPRPNM ) THEN
+(  173)     IF(ALLOCATED(F%RPNM)) DEALLOCATE(F%RPNM)
+(  174)   ENDIF
+(  175)   IF( S%LDLL ) THEN
+(  176)     IF(ALLOCATED(F%RMU2)) DEALLOCATE(F%RMU2)
+(  177)     IF(ALLOCATED(F%RACTHE2)) DEALLOCATE(F%RACTHE2)
+(  178)   ENDIF
+(  179) 
+(  180)   !TPM_GEOMETRY
+(  181)   IF(ALLOCATED(G%NMEN)) DEALLOCATE(G%NMEN)
+(  182)   IF(ALLOCATED(G%NDGLU)) DEALLOCATE(G%NDGLU)
+(  183)   IF(ALLOCATED(G%NLOEN)) DEALLOCATE(G%NLOEN)
+(  184) 
+(  185)   LENABLED(KRESOL)=.FALSE.
+(  186)   NDEF_RESOL = COUNT(LENABLED)
+(  187)   ! Do not stay on a disabled resolution
+(  188)   DO JRESOL=1,SIZE(LENABLED)
+(  189)     IF (LENABLED(JRESOL)) THEN
+(  190)       CALL SET_RESOL(JRESOL)
+(  191)       EXIT
+(  192)     ENDIF
+(  193)   ENDDO
+(  194) 
+(  195) ENDIF
+(  196) !     ------------------------------------------------------------------
+(  197) 
+(  198) END SUBROUTINE DEALLOC_RESOL
+(  199) END MODULE DEALLOC_RESOL_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:15      page 5
+
+(    1) # 1 "dealloc_resol_mod.F90"
+(    1) MODULE DEALLOC_RESOL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE DEALLOC_RESOL(KRESOL)
+(    4) # 5 "dealloc_resol_mod.F90"
+(    5) !**** *DEALLOC_RESOL* - Deallocations of a resolution
+(    6) # 7 "dealloc_resol_mod.F90"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !     Release allocated arrays for a given resolution
+(   10) # 11 "dealloc_resol_mod.F90"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !     CALL DEALLOC_RESOL
+(   14) # 15 "dealloc_resol_mod.F90"
+(   15) !     Explicit arguments : KRESOL : resolution tag
+(   16) !     --------------------
+(   17) # 18 "dealloc_resol_mod.F90"
+(   18) !     Method.
+(   19) !     -------
+(   20) # 21 "dealloc_resol_mod.F90"
+(   21) !     Externals.  None
+(   22) !     ----------
+(   23) # 24 "dealloc_resol_mod.F90"
+(   24) !     Author.
+(   25) !     -------
+(   26) !        R. El Khatib *METEO-FRANCE*
+(   27) # 28 "dealloc_resol_mod.F90"
+(   28) !     Modifications.
+(   29) !     --------------
+(   30) !        Original : 09-Jul-2013 from trans_end
+(   31) # 32 "dealloc_resol_mod.F90"
+(   32) !     ------------------------------------------------------------------
+(   33) # 34 "dealloc_resol_mod.F90"
+(   34) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   35) # 36 "dealloc_resol_mod.F90"
+(   36) USE TPM_DIM         ,ONLY : R
+(   37) USE TPM_GEN         ,ONLY : LENABLED, NOUT,NDEF_RESOL
+(   38) USE TPM_DISTR       ,ONLY : D,NPRTRV
+(   39) USE TPM_GEOMETRY    ,ONLY : G
+(   40) USE TPM_FIELDS      ,ONLY : F
+(   41) USE TPM_FFT         ,ONLY : T, TB
+(   42) USE BLUESTEIN_MOD   ,ONLY : BLUESTEIN_TERM
+(   43) # 46 "dealloc_resol_mod.F90"
+(   46) USE TPM_FLT         ,ONLY : S
+(   47) USE TPM_CTL         ,ONLY : C
+(   48) USE SEEFMM_MIX
+(   49) # 50 "dealloc_resol_mod.F90"
+(   50) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(   51) !
+(   52) # 53 "dealloc_resol_mod.F90"
+(   53) IMPLICIT NONE
+(   54) # 55 "dealloc_resol_mod.F90"
+(   55) INTEGER(KIND=JPIM),  INTENT(IN) :: KRESOL
+(   56) INTEGER(KIND=JPIM) :: JMLOC,IPRTRV,JSETV,IMLOC,IM,ILA,ILS, JRESOL
+(   57) # 58 "dealloc_resol_mod.F90"
+(   58) !     ------------------------------------------------------------------
+(   59) # 60 "dealloc_resol_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:15      page 6
+
+(   60) IF (.NOT.LENABLED(KRESOL)) THEN
+(   61) # 62 "dealloc_resol_mod.F90"
+(   62)   WRITE(UNIT=NOUT,FMT='('' DEALLOC_RESOL WARNING : KRESOL = '',I3,'' ALREADY DISABLED '')') KRESOL
+(   63) # 64 "dealloc_resol_mod.F90"
+(   64) ELSE
+(   65) # 66 "dealloc_resol_mod.F90"
+(   66)   CALL SET_RESOL(KRESOL)
+(   67) # 68 "dealloc_resol_mod.F90"
+(   68)   !TPM_FLT
+(   69)   IF( ALLOCATED(S%FA) ) THEN
+(   70)     DO JMLOC=1,D%NUMP,NPRTRV  ! +++++++++++++++++++++ JMLOC LOOP ++++++++++
+(   71)       IPRTRV=MIN(NPRTRV,D%NUMP-JMLOC+1)
+(   72)       DO JSETV=1,IPRTRV
+(   73)         IMLOC=JMLOC+JSETV-1
+(   74)         IM = D%MYMS(IMLOC)
+(   75)         ILA = (R%NSMAX-IM+2)/2
+(   76)         ILS = (R%NSMAX-IM+3)/2
+(   77)         IF( S%LUSEFLT .AND. ILA > S%ITHRESHOLD) THEN
+(   78)         ELSE
+(   79)           IF(.NOT.C%CIO_TYPE == 'mbuf' .AND. ASSOCIATED(S%FA(IMLOC)%RPNMA)) DEALLOCATE(S%FA(IMLOC)%RPNMA)
+(   80)         ENDIF
+(   81)         IF( S%LUSEFLT .AND. ILS > S%ITHRESHOLD) THEN
+(   82)         ELSE
+(   83)           IF(.NOT.C%CIO_TYPE == 'mbuf' .AND. ASSOCIATED(S%FA(IMLOC)%RPNMS)) DEALLOCATE(S%FA(IMLOC)%RPNMS)
+(   84)         ENDIF
+(   85)         IF(S%LDLL) THEN
+(   86)           IF(.NOT.C%CIO_TYPE == 'mbuf' .AND. ASSOCIATED(S%FA(IMLOC)%RPNMWI)) DEALLOCATE(S%FA(IMLOC)%RPNMWI)
+(   87)           IF(.NOT.C%CIO_TYPE == 'mbuf' .AND. ASSOCIATED(S%FA(IMLOC)%RPNMWO)) DEALLOCATE(S%FA(IMLOC)%RPNMWO)
+(   88)         ENDIF
+(   89)       ENDDO
+(   90)     ENDDO
+(   91)     DEALLOCATE(S%FA)
+(   92)   ENDIF
+(   93)   IF(S%LDLL) THEN
+(   94)     CALL FREE_SEEFMM(S%FMM_INTI)
+(   95)     IF(ASSOCIATED(S%FMM_INTI)) DEALLOCATE(S%FMM_INTI)
+(   96)   ENDIF
+(   97) # 98 "dealloc_resol_mod.F90"
+(   98)   !TPM_DISTR
+(   99)   IF(ALLOCATED(D%NFRSTLAT)) DEALLOCATE(D%NFRSTLAT)
+(  100)   IF(ALLOCATED(D%NLSTLAT)) DEALLOCATE(D%NLSTLAT)
+(  101)   IF(ALLOCATED(D%NPTRLAT)) DEALLOCATE(D%NPTRLAT)
+(  102)   IF(ALLOCATED(D%NPTRFRSTLAT)) DEALLOCATE(D%NPTRFRSTLAT)
+(  103)   IF(ALLOCATED(D%NPTRLSTLAT)) DEALLOCATE(D%NPTRLSTLAT)
+(  104)   IF(ALLOCATED(D%LSPLITLAT)) DEALLOCATE(D%LSPLITLAT)
+(  105)   IF(ALLOCATED(D%NSTA)) DEALLOCATE(D%NSTA)
+(  106)   IF(ALLOCATED(D%NONL)) DEALLOCATE(D%NONL)
+(  107)   IF(ALLOCATED(D%NGPTOTL)) DEALLOCATE(D%NGPTOTL)
+(  108)   IF(ALLOCATED(D%NPROCA_GP)) DEALLOCATE(D%NPROCA_GP)
+(  109) # 110 "dealloc_resol_mod.F90"
+(  110)   IF(D%LWEIGHTED_DISTR) THEN
+(  111)     IF(ALLOCATED(D%RWEIGHT)) DEALLOCATE(D%RWEIGHT)
+(  112)   ENDIF
+(  113) # 114 "dealloc_resol_mod.F90"
+(  114)   IF(ALLOCATED(D%MYMS)) DEALLOCATE(D%MYMS)
+(  115)   IF(ALLOCATED(D%NUMPP)) DEALLOCATE(D%NUMPP)
+(  116)   IF(ALLOCATED(D%NPOSSP)) DEALLOCATE(D%NPOSSP)
+(  117)   IF(ALLOCATED(D%NPROCM)) DEALLOCATE(D%NPROCM)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:15      page 7
+
+(  118)   IF(ALLOCATED(D%NDIM0G)) DEALLOCATE(D%NDIM0G)
+(  119)   IF(ALLOCATED(D%NASM0)) DEALLOCATE(D%NASM0)
+(  120)   IF(ALLOCATED(D%NATM0)) DEALLOCATE(D%NATM0)
+(  121)   IF(ALLOCATED(D%NLATLS)) DEALLOCATE(D%NLATLS)
+(  122)   IF(ALLOCATED(D%NLATLE)) DEALLOCATE(D%NLATLE)
+(  123)   IF(ALLOCATED(D%NPMT)) DEALLOCATE(D%NPMT)
+(  124)   IF(ALLOCATED(D%NPMS)) DEALLOCATE(D%NPMS)
+(  125)   IF(ALLOCATED(D%NPMG)) DEALLOCATE(D%NPMG)
+(  126)   IF(ALLOCATED(D%NULTPP)) DEALLOCATE(D%NULTPP)
+(  127)   IF(ALLOCATED(D%NPROCL)) DEALLOCATE(D%NPROCL)
+(  128)   IF(ALLOCATED(D%NPTRLS)) DEALLOCATE(D%NPTRLS)
+(  129)   IF(ALLOCATED(D%NALLMS)) DEALLOCATE(D%NALLMS)
+(  130)   IF(ALLOCATED(D%NPTRMS)) DEALLOCATE(D%NPTRMS)
+(  131)   IF(ALLOCATED(D%NSTAGT0B)) DEALLOCATE(D%NSTAGT0B)
+(  132)   IF(ALLOCATED(D%NSTAGT1B)) DEALLOCATE(D%NSTAGT1B)
+(  133)   IF(ALLOCATED(D%NPNTGTB0)) DEALLOCATE(D%NPNTGTB0)
+(  134)   IF(ALLOCATED(D%NPNTGTB1)) DEALLOCATE(D%NPNTGTB1)
+(  135)   IF(ALLOCATED(D%NLTSFTB)) DEALLOCATE(D%NLTSFTB)
+(  136)   IF(ALLOCATED(D%NLTSGTB)) DEALLOCATE(D%NLTSGTB)
+(  137)   IF(ALLOCATED(D%MSTABF)) DEALLOCATE(D%MSTABF)
+(  138)   IF(ALLOCATED(D%NSTAGTF)) DEALLOCATE(D%NSTAGTF)
+(  139) # 140 "dealloc_resol_mod.F90"
+(  140)   !TPM_FFT
+(  141)   IF (.NOT.D%LCPNMONLY) THEN
+(  142)     IF( ASSOCIATED(T) ) THEN
+(  143)       IF( ALLOCATED(T%TRIGS) ) DEALLOCATE(T%TRIGS)
+(  144)       IF( ALLOCATED(T%NFAX) )  DEALLOCATE(T%NFAX)
+(  145)       IF( ALLOCATED(T%LUSEFFT992)) DEALLOCATE(T%LUSEFFT992)
+(  146)     ENDIF
+(  147)     IF( ASSOCIATED(TB) ) THEN
+(  148)        IF( T%LBLUESTEIN )THEN
+(  149)          CALL BLUESTEIN_TERM(TB)
+(  150)          T%LBLUESTEIN = .FALSE.
+(  151)        ENDIF
+(  152)     ENDIF
+(  153)   ENDIF
+(  154) # 163 "dealloc_resol_mod.F90"
+(  163)   !TPM_FIELDS
+(  164)   IF(ALLOCATED(F%RMU)) DEALLOCATE(F%RMU)
+(  165)   IF(ALLOCATED(F%RW)) DEALLOCATE(F%RW)
+(  166)   IF(ALLOCATED(F%R1MU2)) DEALLOCATE(F%R1MU2)
+(  167)   IF(ALLOCATED(F%RACTHE)) DEALLOCATE(F%RACTHE)
+(  168)   IF(ALLOCATED(F%REPSNM)) DEALLOCATE(F%REPSNM)
+(  169)   IF(ALLOCATED(F%RN)) DEALLOCATE(F%RN)
+(  170)   IF(ALLOCATED(F%RLAPIN)) DEALLOCATE(F%RLAPIN)
+(  171)   IF(ALLOCATED(F%NLTN)) DEALLOCATE(F%NLTN)
+(  172)   IF( S%LKEEPRPNM ) THEN
+(  173)     IF(ALLOCATED(F%RPNM)) DEALLOCATE(F%RPNM)
+(  174)   ENDIF
+(  175)   IF( S%LDLL ) THEN
+(  176)     IF(ALLOCATED(F%RMU2)) DEALLOCATE(F%RMU2)
+(  177)     IF(ALLOCATED(F%RACTHE2)) DEALLOCATE(F%RACTHE2)
+(  178)   ENDIF
+(  179) # 180 "dealloc_resol_mod.F90"
+(  180)   !TPM_GEOMETRY
+(  181)   IF(ALLOCATED(G%NMEN)) DEALLOCATE(G%NMEN)
+(  182)   IF(ALLOCATED(G%NDGLU)) DEALLOCATE(G%NDGLU)
+(  183)   IF(ALLOCATED(G%NLOEN)) DEALLOCATE(G%NLOEN)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:15      page 8
+
+(  184) # 185 "dealloc_resol_mod.F90"
+(  185)   LENABLED(KRESOL)=.FALSE.
+(  186)   NDEF_RESOL = COUNT(LENABLED)
+(  187)   ! Do not stay on a disabled resolution
+(  188)   DO JRESOL=1,SIZE(LENABLED)
+(  189)     IF (LENABLED(JRESOL)) THEN
+(  190)       CALL SET_RESOL(JRESOL)
+(  191)       EXIT
+(  192)     ENDIF
+(  193)   ENDDO
+(  194) # 195 "dealloc_resol_mod.F90"
+(  195) ENDIF
+(  196) !     ------------------------------------------------------------------
+(  197) # 198 "dealloc_resol_mod.F90"
+(  198) END SUBROUTINE DEALLOC_RESOL
+(  199) END MODULE DEALLOC_RESOL_MOD

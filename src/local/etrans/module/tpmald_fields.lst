@@ -1,0 +1,92 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:34      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: tpmald_fields.F90
+
+(    1) MODULE TPMALD_FIELDS
+(    2) 
+(    3) USE PARKIND1  ,ONLY : JPIM     ,JPRB,     JPRBT
+(    4) 
+(    5) IMPLICIT NONE
+(    6) 
+(    7) SAVE
+(    8) 
+(    9) TYPE ALDFIELDS_TYPE
+(   10) 
+(   11) REAL(KIND=JPRB) ,POINTER :: RLEPINM(:) ! eigen-values of the inverse Laplace operator
+(   12) END TYPE ALDFIELDS_TYPE
+(   13) 
+(   14) TYPE(ALDFIELDS_TYPE),ALLOCATABLE,TARGET :: ALDFIELDS_RESOL(:)
+(   15) TYPE(ALDFIELDS_TYPE),POINTER     :: FALD
+(   16) 
+(   17) REAL (KIND=JPRB), ALLOCATABLE :: FALD_RLEPINM (:)
+(   18) 
+(   19) END MODULE TPMALD_FIELDS
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:34      page 2
+
+(    1) # 1 "tpmald_fields.F90"
+(    1) MODULE TPMALD_FIELDS
+(    2) # 3 "tpmald_fields.F90"
+(    3) USE PARKIND1  ,ONLY : JPIM     ,JPRB,     JPRBT
+(    4) # 5 "tpmald_fields.F90"
+(    5) IMPLICIT NONE
+(    6) # 7 "tpmald_fields.F90"
+(    7) SAVE
+(    8) # 9 "tpmald_fields.F90"
+(    9) TYPE ALDFIELDS_TYPE
+(   10) # 11 "tpmald_fields.F90"
+(   11) REAL(KIND=JPRB) ,POINTER :: RLEPINM(:) ! eigen-values of the inverse Laplace operator
+(   12) END TYPE ALDFIELDS_TYPE
+(   13) # 14 "tpmald_fields.F90"
+(   14) TYPE(ALDFIELDS_TYPE),ALLOCATABLE,TARGET :: ALDFIELDS_RESOL(:)
+(   15) TYPE(ALDFIELDS_TYPE),POINTER     :: FALD
+(   16) # 17 "tpmald_fields.F90"
+(   17) REAL (KIND=JPRB), ALLOCATABLE :: FALD_RLEPINM (:)
+(   18) # 19 "tpmald_fields.F90"
+(   19) END MODULE TPMALD_FIELDS

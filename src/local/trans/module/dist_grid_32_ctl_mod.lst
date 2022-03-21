@@ -1,0 +1,617 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:06      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: dist_grid_32_ctl_mod.F90
+
+(    1) MODULE DIST_GRID_32_CTL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE DIST_GRID_32_CTL(PGPG,KFDISTG,KPROMA,KFROM,PGP)
+(    4) 
+(    5) !**** *DIST_GRID_32_CTL* - Distributing global gridpoint array to processors
+(    6) 
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Routine for distributing gridpoint array
+(   10) 
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !     CALL DIST_GRID_32_CTL(...)
+(   14) 
+(   15) !     Explicit arguments : 
+(   16) !     -------------------- 
+(   17) !     PGPG(:,:)   - Global gridpoint array
+(   18) !     KFDISTG     - Global number of fields to be distributed
+(   19) !     KPROMA      - required blocking factor for gridpoint output
+(   20) !     KFROM(:)    - Processor responsible for distributing each field
+(   21) !     PGP(:,:,:)  - Local spectral array
+(   22) 
+(   23) !     Externals.  SET2PE - compute "A and B" set from PE
+(   24) !     ----------  MPL..  - message passing routines
+(   25) 
+(   26) !     Author.
+(   27) !     -------
+(   28) !        Mats Hamrud *ECMWF*
+(   29) 
+(   30) !     Modifications.
+(   31) !     --------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:06      page 2
+
+(   32) !        Original : 2000-04-01
+(   33) 
+(   34) !     ------------------------------------------------------------------
+(   35) 
+(   36) USE PARKIND1  ,ONLY : JPIM     ,JPRM
+(   37) USE MPL_MODULE
+(   38) 
+(   39) USE TPM_DISTR
+(   40) USE TPM_GEOMETRY
+(   41) 
+(   42) USE SET2PE_MOD
+(   43) USE ABORT_TRANS_MOD
+(   44) USE EQ_REGIONS_MOD
+(   45) 
+(   46) IMPLICIT NONE
+(   47) 
+(   48) ! Declaration of arguments
+(   49) 
+(   50) REAL(KIND=JPRM)    ,OPTIONAL, INTENT(IN)  :: PGPG(:,:)
+(   51) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFDISTG
+(   52) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KPROMA
+(   53) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFROM(:)
+(   54) REAL(KIND=JPRM)             , INTENT(OUT) :: PGP(:,:,:)
+(   55) 
+(   56) ! Declaration of local variables
+(   57) 
+(   58) REAL(KIND=JPRM)    :: ZDUM(D%NGPTOTMX)
+(   59) REAL(KIND=JPRM),ALLOCATABLE :: ZBUF(:,:,:),ZRCV2(:,:)
+(   60) REAL(KIND=JPRM)    :: ZRCV(D%NGPTOTMX,KFDISTG)
+(   61) INTEGER(KIND=JPIM) :: JFLD,JB,JA,IGLOFF,IGL1,IGL2,IOFF,ILAST,ILOFF,ILENR
+(   62) INTEGER(KIND=JPIM) :: JGL,JLON,ISND,ITAG,J,IRCV
+(   63) INTEGER(KIND=JPIM) :: JKGLO,IEND,JROF,IBL,JROC
+(   64) INTEGER(KIND=JPIM) :: ISENDREQ(NPROC,KFDISTG),ILEN(NPROC,KFDISTG)
+(   65) INTEGER(KIND=JPIM) :: IFROM,IMYFIELDS,IFLD,IFLDSFROM(NPROC)
+(   66) LOGICAL :: LLSAME
+(   67) 
+(   68) !     ------------------------------------------------------------------
+(   69) 
+(   70) ! Copy for single PE
+(   71) 
+(   72) IF(NPROC == 1) THEN
+(   73) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JKGLO,IEND,IOFF,IBL,JFLD,JROF)
+(   74)   DO JKGLO=1,D%NGPTOT,KPROMA
+(   75)     IEND = MIN(KPROMA,D%NGPTOT-JKGLO+1)
+(   76)     IOFF = JKGLO-1
+(   77)     IBL  = (JKGLO-1)/KPROMA+1
+(   78)     DO JFLD=1,KFDISTG
+(   79)       DO JROF=1,IEND
+(   80)         PGP(JROF,JFLD,IBL) = PGPG(IOFF+JROF,JFLD) 
+(   81)       ENDDO
+(   82)     ENDDO
+(   83)   ENDDO
+(   84) !$OMP END PARALLEL DO
+(   85) 
+(   86) ELSEIF(KFDISTG>0) THEN
+(   87) 
+(   88) ! test if values in KFROM are all the same
+(   89)   LLSAME=.TRUE.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:06      page 3
+
+(   90)   IFROM=KFROM(1)
+(   91)   DO JFLD=2,KFDISTG
+(   92)     IF(KFROM(JFLD) /= IFROM) THEN
+(   93)       LLSAME=.FALSE.
+(   94)       EXIT
+(   95)     ENDIF
+(   96)   ENDDO
+(   97) 
+(   98)   IMYFIELDS = 0
+(   99)   DO JFLD=1,KFDISTG
+(  100)     IF(KFROM(JFLD) == MYPROC) THEN
+(  101)       IMYFIELDS = IMYFIELDS+1
+(  102)     ENDIF
+(  103)   ENDDO
+(  104) 
+(  105)   CALL GSTATS(1663,0)
+(  106)   IF(IMYFIELDS > 0) THEN
+(  107)     ALLOCATE(ZBUF(D%NGPTOTMX,IMYFIELDS,NPROC))
+(  108) 
+(  109) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1)&
+(  110) !$OMP&PRIVATE(JFLD,JA,JB,ISND,IGLOFF,IGL1,IGL2,IOFF,ILAST,J,&
+(  111) !$OMP&ILOFF,JGL,JLON)
+(  112)     DO JFLD=1,IMYFIELDS
+(  113)       DO JA=1,N_REGIONS_NS
+(  114)         DO JB=1,N_REGIONS(JA)
+(  115)           CALL SET2PE(ISND,JA,JB,0,0)
+(  116) 
+(  117)           IGLOFF = D%NPTRFRSTLAT(JA)
+(  118)           IGL1   = D%NFRSTLAT(JA)
+(  119)           IGL2   = D%NLSTLAT(JA)
+(  120)           IOFF = 0
+(  121)           IF(JA > 1) THEN
+(  122)             IF( D%NLSTLAT(JA-1) == D%NFRSTLAT(JA) )THEN
+(  123)               ILAST = D%NLSTLAT(JA-1)-1
+(  124)             ELSE
+(  125)               ILAST = D%NLSTLAT(JA-1)
+(  126)             ENDIF
+(  127)             DO J=D%NFRSTLAT(1),ILAST
+(  128)               IOFF = IOFF+G%NLOEN(J)
+(  129)             ENDDO
+(  130)           ENDIF
+(  131)           
+(  132)           ILEN(ISND,JFLD) = 0
+(  133)           ILOFF = 0
+(  134)           DO JGL=IGL1,IGL2
+(  135)             DO JLON=1,D%NONL(IGLOFF+JGL-IGL1,JB)
+(  136)               ZBUF(ILEN(ISND,JFLD)+JLON,JFLD,ISND) = &
+(  137)                & PGPG(IOFF+ILOFF+D%NSTA(IGLOFF+JGL-IGL1,JB)+JLON-1,JFLD)
+(  138)             ENDDO
+(  139)             ILEN(ISND,JFLD) = ILEN(ISND,JFLD) + D%NONL(IGLOFF+JGL-IGL1,JB)
+(  140)             ILOFF = ILOFF + G%NLOEN(JGL)
+(  141)           ENDDO
+(  142)         ENDDO
+(  143)       ENDDO
+(  144)     ENDDO
+(  145) !$OMP END PARALLEL DO
+(  146)   ENDIF
+(  147)   CALL GSTATS(1663,1)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:06      page 4
+
+(  148)     
+(  149)   ! Message passing
+(  150)   CALL GSTATS_BARRIER(791)
+(  151)   CALL GSTATS(811,0)
+(  152)   ! Send
+(  153)   IF( LLSAME )THEN
+(  154)     IF(KFROM(1) == MYPROC) THEN
+(  155)       ITAG = MTAGDISTGP
+(  156)       DO JROC=1,NPROC
+(  157)         CALL MPL_SEND(ZBUF(:,:,JROC),KDEST=NPRCIDS(JROC),KTAG=ITAG,&
+(  158)          &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(JROC,1),&
+(  159)          &CDSTRING='DIST_GRID_32_CTL')
+(  160)       ENDDO
+(  161)     ENDIF
+(  162)   ELSE
+(  163)    IF(IMYFIELDS > 0) THEN
+(  164)       ITAG = MTAGDISTGP
+(  165)       DO JROC=1,NPROC
+(  166)         CALL MPL_SEND(ZBUF(:,:,JROC),KDEST=NPRCIDS(JROC),KTAG=ITAG,&
+(  167)          &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(JROC,1),&
+(  168)          &CDSTRING='DIST_GRID_32_CTL')
+(  169)       ENDDO
+(  170)     ENDIF
+(  171)   ENDIF
+(  172)       
+(  173)     ! Receive
+(  174) 
+(  175)   IF( LLSAME )THEN
+(  176)     IRCV = KFROM(1)
+(  177)     ITAG = MTAGDISTGP
+(  178)     CALL MPL_RECV(ZRCV,KSOURCE=NPRCIDS(IRCV),KTAG=ITAG,&
+(  179)      &KMP_TYPE=JP_BLOCKING_STANDARD,KOUNT=ILENR,CDSTRING='DIST_GRID_32_CTL:')
+(  180)     IF( ILENR /= D%NGPTOTMX*KFDISTG )THEN
+(  181)       CALL ABORT_TRANS(' DIST_GRID_32_CTL: INVALID RECEIVE MESSAGE LENGTH 1')
+(  182)     ENDIF
+(  183)   ELSE
+(  184)     IFLDSFROM(:)=0
+(  185)     DO JFLD=1,KFDISTG
+(  186)       IFLDSFROM(KFROM(JFLD)) = IFLDSFROM(KFROM(JFLD))+1
+(  187)     ENDDO
+(  188)     ITAG = MTAGDISTGP
+(  189)     DO JROC=1,NPROC
+(  190)       IF(IFLDSFROM(JROC) > 0 ) THEN
+(  191)         IRCV = JROC
+(  192)         ALLOCATE(ZRCV2(D%NGPTOTMX,IFLDSFROM(JROC)))
+(  193)         CALL MPL_RECV(ZRCV2,KSOURCE=NPRCIDS(IRCV),KTAG=ITAG,&
+(  194)          &KMP_TYPE=JP_BLOCKING_STANDARD,KOUNT=ILENR,CDSTRING='DIST_GRID_32_CTL:')
+(  195)         IF( ILENR /= D%NGPTOTMX*IFLDSFROM(JROC) )THEN
+(  196)           CALL ABORT_TRANS(' DIST_GRID_32_CTL: INVALID RECEIVE MESSAGE LENGTH 2')
+(  197)         ENDIF
+(  198)         IFLD = 0
+(  199)         DO JFLD=1,KFDISTG
+(  200)           IF(KFROM(JFLD) == JROC) THEN
+(  201)             IFLD = IFLD+1
+(  202)             ZRCV(1:D%NGPTOT,JFLD) = ZRCV2(1:D%NGPTOT,IFLD)
+(  203)           ENDIF
+(  204)         ENDDO
+(  205)         DEALLOCATE(ZRCV2)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:06      page 5
+
+(  206)       ENDIF
+(  207)     ENDDO
+(  208)   ENDIF
+(  209) 
+(  210) ! Wait for send to complete
+(  211) 
+(  212)   IF( LLSAME )THEN
+(  213)     IF(KFROM(1) == MYPROC) THEN
+(  214)       CALL MPL_WAIT(KREQUEST=ISENDREQ(:,1), &
+(  215)        & CDSTRING='DIST_GRID_32_CTL: WAIT 1')
+(  216)     ENDIF
+(  217)   ELSEIF(IMYFIELDS > 0) THEN
+(  218)     CALL MPL_WAIT(KREQUEST=ISENDREQ(:,1), &
+(  219)      & CDSTRING='DIST_GRID_32_CTL: WAIT 2')
+(  220)   ENDIF
+(  221)   CALL GSTATS(811,1)
+(  222)   CALL GSTATS_BARRIER2(791)
+(  223) 
+(  224)   CALL GSTATS(1663,0)
+(  225) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JKGLO,IEND,IOFF,IBL,JFLD,JROF)
+(  226)   DO JKGLO=1,D%NGPTOT,KPROMA
+(  227)     IEND = MIN(KPROMA,D%NGPTOT-JKGLO+1)
+(  228)     IOFF = JKGLO-1
+(  229)     IBL  = (JKGLO-1)/KPROMA+1
+(  230)     DO JFLD=1,KFDISTG
+(  231)       DO JROF=1,IEND
+(  232)         PGP(JROF,JFLD,IBL) = ZRCV(IOFF+JROF,JFLD) 
+(  233)       ENDDO
+(  234)     ENDDO
+(  235)   ENDDO
+(  236) !$OMP END PARALLEL DO
+(  237)   CALL GSTATS(1663,1)
+(  238)   !Synchronize processors
+(  239)   CALL GSTATS(786,0)
+(  240)   CALL MPL_BARRIER(CDSTRING='DIST_GRID_32_CTL:')
+(  241)   CALL GSTATS(786,1)
+(  242)   IF(ALLOCATED(ZBUF)) DEALLOCATE(ZBUF)
+(  243) ENDIF
+(  244) 
+(  245) !     ------------------------------------------------------------------
+(  246) 
+(  247) END SUBROUTINE DIST_GRID_32_CTL
+(  248) END MODULE DIST_GRID_32_CTL_MOD
+(  249) 
+(  250) 
+(  251) 
+(  252) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:06      page 6
+
+(    1) # 1 "dist_grid_32_ctl_mod.F90"
+(    1) MODULE DIST_GRID_32_CTL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE DIST_GRID_32_CTL(PGPG,KFDISTG,KPROMA,KFROM,PGP)
+(    4) # 5 "dist_grid_32_ctl_mod.F90"
+(    5) !**** *DIST_GRID_32_CTL* - Distributing global gridpoint array to processors
+(    6) # 7 "dist_grid_32_ctl_mod.F90"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Routine for distributing gridpoint array
+(   10) # 11 "dist_grid_32_ctl_mod.F90"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !     CALL DIST_GRID_32_CTL(...)
+(   14) # 15 "dist_grid_32_ctl_mod.F90"
+(   15) !     Explicit arguments : 
+(   16) !     -------------------- 
+(   17) !     PGPG(:,:)   - Global gridpoint array
+(   18) !     KFDISTG     - Global number of fields to be distributed
+(   19) !     KPROMA      - required blocking factor for gridpoint output
+(   20) !     KFROM(:)    - Processor responsible for distributing each field
+(   21) !     PGP(:,:,:)  - Local spectral array
+(   22) # 23 "dist_grid_32_ctl_mod.F90"
+(   23) !     Externals.  SET2PE - compute "A and B" set from PE
+(   24) !     ----------  MPL..  - message passing routines
+(   25) # 26 "dist_grid_32_ctl_mod.F90"
+(   26) !     Author.
+(   27) !     -------
+(   28) !        Mats Hamrud *ECMWF*
+(   29) # 30 "dist_grid_32_ctl_mod.F90"
+(   30) !     Modifications.
+(   31) !     --------------
+(   32) !        Original : 2000-04-01
+(   33) # 34 "dist_grid_32_ctl_mod.F90"
+(   34) !     ------------------------------------------------------------------
+(   35) # 36 "dist_grid_32_ctl_mod.F90"
+(   36) USE PARKIND1  ,ONLY : JPIM     ,JPRM
+(   37) USE MPL_MODULE
+(   38) # 39 "dist_grid_32_ctl_mod.F90"
+(   39) USE TPM_DISTR
+(   40) USE TPM_GEOMETRY
+(   41) # 42 "dist_grid_32_ctl_mod.F90"
+(   42) USE SET2PE_MOD
+(   43) USE ABORT_TRANS_MOD
+(   44) USE EQ_REGIONS_MOD
+(   45) # 46 "dist_grid_32_ctl_mod.F90"
+(   46) IMPLICIT NONE
+(   47) # 48 "dist_grid_32_ctl_mod.F90"
+(   48) ! Declaration of arguments
+(   49) # 50 "dist_grid_32_ctl_mod.F90"
+(   50) REAL(KIND=JPRM)    ,OPTIONAL, INTENT(IN)  :: PGPG(:,:)
+(   51) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFDISTG
+(   52) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KPROMA
+(   53) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFROM(:)
+(   54) REAL(KIND=JPRM)             , INTENT(OUT) :: PGP(:,:,:)
+(   55) # 56 "dist_grid_32_ctl_mod.F90"
+(   56) ! Declaration of local variables
+(   57) # 58 "dist_grid_32_ctl_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:06      page 7
+
+(   58) REAL(KIND=JPRM)    :: ZDUM(D%NGPTOTMX)
+(   59) REAL(KIND=JPRM),ALLOCATABLE :: ZBUF(:,:,:),ZRCV2(:,:)
+(   60) REAL(KIND=JPRM)    :: ZRCV(D%NGPTOTMX,KFDISTG)
+(   61) INTEGER(KIND=JPIM) :: JFLD,JB,JA,IGLOFF,IGL1,IGL2,IOFF,ILAST,ILOFF,ILENR
+(   62) INTEGER(KIND=JPIM) :: JGL,JLON,ISND,ITAG,J,IRCV
+(   63) INTEGER(KIND=JPIM) :: JKGLO,IEND,JROF,IBL,JROC
+(   64) INTEGER(KIND=JPIM) :: ISENDREQ(NPROC,KFDISTG),ILEN(NPROC,KFDISTG)
+(   65) INTEGER(KIND=JPIM) :: IFROM,IMYFIELDS,IFLD,IFLDSFROM(NPROC)
+(   66) LOGICAL :: LLSAME
+(   67) # 68 "dist_grid_32_ctl_mod.F90"
+(   68) !     ------------------------------------------------------------------
+(   69) # 70 "dist_grid_32_ctl_mod.F90"
+(   70) ! Copy for single PE
+(   71) # 72 "dist_grid_32_ctl_mod.F90"
+(   72) IF(NPROC == 1) THEN
+(   73) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JKGLO,IEND,IOFF,IBL,JFLD,JROF)
+(   74)   DO JKGLO=1,D%NGPTOT,KPROMA
+(   75)     IEND = MIN(KPROMA,D%NGPTOT-JKGLO+1)
+(   76)     IOFF = JKGLO-1
+(   77)     IBL  = (JKGLO-1)/KPROMA+1
+(   78)     DO JFLD=1,KFDISTG
+(   79)       DO JROF=1,IEND
+(   80)         PGP(JROF,JFLD,IBL) = PGPG(IOFF+JROF,JFLD) 
+(   81)       ENDDO
+(   82)     ENDDO
+(   83)   ENDDO
+(   84) !$OMP END PARALLEL DO
+(   85) # 86 "dist_grid_32_ctl_mod.F90"
+(   86) ELSEIF(KFDISTG>0) THEN
+(   87) # 88 "dist_grid_32_ctl_mod.F90"
+(   88) ! test if values in KFROM are all the same
+(   89)   LLSAME=.TRUE.
+(   90)   IFROM=KFROM(1)
+(   91)   DO JFLD=2,KFDISTG
+(   92)     IF(KFROM(JFLD) /= IFROM) THEN
+(   93)       LLSAME=.FALSE.
+(   94)       EXIT
+(   95)     ENDIF
+(   96)   ENDDO
+(   97) # 98 "dist_grid_32_ctl_mod.F90"
+(   98)   IMYFIELDS = 0
+(   99)   DO JFLD=1,KFDISTG
+(  100)     IF(KFROM(JFLD) == MYPROC) THEN
+(  101)       IMYFIELDS = IMYFIELDS+1
+(  102)     ENDIF
+(  103)   ENDDO
+(  104) # 105 "dist_grid_32_ctl_mod.F90"
+(  105)   CALL GSTATS(1663,0)
+(  106)   IF(IMYFIELDS > 0) THEN
+(  107)     ALLOCATE(ZBUF(D%NGPTOTMX,IMYFIELDS,NPROC))
+(  108) # 109 "dist_grid_32_ctl_mod.F90"
+(  109) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1)&
+(  110) !$OMP&PRIVATE(JFLD,JA,JB,ISND,IGLOFF,IGL1,IGL2,IOFF,ILAST,J,&
+(  111) !$OMP&ILOFF,JGL,JLON)
+(  112)     DO JFLD=1,IMYFIELDS
+(  113)       DO JA=1,N_REGIONS_NS
+(  114)         DO JB=1,N_REGIONS(JA)
+(  115)           CALL SET2PE(ISND,JA,JB,0,0)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:06      page 8
+
+(  116) # 117 "dist_grid_32_ctl_mod.F90"
+(  117)           IGLOFF = D%NPTRFRSTLAT(JA)
+(  118)           IGL1   = D%NFRSTLAT(JA)
+(  119)           IGL2   = D%NLSTLAT(JA)
+(  120)           IOFF = 0
+(  121)           IF(JA > 1) THEN
+(  122)             IF( D%NLSTLAT(JA-1) == D%NFRSTLAT(JA) )THEN
+(  123)               ILAST = D%NLSTLAT(JA-1)-1
+(  124)             ELSE
+(  125)               ILAST = D%NLSTLAT(JA-1)
+(  126)             ENDIF
+(  127)             DO J=D%NFRSTLAT(1),ILAST
+(  128)               IOFF = IOFF+G%NLOEN(J)
+(  129)             ENDDO
+(  130)           ENDIF
+(  131)           
+(  132)           ILEN(ISND,JFLD) = 0
+(  133)           ILOFF = 0
+(  134)           DO JGL=IGL1,IGL2
+(  135)             DO JLON=1,D%NONL(IGLOFF+JGL-IGL1,JB)
+(  136)               ZBUF(ILEN(ISND,JFLD)+JLON,JFLD,ISND) = &
+(  137)                & PGPG(IOFF+ILOFF+D%NSTA(IGLOFF+JGL-IGL1,JB)+JLON-1,JFLD)
+(  138)             ENDDO
+(  139)             ILEN(ISND,JFLD) = ILEN(ISND,JFLD) + D%NONL(IGLOFF+JGL-IGL1,JB)
+(  140)             ILOFF = ILOFF + G%NLOEN(JGL)
+(  141)           ENDDO
+(  142)         ENDDO
+(  143)       ENDDO
+(  144)     ENDDO
+(  145) !$OMP END PARALLEL DO
+(  146)   ENDIF
+(  147)   CALL GSTATS(1663,1)
+(  148)     
+(  149)   ! Message passing
+(  150)   CALL GSTATS_BARRIER(791)
+(  151)   CALL GSTATS(811,0)
+(  152)   ! Send
+(  153)   IF( LLSAME )THEN
+(  154)     IF(KFROM(1) == MYPROC) THEN
+(  155)       ITAG = MTAGDISTGP
+(  156)       DO JROC=1,NPROC
+(  157)         CALL MPL_SEND(ZBUF(:,:,JROC),KDEST=NPRCIDS(JROC),KTAG=ITAG,&
+(  158)          &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(JROC,1),&
+(  159)          &CDSTRING='DIST_GRID_32_CTL')
+(  160)       ENDDO
+(  161)     ENDIF
+(  162)   ELSE
+(  163)    IF(IMYFIELDS > 0) THEN
+(  164)       ITAG = MTAGDISTGP
+(  165)       DO JROC=1,NPROC
+(  166)         CALL MPL_SEND(ZBUF(:,:,JROC),KDEST=NPRCIDS(JROC),KTAG=ITAG,&
+(  167)          &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(JROC,1),&
+(  168)          &CDSTRING='DIST_GRID_32_CTL')
+(  169)       ENDDO
+(  170)     ENDIF
+(  171)   ENDIF
+(  172)       
+(  173)     ! Receive
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:06      page 9
+
+(  174) # 175 "dist_grid_32_ctl_mod.F90"
+(  175)   IF( LLSAME )THEN
+(  176)     IRCV = KFROM(1)
+(  177)     ITAG = MTAGDISTGP
+(  178)     CALL MPL_RECV(ZRCV,KSOURCE=NPRCIDS(IRCV),KTAG=ITAG,&
+(  179)      &KMP_TYPE=JP_BLOCKING_STANDARD,KOUNT=ILENR,CDSTRING='DIST_GRID_32_CTL:')
+(  180)     IF( ILENR /= D%NGPTOTMX*KFDISTG )THEN
+(  181)       CALL ABORT_TRANS(' DIST_GRID_32_CTL: INVALID RECEIVE MESSAGE LENGTH 1')
+(  182)     ENDIF
+(  183)   ELSE
+(  184)     IFLDSFROM(:)=0
+(  185)     DO JFLD=1,KFDISTG
+(  186)       IFLDSFROM(KFROM(JFLD)) = IFLDSFROM(KFROM(JFLD))+1
+(  187)     ENDDO
+(  188)     ITAG = MTAGDISTGP
+(  189)     DO JROC=1,NPROC
+(  190)       IF(IFLDSFROM(JROC) > 0 ) THEN
+(  191)         IRCV = JROC
+(  192)         ALLOCATE(ZRCV2(D%NGPTOTMX,IFLDSFROM(JROC)))
+(  193)         CALL MPL_RECV(ZRCV2,KSOURCE=NPRCIDS(IRCV),KTAG=ITAG,&
+(  194)          &KMP_TYPE=JP_BLOCKING_STANDARD,KOUNT=ILENR,CDSTRING='DIST_GRID_32_CTL:')
+(  195)         IF( ILENR /= D%NGPTOTMX*IFLDSFROM(JROC) )THEN
+(  196)           CALL ABORT_TRANS(' DIST_GRID_32_CTL: INVALID RECEIVE MESSAGE LENGTH 2')
+(  197)         ENDIF
+(  198)         IFLD = 0
+(  199)         DO JFLD=1,KFDISTG
+(  200)           IF(KFROM(JFLD) == JROC) THEN
+(  201)             IFLD = IFLD+1
+(  202)             ZRCV(1:D%NGPTOT,JFLD) = ZRCV2(1:D%NGPTOT,IFLD)
+(  203)           ENDIF
+(  204)         ENDDO
+(  205)         DEALLOCATE(ZRCV2)
+(  206)       ENDIF
+(  207)     ENDDO
+(  208)   ENDIF
+(  209) # 210 "dist_grid_32_ctl_mod.F90"
+(  210) ! Wait for send to complete
+(  211) # 212 "dist_grid_32_ctl_mod.F90"
+(  212)   IF( LLSAME )THEN
+(  213)     IF(KFROM(1) == MYPROC) THEN
+(  214)       CALL MPL_WAIT(KREQUEST=ISENDREQ(:,1), &
+(  215)        & CDSTRING='DIST_GRID_32_CTL: WAIT 1')
+(  216)     ENDIF
+(  217)   ELSEIF(IMYFIELDS > 0) THEN
+(  218)     CALL MPL_WAIT(KREQUEST=ISENDREQ(:,1), &
+(  219)      & CDSTRING='DIST_GRID_32_CTL: WAIT 2')
+(  220)   ENDIF
+(  221)   CALL GSTATS(811,1)
+(  222)   CALL GSTATS_BARRIER2(791)
+(  223) # 224 "dist_grid_32_ctl_mod.F90"
+(  224)   CALL GSTATS(1663,0)
+(  225) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JKGLO,IEND,IOFF,IBL,JFLD,JROF)
+(  226)   DO JKGLO=1,D%NGPTOT,KPROMA
+(  227)     IEND = MIN(KPROMA,D%NGPTOT-JKGLO+1)
+(  228)     IOFF = JKGLO-1
+(  229)     IBL  = (JKGLO-1)/KPROMA+1
+(  230)     DO JFLD=1,KFDISTG
+(  231)       DO JROF=1,IEND
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:06      page 10
+
+(  232)         PGP(JROF,JFLD,IBL) = ZRCV(IOFF+JROF,JFLD) 
+(  233)       ENDDO
+(  234)     ENDDO
+(  235)   ENDDO
+(  236) !$OMP END PARALLEL DO
+(  237)   CALL GSTATS(1663,1)
+(  238)   !Synchronize processors
+(  239)   CALL GSTATS(786,0)
+(  240)   CALL MPL_BARRIER(CDSTRING='DIST_GRID_32_CTL:')
+(  241)   CALL GSTATS(786,1)
+(  242)   IF(ALLOCATED(ZBUF)) DEALLOCATE(ZBUF)
+(  243) ENDIF
+(  244) # 245 "dist_grid_32_ctl_mod.F90"
+(  245) !     ------------------------------------------------------------------
+(  246) # 247 "dist_grid_32_ctl_mod.F90"
+(  247) END SUBROUTINE DIST_GRID_32_CTL
+(  248) END MODULE DIST_GRID_32_CTL_MOD

@@ -1,0 +1,488 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:16      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: egath_spec.F90
+
+(    1) SUBROUTINE EGATH_SPEC(PSPECG,KFGATHG,KTO,KVSET,KRESOL,PSPEC,LDIM1_IS_FLD,KSMAX,KMSMAX,LDZA0IP)
+(    2) 
+(    3) !**** *EGATH_SPEC* - Gather global spectral array from processors
+(    4) 
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !        Interface routine for gathering spectral array
+(    8) 
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL EGATH_SPEC(...)
+(   12) 
+(   13) !     Explicit arguments :
+(   14) !     --------------------
+(   15) !     PSPECG(:,:) - Global spectral array
+(   16) !     KFGATHG     - Global number of fields to be gathered
+(   17) !     KTO(:)      - Processor responsible for gathering each field
+(   18) !     KVSET(:)    - "B-Set" for each field
+(   19) !     KRESOL      - resolution tag  which is required ,default is the
+(   20) !                   first defined resulution (input)
+(   21) !     PSPEC(:,:)  - Local spectral array
+(   22) !     LDZA0IP     - Set to zero imaginary part of first coefficients
+(   23) 
+(   24) !
+(   25) !     Method.
+(   26) !     -------
+(   27) 
+(   28) !     Externals.  SET_RESOL   - set resolution
+(   29) !     ----------  EGATH_SPEC_CONTROL - control routine
+(   30) 
+(   31) !     Author.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:16      page 2
+
+(   32) !     -------
+(   33) !        Mats Hamrud *ECMWF*
+(   34) 
+(   35) !     Modifications.
+(   36) !     --------------
+(   37) !        Original : 00-03-03
+(   38) !        Modified 03-09-30  Y. Seity, bug correction IFSEND=0       
+(   39) !        R. El Khatib 23-Oct-2012 Monkey business
+(   40) !        P.Marguinaud 10-Oct-2013 Add an option to set (or not) first
+(   41) !        coefficients imaginary part to zero
+(   42) !     ------------------------------------------------------------------
+(   43) 
+(   44) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   45) 
+(   46) !ifndef INTERFACE
+(   47) 
+(   48) USE TPM_GEN         ,ONLY : NERR
+(   49) USE TPM_DIM         ,ONLY : R
+(   50) USE TPMALD_DIM      ,ONLY : RALD
+(   51) USE TPM_DISTR       ,ONLY : D, NPRTRV, NPRTRW, MYSETV, MYPROC, NPROC
+(   52) USE TPMALD_DISTR
+(   53) 
+(   54) USE ESET_RESOL_MOD  ,ONLY : ESET_RESOL
+(   55) USE EGATH_SPEC_CONTROL_MOD ,ONLY : EGATH_SPEC_CONTROL
+(   56) 
+(   57) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   58) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   59) 
+(   60) !endif INTERFACE
+(   61) 
+(   62) IMPLICIT NONE
+(   63) 
+(   64) ! Declaration of arguments
+(   65) 
+(   66) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT)  :: PSPECG(:,:)
+(   67) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFGATHG
+(   68) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KTO(:)
+(   69) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSET(:)
+(   70) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   71) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPEC(:,:)
+(   72) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDIM1_IS_FLD
+(   73) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KSMAX
+(   74) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KMSMAX
+(   75) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDZA0IP
+(   76) 
+(   77) !ifndef INTERFACE
+(   78) 
+(   79) INTEGER(KIND=JPIM) :: IVSET(KFGATHG)
+(   80) INTEGER(KIND=JPIM) :: IFRECV,IFSEND,J
+(   81) INTEGER(KIND=JPIM) :: IFLD,ICOEFF
+(   82) INTEGER(KIND=JPIM) :: ISMAX, IMSMAX, ISPEC2, ISPEC2_G
+(   83) INTEGER(KIND=JPIM) :: IPOSSP(NPRTRW+1)
+(   84) INTEGER(KIND=JPIM),ALLOCATABLE :: IDIM0G(:)
+(   85) INTEGER(KIND=JPIM),ALLOCATABLE :: ICPL2M(:)
+(   86) LOGICAL :: LLDIM1_IS_FLD
+(   87) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   88) 
+(   89) !     ------------------------------------------------------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:16      page 3
+
+(   90) 
+(   91) IF (LHOOK) CALL DR_HOOK('EGATH_SPEC',0,ZHOOK_HANDLE)
+(   92) ! Set current resolution
+(   93) CALL ESET_RESOL(KRESOL)
+(   94) 
+(   95) LLDIM1_IS_FLD = .TRUE.
+(   96) IF(PRESENT(LDIM1_IS_FLD)) LLDIM1_IS_FLD = LDIM1_IS_FLD
+(   97) 
+(   98) IF(LLDIM1_IS_FLD) THEN
+(   99)   IFLD = 1
+(  100)   ICOEFF = 2
+(  101) ELSE
+(  102)   IFLD = 2
+(  103)   ICOEFF = 1
+(  104) ENDIF
+(  105) IF(UBOUND(KTO,1) < KFGATHG) THEN
+(  106)  CALL ABORT_TRANS('EGATH_SPEC: KTO TOO SHORT!')
+(  107) ENDIF
+(  108) 
+(  109) ISMAX = R%NSMAX
+(  110) IMSMAX = RALD%NMSMAX
+(  111) IF(PRESENT(KSMAX)) ISMAX = KSMAX
+(  112) IF(PRESENT(KMSMAX)) IMSMAX = KMSMAX
+(  113) ALLOCATE(IDIM0G(0:IMSMAX))
+(  114) ALLOCATE(ICPL2M(0:IMSMAX))
+(  115) IF(IMSMAX /= RALD%NMSMAX .OR. ISMAX /= R%NSMAX) THEN
+(  116)   CALL ABORT_TRANS('EGATH_SPEC:TRUNCATION CHANGE NOT YET CODED')
+(  117) ELSE
+(  118)   ISPEC2    = D%NSPEC2
+(  119)   ISPEC2_G  = R%NSPEC2_G
+(  120)   IPOSSP(:) = D%NPOSSP(:)
+(  121)   IDIM0G(:) = D%NDIM0G(:)
+(  122)   ICPL2M(:) = DALD%NCPL2M(:)
+(  123) ENDIF
+(  124) 
+(  125) IFSEND = 0 
+(  126) IFRECV = 0
+(  127) DO J=1,KFGATHG
+(  128)   IF(KTO(J) < 1 .OR. KTO(J) > NPROC) THEN
+(  129)     WRITE(NERR,*) 'EGATH_SPEC:ILLEGAL KTO VALUE',KTO(J),J
+(  130)     CALL ABORT_TRANS('EGATH_SPEC:ILLEGAL KTO VALUE')
+(  131)   ENDIF
+(  132)   IF(KTO(J) == MYPROC) IFRECV = IFRECV+1
+(  133) ENDDO
+(  134) 
+(  135) IF(IFRECV > 0) THEN
+(  136)   IF(.NOT.PRESENT(PSPECG)) THEN
+(  137)     CALL ABORT_TRANS('EGATH_SPEC:PSPECG MISSING')
+(  138)   ENDIF
+(  139)   IF(UBOUND(PSPECG,IFLD) < IFRECV) THEN
+(  140)     WRITE(NERR,*) 'EGATH_SPEC: ',IFLD, UBOUND(PSPECG,IFLD), IFRECV
+(  141)     CALL ABORT_TRANS('EGATH_SPEC:FIELD DIMENSION OF PSPECG TOO SMALL')
+(  142)   ENDIF
+(  143)  IF(UBOUND(PSPECG,ICOEFF) < ISPEC2_G) THEN
+(  144)     WRITE(NERR,*) 'EGATH_SPEC: ',ICOEFF, UBOUND(PSPECG,ICOEFF), ISPEC2_G
+(  145)     CALL ABORT_TRANS('EGATH_SPEC:COEFF DIMENSION OF PSPECG TOO SMALL')
+(  146)   ENDIF
+(  147) ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:16      page 4
+
+(  148) 
+(  149) IF(PRESENT(KVSET)) THEN
+(  150)   IF(UBOUND(KVSET,1) < KFGATHG) THEN
+(  151)     CALL ABORT_TRANS('EGATH_SPEC: KVSET TOO SHORT!')
+(  152)   ENDIF
+(  153)   DO J=1,KFGATHG
+(  154)     IF(KVSET(J) > NPRTRV .OR. KVSET(J) < 1) THEN
+(  155)       WRITE(NERR,*) 'EGATH_SPEC:KVSET(J) > NPRTRV ',J,KVSET(J),NPRTRV
+(  156)       CALL ABORT_TRANS('EGATH_SPEC:KVSET CONTAINS VALUES OUTSIDE RANGE')
+(  157)     ENDIF
+(  158)     IF(KVSET(J) == MYSETV) THEN
+(  159)       IFSEND = IFSEND+1
+(  160)     ENDIF
+(  161)   ENDDO
+(  162)   IVSET(:) = KVSET(1:KFGATHG)
+(  163) ELSEIF(NPRTRV > 1) THEN
+(  164)   WRITE(NERR,*) 'EGATH_SPEC:KVSET MISSING, NPRTRV ',NPRTRV
+(  165)   CALL ABORT_TRANS('EGATH_SPEC:KVSET MISSING, NPRTRV > 1')
+(  166) ELSE
+(  167)   IFSEND   = KFGATHG
+(  168)   IVSET(:) = 1
+(  169) ENDIF
+(  170) 
+(  171) IF(IFSEND > 0 ) THEN
+(  172)   IF(.NOT.PRESENT(PSPEC)) THEN
+(  173)     CALL ABORT_TRANS('EGATH_SPEC: FIELDS TO RECIEVE AND PSPEC NOT PRESENT')
+(  174)   ENDIF
+(  175)   IF(UBOUND(PSPEC,IFLD) < IFSEND) THEN
+(  176)     CALL ABORT_TRANS('EGATH_SPEC: FIELD DIMENSION OF PSPEC TOO SMALL')
+(  177)   ENDIF
+(  178)   IF(UBOUND(PSPEC,ICOEFF) < ISPEC2 ) THEN
+(  179)     CALL ABORT_TRANS('EGATH_SPEC: COEFF DIMENSION OF PSPEC TOO SMALL')
+(  180)   ENDIF
+(  181) ENDIF
+(  182) 
+(  183) CALL EGATH_SPEC_CONTROL(PSPECG,KFGATHG,KTO,IVSET,PSPEC,LLDIM1_IS_FLD,&
+(  184)  & IMSMAX,ISPEC2,ISPEC2_G,IPOSSP,IDIM0G,ICPL2M,LDZA0IP)
+(  185) DEALLOCATE(IDIM0G)
+(  186) DEALLOCATE(ICPL2M)
+(  187) 
+(  188) IF (LHOOK) CALL DR_HOOK('EGATH_SPEC',1,ZHOOK_HANDLE)
+(  189) !endif INTERFACE
+(  190) 
+(  191) !     ------------------------------------------------------------------
+(  192) 
+(  193) END SUBROUTINE EGATH_SPEC
+(  194) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:16      page 5
+
+(    1) # 1 "egath_spec.F90"
+(    1) SUBROUTINE EGATH_SPEC(PSPECG,KFGATHG,KTO,KVSET,KRESOL,PSPEC,LDIM1_IS_FLD,KSMAX,KMSMAX,LDZA0IP)
+(    2) # 3 "egath_spec.F90"
+(    3) !**** *EGATH_SPEC* - Gather global spectral array from processors
+(    4) # 5 "egath_spec.F90"
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !        Interface routine for gathering spectral array
+(    8) # 9 "egath_spec.F90"
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL EGATH_SPEC(...)
+(   12) # 13 "egath_spec.F90"
+(   13) !     Explicit arguments :
+(   14) !     --------------------
+(   15) !     PSPECG(:,:) - Global spectral array
+(   16) !     KFGATHG     - Global number of fields to be gathered
+(   17) !     KTO(:)      - Processor responsible for gathering each field
+(   18) !     KVSET(:)    - "B-Set" for each field
+(   19) !     KRESOL      - resolution tag  which is required ,default is the
+(   20) !                   first defined resulution (input)
+(   21) !     PSPEC(:,:)  - Local spectral array
+(   22) !     LDZA0IP     - Set to zero imaginary part of first coefficients
+(   23) # 24 "egath_spec.F90"
+(   24) !
+(   25) !     Method.
+(   26) !     -------
+(   27) # 28 "egath_spec.F90"
+(   28) !     Externals.  SET_RESOL   - set resolution
+(   29) !     ----------  EGATH_SPEC_CONTROL - control routine
+(   30) # 31 "egath_spec.F90"
+(   31) !     Author.
+(   32) !     -------
+(   33) !        Mats Hamrud *ECMWF*
+(   34) # 35 "egath_spec.F90"
+(   35) !     Modifications.
+(   36) !     --------------
+(   37) !        Original : 00-03-03
+(   38) !        Modified 03-09-30  Y. Seity, bug correction IFSEND=0       
+(   39) !        R. El Khatib 23-Oct-2012 Monkey business
+(   40) !        P.Marguinaud 10-Oct-2013 Add an option to set (or not) first
+(   41) !        coefficients imaginary part to zero
+(   42) !     ------------------------------------------------------------------
+(   43) # 44 "egath_spec.F90"
+(   44) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   45) # 46 "egath_spec.F90"
+(   46) !ifndef INTERFACE
+(   47) # 48 "egath_spec.F90"
+(   48) USE TPM_GEN         ,ONLY : NERR
+(   49) USE TPM_DIM         ,ONLY : R
+(   50) USE TPMALD_DIM      ,ONLY : RALD
+(   51) USE TPM_DISTR       ,ONLY : D, NPRTRV, NPRTRW, MYSETV, MYPROC, NPROC
+(   52) USE TPMALD_DISTR
+(   53) # 54 "egath_spec.F90"
+(   54) USE ESET_RESOL_MOD  ,ONLY : ESET_RESOL
+(   55) USE EGATH_SPEC_CONTROL_MOD ,ONLY : EGATH_SPEC_CONTROL
+(   56) # 57 "egath_spec.F90"
+(   57) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:16      page 6
+
+(   58) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   59) # 60 "egath_spec.F90"
+(   60) !endif INTERFACE
+(   61) # 62 "egath_spec.F90"
+(   62) IMPLICIT NONE
+(   63) # 64 "egath_spec.F90"
+(   64) ! Declaration of arguments
+(   65) # 66 "egath_spec.F90"
+(   66) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT)  :: PSPECG(:,:)
+(   67) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFGATHG
+(   68) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KTO(:)
+(   69) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSET(:)
+(   70) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   71) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPEC(:,:)
+(   72) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDIM1_IS_FLD
+(   73) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KSMAX
+(   74) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KMSMAX
+(   75) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDZA0IP
+(   76) # 77 "egath_spec.F90"
+(   77) !ifndef INTERFACE
+(   78) # 79 "egath_spec.F90"
+(   79) INTEGER(KIND=JPIM) :: IVSET(KFGATHG)
+(   80) INTEGER(KIND=JPIM) :: IFRECV,IFSEND,J
+(   81) INTEGER(KIND=JPIM) :: IFLD,ICOEFF
+(   82) INTEGER(KIND=JPIM) :: ISMAX, IMSMAX, ISPEC2, ISPEC2_G
+(   83) INTEGER(KIND=JPIM) :: IPOSSP(NPRTRW+1)
+(   84) INTEGER(KIND=JPIM),ALLOCATABLE :: IDIM0G(:)
+(   85) INTEGER(KIND=JPIM),ALLOCATABLE :: ICPL2M(:)
+(   86) LOGICAL :: LLDIM1_IS_FLD
+(   87) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   88) # 89 "egath_spec.F90"
+(   89) !     ------------------------------------------------------------------
+(   90) # 91 "egath_spec.F90"
+(   91) IF (LHOOK) CALL DR_HOOK('EGATH_SPEC',0,ZHOOK_HANDLE)
+(   92) ! Set current resolution
+(   93) CALL ESET_RESOL(KRESOL)
+(   94) # 95 "egath_spec.F90"
+(   95) LLDIM1_IS_FLD = .TRUE.
+(   96) IF(PRESENT(LDIM1_IS_FLD)) LLDIM1_IS_FLD = LDIM1_IS_FLD
+(   97) # 98 "egath_spec.F90"
+(   98) IF(LLDIM1_IS_FLD) THEN
+(   99)   IFLD = 1
+(  100)   ICOEFF = 2
+(  101) ELSE
+(  102)   IFLD = 2
+(  103)   ICOEFF = 1
+(  104) ENDIF
+(  105) IF(UBOUND(KTO,1) < KFGATHG) THEN
+(  106)  CALL ABORT_TRANS('EGATH_SPEC: KTO TOO SHORT!')
+(  107) ENDIF
+(  108) # 109 "egath_spec.F90"
+(  109) ISMAX = R%NSMAX
+(  110) IMSMAX = RALD%NMSMAX
+(  111) IF(PRESENT(KSMAX)) ISMAX = KSMAX
+(  112) IF(PRESENT(KMSMAX)) IMSMAX = KMSMAX
+(  113) ALLOCATE(IDIM0G(0:IMSMAX))
+(  114) ALLOCATE(ICPL2M(0:IMSMAX))
+(  115) IF(IMSMAX /= RALD%NMSMAX .OR. ISMAX /= R%NSMAX) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:16      page 7
+
+(  116)   CALL ABORT_TRANS('EGATH_SPEC:TRUNCATION CHANGE NOT YET CODED')
+(  117) ELSE
+(  118)   ISPEC2    = D%NSPEC2
+(  119)   ISPEC2_G  = R%NSPEC2_G
+(  120)   IPOSSP(:) = D%NPOSSP(:)
+(  121)   IDIM0G(:) = D%NDIM0G(:)
+(  122)   ICPL2M(:) = DALD%NCPL2M(:)
+(  123) ENDIF
+(  124) # 125 "egath_spec.F90"
+(  125) IFSEND = 0 
+(  126) IFRECV = 0
+(  127) DO J=1,KFGATHG
+(  128)   IF(KTO(J) < 1 .OR. KTO(J) > NPROC) THEN
+(  129)     WRITE(NERR,*) 'EGATH_SPEC:ILLEGAL KTO VALUE',KTO(J),J
+(  130)     CALL ABORT_TRANS('EGATH_SPEC:ILLEGAL KTO VALUE')
+(  131)   ENDIF
+(  132)   IF(KTO(J) == MYPROC) IFRECV = IFRECV+1
+(  133) ENDDO
+(  134) # 135 "egath_spec.F90"
+(  135) IF(IFRECV > 0) THEN
+(  136)   IF(.NOT.PRESENT(PSPECG)) THEN
+(  137)     CALL ABORT_TRANS('EGATH_SPEC:PSPECG MISSING')
+(  138)   ENDIF
+(  139)   IF(UBOUND(PSPECG,IFLD) < IFRECV) THEN
+(  140)     WRITE(NERR,*) 'EGATH_SPEC: ',IFLD, UBOUND(PSPECG,IFLD), IFRECV
+(  141)     CALL ABORT_TRANS('EGATH_SPEC:FIELD DIMENSION OF PSPECG TOO SMALL')
+(  142)   ENDIF
+(  143)  IF(UBOUND(PSPECG,ICOEFF) < ISPEC2_G) THEN
+(  144)     WRITE(NERR,*) 'EGATH_SPEC: ',ICOEFF, UBOUND(PSPECG,ICOEFF), ISPEC2_G
+(  145)     CALL ABORT_TRANS('EGATH_SPEC:COEFF DIMENSION OF PSPECG TOO SMALL')
+(  146)   ENDIF
+(  147) ENDIF
+(  148) # 149 "egath_spec.F90"
+(  149) IF(PRESENT(KVSET)) THEN
+(  150)   IF(UBOUND(KVSET,1) < KFGATHG) THEN
+(  151)     CALL ABORT_TRANS('EGATH_SPEC: KVSET TOO SHORT!')
+(  152)   ENDIF
+(  153)   DO J=1,KFGATHG
+(  154)     IF(KVSET(J) > NPRTRV .OR. KVSET(J) < 1) THEN
+(  155)       WRITE(NERR,*) 'EGATH_SPEC:KVSET(J) > NPRTRV ',J,KVSET(J),NPRTRV
+(  156)       CALL ABORT_TRANS('EGATH_SPEC:KVSET CONTAINS VALUES OUTSIDE RANGE')
+(  157)     ENDIF
+(  158)     IF(KVSET(J) == MYSETV) THEN
+(  159)       IFSEND = IFSEND+1
+(  160)     ENDIF
+(  161)   ENDDO
+(  162)   IVSET(:) = KVSET(1:KFGATHG)
+(  163) ELSEIF(NPRTRV > 1) THEN
+(  164)   WRITE(NERR,*) 'EGATH_SPEC:KVSET MISSING, NPRTRV ',NPRTRV
+(  165)   CALL ABORT_TRANS('EGATH_SPEC:KVSET MISSING, NPRTRV > 1')
+(  166) ELSE
+(  167)   IFSEND   = KFGATHG
+(  168)   IVSET(:) = 1
+(  169) ENDIF
+(  170) # 171 "egath_spec.F90"
+(  171) IF(IFSEND > 0 ) THEN
+(  172)   IF(.NOT.PRESENT(PSPEC)) THEN
+(  173)     CALL ABORT_TRANS('EGATH_SPEC: FIELDS TO RECIEVE AND PSPEC NOT PRESENT')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:16      page 8
+
+(  174)   ENDIF
+(  175)   IF(UBOUND(PSPEC,IFLD) < IFSEND) THEN
+(  176)     CALL ABORT_TRANS('EGATH_SPEC: FIELD DIMENSION OF PSPEC TOO SMALL')
+(  177)   ENDIF
+(  178)   IF(UBOUND(PSPEC,ICOEFF) < ISPEC2 ) THEN
+(  179)     CALL ABORT_TRANS('EGATH_SPEC: COEFF DIMENSION OF PSPEC TOO SMALL')
+(  180)   ENDIF
+(  181) ENDIF
+(  182) # 183 "egath_spec.F90"
+(  183) CALL EGATH_SPEC_CONTROL(PSPECG,KFGATHG,KTO,IVSET,PSPEC,LLDIM1_IS_FLD,&
+(  184)  & IMSMAX,ISPEC2,ISPEC2_G,IPOSSP,IDIM0G,ICPL2M,LDZA0IP)
+(  185) DEALLOCATE(IDIM0G)
+(  186) DEALLOCATE(ICPL2M)
+(  187) # 188 "egath_spec.F90"
+(  188) IF (LHOOK) CALL DR_HOOK('EGATH_SPEC',1,ZHOOK_HANDLE)
+(  189) !endif INTERFACE
+(  190) # 191 "egath_spec.F90"
+(  191) !     ------------------------------------------------------------------
+(  192) # 193 "egath_spec.F90"
+(  193) END SUBROUTINE EGATH_SPEC

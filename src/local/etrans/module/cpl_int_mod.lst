@@ -1,0 +1,106 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:40      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: cpl_int_mod.F90
+
+(    1) MODULE CPL_INT_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE CPL_INT(PGTF,KENDROWL,KFIELDS,KFFIELDS,KLEN,KSTA,CPL_PROC,KPTRGP)
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) 
+(    8) IMPLICIT NONE
+(    9) INTEGER(KIND=JPIM), INTENT(IN) :: KENDROWL 
+(   10) INTEGER(KIND=JPIM), INTENT(IN) :: KFIELDS
+(   11) INTEGER(KIND=JPIM), INTENT(IN) :: KFFIELDS
+(   12) INTEGER(KIND=JPIM), INTENT(IN) :: KLEN
+(   13) INTEGER(KIND=JPIM), INTENT(IN) :: KSTA(KENDROWL)
+(   14) INTEGER(KIND=JPIM), OPTIONAL, INTENT(IN) :: KPTRGP(:)
+(   15) REAL(KIND=JPRB), INTENT(INOUT) :: PGTF(KFIELDS,KLEN)
+(   16) EXTERNAL  CPL_PROC
+(   17) 
+(   18) INTEGER(KIND=JPIM) :: IPTRGP(KFIELDS)
+(   19) INTEGER(KIND=JPIM) :: J
+(   20) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   21) !--------------------------------------------------------------
+(   22) IF (LHOOK) CALL DR_HOOK('CPL_INT_MOD:CPL_INT',0,ZHOOK_HANDLE)
+(   23) IF(PRESENT(KPTRGP)) THEN
+(   24)   IPTRGP(:)=KPTRGP(1:KFIELDS)
+(   25) ELSE
+(   26)   DO J=1,KFIELDS
+(   27)     IPTRGP(J)=J
+(   28)   ENDDO
+(   29) ENDIF
+(   30) CALL CPL_PROC(PGTF,KENDROWL,KFIELDS,KFFIELDS,KLEN,KSTA,IPTRGP)
+(   31) IF (LHOOK) CALL DR_HOOK('CPL_INT_MOD:CPL_INT',1,ZHOOK_HANDLE)
+(   32) END SUBROUTINE CPL_INT
+(   33) END MODULE CPL_INT_MOD
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:40      page 2
+
+(    1) # 1 "cpl_int_mod.F90"
+(    1) MODULE CPL_INT_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE CPL_INT(PGTF,KENDROWL,KFIELDS,KFFIELDS,KLEN,KSTA,CPL_PROC,KPTRGP)
+(    4) # 5 "cpl_int_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) # 8 "cpl_int_mod.F90"
+(    8) IMPLICIT NONE
+(    9) INTEGER(KIND=JPIM), INTENT(IN) :: KENDROWL 
+(   10) INTEGER(KIND=JPIM), INTENT(IN) :: KFIELDS
+(   11) INTEGER(KIND=JPIM), INTENT(IN) :: KFFIELDS
+(   12) INTEGER(KIND=JPIM), INTENT(IN) :: KLEN
+(   13) INTEGER(KIND=JPIM), INTENT(IN) :: KSTA(KENDROWL)
+(   14) INTEGER(KIND=JPIM), OPTIONAL, INTENT(IN) :: KPTRGP(:)
+(   15) REAL(KIND=JPRB), INTENT(INOUT) :: PGTF(KFIELDS,KLEN)
+(   16) EXTERNAL  CPL_PROC
+(   17) # 18 "cpl_int_mod.F90"
+(   18) INTEGER(KIND=JPIM) :: IPTRGP(KFIELDS)
+(   19) INTEGER(KIND=JPIM) :: J
+(   20) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   21) !--------------------------------------------------------------
+(   22) IF (LHOOK) CALL DR_HOOK('CPL_INT_MOD:CPL_INT',0,ZHOOK_HANDLE)
+(   23) IF(PRESENT(KPTRGP)) THEN
+(   24)   IPTRGP(:)=KPTRGP(1:KFIELDS)
+(   25) ELSE
+(   26)   DO J=1,KFIELDS
+(   27)     IPTRGP(J)=J
+(   28)   ENDDO
+(   29) ENDIF
+(   30) CALL CPL_PROC(PGTF,KENDROWL,KFIELDS,KFFIELDS,KLEN,KSTA,IPTRGP)
+(   31) IF (LHOOK) CALL DR_HOOK('CPL_INT_MOD:CPL_INT',1,ZHOOK_HANDLE)
+(   32) END SUBROUTINE CPL_INT
+(   33) END MODULE CPL_INT_MOD

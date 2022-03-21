@@ -1,0 +1,741 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:50:05      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: einv_trans_ctl_mod.F90
+
+(    1) MODULE EINV_TRANS_CTL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EINV_TRANS_CTL(KF_UV_G,KF_SCALARS_G,KF_GP,KF_FS,KF_OUT_LT,&
+(    4)  & KF_UV,KF_SCALARS,KF_SCDERS,&
+(    5)  & PSPVOR,PSPDIV,PSPSCALAR,KVSETUV,KVSETSC,PGP,FSPGL_PROC,&
+(    6)  & PSPSC3A,PSPSC3B,PSPSC2,KVSETSC3A,KVSETSC3B,KVSETSC2,PGPUV,PGP3A,PGP3B,PGP2,&
+(    7)  & PSPMEANU,PSPMEANV)
+(    8) 
+(    9) 
+(   10) !**** *EINV_TRANS_CTL* - Control routine for inverse spectral transform.
+(   11) 
+(   12) !     Purpose.
+(   13) !     --------
+(   14) !        Control routine for the inverse spectral transform
+(   15) 
+(   16) !**   Interface.
+(   17) !     ----------
+(   18) !     CALL EINV_TRANS_CTL(...)
+(   19) 
+(   20) !     Explicit arguments :
+(   21) !     --------------------
+(   22) !     KF_UV_G      - global number of spectral u-v fields
+(   23) !     KF_SCALARS_G - global number of scalar spectral fields
+(   24) !     KF_GP        - total number of output gridpoint fields
+(   25) !     KF_FS        - total number of fields in fourier space
+(   26) !     KF_OUT_LT    - total number of fields coming out from inverse LT
+(   27) !     KF_UV        - local number of spectral u-v fields
+(   28) !     KF_SCALARS   - local number of scalar spectral fields
+(   29) !     KF_SCDERS    - local number of derivatives of scalar spectral fields
+(   30) !     PSPVOR(:,:)  - spectral vorticity (input)
+(   31) !     PSPDIV(:,:)  - spectral divergence (input)
+(   32) !     PSPSCALAR(:,:) - spectral scalarvalued fields (input)
+(   33) !     KVSETUV(:)  - indicating which 'b-set' in spectral space owns a
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:50:05      page 2
+
+(   34) !                   vor/div field. Equivalant to NBSETLEV in the IFS.
+(   35) !                   The length of KVSETUV should be the GLOBAL number
+(   36) !                   of u/v fields which is the dimension of u and v releated
+(   37) !                   fields in grid-point space.
+(   38) !     KVESETSC(:) - indicating which 'b-set' in spectral space owns a
+(   39) !                   scalar field. As for KVSETUV this argument is required
+(   40) !                   if the total number of processors is greater than
+(   41) !                   the number of processors used for distribution in
+(   42) !                   spectral wave space.
+(   43) !     FSPGL_PROC  - external procedure to be executed in fourier space
+(   44) !                   before transposition
+(   45) !     PGP(:,:,:)  - gridpoint fields (output)
+(   46) 
+(   47) !                  The ordering of the output fields is as follows (all
+(   48) !                  parts are optional depending on the input switches):
+(   49) 
+(   50) !       vorticity     : KF_UV_G fields
+(   51) !       divergence    : KF_UV_G fields
+(   52) !       u             : KF_UV_G fields
+(   53) !       v             : KF_UV_G fields
+(   54) !       scalar fields : KF_SCALARS_G fields
+(   55) !       N-S derivative of scalar fields : KF_SCALARS_G fields
+(   56) !       E-W derivative of u : KF_UV_G fields
+(   57) !       E-W derivative of v : KF_UV_G fields
+(   58) !       E-W derivative of scalar fields : KF_SCALARS_G fields
+(   59) 
+(   60) !     Method.
+(   61) !     -------
+(   62) 
+(   63) !     Externals.  SHUFFLE     - reshuffle fields for load balancing
+(   64) !     ----------  FIELD_SPLIT - split fields in NPROMATR packets
+(   65) !                 LTINV_CTL   - control of Legendre transform
+(   66) !                 FTINV_CTL   - control of Fourier transform
+(   67) 
+(   68) !     Author.
+(   69) !     -------
+(   70) !        Mats Hamrud *ECMWF*
+(   71) 
+(   72) !     Modifications.
+(   73) !     --------------
+(   74) !        Original : 01-01-03
+(   75) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   76) 
+(   77) !     ------------------------------------------------------------------
+(   78) 
+(   79) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   80) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   81) 
+(   82) USE TPM_GEN         ,ONLY : NPROMATR
+(   83) USE TPM_TRANS       ,ONLY : LDIVGP, LSCDERS, LUVDER, LVORGP
+(   84) !USE TPM_DISTR
+(   85) 
+(   86) USE SHUFFLE_MOD     ,ONLY : SHUFFLE
+(   87) USE FIELD_SPLIT_MOD ,ONLY : FIELD_SPLIT
+(   88) USE ELTINV_CTL_MOD  ,ONLY : ELTINV_CTL
+(   89) USE EFTINV_CTL_MOD  ,ONLY : EFTINV_CTL
+(   90) !
+(   91) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:50:05      page 3
+
+(   92) IMPLICIT NONE
+(   93) 
+(   94) ! Declaration of arguments
+(   95) 
+(   96) INTEGER(KIND=JPIM), INTENT(IN) :: KF_UV_G
+(   97) INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCALARS_G
+(   98) INTEGER(KIND=JPIM), INTENT(IN) :: KF_GP
+(   99) INTEGER(KIND=JPIM), INTENT(IN) :: KF_FS
+(  100) INTEGER(KIND=JPIM), INTENT(IN) :: KF_OUT_LT
+(  101) INTEGER(KIND=JPIM), INTENT(IN) :: KF_UV
+(  102) INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCALARS
+(  103) INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCDERS
+(  104) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPVOR(:,:)
+(  105) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPDIV(:,:)
+(  106) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPSCALAR(:,:)
+(  107) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPSC3A(:,:,:)
+(  108) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPSC3B(:,:,:)
+(  109) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPSC2(:,:)
+(  110) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETUV(:)
+(  111) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC(:)
+(  112) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3A(:)
+(  113) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3B(:)
+(  114) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC2(:)
+(  115) REAL(KIND=JPRB) ,OPTIONAL   ,INTENT(OUT) :: PGP(:,:,:)
+(  116) EXTERNAL  FSPGL_PROC
+(  117) OPTIONAL  FSPGL_PROC
+(  118) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGPUV(:,:,:,:)
+(  119) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGP3A(:,:,:,:)
+(  120) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGP3B(:,:,:,:)
+(  121) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGP2(:,:,:)
+(  122) REAL(KIND=JPRB)      ,OPTIONAL, INTENT(IN) :: PSPMEANU(:)
+(  123) REAL(KIND=JPRB)      ,OPTIONAL, INTENT(IN) :: PSPMEANV(:)
+(  124) 
+(  125) ! Local variables
+(  126) 
+(  127) INTEGER(KIND=JPIM) :: IPTRGP(KF_GP),IPTRSPUV(NPROMATR),IPTRSPSC(NPROMATR)
+(  128) INTEGER(KIND=JPIM) :: ISHFUV_G(KF_GP),ISHFSC_G(KF_GP)
+(  129) INTEGER(KIND=JPIM) :: IVSETUV(KF_GP),IVSETSC(KF_GP)
+(  130) INTEGER(KIND=JPIM) :: IBLKS,JBLK,ISTUV_G,IENUV_G
+(  131) INTEGER(KIND=JPIM) :: IF_UV_G,IF_UV,ISTUV,IF_SCALARS,IF_SCALARS_G,IF_FS,IF_GP
+(  132) INTEGER(KIND=JPIM) :: JFLD,ISTSC_G,IENSC_G,ISTSC,IENSC,IENUV,IF_SCDERS,IF_OUT_LT
+(  133) INTEGER(KIND=JPIM) :: IOFFD,IOFFU,IOFFV,IOFFUVD,IOFFSC,IOFFSCNS,IOFFSCEW,IOFF,IF_GPB
+(  134) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  135) 
+(  136) !     ------------------------------------------------------------------
+(  137) 
+(  138) ! Perform transform
+(  139) 
+(  140) IF (LHOOK) CALL DR_HOOK('EINV_TRANS_CTL_MOD:EINV_TRANS_CTL',0,ZHOOK_HANDLE)
+(  141) IF_GPB = 2*KF_UV_G+KF_SCALARS_G
+(  142) 
+(  143) IF(NPROMATR > 0 .AND. IF_GPB > NPROMATR) THEN
+(  144) 
+(  145)   ! Fields to be split into packets
+(  146) 
+(  147)   CALL SHUFFLE(KF_UV_G,KF_SCALARS_G,ISHFUV_G,IVSETUV,ISHFSC_G,IVSETSC, &
+(  148)    & KVSETUV,KVSETSC)
+(  149) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:50:05      page 4
+
+(  150)   IBLKS=(IF_GPB-1)/NPROMATR+1
+(  151) 
+(  152)   DO JBLK=1,IBLKS
+(  153)   
+(  154)     CALL FIELD_SPLIT(JBLK,IF_GPB,KF_UV_G,IVSETUV,IVSETSC,&
+(  155)      & ISTUV_G,IENUV_G,IF_UV_G,ISTSC_G,IENSC_G,IF_SCALARS_G,&
+(  156)      & ISTUV,IENUV,IF_UV,ISTSC,IENSC,IF_SCALARS)
+(  157) 
+(  158)     IF(LSCDERS) THEN
+(  159)       IF_SCDERS = IF_SCALARS
+(  160)     ELSE
+(  161)       IF_SCDERS = 0
+(  162)     ENDIF
+(  163)         
+(  164)     IF_OUT_LT = 2*IF_UV + IF_SCALARS+IF_SCDERS
+(  165)     IF(LVORGP) THEN
+(  166)       IF_OUT_LT = IF_OUT_LT+IF_UV
+(  167)     ENDIF
+(  168)     IF(LDIVGP) THEN
+(  169)       IF_OUT_LT = IF_OUT_LT+IF_UV
+(  170)     ENDIF
+(  171)     IF_FS = IF_OUT_LT+IF_SCDERS
+(  172)     IF(LUVDER) THEN
+(  173)       IF_FS = IF_FS+2*IF_UV
+(  174)     ENDIF
+(  175) 
+(  176)     IF_GP = 2*IF_UV_G+IF_SCALARS_G
+(  177)     IOFFD = 0
+(  178)     IOFFU = 0
+(  179)     IOFFV = KF_UV_G
+(  180)     IOFFUVD = 2*KF_UV_G+KF_SCALARS_G
+(  181)     IOFFSC = 2*KF_UV_G
+(  182)     IF(LVORGP) THEN
+(  183)       IF_GP = IF_GP+IF_UV_G
+(  184)       IOFFD = KF_UV_G
+(  185)       IOFFU = IOFFU+KF_UV_G
+(  186)       IOFFV = IOFFV+KF_UV_G
+(  187)       IOFFUVD =IOFFUVD+KF_UV_G
+(  188)       IOFFSC = IOFFSC+KF_UV_G
+(  189)     ENDIF
+(  190)     IF(LDIVGP) THEN
+(  191)       IF_GP = IF_GP+IF_UV_G
+(  192)       IOFFU = IOFFU+KF_UV_G
+(  193)       IOFFV = IOFFV+KF_UV_G
+(  194)       IOFFUVD =IOFFUVD+KF_UV_G
+(  195)       IOFFSC = IOFFSC+KF_UV_G
+(  196)     ENDIF
+(  197)     IF(LSCDERS) THEN
+(  198)       IF_GP  = IF_GP+2*IF_SCALARS_G
+(  199)       IOFFUVD =IOFFUVD+KF_SCALARS_G
+(  200)       IOFFSCNS = IOFFSC+KF_SCALARS_G
+(  201)       IOFFSCEW = IOFFSC+2*KF_SCALARS_G
+(  202)     ENDIF
+(  203)     IF(LUVDER) THEN
+(  204)       IF_GP = IF_GP+2*IF_UV_G
+(  205)       IOFFSCEW = IOFFSCEW+2*KF_UV_G
+(  206)     ENDIF
+(  207) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:50:05      page 5
+
+(  208)     DO JFLD=1,IF_UV_G
+(  209)       IOFF = 0
+(  210)       IF(LVORGP) THEN
+(  211)         IPTRGP(JFLD+IOFF) = ISHFUV_G(ISTUV_G+JFLD-1)
+(  212)         IOFF = IOFF+IF_UV_G
+(  213)       ENDIF
+(  214)       IF(LDIVGP) THEN
+(  215)         IPTRGP(JFLD+IOFF) = IOFFD+ISHFUV_G(ISTUV_G+JFLD-1)
+(  216)         IOFF = IOFF+IF_UV_G
+(  217)       ENDIF
+(  218)       IPTRGP(JFLD+IOFF) = IOFFU+ISHFUV_G(ISTUV_G+JFLD-1)
+(  219)       IOFF = IOFF+IF_UV_G
+(  220)       IPTRGP(JFLD+IOFF) = IOFFV+ISHFUV_G(ISTUV_G+JFLD-1)
+(  221)       IOFF = IOFF+IF_UV_G+IF_SCALARS_G
+(  222)       IF(LSCDERS) THEN
+(  223)         IOFF  = IOFF+IF_SCALARS_G
+(  224)       ENDIF
+(  225)       IF(LUVDER) THEN
+(  226)         IPTRGP(JFLD+IOFF) = IOFFUVD+ISHFUV_G(ISTUV_G+JFLD-1)
+(  227)         IOFF = IOFF+IF_UV_G
+(  228)         IPTRGP(JFLD+IOFF) = IOFFUVD+KF_UV_G+ISHFUV_G(ISTUV_G+JFLD-1)
+(  229)       ENDIF
+(  230)     ENDDO
+(  231) 
+(  232)     DO JFLD=1,IF_SCALARS_G
+(  233)       IOFF = 2*IF_UV_G
+(  234)       IF (LVORGP) IOFF = IOFF+IF_UV_G
+(  235)       IF (LDIVGP) IOFF = IOFF+IF_UV_G
+(  236)       IPTRGP(JFLD+IOFF) = IOFFSC+ISHFSC_G(ISTSC_G+JFLD-1)
+(  237)       IOFF = IOFF+IF_SCALARS_G
+(  238)       IF(LSCDERS) THEN
+(  239)         IPTRGP(JFLD+IOFF) = IOFFSCNS+ISHFSC_G(ISTSC_G+JFLD-1)
+(  240)         IOFF  = IOFF+IF_SCALARS_G
+(  241)         IF(LUVDER) THEN
+(  242)           IOFF  = IOFF+2*IF_UV_G
+(  243)         ENDIF
+(  244)         IPTRGP(JFLD+IOFF) = IOFFSCEW+ISHFSC_G(ISTSC_G+JFLD-1)
+(  245)       ENDIF
+(  246)     ENDDO
+(  247)     DO JFLD=1,IF_UV
+(  248)       IPTRSPUV(JFLD) = ISTUV+JFLD-1
+(  249)     ENDDO
+(  250)     DO JFLD=1,IF_SCALARS
+(  251)       IPTRSPSC(JFLD) = ISTSC+JFLD-1
+(  252)     ENDDO
+(  253) 
+(  254)     CALL ELTINV_CTL(IF_OUT_LT,IF_UV,IF_SCALARS,IF_SCDERS, &
+(  255)      & PSPVOR=PSPVOR,PSPDIV=PSPDIV,PSPSCALAR=PSPSCALAR,&
+(  256)      & KFLDPTRUV=IPTRSPUV,KFLDPTRSC=IPTRSPSC,&
+(  257)      & PSPMEANU=PSPMEANU,PSPMEANV=PSPMEANV,FSPGL_PROC=FSPGL_PROC)
+(  258) 
+(  259)     IF(IF_UV_G > 0 .AND. IF_SCALARS_G > 0) THEN
+(  260)       CALL EFTINV_CTL(IF_UV_G,IF_SCALARS_G,&
+(  261)        & IF_UV,IF_SCALARS,IF_SCDERS,IF_GP,IF_FS,IF_OUT_LT,&
+(  262)        & KVSETUV=IVSETUV(ISTUV_G:IENUV_G),&
+(  263)        & KVSETSC=IVSETSC(ISTSC_G:IENSC_G),KPTRGP=IPTRGP,&
+(  264)        & PGP=PGP)
+(  265)     ELSEIF(IF_UV_G > 0) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:50:05      page 6
+
+(  266)       CALL EFTINV_CTL(IF_UV_G,IF_SCALARS_G,&
+(  267)        & IF_UV,IF_SCALARS,IF_SCDERS,IF_GP,IF_FS,IF_OUT_LT,&
+(  268)        & KVSETUV=IVSETUV(ISTUV_G:IENUV_G),KPTRGP=IPTRGP,&
+(  269)        & PGP=PGP)
+(  270)     ELSEIF(IF_SCALARS_G > 0) THEN
+(  271)       CALL EFTINV_CTL(IF_UV_G,IF_SCALARS_G,&
+(  272)        & IF_UV,IF_SCALARS,IF_SCDERS,IF_GP,IF_FS,IF_OUT_LT,&
+(  273)        & KVSETSC=IVSETSC(ISTSC_G:IENSC_G),KPTRGP=IPTRGP,&
+(  274)        & PGP=PGP)
+(  275)     ENDIF
+(  276)   ENDDO
+(  277) 
+(  278) ELSE
+(  279) 
+(  280)   ! No splitting of fields, transform done in one go
+(  281) 
+(  282)   CALL ELTINV_CTL(KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS, &
+(  283)    & PSPVOR=PSPVOR,PSPDIV=PSPDIV,PSPSCALAR=PSPSCALAR,&
+(  284)    & PSPSC3A=PSPSC3A,PSPSC3B=PSPSC3B,PSPSC2=PSPSC2,&
+(  285)    & PSPMEANU=PSPMEANU,PSPMEANV=PSPMEANV,FSPGL_PROC=FSPGL_PROC)
+(  286) 
+(  287)   CALL EFTINV_CTL(KF_UV_G,KF_SCALARS_G,&
+(  288)    & KF_UV,KF_SCALARS,KF_SCDERS,KF_GP,KF_FS,KF_OUT_LT,&
+(  289)    & KVSETUV=KVSETUV,KVSETSC=KVSETSC,&
+(  290)    & KVSETSC3A=KVSETSC3A,KVSETSC3B=KVSETSC3B,KVSETSC2=KVSETSC2,&
+(  291)    & PGP=PGP,PGPUV=PGPUV,PGP3A=PGP3A,PGP3B=PGP3B,PGP2=PGP2)
+(  292) 
+(  293) ENDIF
+(  294) IF (LHOOK) CALL DR_HOOK('EINV_TRANS_CTL_MOD:EINV_TRANS_CTL',1,ZHOOK_HANDLE)
+(  295) 
+(  296) !     ------------------------------------------------------------------
+(  297) 
+(  298) END SUBROUTINE EINV_TRANS_CTL
+(  299) END MODULE EINV_TRANS_CTL_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:50:05      page 7
+
+(    1) # 1 "einv_trans_ctl_mod.F90"
+(    1) MODULE EINV_TRANS_CTL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EINV_TRANS_CTL(KF_UV_G,KF_SCALARS_G,KF_GP,KF_FS,KF_OUT_LT,&
+(    4)  & KF_UV,KF_SCALARS,KF_SCDERS,&
+(    5)  & PSPVOR,PSPDIV,PSPSCALAR,KVSETUV,KVSETSC,PGP,FSPGL_PROC,&
+(    6)  & PSPSC3A,PSPSC3B,PSPSC2,KVSETSC3A,KVSETSC3B,KVSETSC2,PGPUV,PGP3A,PGP3B,PGP2,&
+(    7)  & PSPMEANU,PSPMEANV)
+(    8) # 10 "einv_trans_ctl_mod.F90"
+(   10) !**** *EINV_TRANS_CTL* - Control routine for inverse spectral transform.
+(   11) # 12 "einv_trans_ctl_mod.F90"
+(   12) !     Purpose.
+(   13) !     --------
+(   14) !        Control routine for the inverse spectral transform
+(   15) # 16 "einv_trans_ctl_mod.F90"
+(   16) !**   Interface.
+(   17) !     ----------
+(   18) !     CALL EINV_TRANS_CTL(...)
+(   19) # 20 "einv_trans_ctl_mod.F90"
+(   20) !     Explicit arguments :
+(   21) !     --------------------
+(   22) !     KF_UV_G      - global number of spectral u-v fields
+(   23) !     KF_SCALARS_G - global number of scalar spectral fields
+(   24) !     KF_GP        - total number of output gridpoint fields
+(   25) !     KF_FS        - total number of fields in fourier space
+(   26) !     KF_OUT_LT    - total number of fields coming out from inverse LT
+(   27) !     KF_UV        - local number of spectral u-v fields
+(   28) !     KF_SCALARS   - local number of scalar spectral fields
+(   29) !     KF_SCDERS    - local number of derivatives of scalar spectral fields
+(   30) !     PSPVOR(:,:)  - spectral vorticity (input)
+(   31) !     PSPDIV(:,:)  - spectral divergence (input)
+(   32) !     PSPSCALAR(:,:) - spectral scalarvalued fields (input)
+(   33) !     KVSETUV(:)  - indicating which 'b-set' in spectral space owns a
+(   34) !                   vor/div field. Equivalant to NBSETLEV in the IFS.
+(   35) !                   The length of KVSETUV should be the GLOBAL number
+(   36) !                   of u/v fields which is the dimension of u and v releated
+(   37) !                   fields in grid-point space.
+(   38) !     KVESETSC(:) - indicating which 'b-set' in spectral space owns a
+(   39) !                   scalar field. As for KVSETUV this argument is required
+(   40) !                   if the total number of processors is greater than
+(   41) !                   the number of processors used for distribution in
+(   42) !                   spectral wave space.
+(   43) !     FSPGL_PROC  - external procedure to be executed in fourier space
+(   44) !                   before transposition
+(   45) !     PGP(:,:,:)  - gridpoint fields (output)
+(   46) # 47 "einv_trans_ctl_mod.F90"
+(   47) !                  The ordering of the output fields is as follows (all
+(   48) !                  parts are optional depending on the input switches):
+(   49) # 50 "einv_trans_ctl_mod.F90"
+(   50) !       vorticity     : KF_UV_G fields
+(   51) !       divergence    : KF_UV_G fields
+(   52) !       u             : KF_UV_G fields
+(   53) !       v             : KF_UV_G fields
+(   54) !       scalar fields : KF_SCALARS_G fields
+(   55) !       N-S derivative of scalar fields : KF_SCALARS_G fields
+(   56) !       E-W derivative of u : KF_UV_G fields
+(   57) !       E-W derivative of v : KF_UV_G fields
+(   58) !       E-W derivative of scalar fields : KF_SCALARS_G fields
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:50:05      page 8
+
+(   59) # 60 "einv_trans_ctl_mod.F90"
+(   60) !     Method.
+(   61) !     -------
+(   62) # 63 "einv_trans_ctl_mod.F90"
+(   63) !     Externals.  SHUFFLE     - reshuffle fields for load balancing
+(   64) !     ----------  FIELD_SPLIT - split fields in NPROMATR packets
+(   65) !                 LTINV_CTL   - control of Legendre transform
+(   66) !                 FTINV_CTL   - control of Fourier transform
+(   67) # 68 "einv_trans_ctl_mod.F90"
+(   68) !     Author.
+(   69) !     -------
+(   70) !        Mats Hamrud *ECMWF*
+(   71) # 72 "einv_trans_ctl_mod.F90"
+(   72) !     Modifications.
+(   73) !     --------------
+(   74) !        Original : 01-01-03
+(   75) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   76) # 77 "einv_trans_ctl_mod.F90"
+(   77) !     ------------------------------------------------------------------
+(   78) # 79 "einv_trans_ctl_mod.F90"
+(   79) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   80) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   81) # 82 "einv_trans_ctl_mod.F90"
+(   82) USE TPM_GEN         ,ONLY : NPROMATR
+(   83) USE TPM_TRANS       ,ONLY : LDIVGP, LSCDERS, LUVDER, LVORGP
+(   84) !USE TPM_DISTR
+(   85) # 86 "einv_trans_ctl_mod.F90"
+(   86) USE SHUFFLE_MOD     ,ONLY : SHUFFLE
+(   87) USE FIELD_SPLIT_MOD ,ONLY : FIELD_SPLIT
+(   88) USE ELTINV_CTL_MOD  ,ONLY : ELTINV_CTL
+(   89) USE EFTINV_CTL_MOD  ,ONLY : EFTINV_CTL
+(   90) !
+(   91) # 92 "einv_trans_ctl_mod.F90"
+(   92) IMPLICIT NONE
+(   93) # 94 "einv_trans_ctl_mod.F90"
+(   94) ! Declaration of arguments
+(   95) # 96 "einv_trans_ctl_mod.F90"
+(   96) INTEGER(KIND=JPIM), INTENT(IN) :: KF_UV_G
+(   97) INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCALARS_G
+(   98) INTEGER(KIND=JPIM), INTENT(IN) :: KF_GP
+(   99) INTEGER(KIND=JPIM), INTENT(IN) :: KF_FS
+(  100) INTEGER(KIND=JPIM), INTENT(IN) :: KF_OUT_LT
+(  101) INTEGER(KIND=JPIM), INTENT(IN) :: KF_UV
+(  102) INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCALARS
+(  103) INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCDERS
+(  104) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPVOR(:,:)
+(  105) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPDIV(:,:)
+(  106) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPSCALAR(:,:)
+(  107) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPSC3A(:,:,:)
+(  108) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPSC3B(:,:,:)
+(  109) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPSC2(:,:)
+(  110) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETUV(:)
+(  111) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC(:)
+(  112) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3A(:)
+(  113) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3B(:)
+(  114) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC2(:)
+(  115) REAL(KIND=JPRB) ,OPTIONAL   ,INTENT(OUT) :: PGP(:,:,:)
+(  116) EXTERNAL  FSPGL_PROC
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:50:05      page 9
+
+(  117) OPTIONAL  FSPGL_PROC
+(  118) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGPUV(:,:,:,:)
+(  119) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGP3A(:,:,:,:)
+(  120) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGP3B(:,:,:,:)
+(  121) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGP2(:,:,:)
+(  122) REAL(KIND=JPRB)      ,OPTIONAL, INTENT(IN) :: PSPMEANU(:)
+(  123) REAL(KIND=JPRB)      ,OPTIONAL, INTENT(IN) :: PSPMEANV(:)
+(  124) # 125 "einv_trans_ctl_mod.F90"
+(  125) ! Local variables
+(  126) # 127 "einv_trans_ctl_mod.F90"
+(  127) INTEGER(KIND=JPIM) :: IPTRGP(KF_GP),IPTRSPUV(NPROMATR),IPTRSPSC(NPROMATR)
+(  128) INTEGER(KIND=JPIM) :: ISHFUV_G(KF_GP),ISHFSC_G(KF_GP)
+(  129) INTEGER(KIND=JPIM) :: IVSETUV(KF_GP),IVSETSC(KF_GP)
+(  130) INTEGER(KIND=JPIM) :: IBLKS,JBLK,ISTUV_G,IENUV_G
+(  131) INTEGER(KIND=JPIM) :: IF_UV_G,IF_UV,ISTUV,IF_SCALARS,IF_SCALARS_G,IF_FS,IF_GP
+(  132) INTEGER(KIND=JPIM) :: JFLD,ISTSC_G,IENSC_G,ISTSC,IENSC,IENUV,IF_SCDERS,IF_OUT_LT
+(  133) INTEGER(KIND=JPIM) :: IOFFD,IOFFU,IOFFV,IOFFUVD,IOFFSC,IOFFSCNS,IOFFSCEW,IOFF,IF_GPB
+(  134) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  135) # 136 "einv_trans_ctl_mod.F90"
+(  136) !     ------------------------------------------------------------------
+(  137) # 138 "einv_trans_ctl_mod.F90"
+(  138) ! Perform transform
+(  139) # 140 "einv_trans_ctl_mod.F90"
+(  140) IF (LHOOK) CALL DR_HOOK('EINV_TRANS_CTL_MOD:EINV_TRANS_CTL',0,ZHOOK_HANDLE)
+(  141) IF_GPB = 2*KF_UV_G+KF_SCALARS_G
+(  142) # 143 "einv_trans_ctl_mod.F90"
+(  143) IF(NPROMATR > 0 .AND. IF_GPB > NPROMATR) THEN
+(  144) # 145 "einv_trans_ctl_mod.F90"
+(  145)   ! Fields to be split into packets
+(  146) # 147 "einv_trans_ctl_mod.F90"
+(  147)   CALL SHUFFLE(KF_UV_G,KF_SCALARS_G,ISHFUV_G,IVSETUV,ISHFSC_G,IVSETSC, &
+(  148)    & KVSETUV,KVSETSC)
+(  149) # 150 "einv_trans_ctl_mod.F90"
+(  150)   IBLKS=(IF_GPB-1)/NPROMATR+1
+(  151) # 152 "einv_trans_ctl_mod.F90"
+(  152)   DO JBLK=1,IBLKS
+(  153)   
+(  154)     CALL FIELD_SPLIT(JBLK,IF_GPB,KF_UV_G,IVSETUV,IVSETSC,&
+(  155)      & ISTUV_G,IENUV_G,IF_UV_G,ISTSC_G,IENSC_G,IF_SCALARS_G,&
+(  156)      & ISTUV,IENUV,IF_UV,ISTSC,IENSC,IF_SCALARS)
+(  157) # 158 "einv_trans_ctl_mod.F90"
+(  158)     IF(LSCDERS) THEN
+(  159)       IF_SCDERS = IF_SCALARS
+(  160)     ELSE
+(  161)       IF_SCDERS = 0
+(  162)     ENDIF
+(  163)         
+(  164)     IF_OUT_LT = 2*IF_UV + IF_SCALARS+IF_SCDERS
+(  165)     IF(LVORGP) THEN
+(  166)       IF_OUT_LT = IF_OUT_LT+IF_UV
+(  167)     ENDIF
+(  168)     IF(LDIVGP) THEN
+(  169)       IF_OUT_LT = IF_OUT_LT+IF_UV
+(  170)     ENDIF
+(  171)     IF_FS = IF_OUT_LT+IF_SCDERS
+(  172)     IF(LUVDER) THEN
+(  173)       IF_FS = IF_FS+2*IF_UV
+(  174)     ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:50:05      page 10
+
+(  175) # 176 "einv_trans_ctl_mod.F90"
+(  176)     IF_GP = 2*IF_UV_G+IF_SCALARS_G
+(  177)     IOFFD = 0
+(  178)     IOFFU = 0
+(  179)     IOFFV = KF_UV_G
+(  180)     IOFFUVD = 2*KF_UV_G+KF_SCALARS_G
+(  181)     IOFFSC = 2*KF_UV_G
+(  182)     IF(LVORGP) THEN
+(  183)       IF_GP = IF_GP+IF_UV_G
+(  184)       IOFFD = KF_UV_G
+(  185)       IOFFU = IOFFU+KF_UV_G
+(  186)       IOFFV = IOFFV+KF_UV_G
+(  187)       IOFFUVD =IOFFUVD+KF_UV_G
+(  188)       IOFFSC = IOFFSC+KF_UV_G
+(  189)     ENDIF
+(  190)     IF(LDIVGP) THEN
+(  191)       IF_GP = IF_GP+IF_UV_G
+(  192)       IOFFU = IOFFU+KF_UV_G
+(  193)       IOFFV = IOFFV+KF_UV_G
+(  194)       IOFFUVD =IOFFUVD+KF_UV_G
+(  195)       IOFFSC = IOFFSC+KF_UV_G
+(  196)     ENDIF
+(  197)     IF(LSCDERS) THEN
+(  198)       IF_GP  = IF_GP+2*IF_SCALARS_G
+(  199)       IOFFUVD =IOFFUVD+KF_SCALARS_G
+(  200)       IOFFSCNS = IOFFSC+KF_SCALARS_G
+(  201)       IOFFSCEW = IOFFSC+2*KF_SCALARS_G
+(  202)     ENDIF
+(  203)     IF(LUVDER) THEN
+(  204)       IF_GP = IF_GP+2*IF_UV_G
+(  205)       IOFFSCEW = IOFFSCEW+2*KF_UV_G
+(  206)     ENDIF
+(  207) # 208 "einv_trans_ctl_mod.F90"
+(  208)     DO JFLD=1,IF_UV_G
+(  209)       IOFF = 0
+(  210)       IF(LVORGP) THEN
+(  211)         IPTRGP(JFLD+IOFF) = ISHFUV_G(ISTUV_G+JFLD-1)
+(  212)         IOFF = IOFF+IF_UV_G
+(  213)       ENDIF
+(  214)       IF(LDIVGP) THEN
+(  215)         IPTRGP(JFLD+IOFF) = IOFFD+ISHFUV_G(ISTUV_G+JFLD-1)
+(  216)         IOFF = IOFF+IF_UV_G
+(  217)       ENDIF
+(  218)       IPTRGP(JFLD+IOFF) = IOFFU+ISHFUV_G(ISTUV_G+JFLD-1)
+(  219)       IOFF = IOFF+IF_UV_G
+(  220)       IPTRGP(JFLD+IOFF) = IOFFV+ISHFUV_G(ISTUV_G+JFLD-1)
+(  221)       IOFF = IOFF+IF_UV_G+IF_SCALARS_G
+(  222)       IF(LSCDERS) THEN
+(  223)         IOFF  = IOFF+IF_SCALARS_G
+(  224)       ENDIF
+(  225)       IF(LUVDER) THEN
+(  226)         IPTRGP(JFLD+IOFF) = IOFFUVD+ISHFUV_G(ISTUV_G+JFLD-1)
+(  227)         IOFF = IOFF+IF_UV_G
+(  228)         IPTRGP(JFLD+IOFF) = IOFFUVD+KF_UV_G+ISHFUV_G(ISTUV_G+JFLD-1)
+(  229)       ENDIF
+(  230)     ENDDO
+(  231) # 232 "einv_trans_ctl_mod.F90"
+(  232)     DO JFLD=1,IF_SCALARS_G
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:50:05      page 11
+
+(  233)       IOFF = 2*IF_UV_G
+(  234)       IF (LVORGP) IOFF = IOFF+IF_UV_G
+(  235)       IF (LDIVGP) IOFF = IOFF+IF_UV_G
+(  236)       IPTRGP(JFLD+IOFF) = IOFFSC+ISHFSC_G(ISTSC_G+JFLD-1)
+(  237)       IOFF = IOFF+IF_SCALARS_G
+(  238)       IF(LSCDERS) THEN
+(  239)         IPTRGP(JFLD+IOFF) = IOFFSCNS+ISHFSC_G(ISTSC_G+JFLD-1)
+(  240)         IOFF  = IOFF+IF_SCALARS_G
+(  241)         IF(LUVDER) THEN
+(  242)           IOFF  = IOFF+2*IF_UV_G
+(  243)         ENDIF
+(  244)         IPTRGP(JFLD+IOFF) = IOFFSCEW+ISHFSC_G(ISTSC_G+JFLD-1)
+(  245)       ENDIF
+(  246)     ENDDO
+(  247)     DO JFLD=1,IF_UV
+(  248)       IPTRSPUV(JFLD) = ISTUV+JFLD-1
+(  249)     ENDDO
+(  250)     DO JFLD=1,IF_SCALARS
+(  251)       IPTRSPSC(JFLD) = ISTSC+JFLD-1
+(  252)     ENDDO
+(  253) # 254 "einv_trans_ctl_mod.F90"
+(  254)     CALL ELTINV_CTL(IF_OUT_LT,IF_UV,IF_SCALARS,IF_SCDERS, &
+(  255)      & PSPVOR=PSPVOR,PSPDIV=PSPDIV,PSPSCALAR=PSPSCALAR,&
+(  256)      & KFLDPTRUV=IPTRSPUV,KFLDPTRSC=IPTRSPSC,&
+(  257)      & PSPMEANU=PSPMEANU,PSPMEANV=PSPMEANV,FSPGL_PROC=FSPGL_PROC)
+(  258) # 259 "einv_trans_ctl_mod.F90"
+(  259)     IF(IF_UV_G > 0 .AND. IF_SCALARS_G > 0) THEN
+(  260)       CALL EFTINV_CTL(IF_UV_G,IF_SCALARS_G,&
+(  261)        & IF_UV,IF_SCALARS,IF_SCDERS,IF_GP,IF_FS,IF_OUT_LT,&
+(  262)        & KVSETUV=IVSETUV(ISTUV_G:IENUV_G),&
+(  263)        & KVSETSC=IVSETSC(ISTSC_G:IENSC_G),KPTRGP=IPTRGP,&
+(  264)        & PGP=PGP)
+(  265)     ELSEIF(IF_UV_G > 0) THEN
+(  266)       CALL EFTINV_CTL(IF_UV_G,IF_SCALARS_G,&
+(  267)        & IF_UV,IF_SCALARS,IF_SCDERS,IF_GP,IF_FS,IF_OUT_LT,&
+(  268)        & KVSETUV=IVSETUV(ISTUV_G:IENUV_G),KPTRGP=IPTRGP,&
+(  269)        & PGP=PGP)
+(  270)     ELSEIF(IF_SCALARS_G > 0) THEN
+(  271)       CALL EFTINV_CTL(IF_UV_G,IF_SCALARS_G,&
+(  272)        & IF_UV,IF_SCALARS,IF_SCDERS,IF_GP,IF_FS,IF_OUT_LT,&
+(  273)        & KVSETSC=IVSETSC(ISTSC_G:IENSC_G),KPTRGP=IPTRGP,&
+(  274)        & PGP=PGP)
+(  275)     ENDIF
+(  276)   ENDDO
+(  277) # 278 "einv_trans_ctl_mod.F90"
+(  278) ELSE
+(  279) # 280 "einv_trans_ctl_mod.F90"
+(  280)   ! No splitting of fields, transform done in one go
+(  281) # 282 "einv_trans_ctl_mod.F90"
+(  282)   CALL ELTINV_CTL(KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS, &
+(  283)    & PSPVOR=PSPVOR,PSPDIV=PSPDIV,PSPSCALAR=PSPSCALAR,&
+(  284)    & PSPSC3A=PSPSC3A,PSPSC3B=PSPSC3B,PSPSC2=PSPSC2,&
+(  285)    & PSPMEANU=PSPMEANU,PSPMEANV=PSPMEANV,FSPGL_PROC=FSPGL_PROC)
+(  286) # 287 "einv_trans_ctl_mod.F90"
+(  287)   CALL EFTINV_CTL(KF_UV_G,KF_SCALARS_G,&
+(  288)    & KF_UV,KF_SCALARS,KF_SCDERS,KF_GP,KF_FS,KF_OUT_LT,&
+(  289)    & KVSETUV=KVSETUV,KVSETSC=KVSETSC,&
+(  290)    & KVSETSC3A=KVSETSC3A,KVSETSC3B=KVSETSC3B,KVSETSC2=KVSETSC2,&
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:50:05      page 12
+
+(  291)    & PGP=PGP,PGPUV=PGPUV,PGP3A=PGP3A,PGP3B=PGP3B,PGP2=PGP2)
+(  292) # 293 "einv_trans_ctl_mod.F90"
+(  293) ENDIF
+(  294) IF (LHOOK) CALL DR_HOOK('EINV_TRANS_CTL_MOD:EINV_TRANS_CTL',1,ZHOOK_HANDLE)
+(  295) # 296 "einv_trans_ctl_mod.F90"
+(  296) !     ------------------------------------------------------------------
+(  297) # 298 "einv_trans_ctl_mod.F90"
+(  298) END SUBROUTINE EINV_TRANS_CTL
+(  299) END MODULE EINV_TRANS_CTL_MOD

@@ -1,0 +1,81 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:52      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: dr_hook_procinfo.F90
+
+(    1) SUBROUTINE DR_HOOK_PROCINFO(KMYPROC, KNPROC)
+(    2) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    3) USE MPL_MODULE, ONLY : MPL_WORLD_RANK, MPL_WORLD_SIZE
+(    4) IMPLICIT NONE
+(    5) INTEGER(KIND=JPIM),INTENT(OUT) :: KMYPROC, KNPROC
+(    6) KMYPROC = MPL_WORLD_RANK + 1
+(    7) KNPROC = MPL_WORLD_SIZE
+(    8) END SUBROUTINE DR_HOOK_PROCINFO
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:52      page 2
+
+(    1) # 1 "dr_hook_procinfo.F90"
+(    1) SUBROUTINE DR_HOOK_PROCINFO(KMYPROC, KNPROC)
+(    2) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    3) USE MPL_MODULE, ONLY : MPL_WORLD_RANK, MPL_WORLD_SIZE
+(    4) IMPLICIT NONE
+(    5) INTEGER(KIND=JPIM),INTENT(OUT) :: KMYPROC, KNPROC
+(    6) KMYPROC = MPL_WORLD_RANK + 1
+(    7) KNPROC = MPL_WORLD_SIZE
+(    8) END SUBROUTINE DR_HOOK_PROCINFO

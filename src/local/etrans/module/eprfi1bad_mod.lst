@@ -1,0 +1,323 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:02      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eprfi1bad_mod.F90
+
+(    1) MODULE EPRFI1BAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EPRFI1BAD(KM,PIA,PSPEC,KFIELDS,KFLDPTR)
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) 
+(    8) USE TPMALD_DISTR    ,ONLY : DALD
+(    9) 
+(   10) !**** *EPRFI1BAD* - Prepare spectral fields for inverse Legendre transform
+(   11) 
+(   12) !     Purpose.
+(   13) !     --------
+(   14) !        To extract the spectral fields for a specific zonal wavenumber
+(   15) !        and put them in an order suitable for the inverse Legendre           .
+(   16) !        tranforms.The ordering is from NSMAX to KM for better conditioning.
+(   17) !        Elements 1,2 and NLCM(KM)+1 are zeroed in preparation for computing
+(   18) !        u,v and derivatives in spectral space.
+(   19) 
+(   20) !**   Interface.
+(   21) !     ----------
+(   22) !        *CALL* *EPRFI1BAD(...)*
+(   23) 
+(   24) !        Explicit arguments :  KM     - zonal wavenumber
+(   25) !        ------------------    PIA    - spectral components for transform
+(   26) !                              PSPEC  - spectral array
+(   27) !                              KFIELDS  - number of fields
+(   28) 
+(   29) !        Implicit arguments :  None.
+(   30) !        --------------------
+(   31) 
+(   32) !     Method.
+(   33) !     -------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:02      page 2
+
+(   34) 
+(   35) !     Externals.   None.
+(   36) !     ----------
+(   37) 
+(   38) !     Reference.
+(   39) !     ----------
+(   40) !        ECMWF Research Department documentation of the IFS
+(   41) 
+(   42) !     Author.
+(   43) !     -------
+(   44) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   45) 
+(   46) !     Modifications.
+(   47) !     --------------
+(   48) !        Original : 00-02-01 From PRFI1BAD in IFS CY22R1
+(   49) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   50) 
+(   51) !     ------------------------------------------------------------------
+(   52) 
+(   53) IMPLICIT NONE
+(   54) 
+(   55) INTEGER(KIND=JPIM),INTENT(IN)    :: KM,KFIELDS
+(   56) REAL(KIND=JPRB)   ,INTENT(INOUT) :: PSPEC(:,:)
+(   57) REAL(KIND=JPRB)   ,INTENT(IN)    :: PIA(:,:)
+(   58) INTEGER(KIND=JPIM),INTENT(IN),OPTIONAL :: KFLDPTR(:)
+(   59) 
+(   60) INTEGER(KIND=JPIM) :: II, INM, IR, J, JFLD, ILCM, IOFF, IFLD
+(   61) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   62) 
+(   63) !     ------------------------------------------------------------------
+(   64) 
+(   65) !*       1.    EXTRACT FIELDS FROM SPECTRAL ARRAYS.
+(   66) !              --------------------------------------------------
+(   67) 
+(   68) IF (LHOOK) CALL DR_HOOK('EPRFI1BAD_MOD:EPRFI1BAD',0,ZHOOK_HANDLE)
+(   69) ILCM=DALD%NCPL2M(KM)
+(   70) 
+(   71) IOFF = DALD%NESM0(KM)
+(   72) 
+(   73) IF(PRESENT(KFLDPTR)) THEN
+(   74)   DO JFLD=1,KFIELDS
+(   75)     IR = 2*(JFLD-1)+1
+(   76)     II = IR+1
+(   77)     IFLD = KFLDPTR(JFLD)
+(   78)     DO J=1,ILCM,2
+(   79)       INM = IOFF+(J-1)*2
+(   80) 
+(   81)       PSPEC(IFLD,INM  ) = PSPEC(IFLD,INM  ) + PIA(J  ,IR)
+(   82)       PSPEC(IFLD,INM+1) = PSPEC(IFLD,INM+1) + PIA(J+1,IR)
+(   83)       PSPEC(IFLD,INM+2) = PSPEC(IFLD,INM+2) + PIA(J  ,II)
+(   84)       PSPEC(IFLD,INM+3) = PSPEC(IFLD,INM+3) + PIA(J+1,II)
+(   85) 
+(   86)     ENDDO
+(   87)   ENDDO
+(   88) ELSE
+(   89)   DO J=1,ILCM,2
+(   90)     INM = IOFF+(J-1)*2
+(   91) !DIR$ IVDEP
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:02      page 3
+
+(   92) !OCL NOVREC
+(   93)     DO JFLD=1,KFIELDS
+(   94)       IR = 2*(JFLD-1)+1
+(   95)       II = IR+1
+(   96) 
+(   97)       PSPEC(JFLD,INM  ) = PSPEC(JFLD,INM  ) + PIA(J  ,IR)
+(   98)       PSPEC(JFLD,INM+1) = PSPEC(JFLD,INM+1) + PIA(J+1,IR)
+(   99)       PSPEC(JFLD,INM+2) = PSPEC(JFLD,INM+2) + PIA(J  ,II)
+(  100)       PSPEC(JFLD,INM+3) = PSPEC(JFLD,INM+3) + PIA(J+1,II)
+(  101) 
+(  102)     ENDDO
+(  103)   ENDDO
+(  104) ENDIF
+(  105) IF (LHOOK) CALL DR_HOOK('EPRFI1BAD_MOD:EPRFI1BAD',1,ZHOOK_HANDLE)
+(  106) 
+(  107) !     ------------------------------------------------------------------
+(  108) 
+(  109) END SUBROUTINE EPRFI1BAD
+(  110) END MODULE EPRFI1BAD_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:02      page 4
+
+(    1) # 1 "eprfi1bad_mod.F90"
+(    1) MODULE EPRFI1BAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EPRFI1BAD(KM,PIA,PSPEC,KFIELDS,KFLDPTR)
+(    4) # 5 "eprfi1bad_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) # 8 "eprfi1bad_mod.F90"
+(    8) USE TPMALD_DISTR    ,ONLY : DALD
+(    9) # 10 "eprfi1bad_mod.F90"
+(   10) !**** *EPRFI1BAD* - Prepare spectral fields for inverse Legendre transform
+(   11) # 12 "eprfi1bad_mod.F90"
+(   12) !     Purpose.
+(   13) !     --------
+(   14) !        To extract the spectral fields for a specific zonal wavenumber
+(   15) !        and put them in an order suitable for the inverse Legendre           .
+(   16) !        tranforms.The ordering is from NSMAX to KM for better conditioning.
+(   17) !        Elements 1,2 and NLCM(KM)+1 are zeroed in preparation for computing
+(   18) !        u,v and derivatives in spectral space.
+(   19) # 20 "eprfi1bad_mod.F90"
+(   20) !**   Interface.
+(   21) !     ----------
+(   22) !        *CALL* *EPRFI1BAD(...)*
+(   23) # 24 "eprfi1bad_mod.F90"
+(   24) !        Explicit arguments :  KM     - zonal wavenumber
+(   25) !        ------------------    PIA    - spectral components for transform
+(   26) !                              PSPEC  - spectral array
+(   27) !                              KFIELDS  - number of fields
+(   28) # 29 "eprfi1bad_mod.F90"
+(   29) !        Implicit arguments :  None.
+(   30) !        --------------------
+(   31) # 32 "eprfi1bad_mod.F90"
+(   32) !     Method.
+(   33) !     -------
+(   34) # 35 "eprfi1bad_mod.F90"
+(   35) !     Externals.   None.
+(   36) !     ----------
+(   37) # 38 "eprfi1bad_mod.F90"
+(   38) !     Reference.
+(   39) !     ----------
+(   40) !        ECMWF Research Department documentation of the IFS
+(   41) # 42 "eprfi1bad_mod.F90"
+(   42) !     Author.
+(   43) !     -------
+(   44) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   45) # 46 "eprfi1bad_mod.F90"
+(   46) !     Modifications.
+(   47) !     --------------
+(   48) !        Original : 00-02-01 From PRFI1BAD in IFS CY22R1
+(   49) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   50) # 51 "eprfi1bad_mod.F90"
+(   51) !     ------------------------------------------------------------------
+(   52) # 53 "eprfi1bad_mod.F90"
+(   53) IMPLICIT NONE
+(   54) # 55 "eprfi1bad_mod.F90"
+(   55) INTEGER(KIND=JPIM),INTENT(IN)    :: KM,KFIELDS
+(   56) REAL(KIND=JPRB)   ,INTENT(INOUT) :: PSPEC(:,:)
+(   57) REAL(KIND=JPRB)   ,INTENT(IN)    :: PIA(:,:)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:02      page 5
+
+(   58) INTEGER(KIND=JPIM),INTENT(IN),OPTIONAL :: KFLDPTR(:)
+(   59) # 60 "eprfi1bad_mod.F90"
+(   60) INTEGER(KIND=JPIM) :: II, INM, IR, J, JFLD, ILCM, IOFF, IFLD
+(   61) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   62) # 63 "eprfi1bad_mod.F90"
+(   63) !     ------------------------------------------------------------------
+(   64) # 65 "eprfi1bad_mod.F90"
+(   65) !*       1.    EXTRACT FIELDS FROM SPECTRAL ARRAYS.
+(   66) !              --------------------------------------------------
+(   67) # 68 "eprfi1bad_mod.F90"
+(   68) IF (LHOOK) CALL DR_HOOK('EPRFI1BAD_MOD:EPRFI1BAD',0,ZHOOK_HANDLE)
+(   69) ILCM=DALD%NCPL2M(KM)
+(   70) # 71 "eprfi1bad_mod.F90"
+(   71) IOFF = DALD%NESM0(KM)
+(   72) # 73 "eprfi1bad_mod.F90"
+(   73) IF(PRESENT(KFLDPTR)) THEN
+(   74)   DO JFLD=1,KFIELDS
+(   75)     IR = 2*(JFLD-1)+1
+(   76)     II = IR+1
+(   77)     IFLD = KFLDPTR(JFLD)
+(   78)     DO J=1,ILCM,2
+(   79)       INM = IOFF+(J-1)*2
+(   80) # 81 "eprfi1bad_mod.F90"
+(   81)       PSPEC(IFLD,INM  ) = PSPEC(IFLD,INM  ) + PIA(J  ,IR)
+(   82)       PSPEC(IFLD,INM+1) = PSPEC(IFLD,INM+1) + PIA(J+1,IR)
+(   83)       PSPEC(IFLD,INM+2) = PSPEC(IFLD,INM+2) + PIA(J  ,II)
+(   84)       PSPEC(IFLD,INM+3) = PSPEC(IFLD,INM+3) + PIA(J+1,II)
+(   85) # 86 "eprfi1bad_mod.F90"
+(   86)     ENDDO
+(   87)   ENDDO
+(   88) ELSE
+(   89)   DO J=1,ILCM,2
+(   90)     INM = IOFF+(J-1)*2
+(   91) !DIR$ IVDEP
+(   92) !OCL NOVREC
+(   93)     DO JFLD=1,KFIELDS
+(   94)       IR = 2*(JFLD-1)+1
+(   95)       II = IR+1
+(   96) # 97 "eprfi1bad_mod.F90"
+(   97)       PSPEC(JFLD,INM  ) = PSPEC(JFLD,INM  ) + PIA(J  ,IR)
+(   98)       PSPEC(JFLD,INM+1) = PSPEC(JFLD,INM+1) + PIA(J+1,IR)
+(   99)       PSPEC(JFLD,INM+2) = PSPEC(JFLD,INM+2) + PIA(J  ,II)
+(  100)       PSPEC(JFLD,INM+3) = PSPEC(JFLD,INM+3) + PIA(J+1,II)
+(  101) # 102 "eprfi1bad_mod.F90"
+(  102)     ENDDO
+(  103)   ENDDO
+(  104) ENDIF
+(  105) IF (LHOOK) CALL DR_HOOK('EPRFI1BAD_MOD:EPRFI1BAD',1,ZHOOK_HANDLE)
+(  106) # 107 "eprfi1bad_mod.F90"
+(  107) !     ------------------------------------------------------------------
+(  108) # 109 "eprfi1bad_mod.F90"
+(  109) END SUBROUTINE EPRFI1BAD
+(  110) END MODULE EPRFI1BAD_MOD

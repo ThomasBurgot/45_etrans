@@ -1,0 +1,93 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:44      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: gpu_bind.F90
+
+(    1) SUBROUTINE GPU_BIND (KTASK, KSIZE)
+(    2) 
+(    3) #ifdef _OPENACC
+(    4) USE OPENACC
+(    5) #endif
+(    6) USE PARKIND1, ONLY : JPIM
+(    7) 
+(    8) IMPLICIT NONE
+(    9) 
+(   10) INTEGER (KIND=JPIM), INTENT (IN) :: KTASK, KSIZE
+(   11) 
+(   12) INTEGER (KIND=JPIM) :: NDEV, IDEV, IDTY
+(   13) 
+(   14) #ifdef _OPENACC
+(   15) !$acc init
+(   16) 
+(   17) IDTY = ACC_GET_DEVICE_TYPE ()
+(   18) NDEV = ACC_GET_NUM_DEVICES (IDTY)
+(   19) IDEV = MOD (KTASK, NDEV)
+(   20) CALL ACC_SET_DEVICE_NUM (IDEV, ACC_GET_DEVICE_TYPE ())
+(   21) #endif
+(   22) 
+(   23) END SUBROUTINE
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:44      page 2
+
+(    1) # 1 "gpu_bind.F90"
+(    1) SUBROUTINE GPU_BIND (KTASK, KSIZE)
+(    2) # 4 "gpu_bind.F90"
+(    4) USE OPENACC
+(    5) # 6 "gpu_bind.F90"
+(    6) USE PARKIND1, ONLY : JPIM
+(    7) # 8 "gpu_bind.F90"
+(    8) IMPLICIT NONE
+(    9) # 10 "gpu_bind.F90"
+(   10) INTEGER (KIND=JPIM), INTENT (IN) :: KTASK, KSIZE
+(   11) # 12 "gpu_bind.F90"
+(   12) INTEGER (KIND=JPIM) :: NDEV, IDEV, IDTY
+(   13) # 15 "gpu_bind.F90"
+(   15) !$acc init
+(   16) # 17 "gpu_bind.F90"
+(   17) IDTY = ACC_GET_DEVICE_TYPE ()
+(   18) NDEV = ACC_GET_NUM_DEVICES (IDTY)
+(   19) IDEV = MOD (KTASK, NDEV)
+(   20) CALL ACC_SET_DEVICE_NUM (IDEV, ACC_GET_DEVICE_TYPE ())
+(   21) # 23 "gpu_bind.F90"
+(   23) END SUBROUTINE

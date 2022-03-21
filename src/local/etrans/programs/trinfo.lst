@@ -1,0 +1,567 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:23      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: trinfo.F90
+
+(    1) PROGRAM TRINFO
+(    2) 
+(    3) USE PARKIND1, ONLY : JPIM, JPRB
+(    4) USE XRD_GETOPTIONS
+(    5) USE FA_MOD, ONLY : FA => FA_COM_DEFAULT
+(    6) USE SUEMPLAT_MOD
+(    7) USE SUMPLAT_MOD
+(    8) USE EQ_REGIONS_MOD
+(    9) 
+(   10) IMPLICIT NONE
+(   11) 
+(   12) CHARACTER (LEN=128) :: CLFA
+(   13) INTEGER (KIND=JPIM) :: INBARP, INBARI, IREP
+(   14) CHARACTER (LEN=*), PARAMETER :: CLNOMC = 'cadre'
+(   15) INTEGER (KIND=JPIM), PARAMETER :: ILUN = 77
+(   16) 
+(   17) INTEGER (KIND=JPIM) :: ITYPTR, ITRONC, INLATI, INXLON, INIVER
+(   18) INTEGER (KIND=JPIM), ALLOCATABLE :: INLOPA (:), INOZPA (:)
+(   19) REAL (KIND=JPRB) :: ZSLAPO, ZCLOPO, ZSLOPO, ZCODIL, ZREFER
+(   20) REAL (KIND=JPRB), ALLOCATABLE :: ZSINLA (:), ZAHYBR (:), ZBHYBR (:)
+(   21) LOGICAL :: LLGARD
+(   22) 
+(   23) LOGICAL :: LELAM
+(   24) INTEGER (KIND=JPIM) :: NSMAX, NMSMAX, NFLEVG, NDGLG, NDLON
+(   25) INTEGER (KIND=JPIM), ALLOCATABLE :: NLOENG (:)
+(   26) 
+(   27) INTEGER (KIND=JPIM) :: NPRINTLEV
+(   28) INTEGER (KIND=JPIM) :: NPROC, NPRGPNS, NPRGPEW, NDGUXG
+(   29) LOGICAL :: LEQ_REGIONS, LSPLIT, LLWEIGHTED_DISTR
+(   30) 
+(   31) INTEGER (KIND=JPIM), ALLOCATABLE :: NFRSTLAT (:), NLSTLAT (:), NPROCAGP (:), &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:23      page 2
+
+(   32)                                   & NPTRLAT (:), NPTRFRSTLAT (:), NPTRLSTLAT (:)
+(   33) LOGICAL, ALLOCATABLE :: LSPLITLAT (:)
+(   34) 
+(   35) INTEGER (KIND=JPIM) :: IFRSTLOFF, IPTRFLOFF, IMEDIAP, IRESTM
+(   36) REAL (KIND=JPRB) :: ZWEIGHT (1), ZMEDIAP
+(   37) 
+(   38) INTEGER (KIND=JPIM) :: JGL
+(   39) 
+(   40) TYPE (EQ_REGIONS_T) :: YLER
+(   41) 
+(   42) CALL INITOPTIONS (KOPTMIN=0)
+(   43) 
+(   44) CALL GETOPTION ('--fa-file', CLFA, MND = .TRUE., USE = "FA file")
+(   45) 
+(   46) NPRINTLEV = 1
+(   47) CALL GETOPTION ('--nprintlev', NPRINTLEV)
+(   48) 
+(   49) NPRGPNS = 1
+(   50) CALL GETOPTION ('--nprgpns', NPRGPNS)
+(   51) 
+(   52) NPRGPEW = 1
+(   53) CALL GETOPTION ('--nprgpew', NPRGPEW)
+(   54) 
+(   55) NPROC = NPRGPNS * NPRGPEW
+(   56) CALL GETOPTION ('--nproc', NPROC)
+(   57) 
+(   58) CALL GETOPTION ('--leq_regions', LEQ_REGIONS)
+(   59) 
+(   60) CALL GETOPTION ('--lsplit', LSPLIT)
+(   61) 
+(   62) CALL CHECKOPTIONS ()
+(   63) 
+(   64) CALL FAITOU (IREP, ILUN, .TRUE., CLFA, 'OLD', .TRUE., .FALSE., 0_JPIM, INBARP, INBARI, CLNOMC)
+(   65) 
+(   66) ALLOCATE (INLOPA (FA%JPXPAH), INOZPA (FA%JPXIND), &
+(   67)         & ZSINLA (FA%JPXGEO), ZAHYBR (0:FA%JPXNIV), ZBHYBR (0:FA%JPXNIV))
+(   68) 
+(   69) CALL FACIES (CLNOMC, ITYPTR, ZSLAPO, ZCLOPO, ZSLOPO, &
+(   70) &            ZCODIL, ITRONC, INLATI, INXLON, INLOPA, &
+(   71) &            INOZPA, ZSINLA, INIVER, ZREFER, ZAHYBR, &
+(   72) &            ZBHYBR, LLGARD)
+(   73) 
+(   74) 
+(   75) CALL FAIRME (IREP, ILUN, 'KEEP')
+(   76) 
+(   77) LELAM = ITYPTR < 0
+(   78) NSMAX = ITRONC
+(   79) IF (LELAM) THEN
+(   80)   NMSMAX = - ITYPTR
+(   81)   NDGUXG = INLOPA (6)
+(   82) ELSE
+(   83)   NMSMAX = NSMAX
+(   84)   NDGUXG = 0
+(   85) ENDIF
+(   86) 
+(   87) NFLEVG = INIVER
+(   88) NDGLG  = INLATI
+(   89) NDLON  = INXLON
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:23      page 3
+
+(   90) 
+(   91) WRITE (*, *) " NPROC       = ", NPROC
+(   92) WRITE (*, *) " NPRGPNS     = ", NPRGPNS
+(   93) WRITE (*, *) " NPRGPEW     = ", NPRGPEW
+(   94) WRITE (*, *) " LELAM       = ", LELAM
+(   95) WRITE (*, *) " NDLON       = ", NDLON
+(   96) WRITE (*, *) " NDGLG       = ", NDGLG
+(   97) WRITE (*, *) " NDGUXG      = ", NDGUXG
+(   98) WRITE (*, *) " NFLEVG      = ", NFLEVG
+(   99) WRITE (*, *) " NSMAX       = ", NSMAX
+(  100) WRITE (*, *) " NMSMAX      = ", NMSMAX
+(  101) WRITE (*, *) " LSPLIT      = ", LSPLIT
+(  102) WRITE (*, *) " LEQ_REGIONS = ", LEQ_REGIONS
+(  103) 
+(  104) ALLOCATE (NLOENG (NDGLG))
+(  105) 
+(  106) IF (LELAM) THEN
+(  107)   NLOENG = NDLON
+(  108) ELSE
+(  109)   DO JGL = 1, (NDGLG+1)/2
+(  110)     NLOENG (JGL) = INLOPA (JGL)
+(  111)   ENDDO
+(  112)   DO JGL = (NDGLG+1)/2+1, NDGLG
+(  113)     NLOENG (JGL) = INLOPA (NDGLG-JGL+1)
+(  114)   ENDDO
+(  115) ENDIF
+(  116) 
+(  117) WRITE (*, *) " NLOENG = ", NLOENG
+(  118) 
+(  119) CALL EQ_REGIONS_SAVE (YLER)
+(  120) 
+(  121) IF (LEQ_REGIONS) THEN
+(  122)   ALLOCATE (N_REGIONS (NPROC+2))
+(  123)   N_REGIONS = 0
+(  124)   CALL EQ_REGIONS (NPROC)
+(  125) ELSE
+(  126)   N_REGIONS_NS = NPRGPNS
+(  127)   ALLOCATE (N_REGIONS (N_REGIONS_NS))
+(  128)   N_REGIONS    = NPRGPEW
+(  129)   N_REGIONS_EW = NPRGPEW
+(  130) ENDIF
+(  131) 
+(  132) WRITE (*, *) " N_REGIONS    = ", N_REGIONS
+(  133) WRITE (*, *) " N_REGIONS_NS = ", N_REGIONS_NS
+(  134) WRITE (*, *) " N_REGIONS_EW = ", N_REGIONS_EW
+(  135) 
+(  136) ALLOCATE (NFRSTLAT (N_REGIONS_NS), NLSTLAT (N_REGIONS_NS), NPROCAGP (N_REGIONS_NS), &
+(  137)         & NPTRLAT (NDGLG), NPTRFRSTLAT (N_REGIONS_NS), NPTRLSTLAT (N_REGIONS_NS),   &
+(  138)         & LSPLITLAT (NDGLG))
+(  139) 
+(  140) 
+(  141) LLWEIGHTED_DISTR = .FALSE.
+(  142) 
+(  143) IF (LELAM) THEN
+(  144) 
+(  145)   CALL SUEMPLAT (KDGL               = NDGLG              , &
+(  146)                & KPROC              = NPROC              , &
+(  147)                & KPROCA             = N_REGIONS_NS       , &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:23      page 4
+
+(  148)                & KMYSETA            = 1_JPIM             , &
+(  149)                & LDSPLIT            = LSPLIT             , &
+(  150)                & LDEQ_REGIONS       = LEQ_REGIONS        , &
+(  151)                & KFRSTLAT           = NFRSTLAT           , &
+(  152)                & KLSTLAT            = NLSTLAT            , &
+(  153)                & KFRSTLOFF          = IFRSTLOFF          , &
+(  154)                & KPTRLAT            = NPTRLAT            , &
+(  155)                & KPTRFRSTLAT        = NPTRFRSTLAT        , &
+(  156)                & KPTRLSTLAT         = NPTRLSTLAT         , &
+(  157)                & KPTRFLOFF          = IPTRFLOFF          , &
+(  158)                & PWEIGHT            = ZWEIGHT            , &
+(  159)                & LDWEIGHTED_DISTR   = LLWEIGHTED_DISTR   , &
+(  160)                & PMEDIAP            = ZMEDIAP            , &
+(  161)                & KPROCAGP           = NPROCAGP           , &
+(  162)                & KMEDIAP            = IMEDIAP            , &
+(  163)                & KRESTM             = IRESTM             , &
+(  164)                & LDSPLITLAT         = LSPLITLAT          , &
+(  165)                & KMYPROC            = 1_JPIM             , &
+(  166)                & KLOEN              = NLOENG             , &
+(  167)                & KDGUX              = NDGLG) ! Should be NDGUXG+INT((RDISTR_E*(NDGLG-NDGUXG)))
+(  168) 
+(  169) ELSE
+(  170)   
+(  171)   CALL SUMPLAT (KDGL               = NDGLG              , &
+(  172)               & KPROC              = NPROC              , &
+(  173)               & KPROCA             = N_REGIONS_NS       , &
+(  174)               & KMYSETA            = 1_JPIM             , &
+(  175)               & LDSPLIT            = LSPLIT             , &
+(  176)               & LDEQ_REGIONS       = LEQ_REGIONS        , &
+(  177)               & KFRSTLAT           = NFRSTLAT           , &
+(  178)               & KLSTLAT            = NLSTLAT            , &
+(  179)               & KFRSTLOFF          = IFRSTLOFF          , &
+(  180)               & KPTRLAT            = NPTRLAT            , &
+(  181)               & KPTRFRSTLAT        = NPTRFRSTLAT        , &
+(  182)               & KPTRLSTLAT         = NPTRLSTLAT         , &
+(  183)               & KPTRFLOFF          = IPTRFLOFF          , &
+(  184)               & PWEIGHT            = ZWEIGHT            , &
+(  185)               & LDWEIGHTED_DISTR   = LLWEIGHTED_DISTR   , &
+(  186)               & PMEDIAP            = ZMEDIAP            , &
+(  187)               & KPROCAGP           = NPROCAGP           , &
+(  188)               & KMEDIAP            = IMEDIAP            , &
+(  189)               & KRESTM             = IRESTM             , &
+(  190)               & LDSPLITLAT         = LSPLITLAT          , &
+(  191)               & KMYPROC            = 1_JPIM             , &
+(  192)               & KLOEN              = NLOENG             )
+(  193) 
+(  194) ENDIF
+(  195) 
+(  196) WRITE (*, *) " NFRSTLAT    = ", NFRSTLAT
+(  197) WRITE (*, *) " NLSTLAT     = ", NLSTLAT
+(  198) WRITE (*, *) " NPTRLAT     = ", NPTRLAT
+(  199) WRITE (*, *) " NPTRFRSTLAT = ", NPTRFRSTLAT
+(  200) WRITE (*, *) " NPTRLSTLAT  = ", NPTRLSTLAT
+(  201) 
+(  202) IF (LEQ_REGIONS) THEN
+(  203)   DEALLOCATE (N_REGIONS)
+(  204)   NULLIFY (N_REGIONS)
+(  205)   CALL EQ_REGIONS_LOAD (YLER)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:23      page 5
+
+(  206) ENDIF
+(  207) 
+(  208) END PROGRAM TRINFO
+(  209) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:23      page 6
+
+(    1) # 1 "trinfo.F90"
+(    1) PROGRAM TRINFO
+(    2) # 3 "trinfo.F90"
+(    3) USE PARKIND1, ONLY : JPIM, JPRB
+(    4) USE XRD_GETOPTIONS
+(    5) USE FA_MOD, ONLY : FA => FA_COM_DEFAULT
+(    6) USE SUEMPLAT_MOD
+(    7) USE SUMPLAT_MOD
+(    8) USE EQ_REGIONS_MOD
+(    9) # 10 "trinfo.F90"
+(   10) IMPLICIT NONE
+(   11) # 12 "trinfo.F90"
+(   12) CHARACTER (LEN=128) :: CLFA
+(   13) INTEGER (KIND=JPIM) :: INBARP, INBARI, IREP
+(   14) CHARACTER (LEN=*), PARAMETER :: CLNOMC = 'cadre'
+(   15) INTEGER (KIND=JPIM), PARAMETER :: ILUN = 77
+(   16) # 17 "trinfo.F90"
+(   17) INTEGER (KIND=JPIM) :: ITYPTR, ITRONC, INLATI, INXLON, INIVER
+(   18) INTEGER (KIND=JPIM), ALLOCATABLE :: INLOPA (:), INOZPA (:)
+(   19) REAL (KIND=JPRB) :: ZSLAPO, ZCLOPO, ZSLOPO, ZCODIL, ZREFER
+(   20) REAL (KIND=JPRB), ALLOCATABLE :: ZSINLA (:), ZAHYBR (:), ZBHYBR (:)
+(   21) LOGICAL :: LLGARD
+(   22) # 23 "trinfo.F90"
+(   23) LOGICAL :: LELAM
+(   24) INTEGER (KIND=JPIM) :: NSMAX, NMSMAX, NFLEVG, NDGLG, NDLON
+(   25) INTEGER (KIND=JPIM), ALLOCATABLE :: NLOENG (:)
+(   26) # 27 "trinfo.F90"
+(   27) INTEGER (KIND=JPIM) :: NPRINTLEV
+(   28) INTEGER (KIND=JPIM) :: NPROC, NPRGPNS, NPRGPEW, NDGUXG
+(   29) LOGICAL :: LEQ_REGIONS, LSPLIT, LLWEIGHTED_DISTR
+(   30) # 31 "trinfo.F90"
+(   31) INTEGER (KIND=JPIM), ALLOCATABLE :: NFRSTLAT (:), NLSTLAT (:), NPROCAGP (:), &
+(   32)                                   & NPTRLAT (:), NPTRFRSTLAT (:), NPTRLSTLAT (:)
+(   33) LOGICAL, ALLOCATABLE :: LSPLITLAT (:)
+(   34) # 35 "trinfo.F90"
+(   35) INTEGER (KIND=JPIM) :: IFRSTLOFF, IPTRFLOFF, IMEDIAP, IRESTM
+(   36) REAL (KIND=JPRB) :: ZWEIGHT (1), ZMEDIAP
+(   37) # 38 "trinfo.F90"
+(   38) INTEGER (KIND=JPIM) :: JGL
+(   39) # 40 "trinfo.F90"
+(   40) TYPE (EQ_REGIONS_T) :: YLER
+(   41) # 42 "trinfo.F90"
+(   42) CALL INITOPTIONS (KOPTMIN=0)
+(   43) # 44 "trinfo.F90"
+(   44) CALL GETOPTION ('--fa-file', CLFA, MND = .TRUE., USE = "FA file")
+(   45) # 46 "trinfo.F90"
+(   46) NPRINTLEV = 1
+(   47) CALL GETOPTION ('--nprintlev', NPRINTLEV)
+(   48) # 49 "trinfo.F90"
+(   49) NPRGPNS = 1
+(   50) CALL GETOPTION ('--nprgpns', NPRGPNS)
+(   51) # 52 "trinfo.F90"
+(   52) NPRGPEW = 1
+(   53) CALL GETOPTION ('--nprgpew', NPRGPEW)
+(   54) # 55 "trinfo.F90"
+(   55) NPROC = NPRGPNS * NPRGPEW
+(   56) CALL GETOPTION ('--nproc', NPROC)
+(   57) # 58 "trinfo.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:23      page 7
+
+(   58) CALL GETOPTION ('--leq_regions', LEQ_REGIONS)
+(   59) # 60 "trinfo.F90"
+(   60) CALL GETOPTION ('--lsplit', LSPLIT)
+(   61) # 62 "trinfo.F90"
+(   62) CALL CHECKOPTIONS ()
+(   63) # 64 "trinfo.F90"
+(   64) CALL FAITOU (IREP, ILUN, .TRUE., CLFA, 'OLD', .TRUE., .FALSE., 0_JPIM, INBARP, INBARI, CLNOMC)
+(   65) # 66 "trinfo.F90"
+(   66) ALLOCATE (INLOPA (FA%JPXPAH), INOZPA (FA%JPXIND), &
+(   67)         & ZSINLA (FA%JPXGEO), ZAHYBR (0:FA%JPXNIV), ZBHYBR (0:FA%JPXNIV))
+(   68) # 69 "trinfo.F90"
+(   69) CALL FACIES (CLNOMC, ITYPTR, ZSLAPO, ZCLOPO, ZSLOPO, &
+(   70) &            ZCODIL, ITRONC, INLATI, INXLON, INLOPA, &
+(   71) &            INOZPA, ZSINLA, INIVER, ZREFER, ZAHYBR, &
+(   72) &            ZBHYBR, LLGARD)
+(   73) # 75 "trinfo.F90"
+(   75) CALL FAIRME (IREP, ILUN, 'KEEP')
+(   76) # 77 "trinfo.F90"
+(   77) LELAM = ITYPTR < 0
+(   78) NSMAX = ITRONC
+(   79) IF (LELAM) THEN
+(   80)   NMSMAX = - ITYPTR
+(   81)   NDGUXG = INLOPA (6)
+(   82) ELSE
+(   83)   NMSMAX = NSMAX
+(   84)   NDGUXG = 0
+(   85) ENDIF
+(   86) # 87 "trinfo.F90"
+(   87) NFLEVG = INIVER
+(   88) NDGLG  = INLATI
+(   89) NDLON  = INXLON
+(   90) # 91 "trinfo.F90"
+(   91) WRITE (*, *) " NPROC       = ", NPROC
+(   92) WRITE (*, *) " NPRGPNS     = ", NPRGPNS
+(   93) WRITE (*, *) " NPRGPEW     = ", NPRGPEW
+(   94) WRITE (*, *) " LELAM       = ", LELAM
+(   95) WRITE (*, *) " NDLON       = ", NDLON
+(   96) WRITE (*, *) " NDGLG       = ", NDGLG
+(   97) WRITE (*, *) " NDGUXG      = ", NDGUXG
+(   98) WRITE (*, *) " NFLEVG      = ", NFLEVG
+(   99) WRITE (*, *) " NSMAX       = ", NSMAX
+(  100) WRITE (*, *) " NMSMAX      = ", NMSMAX
+(  101) WRITE (*, *) " LSPLIT      = ", LSPLIT
+(  102) WRITE (*, *) " LEQ_REGIONS = ", LEQ_REGIONS
+(  103) # 104 "trinfo.F90"
+(  104) ALLOCATE (NLOENG (NDGLG))
+(  105) # 106 "trinfo.F90"
+(  106) IF (LELAM) THEN
+(  107)   NLOENG = NDLON
+(  108) ELSE
+(  109)   DO JGL = 1, (NDGLG+1)/2
+(  110)     NLOENG (JGL) = INLOPA (JGL)
+(  111)   ENDDO
+(  112)   DO JGL = (NDGLG+1)/2+1, NDGLG
+(  113)     NLOENG (JGL) = INLOPA (NDGLG-JGL+1)
+(  114)   ENDDO
+(  115) ENDIF
+(  116) # 117 "trinfo.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:23      page 8
+
+(  117) WRITE (*, *) " NLOENG = ", NLOENG
+(  118) # 119 "trinfo.F90"
+(  119) CALL EQ_REGIONS_SAVE (YLER)
+(  120) # 121 "trinfo.F90"
+(  121) IF (LEQ_REGIONS) THEN
+(  122)   ALLOCATE (N_REGIONS (NPROC+2))
+(  123)   N_REGIONS = 0
+(  124)   CALL EQ_REGIONS (NPROC)
+(  125) ELSE
+(  126)   N_REGIONS_NS = NPRGPNS
+(  127)   ALLOCATE (N_REGIONS (N_REGIONS_NS))
+(  128)   N_REGIONS    = NPRGPEW
+(  129)   N_REGIONS_EW = NPRGPEW
+(  130) ENDIF
+(  131) # 132 "trinfo.F90"
+(  132) WRITE (*, *) " N_REGIONS    = ", N_REGIONS
+(  133) WRITE (*, *) " N_REGIONS_NS = ", N_REGIONS_NS
+(  134) WRITE (*, *) " N_REGIONS_EW = ", N_REGIONS_EW
+(  135) # 136 "trinfo.F90"
+(  136) ALLOCATE (NFRSTLAT (N_REGIONS_NS), NLSTLAT (N_REGIONS_NS), NPROCAGP (N_REGIONS_NS), &
+(  137)         & NPTRLAT (NDGLG), NPTRFRSTLAT (N_REGIONS_NS), NPTRLSTLAT (N_REGIONS_NS),   &
+(  138)         & LSPLITLAT (NDGLG))
+(  139) # 141 "trinfo.F90"
+(  141) LLWEIGHTED_DISTR = .FALSE.
+(  142) # 143 "trinfo.F90"
+(  143) IF (LELAM) THEN
+(  144) # 145 "trinfo.F90"
+(  145)   CALL SUEMPLAT (KDGL               = NDGLG              , &
+(  146)                & KPROC              = NPROC              , &
+(  147)                & KPROCA             = N_REGIONS_NS       , &
+(  148)                & KMYSETA            = 1_JPIM             , &
+(  149)                & LDSPLIT            = LSPLIT             , &
+(  150)                & LDEQ_REGIONS       = LEQ_REGIONS        , &
+(  151)                & KFRSTLAT           = NFRSTLAT           , &
+(  152)                & KLSTLAT            = NLSTLAT            , &
+(  153)                & KFRSTLOFF          = IFRSTLOFF          , &
+(  154)                & KPTRLAT            = NPTRLAT            , &
+(  155)                & KPTRFRSTLAT        = NPTRFRSTLAT        , &
+(  156)                & KPTRLSTLAT         = NPTRLSTLAT         , &
+(  157)                & KPTRFLOFF          = IPTRFLOFF          , &
+(  158)                & PWEIGHT            = ZWEIGHT            , &
+(  159)                & LDWEIGHTED_DISTR   = LLWEIGHTED_DISTR   , &
+(  160)                & PMEDIAP            = ZMEDIAP            , &
+(  161)                & KPROCAGP           = NPROCAGP           , &
+(  162)                & KMEDIAP            = IMEDIAP            , &
+(  163)                & KRESTM             = IRESTM             , &
+(  164)                & LDSPLITLAT         = LSPLITLAT          , &
+(  165)                & KMYPROC            = 1_JPIM             , &
+(  166)                & KLOEN              = NLOENG             , &
+(  167)                & KDGUX              = NDGLG) ! Should be NDGUXG+INT((RDISTR_E*(NDGLG-NDGUXG)))
+(  168) # 169 "trinfo.F90"
+(  169) ELSE
+(  170)   
+(  171)   CALL SUMPLAT (KDGL               = NDGLG              , &
+(  172)               & KPROC              = NPROC              , &
+(  173)               & KPROCA             = N_REGIONS_NS       , &
+(  174)               & KMYSETA            = 1_JPIM             , &
+(  175)               & LDSPLIT            = LSPLIT             , &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:23      page 9
+
+(  176)               & LDEQ_REGIONS       = LEQ_REGIONS        , &
+(  177)               & KFRSTLAT           = NFRSTLAT           , &
+(  178)               & KLSTLAT            = NLSTLAT            , &
+(  179)               & KFRSTLOFF          = IFRSTLOFF          , &
+(  180)               & KPTRLAT            = NPTRLAT            , &
+(  181)               & KPTRFRSTLAT        = NPTRFRSTLAT        , &
+(  182)               & KPTRLSTLAT         = NPTRLSTLAT         , &
+(  183)               & KPTRFLOFF          = IPTRFLOFF          , &
+(  184)               & PWEIGHT            = ZWEIGHT            , &
+(  185)               & LDWEIGHTED_DISTR   = LLWEIGHTED_DISTR   , &
+(  186)               & PMEDIAP            = ZMEDIAP            , &
+(  187)               & KPROCAGP           = NPROCAGP           , &
+(  188)               & KMEDIAP            = IMEDIAP            , &
+(  189)               & KRESTM             = IRESTM             , &
+(  190)               & LDSPLITLAT         = LSPLITLAT          , &
+(  191)               & KMYPROC            = 1_JPIM             , &
+(  192)               & KLOEN              = NLOENG             )
+(  193) # 194 "trinfo.F90"
+(  194) ENDIF
+(  195) # 196 "trinfo.F90"
+(  196) WRITE (*, *) " NFRSTLAT    = ", NFRSTLAT
+(  197) WRITE (*, *) " NLSTLAT     = ", NLSTLAT
+(  198) WRITE (*, *) " NPTRLAT     = ", NPTRLAT
+(  199) WRITE (*, *) " NPTRFRSTLAT = ", NPTRFRSTLAT
+(  200) WRITE (*, *) " NPTRLSTLAT  = ", NPTRLSTLAT
+(  201) # 202 "trinfo.F90"
+(  202) IF (LEQ_REGIONS) THEN
+(  203)   DEALLOCATE (N_REGIONS)
+(  204)   NULLIFY (N_REGIONS)
+(  205)   CALL EQ_REGIONS_LOAD (YLER)
+(  206) ENDIF
+(  207) # 208 "trinfo.F90"
+(  208) END PROGRAM TRINFO

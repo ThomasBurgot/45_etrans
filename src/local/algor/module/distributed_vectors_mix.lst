@@ -1,0 +1,3197 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: distributed_vectors_mix.F90
+
+(    1) MODULE DISTRIBUTED_VECTORS_MIX
+(    2) USE PARKIND1, ONLY : JPRB
+(    3) USE YOMHOOK , ONLY : LHOOK, DR_HOOK
+(    4) 
+(    5) !     ------------------------------------------------------------------
+(    6) 
+(    7) !*    Distributed storage for one-dimensional arrays
+(    8) 
+(    9) !     This module provides the following:
+(   10) 
+(   11) !       - The derived type "distributed_vector".
+(   12) !       - Subroutines "allocate_vector" and "deallocate_vector".
+(   13) !       - Access to the part of the vector held on the local PE.
+(   14) !       - Overloaded assignment and arithmetic operators which
+(   15) !         implicitly translate between normal 1d arrays and
+(   16) !         distributed_vectors.
+(   17) !       - A distributed version of DOT_PRODUCT.
+(   18) 
+(   19) !         A "distributed_vector" acts like a pointer to a real
+(   20) !         one-dimensional array. Unlike an array pointer, you cannot
+(   21) !         access individual elements.
+(   22) 
+(   23) !         It is vital that any operation involving a
+(   24) !         "distributed_vector" is performed by all PEs. (In general
+(   25) !         routines which use "distributed_vector"s will execute
+(   26) !         identical code on all PEs. All message passing is done
+(   27) !         implicitly via the module suroutines below.)
+(   28) 
+(   29) !  The following routines must be used to allocate and deallocate
+(   30) !  space on each PE for each distributed_vector.
+(   31) 
+(   32) !         allocate_vector (handle,klen) allocates storage for the
+(   33) !                                       distributed_vector "handle"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 2
+
+(   34) !                                       which can be used to store a
+(   35) !                                       on dimensional array of "klen"
+(   36) !                                       elements.
+(   37) 
+(   38) !         deallocate_vector (handle)    deallocates the space associated
+(   39) !                                       with "handle".
+(   40) 
+(   41) ! The following operations are defined, where handle, handle1 and
+(   42) ! handle2 represent distributed vectors (allocted with identical
+(   43) ! values for "klen"); pvec, pvec1 and pvec2 are 1d arrays with
+(   44) ! SHAPE "1:klen" or with SIZE "1+handle%local_end-handle%local_end";
+(   45) ! OP is one of +,-,*,/,** or =; and scalar is a real scalar.
+(   46) 
+(   47) !         handle  OP pvec(:)
+(   48) !         pvec(:) OP handle
+(   49) !         handle1 OP handle2
+(   50) !         handle  OP scalar
+(   51) 
+(   52) !         scalar = DOT_PRODUCT (handle,pvec)
+(   53) !         scalar = DOT_PRODUCT (handle1,handle2)
+(   54) !         scalar = DOT_PRODUCT (pvec,handle2)
+(   55) 
+(   56) !   Externals.
+(   57) !   ----------
+(   58) !       MPL_SEND
+(   59) !       MPL_RECV
+(   60) !       ABOR1
+(   61) 
+(   62) !   Reference.
+(   63) !   ----------
+(   64) !       None yet!
+(   65) 
+(   66) !   Author.
+(   67) !   -------
+(   68) !       Mike Fisher *ECMWF*
+(   69) 
+(   70) !   Modifications.
+(   71) !   --------------
+(   72) !       Original   97-11-26
+(   73) !       D.Dent     00-09-01  MPE to MPL conversion
+(   74) 
+(   75) !     ------------------------------------------------------------------
+(   76) 
+(   77) 
+(   78) 
+(   79) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   80) 
+(   81) USE MPL_MODULE
+(   82) 
+(   83) IMPLICIT NONE
+(   84) 
+(   85) PRIVATE
+(   86) PUBLIC  DISTRIBUTED_VECTOR, ALLOCATE_VECTOR, DEALLOCATE_VECTOR,&
+(   87)         &NDV_CHUNK_SIZE, ASSIGNMENT(=), OPERATOR(+), OPERATOR(-),&
+(   88)         &OPERATOR(*), OPERATOR(/), OPERATOR(**), DOT_PRODUCT,&
+(   89)         &DVSECTION,&
+(   90)         &SUM,MAXVAL,SQRT,SETUP_DISTVEC,SCATTER_VECTOR,GATHER_VECTOR
+(   91) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 3
+
+(   92) INTEGER(KIND=JPIM) :: NDV_CHUNK_SIZE
+(   93) INTEGER(KIND=JPIM) :: NPROC,MYPROC,MINTET,MREALT,MT_DISTRIBUTED_VECTOR
+(   94) INTEGER(KIND=JPIM) ,ALLOCATABLE :: NPRCIDS(:)
+(   95) INTEGER(KIND=JPIM),PARAMETER :: JPSETUP=77777
+(   96) 
+(   97) TYPE DISTRIBUTED_VECTOR
+(   98) REAL(KIND=JPRB), POINTER :: LOCAL(:)
+(   99) INTEGER(KIND=JPIM)       :: GLOBAL_LENGTH,LOCAL_START,LOCAL_END,NCHNKS
+(  100) INTEGER(KIND=JPIM)       :: MSETUP
+(  101) END TYPE DISTRIBUTED_VECTOR
+(  102) 
+(  103) INTERFACE ASSIGNMENT (=)
+(  104) MODULE PROCEDURE ASSIGN_AR_DV, ASSIGN_DV_AR,ASSIGN_DV_DV, ASSIGN_SCALAR_DV
+(  105) END INTERFACE
+(  106) 
+(  107) INTERFACE OPERATOR (*)
+(  108) MODULE PROCEDURE MULTIPLY_AR_DV, MULTIPLY_DV_AR,&
+(  109)                    &MULTIPLY_DV_DV, MULTIPLY_SCALAR_DV,&
+(  110)                    &MULTIPLY_DV_SCALAR
+(  111) END INTERFACE
+(  112) 
+(  113) INTERFACE OPERATOR (+)
+(  114) MODULE PROCEDURE ADD_AR_DV, ADD_DV_AR,&
+(  115)                    &ADD_DV_DV, ADD_SCALAR_DV,&
+(  116)                    &ADD_DV_SCALAR
+(  117) END INTERFACE
+(  118) 
+(  119) INTERFACE OPERATOR (-)
+(  120) MODULE PROCEDURE SUBTRACT_AR_DV, SUBTRACT_DV_AR,&
+(  121)                    &SUBTRACT_DV_DV, SUBTRACT_SCALAR_DV,&
+(  122)                    &SUBTRACT_DV_SCALAR, NEGATE_DV
+(  123) END INTERFACE
+(  124) 
+(  125) INTERFACE OPERATOR (/)
+(  126) MODULE PROCEDURE DIVIDE_AR_DV, DIVIDE_DV_AR,&
+(  127)                    &DIVIDE_DV_DV, DIVIDE_SCALAR_DV,&
+(  128)                    &DIVIDE_DV_SCALAR
+(  129) END INTERFACE
+(  130) 
+(  131) INTERFACE OPERATOR (**)
+(  132) MODULE PROCEDURE POWER_AR_DV, POWER_DV_AR,&
+(  133)                    &POWER_DV_DV, POWER_SCALAR_DV,&
+(  134)                    &POWER_DV_SCALAR
+(  135) END INTERFACE
+(  136) 
+(  137) INTERFACE DOT_PRODUCT
+(  138) MODULE PROCEDURE DOT_PRODUCT_DV_DV, DOT_PRODUCT_DV_AR,DOT_PRODUCT_AR_DV
+(  139) END INTERFACE
+(  140) 
+(  141) INTERFACE SCATTER_VECTOR
+(  142) MODULE PROCEDURE SCATTER_VECTOR_DV, SCATTER_VECTOR_AR
+(  143) END INTERFACE
+(  144) 
+(  145) INTERFACE SUM
+(  146) MODULE PROCEDURE SUM_DV
+(  147) END INTERFACE
+(  148) 
+(  149) INTERFACE MAXVAL
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 4
+
+(  150) MODULE PROCEDURE MAXVAL_DV
+(  151) END INTERFACE
+(  152) 
+(  153) INTERFACE SQRT
+(  154) MODULE PROCEDURE SQRT_DV
+(  155) END INTERFACE
+(  156) 
+(  157) ! module procedures:
+(  158) 
+(  159) CONTAINS
+(  160) SUBROUTINE SETUP_DISTVEC(KPROC,KYPROC,KINTET,KREALT,KTAG,&
+(  161)    &KDV_CHUNK_SIZE,KPRCIDS)
+(  162) INTEGER(KIND=JPIM) :: KPROC,KYPROC,KINTET,KREALT,KTAG,KDV_CHUNK_SIZE
+(  163) INTEGER(KIND=JPIM) :: KPRCIDS(KPROC)
+(  164) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  165) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SETUP_DISTVEC',0,ZHOOK_HANDLE)
+(  166) ALLOCATE(NPRCIDS(KPROC))
+(  167) NPROC=KPROC
+(  168) MYPROC=KYPROC
+(  169) MINTET=KINTET
+(  170) MREALT=KREALT
+(  171) MT_DISTRIBUTED_VECTOR=KTAG
+(  172) NDV_CHUNK_SIZE=KDV_CHUNK_SIZE
+(  173) NPRCIDS(:)=KPRCIDS(:)
+(  174) 
+(  175) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SETUP_DISTVEC',1,ZHOOK_HANDLE)
+(  176) END SUBROUTINE SETUP_DISTVEC
+(  177) 
+(  178) INTEGER(KIND=JPIM) FUNCTION NCHUNKS (KLEN)
+(  179) INTEGER(KIND=JPIM), INTENT(IN) :: KLEN
+(  180) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  181) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:NCHUNKS',0,ZHOOK_HANDLE)
+(  182) NCHUNKS = (KLEN+NDV_CHUNK_SIZE-1)/NDV_CHUNK_SIZE
+(  183) 
+(  184) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:NCHUNKS',1,ZHOOK_HANDLE)
+(  185) END FUNCTION NCHUNKS
+(  186) 
+(  187) INTEGER(KIND=JPIM) FUNCTION JEND (KPROC,KLEN)
+(  188) INTEGER(KIND=JPIM), INTENT(IN) :: KPROC,KLEN
+(  189) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  190) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:JEND',0,ZHOOK_HANDLE)
+(  191) JEND = MIN(  NDV_CHUNK_SIZE &
+(  192)                 &*NINT( REAL(KPROC)&
+(  193)                       &*(REAL(NCHUNKS(KLEN))/REAL(NPROC)))&
+(  194)                &,KLEN)
+(  195) 
+(  196) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:JEND',1,ZHOOK_HANDLE)
+(  197) END FUNCTION JEND
+(  198) 
+(  199) INTEGER(KIND=JPIM) FUNCTION JSTART (KPROC,KLEN)
+(  200) INTEGER(KIND=JPIM), INTENT(IN) :: KPROC,KLEN
+(  201) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  202) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:JSTART',0,ZHOOK_HANDLE)
+(  203) JSTART = 1+JEND(KPROC-1,KLEN)
+(  204) 
+(  205) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:JSTART',1,ZHOOK_HANDLE)
+(  206) END FUNCTION JSTART
+(  207) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 5
+
+(  208) SUBROUTINE ALLOCATE_VECTOR (HANDLE,KLEN)
+(  209) 
+(  210) !         allocate storage for the distributed vector
+(  211) 
+(  212) TYPE (DISTRIBUTED_VECTOR), INTENT(OUT) :: HANDLE
+(  213) INTEGER(KIND=JPIM), INTENT(IN)  :: KLEN
+(  214) 
+(  215) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  216) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ALLOCATE_VECTOR',0,ZHOOK_HANDLE)
+(  217) IF(NCHUNKS(KLEN) < NPROC) CALL ABOR1&
+(  218)  & ('ALLOCATE_VECTOR : NCHUNKS<NPROC, REDUCE CHUNK SIZE!')
+(  219)   
+(  220) HANDLE%GLOBAL_LENGTH = KLEN
+(  221) HANDLE%LOCAL_START   = JSTART(MYPROC,KLEN)
+(  222) HANDLE%LOCAL_END     = JEND  (MYPROC,KLEN)
+(  223) HANDLE%NCHNKS  = NCHUNKS(KLEN)
+(  224) HANDLE%MSETUP = JPSETUP
+(  225) 
+(  226) ALLOCATE (HANDLE%LOCAL(HANDLE%LOCAL_START:HANDLE%LOCAL_END))
+(  227) 
+(  228) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ALLOCATE_VECTOR',1,ZHOOK_HANDLE)
+(  229) END SUBROUTINE ALLOCATE_VECTOR
+(  230) 
+(  231) SUBROUTINE DEALLOCATE_VECTOR (HANDLE)
+(  232) 
+(  233) !         deallocate storage for the distributed array
+(  234) 
+(  235) TYPE (DISTRIBUTED_VECTOR), INTENT(OUT) :: HANDLE
+(  236) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  237) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DEALLOCATE_VECTOR',0,ZHOOK_HANDLE)
+(  238) DEALLOCATE (HANDLE%LOCAL)
+(  239) HANDLE%MSETUP = 0
+(  240) 
+(  241) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DEALLOCATE_VECTOR',1,ZHOOK_HANDLE)
+(  242) END SUBROUTINE DEALLOCATE_VECTOR
+(  243) 
+(  244) SUBROUTINE ASSIGN_AR_DV (HANDLE,PVEC)
+(  245) 
+(  246) !         copy array to the distributed_vector
+(  247) 
+(  248) REAL(KIND=JPRB),                      INTENT(IN)    :: PVEC(:)
+(  249) TYPE (DISTRIBUTED_VECTOR), INTENT(INOUT) :: HANDLE
+(  250) 
+(  251) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  252) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ASSIGN_AR_DV',0,ZHOOK_HANDLE)
+(  253) IF (HANDLE%MSETUP /= JPSETUP)&
+(  254)      &CALL ABOR1 ('error: store to unallocated distributed_vector')
+(  255) 
+(  256) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  257)   HANDLE%LOCAL(:) = PVEC(:)
+(  258) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  259)   HANDLE%LOCAL(:) = PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)
+(  260) ELSE
+(  261)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  262) ENDIF
+(  263) 
+(  264) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ASSIGN_AR_DV',1,ZHOOK_HANDLE)
+(  265) END SUBROUTINE ASSIGN_AR_DV
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 6
+
+(  266) 
+(  267) FUNCTION MULTIPLY_AR_DV (PVEC,HANDLE)
+(  268) 
+(  269) !         multiply array and distributed_vector
+(  270) 
+(  271) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  272) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  273) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::MULTIPLY_AR_DV
+(  274) 
+(  275) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  276) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_AR_DV',0,ZHOOK_HANDLE)
+(  277) IF (HANDLE%MSETUP /= JPSETUP)&
+(  278)      &CALL ABOR1 ('error: multiply unallocated distributed_vector')
+(  279) 
+(  280) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  281)   MULTIPLY_AR_DV = PVEC(:) * HANDLE%LOCAL(:)
+(  282) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  283)   MULTIPLY_AR_DV =&
+(  284)    &PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)*HANDLE%LOCAL(:)
+(  285) ELSE
+(  286)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  287) ENDIF
+(  288) 
+(  289) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_AR_DV',1,ZHOOK_HANDLE)
+(  290) END FUNCTION MULTIPLY_AR_DV
+(  291) 
+(  292) FUNCTION DIVIDE_AR_DV (PVEC,HANDLE)
+(  293) 
+(  294) !         divide array and distributed_vector
+(  295) 
+(  296) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  297) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  298) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::DIVIDE_AR_DV
+(  299) 
+(  300) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  301) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_AR_DV',0,ZHOOK_HANDLE)
+(  302) IF (HANDLE%MSETUP /= JPSETUP)&
+(  303)      &CALL ABOR1 ('error: divide unallocated distributed_vector')
+(  304) 
+(  305) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  306)   DIVIDE_AR_DV = PVEC(:) / HANDLE%LOCAL(:)
+(  307) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  308)   DIVIDE_AR_DV =PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)/HANDLE%LOCAL(:)
+(  309) ELSE
+(  310)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  311) ENDIF
+(  312) 
+(  313) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_AR_DV',1,ZHOOK_HANDLE)
+(  314) END FUNCTION DIVIDE_AR_DV
+(  315) 
+(  316) FUNCTION POWER_AR_DV (PVEC,HANDLE)
+(  317) 
+(  318) !         power array and distributed_vector
+(  319) 
+(  320) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  321) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  322) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::POWER_AR_DV
+(  323) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 7
+
+(  324) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  325) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_AR_DV',0,ZHOOK_HANDLE)
+(  326) IF (HANDLE%MSETUP /= JPSETUP)&
+(  327)      &CALL ABOR1 ('error: power unallocated distributed_vector')
+(  328) 
+(  329) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  330)   POWER_AR_DV = PVEC(:) ** HANDLE%LOCAL(:)
+(  331) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  332)   POWER_AR_DV =PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)**HANDLE%LOCAL(:)
+(  333) ELSE
+(  334)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  335) ENDIF
+(  336) 
+(  337) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_AR_DV',1,ZHOOK_HANDLE)
+(  338) END FUNCTION POWER_AR_DV
+(  339) 
+(  340) FUNCTION ADD_AR_DV (PVEC,HANDLE)
+(  341) 
+(  342) !         add array and distributed_vector
+(  343) 
+(  344) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  345) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  346) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::ADD_AR_DV
+(  347) 
+(  348) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  349) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_AR_DV',0,ZHOOK_HANDLE)
+(  350) IF (HANDLE%MSETUP /= JPSETUP)&
+(  351)      &CALL ABOR1 ('error: add unallocated distributed_vector')
+(  352) 
+(  353) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  354)   ADD_AR_DV = PVEC(:) + HANDLE%LOCAL(:)
+(  355) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  356)   ADD_AR_DV =PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)+HANDLE%LOCAL(:)
+(  357) ELSE
+(  358)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  359) ENDIF
+(  360) 
+(  361) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_AR_DV',1,ZHOOK_HANDLE)
+(  362) END FUNCTION ADD_AR_DV
+(  363) 
+(  364) FUNCTION SUBTRACT_AR_DV (PVEC,HANDLE)
+(  365) 
+(  366) !         subtract array and distributed_vector
+(  367) 
+(  368) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  369) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  370) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::SUBTRACT_AR_DV
+(  371) 
+(  372) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  373) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_AR_DV',0,ZHOOK_HANDLE)
+(  374) IF (HANDLE%MSETUP /= JPSETUP)&
+(  375)      &CALL ABOR1 ('error: subtract unallocated distributed_vector')
+(  376) 
+(  377) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  378)   SUBTRACT_AR_DV = PVEC(:) - HANDLE%LOCAL(:)
+(  379) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  380)   SUBTRACT_AR_DV =&
+(  381)    &PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)-HANDLE%LOCAL(:)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 8
+
+(  382) ELSE
+(  383)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  384) ENDIF
+(  385) 
+(  386) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_AR_DV',1,ZHOOK_HANDLE)
+(  387) END FUNCTION SUBTRACT_AR_DV
+(  388) 
+(  389) FUNCTION NEGATE_DV (HANDLE)
+(  390) 
+(  391) !         negate a distributed_vector
+(  392) 
+(  393) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  394) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::NEGATE_DV
+(  395) 
+(  396) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  397) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:NEGATE_DV',0,ZHOOK_HANDLE)
+(  398) IF (HANDLE%MSETUP /= JPSETUP)&
+(  399)      &CALL ABOR1 ('error: negate unallocated distributed_vector')
+(  400) 
+(  401) NEGATE_DV =  -HANDLE%LOCAL(:)
+(  402) 
+(  403) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:NEGATE_DV',1,ZHOOK_HANDLE)
+(  404) END FUNCTION NEGATE_DV
+(  405) 
+(  406) SUBROUTINE ASSIGN_DV_DV (HANDLE1,HANDLE2)
+(  407) 
+(  408) !         copy one distributed_vector to another
+(  409) 
+(  410) TYPE (DISTRIBUTED_VECTOR), INTENT(IN)    :: HANDLE2
+(  411) TYPE (DISTRIBUTED_VECTOR), INTENT(INOUT) :: HANDLE1
+(  412) 
+(  413) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  414) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ASSIGN_DV_DV',0,ZHOOK_HANDLE)
+(  415) IF (HANDLE1%MSETUP /= JPSETUP)&
+(  416)      &CALL ABOR1 ('error: store to unallocated distributed_vector')
+(  417) 
+(  418) IF (HANDLE1%MSETUP /= JPSETUP)&
+(  419)      &CALL ABOR1('error: copy from unallocated distributed_vector')
+(  420) 
+(  421) IF (HANDLE1%GLOBAL_LENGTH == HANDLE2%GLOBAL_LENGTH) THEN
+(  422)   HANDLE1%LOCAL(:) = HANDLE2%LOCAL(:)
+(  423) ELSE
+(  424)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  425) ENDIF
+(  426) 
+(  427) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ASSIGN_DV_DV',1,ZHOOK_HANDLE)
+(  428) END SUBROUTINE ASSIGN_DV_DV
+(  429) 
+(  430) FUNCTION MULTIPLY_DV_DV (HANDLE1,HANDLE2)
+(  431) 
+(  432) !         multiply two distributed_vectors
+(  433) 
+(  434) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE2
+(  435) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE1
+(  436) REAL(KIND=JPRB), DIMENSION(HANDLE1%LOCAL_START:HANDLE1%LOCAL_END) ::MULTIPLY_DV_DV
+(  437) 
+(  438) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  439) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_DV_DV',0,ZHOOK_HANDLE)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 9
+
+(  440) IF (HANDLE1%MSETUP /= JPSETUP .OR. HANDLE2%MSETUP /= JPSETUP     )&
+(  441)      &CALL ABOR1 ('error: multiply unallocated distributed_vector')
+(  442) 
+(  443) IF (HANDLE1%GLOBAL_LENGTH == HANDLE2%GLOBAL_LENGTH) THEN
+(  444)   MULTIPLY_DV_DV = HANDLE1%LOCAL(:) * HANDLE2%LOCAL(:)
+(  445) ELSE
+(  446)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  447) ENDIF
+(  448) 
+(  449) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_DV_DV',1,ZHOOK_HANDLE)
+(  450) END FUNCTION MULTIPLY_DV_DV
+(  451) 
+(  452) FUNCTION DIVIDE_DV_DV (HANDLE1,HANDLE2)
+(  453) 
+(  454) !         divide two distributed_vectors
+(  455) 
+(  456) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE2
+(  457) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE1
+(  458) REAL(KIND=JPRB), DIMENSION(HANDLE1%LOCAL_START:HANDLE1%LOCAL_END) ::DIVIDE_DV_DV
+(  459) 
+(  460) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  461) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_DV_DV',0,ZHOOK_HANDLE)
+(  462) IF (HANDLE1%MSETUP /= JPSETUP .OR. HANDLE2%MSETUP /= JPSETUP  )&
+(  463)      &CALL ABOR1 ('error: divide unallocated distributed_vector')
+(  464) 
+(  465) IF (HANDLE1%GLOBAL_LENGTH == HANDLE2%GLOBAL_LENGTH) THEN
+(  466)   DIVIDE_DV_DV = HANDLE1%LOCAL(:) / HANDLE2%LOCAL(:)
+(  467) ELSE
+(  468)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  469) ENDIF
+(  470) 
+(  471) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_DV_DV',1,ZHOOK_HANDLE)
+(  472) END FUNCTION DIVIDE_DV_DV
+(  473) 
+(  474) FUNCTION POWER_DV_DV (HANDLE1,HANDLE2)
+(  475) 
+(  476) !         power two distributed_vectors
+(  477) 
+(  478) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE2
+(  479) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE1
+(  480) REAL(KIND=JPRB), DIMENSION(HANDLE1%LOCAL_START:HANDLE1%LOCAL_END) ::POWER_DV_DV
+(  481) 
+(  482) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  483) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_DV_DV',0,ZHOOK_HANDLE)
+(  484) IF (HANDLE1%MSETUP /= JPSETUP .OR. HANDLE2%MSETUP /= JPSETUP     )&
+(  485)      &CALL ABOR1 ('error: power unallocated distributed_vector')
+(  486) 
+(  487) IF (HANDLE1%GLOBAL_LENGTH == HANDLE2%GLOBAL_LENGTH) THEN
+(  488)   POWER_DV_DV = HANDLE1%LOCAL(:) ** HANDLE2%LOCAL(:)
+(  489) ELSE
+(  490)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  491) ENDIF
+(  492) 
+(  493) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_DV_DV',1,ZHOOK_HANDLE)
+(  494) END FUNCTION POWER_DV_DV
+(  495) 
+(  496) FUNCTION ADD_DV_DV (HANDLE1,HANDLE2)
+(  497) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 10
+
+(  498) !         add two distributed_vectors
+(  499) 
+(  500) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE2
+(  501) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE1
+(  502) REAL(KIND=JPRB), DIMENSION(HANDLE1%LOCAL_START:HANDLE1%LOCAL_END) ::ADD_DV_DV
+(  503) 
+(  504) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  505) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_DV_DV',0,ZHOOK_HANDLE)
+(  506) IF (HANDLE1%MSETUP /= JPSETUP .OR. HANDLE2%MSETUP /= JPSETUP   )&
+(  507)      &CALL ABOR1 ('error: add unallocated distributed_vector')
+(  508) 
+(  509) IF (HANDLE1%GLOBAL_LENGTH == HANDLE2%GLOBAL_LENGTH) THEN
+(  510)   ADD_DV_DV = HANDLE1%LOCAL(:) + HANDLE2%LOCAL(:)
+(  511) ELSE
+(  512)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  513) ENDIF
+(  514) 
+(  515) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_DV_DV',1,ZHOOK_HANDLE)
+(  516) END FUNCTION ADD_DV_DV
+(  517) 
+(  518) FUNCTION SUBTRACT_DV_DV (HANDLE1,HANDLE2)
+(  519) 
+(  520) !         subtract two distributed_vectors
+(  521) 
+(  522) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE2
+(  523) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE1
+(  524) REAL(KIND=JPRB), DIMENSION(HANDLE1%LOCAL_START:HANDLE1%LOCAL_END) ::SUBTRACT_DV_DV
+(  525) 
+(  526) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  527) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_DV_DV',0,ZHOOK_HANDLE)
+(  528) IF (HANDLE1%MSETUP /= JPSETUP .OR. HANDLE2%MSETUP /= JPSETUP    )&
+(  529)      &CALL ABOR1 ('error: subtract unallocated distributed_vector')
+(  530) 
+(  531) IF (HANDLE1%GLOBAL_LENGTH == HANDLE2%GLOBAL_LENGTH) THEN
+(  532)   SUBTRACT_DV_DV = HANDLE1%LOCAL(:) - HANDLE2%LOCAL(:)
+(  533) ELSE
+(  534)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  535) ENDIF
+(  536) 
+(  537) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_DV_DV',1,ZHOOK_HANDLE)
+(  538) END FUNCTION SUBTRACT_DV_DV
+(  539) 
+(  540) SUBROUTINE ASSIGN_SCALAR_DV (HANDLE,SCALAR)
+(  541) 
+(  542) !         copy scalar to distributed_vector
+(  543) 
+(  544) REAL(KIND=JPRB),                      INTENT(IN)    :: SCALAR
+(  545) TYPE (DISTRIBUTED_VECTOR), INTENT(INOUT) :: HANDLE
+(  546) 
+(  547) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  548) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ASSIGN_SCALAR_DV',0,ZHOOK_HANDLE)
+(  549) IF (HANDLE%MSETUP /= JPSETUP)&
+(  550)      &CALL ABOR1 ('error: store to unallocated distributed_vector')
+(  551) 
+(  552) HANDLE%LOCAL(:) = SCALAR
+(  553) 
+(  554) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ASSIGN_SCALAR_DV',1,ZHOOK_HANDLE)
+(  555) END SUBROUTINE ASSIGN_SCALAR_DV
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 11
+
+(  556) 
+(  557) FUNCTION MULTIPLY_DV_SCALAR (HANDLE,SCALAR)
+(  558) 
+(  559) !         multiply scalar and distributed_vector
+(  560) 
+(  561) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  562) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  563) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::&
+(  564)       &MULTIPLY_DV_SCALAR
+(  565) 
+(  566) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  567) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_DV_SCALAR',0,ZHOOK_HANDLE)
+(  568) IF (HANDLE%MSETUP /= JPSETUP)&
+(  569)      &CALL ABOR1 ('error: multiply unallocated distributed_vector')
+(  570) 
+(  571) MULTIPLY_DV_SCALAR = HANDLE%LOCAL(:) * SCALAR
+(  572) 
+(  573) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_DV_SCALAR',1,ZHOOK_HANDLE)
+(  574) END FUNCTION MULTIPLY_DV_SCALAR
+(  575) 
+(  576) FUNCTION DIVIDE_DV_SCALAR (HANDLE,SCALAR)
+(  577) 
+(  578) !         divide scalar and distributed_vector
+(  579) 
+(  580) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  581) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  582) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::DIVIDE_DV_SCALAR
+(  583) 
+(  584) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  585) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_DV_SCALAR',0,ZHOOK_HANDLE)
+(  586) IF (HANDLE%MSETUP /= JPSETUP)&
+(  587)      &CALL ABOR1 ('error: divide unallocated distributed_vector')
+(  588) 
+(  589) DIVIDE_DV_SCALAR = HANDLE%LOCAL(:) / SCALAR
+(  590) 
+(  591) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_DV_SCALAR',1,ZHOOK_HANDLE)
+(  592) END FUNCTION DIVIDE_DV_SCALAR
+(  593) 
+(  594) FUNCTION POWER_DV_SCALAR (HANDLE,SCALAR)
+(  595) 
+(  596) !         power scalar and distributed_vector
+(  597) 
+(  598) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  599) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  600) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::POWER_DV_SCALAR
+(  601) 
+(  602) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  603) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_DV_SCALAR',0,ZHOOK_HANDLE)
+(  604) IF (HANDLE%MSETUP /= JPSETUP)&
+(  605)      &CALL ABOR1 ('error: power unallocated distributed_vector')
+(  606) 
+(  607) POWER_DV_SCALAR = HANDLE%LOCAL(:) ** SCALAR
+(  608) 
+(  609) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_DV_SCALAR',1,ZHOOK_HANDLE)
+(  610) END FUNCTION POWER_DV_SCALAR
+(  611) 
+(  612) FUNCTION ADD_DV_SCALAR (HANDLE,SCALAR)
+(  613) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 12
+
+(  614) !         add scalar and distributed_vector
+(  615) 
+(  616) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  617) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  618) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::ADD_DV_SCALAR
+(  619) 
+(  620) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  621) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_DV_SCALAR',0,ZHOOK_HANDLE)
+(  622) IF (HANDLE%MSETUP /= JPSETUP)&
+(  623)      &CALL ABOR1 ('error: add unallocated distributed_vector')
+(  624) 
+(  625) ADD_DV_SCALAR = HANDLE%LOCAL(:) + SCALAR
+(  626) 
+(  627) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_DV_SCALAR',1,ZHOOK_HANDLE)
+(  628) END FUNCTION ADD_DV_SCALAR
+(  629) 
+(  630) FUNCTION SUBTRACT_DV_SCALAR (HANDLE,SCALAR)
+(  631) 
+(  632) !         subtract scalar and distributed_vector
+(  633) 
+(  634) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  635) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  636) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::&
+(  637)       &SUBTRACT_DV_SCALAR
+(  638) 
+(  639) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  640) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_DV_SCALAR',0,ZHOOK_HANDLE)
+(  641) IF (HANDLE%MSETUP /= JPSETUP)&
+(  642)      &CALL ABOR1 ('error: subtract unallocated distributed_vector')
+(  643) 
+(  644) SUBTRACT_DV_SCALAR = HANDLE%LOCAL(:) - SCALAR
+(  645) 
+(  646) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_DV_SCALAR',1,ZHOOK_HANDLE)
+(  647) END FUNCTION SUBTRACT_DV_SCALAR
+(  648) 
+(  649) FUNCTION MULTIPLY_SCALAR_DV (SCALAR,HANDLE)
+(  650) 
+(  651) !         multiply scalar and distributed_vector
+(  652) 
+(  653) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  654) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  655) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::&
+(  656)       &MULTIPLY_SCALAR_DV
+(  657) 
+(  658) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  659) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_SCALAR_DV',0,ZHOOK_HANDLE)
+(  660) IF (HANDLE%MSETUP /= JPSETUP)&
+(  661)      &CALL ABOR1 ('error: multiply unallocated distributed_vector')
+(  662) 
+(  663) MULTIPLY_SCALAR_DV = SCALAR * HANDLE%LOCAL(:)
+(  664) 
+(  665) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_SCALAR_DV',1,ZHOOK_HANDLE)
+(  666) END FUNCTION MULTIPLY_SCALAR_DV
+(  667) 
+(  668) FUNCTION DIVIDE_SCALAR_DV (SCALAR,HANDLE)
+(  669) 
+(  670) !         divide scalar and distributed_vector
+(  671) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 13
+
+(  672) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  673) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  674) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::DIVIDE_SCALAR_DV
+(  675) 
+(  676) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  677) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_SCALAR_DV',0,ZHOOK_HANDLE)
+(  678) IF (HANDLE%MSETUP /= JPSETUP)&
+(  679)      &CALL ABOR1 ('error: divide unallocated distributed_vector')
+(  680) 
+(  681) DIVIDE_SCALAR_DV = SCALAR / HANDLE%LOCAL(:)
+(  682) 
+(  683) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_SCALAR_DV',1,ZHOOK_HANDLE)
+(  684) END FUNCTION DIVIDE_SCALAR_DV
+(  685) 
+(  686) FUNCTION POWER_SCALAR_DV (SCALAR,HANDLE)
+(  687) 
+(  688) !         power scalar and distributed_vector
+(  689) 
+(  690) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  691) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  692) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::POWER_SCALAR_DV
+(  693) 
+(  694) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  695) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_SCALAR_DV',0,ZHOOK_HANDLE)
+(  696) IF (HANDLE%MSETUP /= JPSETUP)&
+(  697)      &CALL ABOR1 ('error: power unallocated distributed_vector')
+(  698) 
+(  699) POWER_SCALAR_DV = SCALAR ** HANDLE%LOCAL(:)
+(  700) 
+(  701) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_SCALAR_DV',1,ZHOOK_HANDLE)
+(  702) END FUNCTION POWER_SCALAR_DV
+(  703) 
+(  704) FUNCTION ADD_SCALAR_DV (SCALAR,HANDLE)
+(  705) 
+(  706) !         add scalar and distributed_vector
+(  707) 
+(  708) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  709) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  710) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::ADD_SCALAR_DV
+(  711) 
+(  712) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  713) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_SCALAR_DV',0,ZHOOK_HANDLE)
+(  714) IF (HANDLE%MSETUP /= JPSETUP)&
+(  715)      &CALL ABOR1 ('error: add unallocated distributed_vector')
+(  716) 
+(  717) ADD_SCALAR_DV = SCALAR + HANDLE%LOCAL(:)
+(  718) 
+(  719) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_SCALAR_DV',1,ZHOOK_HANDLE)
+(  720) END FUNCTION ADD_SCALAR_DV
+(  721) 
+(  722) FUNCTION SUBTRACT_SCALAR_DV (SCALAR,HANDLE)
+(  723) 
+(  724) !         subtract scalar and distributed_vector
+(  725) 
+(  726) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  727) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  728) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::&
+(  729)       &SUBTRACT_SCALAR_DV
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 14
+
+(  730) 
+(  731) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  732) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_SCALAR_DV',0,ZHOOK_HANDLE)
+(  733) IF (HANDLE%MSETUP /= JPSETUP)&
+(  734)      &CALL ABOR1 ('error: subtract unallocated distributed_vector')
+(  735) 
+(  736) SUBTRACT_SCALAR_DV = SCALAR - HANDLE%LOCAL(:)
+(  737) 
+(  738) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_SCALAR_DV',1,ZHOOK_HANDLE)
+(  739) END FUNCTION SUBTRACT_SCALAR_DV
+(  740) 
+(  741) SUBROUTINE ASSIGN_DV_AR (PVEC,HANDLE)
+(  742) TYPE (DISTRIBUTED_VECTOR), INTENT(IN)    :: HANDLE
+(  743) REAL(KIND=JPRB),                      INTENT(OUT)   :: PVEC(:)
+(  744) 
+(  745) !         copy a distributed_vector to array
+(  746) 
+(  747) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  748) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ASSIGN_DV_AR',0,ZHOOK_HANDLE)
+(  749) IF (HANDLE%MSETUP /= JPSETUP)&
+(  750)      &CALL ABOR1('error: copy from unallocated distributed_vector')
+(  751) 
+(  752) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  753)   PVEC(:) = HANDLE%LOCAL(:)
+(  754) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  755)   PVEC(:) = DVSECTION (HANDLE,1,HANDLE%GLOBAL_LENGTH)
+(  756) ELSE
+(  757)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  758) ENDIF
+(  759) 
+(  760) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ASSIGN_DV_AR',1,ZHOOK_HANDLE)
+(  761) END SUBROUTINE ASSIGN_DV_AR
+(  762) 
+(  763) FUNCTION DVSECTION (HANDLE,KSTART,KEND)
+(  764) 
+(  765) !         copy a section of a distributed_vector to array
+(  766) 
+(  767) INTEGER(KIND=JPIM),                 INTENT(IN)    :: KSTART,KEND
+(  768) TYPE (DISTRIBUTED_VECTOR), INTENT(IN)    :: HANDLE
+(  769) REAL(KIND=JPRB), DIMENSION(KSTART:KEND)           :: DVSECTION
+(  770) 
+(  771) INTEGER(KIND=JPIM) :: IRECV_COUNTS(NPROC)
+(  772) INTEGER(KIND=JPIM) :: ISTART,IEND,JROC
+(  773) 
+(  774) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  775) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DVSECTION',0,ZHOOK_HANDLE)
+(  776) IF (HANDLE%MSETUP /= JPSETUP)&
+(  777)      &CALL ABOR1('error: copy from unallocated distributed_vector')
+(  778) 
+(  779) !         work out which bits of the vector to recieve from whom
+(  780) 
+(  781) DO JROC=1,NPROC
+(  782)   ISTART = MAX(KSTART,JSTART(JROC,HANDLE%GLOBAL_LENGTH))
+(  783)   IEND   = MIN(KEND  ,JEND  (JROC,HANDLE%GLOBAL_LENGTH))
+(  784)   IRECV_COUNTS(JROC) = MAX(0,IEND+1-ISTART)
+(  785) ENDDO
+(  786) 
+(  787) ISTART = MAX(KSTART,HANDLE%LOCAL_START)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 15
+
+(  788) IEND   = MIN(KEND  ,HANDLE%LOCAL_END  )
+(  789) 
+(  790) !         send and recieve bits of the vector and concatenate into dvsection
+(  791) 
+(  792) CALL GSTATS(651,0)
+(  793) CALL MPL_ALLGATHERV(HANDLE%LOCAL(ISTART:IEND),DVSECTION,IRECV_COUNTS,&
+(  794)  &CDSTRING='Y_D_V dvsection:')
+(  795) CALL GSTATS(651,1)
+(  796) 
+(  797) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DVSECTION',1,ZHOOK_HANDLE)
+(  798) END FUNCTION DVSECTION
+(  799) 
+(  800) FUNCTION MULTIPLY_DV_AR (HANDLE,PVEC)
+(  801) 
+(  802) !         multiply distributed_vector and array
+(  803) 
+(  804) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  805) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  806) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::MULTIPLY_DV_AR
+(  807) 
+(  808) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  809) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_DV_AR',0,ZHOOK_HANDLE)
+(  810) IF (HANDLE%MSETUP /= JPSETUP)&
+(  811)      &CALL ABOR1 ('error: multiply unallocated distributed_vector')
+(  812) 
+(  813) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  814)   MULTIPLY_DV_AR = HANDLE%LOCAL(:) * PVEC(:)
+(  815) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  816)   MULTIPLY_DV_AR =&
+(  817)    &HANDLE%LOCAL(:)*PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)
+(  818) ELSE
+(  819)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  820) ENDIF
+(  821) 
+(  822) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_DV_AR',1,ZHOOK_HANDLE)
+(  823) END FUNCTION MULTIPLY_DV_AR
+(  824) 
+(  825) FUNCTION DIVIDE_DV_AR (HANDLE,PVEC)
+(  826) 
+(  827) !         divide distributed_vector and array
+(  828) 
+(  829) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  830) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  831) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::DIVIDE_DV_AR
+(  832) 
+(  833) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  834) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_DV_AR',0,ZHOOK_HANDLE)
+(  835) IF (HANDLE%MSETUP /= JPSETUP)&
+(  836)      &CALL ABOR1 ('error: divide unallocated distributed_vector')
+(  837) 
+(  838) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  839)   DIVIDE_DV_AR = HANDLE%LOCAL(:) / PVEC(:)
+(  840) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  841)   DIVIDE_DV_AR =HANDLE%LOCAL(:)/PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)
+(  842) ELSE
+(  843)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  844) ENDIF
+(  845) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 16
+
+(  846) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_DV_AR',1,ZHOOK_HANDLE)
+(  847) END FUNCTION DIVIDE_DV_AR
+(  848) 
+(  849) FUNCTION POWER_DV_AR (HANDLE,PVEC)
+(  850) 
+(  851) !         power distributed_vector and array
+(  852) 
+(  853) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  854) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  855) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::POWER_DV_AR
+(  856) 
+(  857) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  858) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_DV_AR',0,ZHOOK_HANDLE)
+(  859) IF (HANDLE%MSETUP /= JPSETUP)&
+(  860)      &CALL ABOR1 ('error: power unallocated distributed_vector')
+(  861) 
+(  862) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  863)   POWER_DV_AR = HANDLE%LOCAL(:) ** PVEC(:)
+(  864) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  865)   POWER_DV_AR =HANDLE%LOCAL(:)**PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)
+(  866) ELSE
+(  867)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  868) ENDIF
+(  869) 
+(  870) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_DV_AR',1,ZHOOK_HANDLE)
+(  871) END FUNCTION POWER_DV_AR
+(  872) 
+(  873) FUNCTION ADD_DV_AR (HANDLE,PVEC)
+(  874) 
+(  875) !         add distributed_vector and array
+(  876) 
+(  877) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  878) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  879) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::ADD_DV_AR
+(  880) 
+(  881) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  882) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_DV_AR',0,ZHOOK_HANDLE)
+(  883) IF (HANDLE%MSETUP /= JPSETUP)&
+(  884)      &CALL ABOR1 ('error: add unallocated distributed_vector')
+(  885) 
+(  886) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  887)   ADD_DV_AR = HANDLE%LOCAL(:) + PVEC(:)
+(  888) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  889)   ADD_DV_AR =HANDLE%LOCAL(:)+PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)
+(  890) ELSE
+(  891)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  892) ENDIF
+(  893) 
+(  894) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_DV_AR',1,ZHOOK_HANDLE)
+(  895) END FUNCTION ADD_DV_AR
+(  896) 
+(  897) FUNCTION SUBTRACT_DV_AR (HANDLE,PVEC)
+(  898) 
+(  899) !         subtract distributed_vector and array
+(  900) 
+(  901) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  902) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  903) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::SUBTRACT_DV_AR
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 17
+
+(  904) 
+(  905) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  906) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_DV_AR',0,ZHOOK_HANDLE)
+(  907) IF (HANDLE%MSETUP /= JPSETUP)&
+(  908)      &CALL ABOR1 ('error: subtract unallocated distributed_vector')
+(  909) 
+(  910) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  911)   SUBTRACT_DV_AR = HANDLE%LOCAL(:) - PVEC(:)
+(  912) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  913)   SUBTRACT_DV_AR =&
+(  914)    &HANDLE%LOCAL(:)-PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)
+(  915) ELSE
+(  916)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  917) ENDIF
+(  918) 
+(  919) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_DV_AR',1,ZHOOK_HANDLE)
+(  920) END FUNCTION SUBTRACT_DV_AR
+(  921) 
+(  922) REAL(KIND=JPRB) FUNCTION DOT_PRODUCT_HELPER (PVEC1,PVEC2,MYSTART,MYEND,KLEN,NCHNKS)
+(  923) REAL(KIND=JPRB),    INTENT(IN), DIMENSION(:) :: PVEC1,PVEC2
+(  924) INTEGER(KIND=JPIM), INTENT(IN)  :: MYSTART,MYEND,KLEN,NCHNKS
+(  925) 
+(  926) INTEGER(KIND=JPIM) :: J,ISTART,IEND,JROC,IERR,IMSGLEN,&
+(  927)             &ICHNK1,ICHNK2,I2,IPROCS,JJ,ICHNK
+(  928) REAL(KIND=JPRB), DIMENSION(NCHNKS) :: PARTIAL,ZBUF
+(  929) INTEGER(KIND=JPIM) :: IRECVCOUNTS(NPROC)
+(  930) 
+(  931) 
+(  932) !   calculate the partial dot products for the local chunks
+(  933) 
+(  934) 
+(  935) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  936) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DOT_PRODUCT_HELPER',0,ZHOOK_HANDLE)
+(  937) CALL GSTATS(1170,0)
+(  938) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(j,ichnk,i2,jj)
+(  939) DO J=1,MYEND-MYSTART+1,NDV_CHUNK_SIZE
+(  940)   ICHNK=(J-1)/NDV_CHUNK_SIZE+1
+(  941)   I2=MIN(J-1+NDV_CHUNK_SIZE,MYEND-MYSTART+1)
+(  942)   ZBUF(ICHNK) = 0.0_JPRB
+(  943)   DO JJ=J,I2
+(  944)     ZBUF(ICHNK)=ZBUF(ICHNK)+PVEC1(JJ)*PVEC2(JJ)
+(  945)   ENDDO
+(  946) ENDDO
+(  947) !$OMP END PARALLEL DO
+(  948) CALL GSTATS(1170,1)
+(  949) 
+(  950) 
+(  951) IF(NPROC > 1) THEN  
+(  952)   DO JROC=1,NPROC 
+(  953)     ISTART = JSTART (JROC,KLEN)
+(  954)     IEND   = JEND   (JROC,KLEN)
+(  955)     ICHNK1 = 1+(ISTART-1)/NDV_CHUNK_SIZE
+(  956)     ICHNK2 = (IEND-1+NDV_CHUNK_SIZE)/NDV_CHUNK_SIZE
+(  957)     IRECVCOUNTS(JROC) = ICHNK2-ICHNK1+1
+(  958)   ENDDO
+(  959)   ICHNK=IRECVCOUNTS(MYPROC)
+(  960)   CALL GSTATS(652,0)
+(  961)   CALL MPL_ALLGATHERV(ZBUF(1:ICHNK),PARTIAL,IRECVCOUNTS,&
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 18
+
+(  962)    & CDSTRING='DISTRIBUTED VECTOR(DOT_PRODUCT):')
+(  963)   CALL GSTATS(652,1)
+(  964) ELSE
+(  965)   PARTIAL(:) = ZBUF(:)
+(  966) ENDIF
+(  967) 
+(  968) !   calculate the full dot product
+(  969) 
+(  970) DOT_PRODUCT_HELPER = SUM (PARTIAL)
+(  971) 
+(  972) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DOT_PRODUCT_HELPER',1,ZHOOK_HANDLE)
+(  973) END FUNCTION DOT_PRODUCT_HELPER
+(  974) 
+(  975) REAL(KIND=JPRB) FUNCTION DOT_PRODUCT_DV_DV (HANDLE1,HANDLE2)
+(  976) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE1,HANDLE2
+(  977) 
+(  978) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  979) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DOT_PRODUCT_DV_DV',0,ZHOOK_HANDLE)
+(  980) IF (HANDLE1%MSETUP /= JPSETUP .OR. HANDLE2%MSETUP /= JPSETUP     )&
+(  981)  & CALL ABOR1('error: dot_product with unallocated distributed_vector')
+(  982) 
+(  983) IF (HANDLE1%GLOBAL_LENGTH  /=  HANDLE2%GLOBAL_LENGTH)&
+(  984)  &CALL ABOR1 ('error: dot_product different length distributed_vectors')
+(  985) 
+(  986) DOT_PRODUCT_DV_DV =&
+(  987)       &DOT_PRODUCT_HELPER (HANDLE1%LOCAL,HANDLE2%LOCAL,&
+(  988)                           &HANDLE1%LOCAL_START,HANDLE1%LOCAL_END,&
+(  989)                           &HANDLE1%GLOBAL_LENGTH,HANDLE1%NCHNKS)
+(  990) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DOT_PRODUCT_DV_DV',1,ZHOOK_HANDLE)
+(  991) END FUNCTION  DOT_PRODUCT_DV_DV
+(  992) 
+(  993) REAL(KIND=JPRB) FUNCTION DOT_PRODUCT_AR_DV (PVEC,HANDLE2)
+(  994) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  995) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE2
+(  996) 
+(  997) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  998) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DOT_PRODUCT_AR_DV',0,ZHOOK_HANDLE)
+(  999) IF (HANDLE2%MSETUP /= JPSETUP     ) CALL ABOR1 &
+( 1000)  &('error: dot_product with unallocated distributed_vector')
+( 1001) 
+( 1002) IF (SIZE(PVEC)  ==  SIZE(HANDLE2%LOCAL)) THEN
+( 1003)   DOT_PRODUCT_AR_DV =&
+( 1004)    &DOT_PRODUCT_HELPER (PVEC,HANDLE2%LOCAL,&
+( 1005)    &HANDLE2%LOCAL_START,HANDLE2%LOCAL_END,&
+( 1006)    &HANDLE2%GLOBAL_LENGTH,HANDLE2%NCHNKS)
+( 1007) ELSEIF (SIZE(PVEC)  ==  HANDLE2%GLOBAL_LENGTH) THEN
+( 1008)   DOT_PRODUCT_AR_DV =&
+( 1009)    &DOT_PRODUCT_HELPER (PVEC(HANDLE2%LOCAL_START:&
+( 1010)    &HANDLE2%LOCAL_END),HANDLE2%LOCAL,&
+( 1011)    &HANDLE2%LOCAL_START,HANDLE2%LOCAL_END,&
+( 1012)    &HANDLE2%GLOBAL_LENGTH,HANDLE2%NCHNKS)
+( 1013) ELSE
+( 1014)   CALL ABOR1('error: dot_product different length distributed_vectors')
+( 1015) ENDIF
+( 1016) 
+( 1017) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DOT_PRODUCT_AR_DV',1,ZHOOK_HANDLE)
+( 1018) END FUNCTION DOT_PRODUCT_AR_DV
+( 1019) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 19
+
+( 1020) REAL(KIND=JPRB) FUNCTION DOT_PRODUCT_DV_AR (HANDLE1,PVEC)
+( 1021) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE1
+( 1022) REAL(KIND=JPRB),                    INTENT(IN) :: PVEC(:)
+( 1023) 
+( 1024) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+( 1025) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DOT_PRODUCT_DV_AR',0,ZHOOK_HANDLE)
+( 1026) IF (HANDLE1%MSETUP /= JPSETUP     ) CALL ABOR1 &
+( 1027)  &('error: dot_product with unallocated distributed_vector')
+( 1028) 
+( 1029) IF (SIZE(HANDLE1%LOCAL)  ==  SIZE(PVEC)) THEN
+( 1030)   DOT_PRODUCT_DV_AR =&
+( 1031)    &DOT_PRODUCT_HELPER (HANDLE1%LOCAL,PVEC,&
+( 1032)    &HANDLE1%LOCAL_START,HANDLE1%LOCAL_END,&
+( 1033)    &HANDLE1%GLOBAL_LENGTH,HANDLE1%NCHNKS)
+( 1034) ELSE IF (HANDLE1%GLOBAL_LENGTH  ==  SIZE(PVEC)) THEN
+( 1035)   DOT_PRODUCT_DV_AR =&
+( 1036)    &DOT_PRODUCT_HELPER (HANDLE1%LOCAL,&
+( 1037)    &PVEC(HANDLE1%LOCAL_START:&
+( 1038)    &HANDLE1%LOCAL_END),&
+( 1039)    &HANDLE1%LOCAL_START,HANDLE1%LOCAL_END,&
+( 1040)    &HANDLE1%GLOBAL_LENGTH,HANDLE1%NCHNKS)
+( 1041) ELSE
+( 1042)   CALL ABOR1('error: dot_product different length  &
+( 1043)    &distributed_vectors')
+( 1044) ENDIF
+( 1045) 
+( 1046) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DOT_PRODUCT_DV_AR',1,ZHOOK_HANDLE)
+( 1047) END FUNCTION DOT_PRODUCT_DV_AR
+( 1048) 
+( 1049) REAL(KIND=JPRB) FUNCTION SUM_HELPER (PVEC,MYSTART,MYEND,KLEN,NCHNKS)
+( 1050) REAL(KIND=JPRB),    INTENT(IN), DIMENSION(:) :: PVEC
+( 1051) INTEGER(KIND=JPIM), INTENT(IN)  :: MYSTART,MYEND,KLEN,NCHNKS
+( 1052) 
+( 1053) INTEGER(KIND=JPIM) :: J,ISTART,IEND,ITAG,JROC,IERR,&
+( 1054)  &ICHNK1,ICHNK2,I2,IPROCS,IROC,JJ,ISENDR
+( 1055) REAL(KIND=JPRB), DIMENSION(NCHNKS) :: PARTIAL,ZBUF
+( 1056) 
+( 1057) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+( 1058) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUM_HELPER',0,ZHOOK_HANDLE)
+( 1059) ITAG    = MT_DISTRIBUTED_VECTOR
+( 1060) 
+( 1061) !   calculate the partial sums for the local chunks
+( 1062) 
+( 1063) IF (MYEND >= MYSTART) THEN
+( 1064)   ICHNK1 = 1+(MYSTART-1)/NDV_CHUNK_SIZE
+( 1065)   ICHNK2 = ICHNK1-1
+( 1066)   
+( 1067)   DO J=1,MYEND-MYSTART+1,NDV_CHUNK_SIZE
+( 1068)     I2=MIN(J-1+NDV_CHUNK_SIZE,MYEND-MYSTART+1)
+( 1069)     ICHNK2 = ICHNK2+1
+( 1070)     !              partial(ichnk2)= SUM (pvec(j:i2))
+( 1071)     PARTIAL(ICHNK2)=0.0_JPRB
+( 1072)     DO JJ=J,I2
+( 1073)       PARTIAL(ICHNK2)=PARTIAL(ICHNK2)+PVEC(JJ)
+( 1074)     ENDDO
+( 1075)     
+( 1076)   ENDDO
+( 1077) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 20
+
+( 1078) !   broadcast the partial dot products for the local chunks
+( 1079) 
+( 1080)   DO JROC=0,NPROC-2
+( 1081)     IROC=MOD(MYPROC+JROC,NPROC)+1
+( 1082)     CALL MPL_SEND (PARTIAL(ICHNK1:ICHNK2),KDEST=NPRCIDS(IROC), &
+( 1083)      &   KTAG=ITAG,CDSTRING='DISTRIBUTED VECTOR:')
+( 1084)   ENDDO
+( 1085) ENDIF
+( 1086) 
+( 1087) !   gather the partial dot products from the other PEs
+( 1088) 
+( 1089) 
+( 1090) IF (MYEND >= MYSTART) THEN
+( 1091)   IPROCS=MIN(NCHNKS,NPROC)-1
+( 1092) ELSE
+( 1093)   IPROCS=MIN(NCHNKS,NPROC)
+( 1094) ENDIF
+( 1095) 
+( 1096) DO JROC=1,IPROCS
+( 1097)   CALL MPL_RECV(ZBUF(1:NCHNKS),KFROM=ISENDR, &
+( 1098)    & KTAG=ITAG,CDSTRING='DISTRIBUTED VECTOR:')
+( 1099)   ISTART = JSTART (ISENDR,KLEN)
+( 1100)   IEND   = JEND   (ISENDR,KLEN)
+( 1101)   ICHNK1 = 1+(ISTART-1)/NDV_CHUNK_SIZE
+( 1102)   ICHNK2 = (IEND-1+NDV_CHUNK_SIZE)/NDV_CHUNK_SIZE
+( 1103)   PARTIAL(ICHNK1:ICHNK2)=ZBUF(1:ICHNK2+1-ICHNK1)
+( 1104) ENDDO
+( 1105) 
+( 1106) !   calculate the full sum
+( 1107) 
+( 1108) SUM_HELPER = SUM (PARTIAL)
+( 1109) 
+( 1110) !   synchronize
+( 1111) CALL MPL_BARRIER (CDSTRING='DISTRIBUTED VECTOR SUM:')
+( 1112) 
+( 1113) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUM_HELPER',1,ZHOOK_HANDLE)
+( 1114) END FUNCTION SUM_HELPER
+( 1115) 
+( 1116) REAL(KIND=JPRB) FUNCTION SUM_DV (HANDLE)
+( 1117) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+( 1118) 
+( 1119) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+( 1120) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUM_DV',0,ZHOOK_HANDLE)
+( 1121) IF (HANDLE%MSETUP /= JPSETUP) CALL ABOR1 &
+( 1122)  &('error: sum with unallocated distributed_vector')
+( 1123) 
+( 1124) 
+( 1125) SUM_DV =&
+( 1126)  &SUM_HELPER (HANDLE%LOCAL,&
+( 1127)  &HANDLE%LOCAL_START,HANDLE%LOCAL_END,&
+( 1128)  &HANDLE%GLOBAL_LENGTH,HANDLE%NCHNKS)
+( 1129) 
+( 1130) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUM_DV',1,ZHOOK_HANDLE)
+( 1131) END FUNCTION  SUM_DV
+( 1132) 
+( 1133) REAL(KIND=JPRB) FUNCTION MAXVAL_HELPER (PVEC,MYSTART,MYEND,KLEN,NCHNKS)
+( 1134) REAL(KIND=JPRB),    INTENT(IN), DIMENSION(:) :: PVEC
+( 1135) INTEGER(KIND=JPIM), INTENT(IN)  :: MYSTART,MYEND,KLEN,NCHNKS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 21
+
+( 1136) 
+( 1137) INTEGER(KIND=JPIM) :: J,ISTART,IEND,ITAG,JROC,IERR,IMSGLEN,ISENDR,ITAGR,&
+( 1138)  &ICHNK1,ICHNK2,I2,IPROCS,IROC,JJ
+( 1139) REAL(KIND=JPRB), DIMENSION(NCHNKS) :: PARTIAL,ZBUF
+( 1140) 
+( 1141) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+( 1142) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MAXVAL_HELPER',0,ZHOOK_HANDLE)
+( 1143) ITAG    = MT_DISTRIBUTED_VECTOR
+( 1144) 
+( 1145) !   calculate the partial maxvals for the local chunks
+( 1146) 
+( 1147) IF (MYEND >= MYSTART) THEN
+( 1148)   ICHNK1 = 1+(MYSTART-1)/NDV_CHUNK_SIZE
+( 1149)   ICHNK2 = ICHNK1-1
+( 1150) 
+( 1151)   DO J=1,MYEND-MYSTART+1,NDV_CHUNK_SIZE
+( 1152)     I2=MIN(J-1+NDV_CHUNK_SIZE,MYEND-MYSTART+1)
+( 1153)     ICHNK2 = ICHNK2+1
+( 1154)     PARTIAL(ICHNK2)= MAXVAL (PVEC(J:I2))
+( 1155)   ENDDO
+( 1156) 
+( 1157) !   broadcast the partial max values for the local chunks
+( 1158) 
+( 1159) 
+( 1160)   DO JROC=0,NPROC-2
+( 1161)     IROC=MOD(MYPROC+JROC,NPROC)+1
+( 1162)     CALL MPL_SEND (PARTIAL(ICHNK1:ICHNK2),KDEST=NPRCIDS(IROC), &
+( 1163)      &   KTAG=ITAG,CDSTRING='DISTRIBUTED VECTOR:')
+( 1164)   ENDDO
+( 1165) ENDIF
+( 1166) 
+( 1167) !   gather the partial max values from the other PEs
+( 1168) 
+( 1169) 
+( 1170) IF (MYEND >= MYSTART) THEN
+( 1171)   IPROCS=MIN(NCHNKS,NPROC)-1
+( 1172) ELSE
+( 1173)   IPROCS=MIN(NCHNKS,NPROC)
+( 1174) ENDIF
+( 1175) 
+( 1176) DO JROC=1,IPROCS
+( 1177)   CALL MPL_RECV(ZBUF(1:NCHNKS),KFROM=ISENDR, &
+( 1178)    & KTAG=ITAG,CDSTRING='DISTRIBUTED VECTOR:')
+( 1179)   ISTART = JSTART (ISENDR,KLEN)
+( 1180)   IEND   = JEND   (ISENDR,KLEN)
+( 1181)   ICHNK1 = 1+(ISTART-1)/NDV_CHUNK_SIZE
+( 1182)   ICHNK2 = (IEND-1+NDV_CHUNK_SIZE)/NDV_CHUNK_SIZE
+( 1183)   PARTIAL(ICHNK1:ICHNK2)=ZBUF(1:ICHNK2+1-ICHNK1)
+( 1184) ENDDO
+( 1185) 
+( 1186) !   calculate the full max value
+( 1187) 
+( 1188) MAXVAL_HELPER = MAXVAL (PARTIAL)
+( 1189) 
+( 1190) !   synchronize
+( 1191) CALL MPL_BARRIER (CDSTRING='MAXVAL:')
+( 1192) 
+( 1193) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MAXVAL_HELPER',1,ZHOOK_HANDLE)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 22
+
+( 1194) END FUNCTION MAXVAL_HELPER
+( 1195) 
+( 1196) REAL(KIND=JPRB) FUNCTION MAXVAL_DV (HANDLE)
+( 1197) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+( 1198) 
+( 1199) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+( 1200) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MAXVAL_DV',0,ZHOOK_HANDLE)
+( 1201) IF (HANDLE%MSETUP /= JPSETUP) CALL ABOR1 &
+( 1202)  &('error: maxval with unallocated distributed_vector')
+( 1203) 
+( 1204) 
+( 1205) MAXVAL_DV =&
+( 1206)  &MAXVAL_HELPER (HANDLE%LOCAL,&
+( 1207)  &HANDLE%LOCAL_START,HANDLE%LOCAL_END,&
+( 1208)  &HANDLE%GLOBAL_LENGTH,HANDLE%NCHNKS)
+( 1209) 
+( 1210) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MAXVAL_DV',1,ZHOOK_HANDLE)
+( 1211) END FUNCTION  MAXVAL_DV
+( 1212) 
+( 1213) FUNCTION SQRT_DV (HANDLE)
+( 1214) 
+( 1215) !         add two distributed_vectors
+( 1216) 
+( 1217) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+( 1218) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) :: SQRT_DV
+( 1219) 
+( 1220) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+( 1221) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SQRT_DV',0,ZHOOK_HANDLE)
+( 1222) IF (HANDLE%MSETUP /= JPSETUP .OR. HANDLE%MSETUP /= JPSETUP   )&
+( 1223)      &CALL ABOR1 ('error: sqrt unallocated distributed_vector')
+( 1224) 
+( 1225) SQRT_DV = SQRT(HANDLE%LOCAL(:))
+( 1226) 
+( 1227) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SQRT_DV',1,ZHOOK_HANDLE)
+( 1228) END FUNCTION SQRT_DV
+( 1229) 
+( 1230) 
+( 1231) SUBROUTINE SCATTER_VECTOR_DV (HANDLE,KROOT,PVEC)
+( 1232) 
+( 1233) !         distribute vector
+( 1234) 
+( 1235) TYPE (DISTRIBUTED_VECTOR), INTENT(OUT)  :: HANDLE
+( 1236) INTEGER(KIND=JPIM), INTENT(IN)                   :: KROOT
+( 1237) REAL(KIND=JPRB),OPTIONAL,           INTENT(IN)   :: PVEC(:)
+( 1238) INTEGER(KIND=JPIM) :: ITAG,JROC,ISTART,IEND,IERR,IMSGLEN,ISENDR,ITAGR
+( 1239) 
+( 1240) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+( 1241) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SCATTER_VECTOR_DV',0,ZHOOK_HANDLE)
+( 1242) IF (HANDLE%MSETUP /= JPSETUP)&
+( 1243)  &CALL ABOR1 &
+( 1244)  &('scatter_vector: copy to unallocated distributed_vector')
+( 1245) 
+( 1246) ITAG = MT_DISTRIBUTED_VECTOR
+( 1247) 
+( 1248) IF(KROOT == MYPROC) THEN 
+( 1249)   IF(.NOT. PRESENT(PVEC)) &
+( 1250)    & CALL ABOR1 ('scatter_vector: pvec missing from kroot')
+( 1251)   IF (SIZE(PVEC) /= HANDLE%GLOBAL_LENGTH)&
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 23
+
+( 1252)    &CALL ABOR1 &
+( 1253)    &('scatter_vector: unequal size')
+( 1254) 
+( 1255) !         broadcast the local part to the other PEs
+( 1256) 
+( 1257) 
+( 1258)   DO JROC=1,NPROC
+( 1259)     IF (JROC /= MYPROC) THEN
+( 1260)       ISTART=JSTART(JROC,HANDLE%GLOBAL_LENGTH)
+( 1261)       IEND=JEND(JROC,HANDLE%GLOBAL_LENGTH)
+( 1262)       IF (IEND >= ISTART) THEN
+( 1263)         CALL MPL_SEND (PVEC(ISTART:IEND),KDEST=NPRCIDS(JROC), &
+( 1264)          &   KTAG=ITAG,CDSTRING='DISTRIBUTED VECTOR:')
+( 1265)       ENDIF
+( 1266)     ENDIF
+( 1267)   ENDDO
+( 1268) 
+( 1269) !         copy the local part from pvec
+( 1270) 
+( 1271)   HANDLE%LOCAL(:)=PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)
+( 1272) ELSE
+( 1273) 
+( 1274) !         collect the local parts from the distributing PE
+( 1275)   
+( 1276)   ISTART = JSTART (MYPROC,HANDLE%GLOBAL_LENGTH)
+( 1277)   IEND   = JEND   (MYPROC,HANDLE%GLOBAL_LENGTH)
+( 1278)   IF (IEND >= ISTART) THEN
+( 1279)     CALL MPL_RECV(HANDLE%LOCAL(ISTART:IEND),KOUNT=IMSGLEN, &
+( 1280)      & KTAG=ITAG,CDSTRING='DISTRIBUTED VECTOR:')
+( 1281)     IF (IMSGLEN /= IEND+1-ISTART)&
+( 1282)      &CALL ABOR1('SCATTER_VECTOR:WRONG LENGTH IN MPL_RECV')
+( 1283)   ENDIF
+( 1284) ENDIF
+( 1285) 
+( 1286) CALL MPL_BARRIER (CDSTRING='SCATTER_VECTOR:')
+( 1287) 
+( 1288) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SCATTER_VECTOR_DV',1,ZHOOK_HANDLE)
+( 1289) END SUBROUTINE SCATTER_VECTOR_DV
+( 1290) 
+( 1291) SUBROUTINE SCATTER_VECTOR_AR (PARRAY,KROOT,PVEC)
+( 1292) 
+( 1293) !         distribute vector
+( 1294) 
+( 1295) REAL(KIND=JPRB), INTENT(OUT)             :: PARRAY(:)
+( 1296) INTEGER(KIND=JPIM), INTENT(IN)           :: KROOT
+( 1297) REAL(KIND=JPRB),OPTIONAL, INTENT(IN)     :: PVEC(:)
+( 1298) INTEGER(KIND=JPIM) :: ITAG,ILEN,IERR
+( 1299) 
+( 1300) 
+( 1301) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+( 1302) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SCATTER_VECTOR_AR',0,ZHOOK_HANDLE)
+( 1303) ITAG = MT_DISTRIBUTED_VECTOR
+( 1304) ILEN = SIZE(PARRAY)
+( 1305) 
+( 1306) IF(KROOT == MYPROC) THEN 
+( 1307)   IF(.NOT. PRESENT(PVEC))& 
+( 1308)    & CALL ABOR1 ('scatter_vector: pvec missing from kroot')
+( 1309)   IF (SIZE(PVEC) /= ILEN) CALL ABOR1('scatter_vector: unequal size')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 24
+
+( 1310) 
+( 1311) !         copy  from pvec
+( 1312) 
+( 1313)   PARRAY(:)=PVEC(:)
+( 1314) 
+( 1315) ENDIF
+( 1316) 
+( 1317) CALL GSTATS(653,0)
+( 1318) CALL MPL_BROADCAST(PARRAY,ITAG,KROOT=KROOT,&
+( 1319)  & CDSTRING='DISTRIBUTED VECTOR (SCATTER_VECTOR):')
+( 1320) CALL GSTATS(653,1)
+( 1321) 
+( 1322) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SCATTER_VECTOR_AR',1,ZHOOK_HANDLE)
+( 1323) END SUBROUTINE SCATTER_VECTOR_AR
+( 1324) 
+( 1325) SUBROUTINE GATHER_VECTOR (HANDLE,KROOT,PVEC)
+( 1326) 
+( 1327) !         distribute vector
+( 1328) 
+( 1329) TYPE (DISTRIBUTED_VECTOR), INTENT(IN)   :: HANDLE
+( 1330) INTEGER(KIND=JPIM), INTENT(IN)                   :: KROOT
+( 1331) REAL(KIND=JPRB),OPTIONAL,           INTENT(OUT)  :: PVEC(:)
+( 1332) INTEGER(KIND=JPIM) :: ITAG,JROC,ISTART,IEND,IST,IEN
+( 1333) INTEGER(KIND=JPIM) :: IRECVCOUNTS(NPROC)
+( 1334) 
+( 1335) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+( 1336) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:GATHER_VECTOR',0,ZHOOK_HANDLE)
+( 1337) IF (HANDLE%MSETUP /= JPSETUP)&
+( 1338)  &CALL ABOR1('gather_vector: copy to unallocated distributed_vector')
+( 1339) 
+( 1340) DO JROC=1,NPROC
+( 1341)   IST=JSTART(JROC,HANDLE%GLOBAL_LENGTH)
+( 1342)   IEN=JEND(JROC,HANDLE%GLOBAL_LENGTH)
+( 1343)   IRECVCOUNTS(JROC) = IEN-IST+1
+( 1344) ENDDO
+( 1345) 
+( 1346) CALL GSTATS(654,0)
+( 1347) IF(KROOT == MYPROC) THEN 
+( 1348)   IF(.NOT. PRESENT(PVEC)) &
+( 1349)    & CALL ABOR1('gather_vector: pvec missing from kroot')
+( 1350)   IF (SIZE(PVEC) /= HANDLE%GLOBAL_LENGTH)&
+( 1351)    &CALL ABOR1('gather_vector: unequal size')
+( 1352)   
+( 1353) !         collect the local parts from all other PEs
+( 1354)   
+( 1355)   CALL MPL_GATHERV(HANDLE%LOCAL,KROOT=KROOT,&
+( 1356)    & KRECVCOUNTS=IRECVCOUNTS,PRECVBUF=PVEC,&
+( 1357)    & CDSTRING='DISTRIBUTED VECTOR(gather_VECTOR):')
+( 1358)   
+( 1359) ELSE
+( 1360)   CALL MPL_GATHERV(HANDLE%LOCAL,KROOT=KROOT,&
+( 1361)    & KRECVCOUNTS=IRECVCOUNTS,&
+( 1362)    & CDSTRING='DISTRIBUTED VECTOR(gather_VECTOR):')
+( 1363) ENDIF
+( 1364) CALL GSTATS(654,1)
+( 1365) 
+( 1366) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:GATHER_VECTOR',1,ZHOOK_HANDLE)
+( 1367) END SUBROUTINE GATHER_VECTOR
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 25
+
+( 1368) 
+( 1369) END MODULE DISTRIBUTED_VECTORS_MIX
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 26
+
+(    1) # 1 "distributed_vectors_mix.F90"
+(    1) MODULE DISTRIBUTED_VECTORS_MIX
+(    2) USE PARKIND1, ONLY : JPRB
+(    3) USE YOMHOOK , ONLY : LHOOK, DR_HOOK
+(    4) # 5 "distributed_vectors_mix.F90"
+(    5) !     ------------------------------------------------------------------
+(    6) # 7 "distributed_vectors_mix.F90"
+(    7) !*    Distributed storage for one-dimensional arrays
+(    8) # 9 "distributed_vectors_mix.F90"
+(    9) !     This module provides the following:
+(   10) # 11 "distributed_vectors_mix.F90"
+(   11) !       - The derived type "distributed_vector".
+(   12) !       - Subroutines "allocate_vector" and "deallocate_vector".
+(   13) !       - Access to the part of the vector held on the local PE.
+(   14) !       - Overloaded assignment and arithmetic operators which
+(   15) !         implicitly translate between normal 1d arrays and
+(   16) !         distributed_vectors.
+(   17) !       - A distributed version of DOT_PRODUCT.
+(   18) # 19 "distributed_vectors_mix.F90"
+(   19) !         A "distributed_vector" acts like a pointer to a real
+(   20) !         one-dimensional array. Unlike an array pointer, you cannot
+(   21) !         access individual elements.
+(   22) # 23 "distributed_vectors_mix.F90"
+(   23) !         It is vital that any operation involving a
+(   24) !         "distributed_vector" is performed by all PEs. (In general
+(   25) !         routines which use "distributed_vector"s will execute
+(   26) !         identical code on all PEs. All message passing is done
+(   27) !         implicitly via the module suroutines below.)
+(   28) # 29 "distributed_vectors_mix.F90"
+(   29) !  The following routines must be used to allocate and deallocate
+(   30) !  space on each PE for each distributed_vector.
+(   31) # 32 "distributed_vectors_mix.F90"
+(   32) !         allocate_vector (handle,klen) allocates storage for the
+(   33) !                                       distributed_vector "handle"
+(   34) !                                       which can be used to store a
+(   35) !                                       on dimensional array of "klen"
+(   36) !                                       elements.
+(   37) # 38 "distributed_vectors_mix.F90"
+(   38) !         deallocate_vector (handle)    deallocates the space associated
+(   39) !                                       with "handle".
+(   40) # 41 "distributed_vectors_mix.F90"
+(   41) ! The following operations are defined, where handle, handle1 and
+(   42) ! handle2 represent distributed vectors (allocted with identical
+(   43) ! values for "klen"); pvec, pvec1 and pvec2 are 1d arrays with
+(   44) ! SHAPE "1:klen" or with SIZE "1+handle%local_end-handle%local_end";
+(   45) ! OP is one of +,-,*,/,** or =; and scalar is a real scalar.
+(   46) # 47 "distributed_vectors_mix.F90"
+(   47) !         handle  OP pvec(:)
+(   48) !         pvec(:) OP handle
+(   49) !         handle1 OP handle2
+(   50) !         handle  OP scalar
+(   51) # 52 "distributed_vectors_mix.F90"
+(   52) !         scalar = DOT_PRODUCT (handle,pvec)
+(   53) !         scalar = DOT_PRODUCT (handle1,handle2)
+(   54) !         scalar = DOT_PRODUCT (pvec,handle2)
+(   55) # 56 "distributed_vectors_mix.F90"
+(   56) !   Externals.
+(   57) !   ----------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 27
+
+(   58) !       MPL_SEND
+(   59) !       MPL_RECV
+(   60) !       ABOR1
+(   61) # 62 "distributed_vectors_mix.F90"
+(   62) !   Reference.
+(   63) !   ----------
+(   64) !       None yet!
+(   65) # 66 "distributed_vectors_mix.F90"
+(   66) !   Author.
+(   67) !   -------
+(   68) !       Mike Fisher *ECMWF*
+(   69) # 70 "distributed_vectors_mix.F90"
+(   70) !   Modifications.
+(   71) !   --------------
+(   72) !       Original   97-11-26
+(   73) !       D.Dent     00-09-01  MPE to MPL conversion
+(   74) # 75 "distributed_vectors_mix.F90"
+(   75) !     ------------------------------------------------------------------
+(   76) # 79 "distributed_vectors_mix.F90"
+(   79) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   80) # 81 "distributed_vectors_mix.F90"
+(   81) USE MPL_MODULE
+(   82) # 83 "distributed_vectors_mix.F90"
+(   83) IMPLICIT NONE
+(   84) # 85 "distributed_vectors_mix.F90"
+(   85) PRIVATE
+(   86) PUBLIC  DISTRIBUTED_VECTOR, ALLOCATE_VECTOR, DEALLOCATE_VECTOR,&
+(   87)         &NDV_CHUNK_SIZE, ASSIGNMENT(=), OPERATOR(+), OPERATOR(-),&
+(   88)         &OPERATOR(*), OPERATOR(/), OPERATOR(**), DOT_PRODUCT,&
+(   89)         &DVSECTION,&
+(   90)         &SUM,MAXVAL,SQRT,SETUP_DISTVEC,SCATTER_VECTOR,GATHER_VECTOR
+(   91) # 92 "distributed_vectors_mix.F90"
+(   92) INTEGER(KIND=JPIM) :: NDV_CHUNK_SIZE
+(   93) INTEGER(KIND=JPIM) :: NPROC,MYPROC,MINTET,MREALT,MT_DISTRIBUTED_VECTOR
+(   94) INTEGER(KIND=JPIM) ,ALLOCATABLE :: NPRCIDS(:)
+(   95) INTEGER(KIND=JPIM),PARAMETER :: JPSETUP=77777
+(   96) # 97 "distributed_vectors_mix.F90"
+(   97) TYPE DISTRIBUTED_VECTOR
+(   98) REAL(KIND=JPRB), POINTER :: LOCAL(:)
+(   99) INTEGER(KIND=JPIM)       :: GLOBAL_LENGTH,LOCAL_START,LOCAL_END,NCHNKS
+(  100) INTEGER(KIND=JPIM)       :: MSETUP
+(  101) END TYPE DISTRIBUTED_VECTOR
+(  102) # 103 "distributed_vectors_mix.F90"
+(  103) INTERFACE ASSIGNMENT (=)
+(  104) MODULE PROCEDURE ASSIGN_AR_DV, ASSIGN_DV_AR,ASSIGN_DV_DV, ASSIGN_SCALAR_DV
+(  105) END INTERFACE
+(  106) # 107 "distributed_vectors_mix.F90"
+(  107) INTERFACE OPERATOR (*)
+(  108) MODULE PROCEDURE MULTIPLY_AR_DV, MULTIPLY_DV_AR,&
+(  109)                    &MULTIPLY_DV_DV, MULTIPLY_SCALAR_DV,&
+(  110)                    &MULTIPLY_DV_SCALAR
+(  111) END INTERFACE
+(  112) # 113 "distributed_vectors_mix.F90"
+(  113) INTERFACE OPERATOR (+)
+(  114) MODULE PROCEDURE ADD_AR_DV, ADD_DV_AR,&
+(  115)                    &ADD_DV_DV, ADD_SCALAR_DV,&
+(  116)                    &ADD_DV_SCALAR
+(  117) END INTERFACE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 28
+
+(  118) # 119 "distributed_vectors_mix.F90"
+(  119) INTERFACE OPERATOR (-)
+(  120) MODULE PROCEDURE SUBTRACT_AR_DV, SUBTRACT_DV_AR,&
+(  121)                    &SUBTRACT_DV_DV, SUBTRACT_SCALAR_DV,&
+(  122)                    &SUBTRACT_DV_SCALAR, NEGATE_DV
+(  123) END INTERFACE
+(  124) # 125 "distributed_vectors_mix.F90"
+(  125) INTERFACE OPERATOR (/)
+(  126) MODULE PROCEDURE DIVIDE_AR_DV, DIVIDE_DV_AR,&
+(  127)                    &DIVIDE_DV_DV, DIVIDE_SCALAR_DV,&
+(  128)                    &DIVIDE_DV_SCALAR
+(  129) END INTERFACE
+(  130) # 131 "distributed_vectors_mix.F90"
+(  131) INTERFACE OPERATOR (**)
+(  132) MODULE PROCEDURE POWER_AR_DV, POWER_DV_AR,&
+(  133)                    &POWER_DV_DV, POWER_SCALAR_DV,&
+(  134)                    &POWER_DV_SCALAR
+(  135) END INTERFACE
+(  136) # 137 "distributed_vectors_mix.F90"
+(  137) INTERFACE DOT_PRODUCT
+(  138) MODULE PROCEDURE DOT_PRODUCT_DV_DV, DOT_PRODUCT_DV_AR,DOT_PRODUCT_AR_DV
+(  139) END INTERFACE
+(  140) # 141 "distributed_vectors_mix.F90"
+(  141) INTERFACE SCATTER_VECTOR
+(  142) MODULE PROCEDURE SCATTER_VECTOR_DV, SCATTER_VECTOR_AR
+(  143) END INTERFACE
+(  144) # 145 "distributed_vectors_mix.F90"
+(  145) INTERFACE SUM
+(  146) MODULE PROCEDURE SUM_DV
+(  147) END INTERFACE
+(  148) # 149 "distributed_vectors_mix.F90"
+(  149) INTERFACE MAXVAL
+(  150) MODULE PROCEDURE MAXVAL_DV
+(  151) END INTERFACE
+(  152) # 153 "distributed_vectors_mix.F90"
+(  153) INTERFACE SQRT
+(  154) MODULE PROCEDURE SQRT_DV
+(  155) END INTERFACE
+(  156) # 157 "distributed_vectors_mix.F90"
+(  157) ! module procedures:
+(  158) # 159 "distributed_vectors_mix.F90"
+(  159) CONTAINS
+(  160) SUBROUTINE SETUP_DISTVEC(KPROC,KYPROC,KINTET,KREALT,KTAG,&
+(  161)    &KDV_CHUNK_SIZE,KPRCIDS)
+(  162) INTEGER(KIND=JPIM) :: KPROC,KYPROC,KINTET,KREALT,KTAG,KDV_CHUNK_SIZE
+(  163) INTEGER(KIND=JPIM) :: KPRCIDS(KPROC)
+(  164) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  165) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SETUP_DISTVEC',0,ZHOOK_HANDLE)
+(  166) ALLOCATE(NPRCIDS(KPROC))
+(  167) NPROC=KPROC
+(  168) MYPROC=KYPROC
+(  169) MINTET=KINTET
+(  170) MREALT=KREALT
+(  171) MT_DISTRIBUTED_VECTOR=KTAG
+(  172) NDV_CHUNK_SIZE=KDV_CHUNK_SIZE
+(  173) NPRCIDS(:)=KPRCIDS(:)
+(  174) # 175 "distributed_vectors_mix.F90"
+(  175) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SETUP_DISTVEC',1,ZHOOK_HANDLE)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 29
+
+(  176) END SUBROUTINE SETUP_DISTVEC
+(  177) # 178 "distributed_vectors_mix.F90"
+(  178) INTEGER(KIND=JPIM) FUNCTION NCHUNKS (KLEN)
+(  179) INTEGER(KIND=JPIM), INTENT(IN) :: KLEN
+(  180) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  181) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:NCHUNKS',0,ZHOOK_HANDLE)
+(  182) NCHUNKS = (KLEN+NDV_CHUNK_SIZE-1)/NDV_CHUNK_SIZE
+(  183) # 184 "distributed_vectors_mix.F90"
+(  184) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:NCHUNKS',1,ZHOOK_HANDLE)
+(  185) END FUNCTION NCHUNKS
+(  186) # 187 "distributed_vectors_mix.F90"
+(  187) INTEGER(KIND=JPIM) FUNCTION JEND (KPROC,KLEN)
+(  188) INTEGER(KIND=JPIM), INTENT(IN) :: KPROC,KLEN
+(  189) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  190) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:JEND',0,ZHOOK_HANDLE)
+(  191) JEND = MIN(  NDV_CHUNK_SIZE &
+(  192)                 &*NINT( REAL(KPROC)&
+(  193)                       &*(REAL(NCHUNKS(KLEN))/REAL(NPROC)))&
+(  194)                &,KLEN)
+(  195) # 196 "distributed_vectors_mix.F90"
+(  196) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:JEND',1,ZHOOK_HANDLE)
+(  197) END FUNCTION JEND
+(  198) # 199 "distributed_vectors_mix.F90"
+(  199) INTEGER(KIND=JPIM) FUNCTION JSTART (KPROC,KLEN)
+(  200) INTEGER(KIND=JPIM), INTENT(IN) :: KPROC,KLEN
+(  201) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  202) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:JSTART',0,ZHOOK_HANDLE)
+(  203) JSTART = 1+JEND(KPROC-1,KLEN)
+(  204) # 205 "distributed_vectors_mix.F90"
+(  205) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:JSTART',1,ZHOOK_HANDLE)
+(  206) END FUNCTION JSTART
+(  207) # 208 "distributed_vectors_mix.F90"
+(  208) SUBROUTINE ALLOCATE_VECTOR (HANDLE,KLEN)
+(  209) # 210 "distributed_vectors_mix.F90"
+(  210) !         allocate storage for the distributed vector
+(  211) # 212 "distributed_vectors_mix.F90"
+(  212) TYPE (DISTRIBUTED_VECTOR), INTENT(OUT) :: HANDLE
+(  213) INTEGER(KIND=JPIM), INTENT(IN)  :: KLEN
+(  214) # 215 "distributed_vectors_mix.F90"
+(  215) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  216) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ALLOCATE_VECTOR',0,ZHOOK_HANDLE)
+(  217) IF(NCHUNKS(KLEN) < NPROC) CALL ABOR1&
+(  218)  & ('ALLOCATE_VECTOR : NCHUNKS<NPROC, REDUCE CHUNK SIZE!')
+(  219)   
+(  220) HANDLE%GLOBAL_LENGTH = KLEN
+(  221) HANDLE%LOCAL_START   = JSTART(MYPROC,KLEN)
+(  222) HANDLE%LOCAL_END     = JEND  (MYPROC,KLEN)
+(  223) HANDLE%NCHNKS  = NCHUNKS(KLEN)
+(  224) HANDLE%MSETUP = JPSETUP
+(  225) # 226 "distributed_vectors_mix.F90"
+(  226) ALLOCATE (HANDLE%LOCAL(HANDLE%LOCAL_START:HANDLE%LOCAL_END))
+(  227) # 228 "distributed_vectors_mix.F90"
+(  228) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ALLOCATE_VECTOR',1,ZHOOK_HANDLE)
+(  229) END SUBROUTINE ALLOCATE_VECTOR
+(  230) # 231 "distributed_vectors_mix.F90"
+(  231) SUBROUTINE DEALLOCATE_VECTOR (HANDLE)
+(  232) # 233 "distributed_vectors_mix.F90"
+(  233) !         deallocate storage for the distributed array
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 30
+
+(  234) # 235 "distributed_vectors_mix.F90"
+(  235) TYPE (DISTRIBUTED_VECTOR), INTENT(OUT) :: HANDLE
+(  236) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  237) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DEALLOCATE_VECTOR',0,ZHOOK_HANDLE)
+(  238) DEALLOCATE (HANDLE%LOCAL)
+(  239) HANDLE%MSETUP = 0
+(  240) # 241 "distributed_vectors_mix.F90"
+(  241) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DEALLOCATE_VECTOR',1,ZHOOK_HANDLE)
+(  242) END SUBROUTINE DEALLOCATE_VECTOR
+(  243) # 244 "distributed_vectors_mix.F90"
+(  244) SUBROUTINE ASSIGN_AR_DV (HANDLE,PVEC)
+(  245) # 246 "distributed_vectors_mix.F90"
+(  246) !         copy array to the distributed_vector
+(  247) # 248 "distributed_vectors_mix.F90"
+(  248) REAL(KIND=JPRB),                      INTENT(IN)    :: PVEC(:)
+(  249) TYPE (DISTRIBUTED_VECTOR), INTENT(INOUT) :: HANDLE
+(  250) # 251 "distributed_vectors_mix.F90"
+(  251) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  252) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ASSIGN_AR_DV',0,ZHOOK_HANDLE)
+(  253) IF (HANDLE%MSETUP /= JPSETUP)&
+(  254)      &CALL ABOR1 ('error: store to unallocated distributed_vector')
+(  255) # 256 "distributed_vectors_mix.F90"
+(  256) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  257)   HANDLE%LOCAL(:) = PVEC(:)
+(  258) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  259)   HANDLE%LOCAL(:) = PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)
+(  260) ELSE
+(  261)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  262) ENDIF
+(  263) # 264 "distributed_vectors_mix.F90"
+(  264) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ASSIGN_AR_DV',1,ZHOOK_HANDLE)
+(  265) END SUBROUTINE ASSIGN_AR_DV
+(  266) # 267 "distributed_vectors_mix.F90"
+(  267) FUNCTION MULTIPLY_AR_DV (PVEC,HANDLE)
+(  268) # 269 "distributed_vectors_mix.F90"
+(  269) !         multiply array and distributed_vector
+(  270) # 271 "distributed_vectors_mix.F90"
+(  271) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  272) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  273) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::MULTIPLY_AR_DV
+(  274) # 275 "distributed_vectors_mix.F90"
+(  275) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  276) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_AR_DV',0,ZHOOK_HANDLE)
+(  277) IF (HANDLE%MSETUP /= JPSETUP)&
+(  278)      &CALL ABOR1 ('error: multiply unallocated distributed_vector')
+(  279) # 280 "distributed_vectors_mix.F90"
+(  280) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  281)   MULTIPLY_AR_DV = PVEC(:) * HANDLE%LOCAL(:)
+(  282) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  283)   MULTIPLY_AR_DV =&
+(  284)    &PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)*HANDLE%LOCAL(:)
+(  285) ELSE
+(  286)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  287) ENDIF
+(  288) # 289 "distributed_vectors_mix.F90"
+(  289) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_AR_DV',1,ZHOOK_HANDLE)
+(  290) END FUNCTION MULTIPLY_AR_DV
+(  291) # 292 "distributed_vectors_mix.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 31
+
+(  292) FUNCTION DIVIDE_AR_DV (PVEC,HANDLE)
+(  293) # 294 "distributed_vectors_mix.F90"
+(  294) !         divide array and distributed_vector
+(  295) # 296 "distributed_vectors_mix.F90"
+(  296) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  297) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  298) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::DIVIDE_AR_DV
+(  299) # 300 "distributed_vectors_mix.F90"
+(  300) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  301) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_AR_DV',0,ZHOOK_HANDLE)
+(  302) IF (HANDLE%MSETUP /= JPSETUP)&
+(  303)      &CALL ABOR1 ('error: divide unallocated distributed_vector')
+(  304) # 305 "distributed_vectors_mix.F90"
+(  305) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  306)   DIVIDE_AR_DV = PVEC(:) / HANDLE%LOCAL(:)
+(  307) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  308)   DIVIDE_AR_DV =PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)/HANDLE%LOCAL(:)
+(  309) ELSE
+(  310)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  311) ENDIF
+(  312) # 313 "distributed_vectors_mix.F90"
+(  313) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_AR_DV',1,ZHOOK_HANDLE)
+(  314) END FUNCTION DIVIDE_AR_DV
+(  315) # 316 "distributed_vectors_mix.F90"
+(  316) FUNCTION POWER_AR_DV (PVEC,HANDLE)
+(  317) # 318 "distributed_vectors_mix.F90"
+(  318) !         power array and distributed_vector
+(  319) # 320 "distributed_vectors_mix.F90"
+(  320) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  321) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  322) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::POWER_AR_DV
+(  323) # 324 "distributed_vectors_mix.F90"
+(  324) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  325) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_AR_DV',0,ZHOOK_HANDLE)
+(  326) IF (HANDLE%MSETUP /= JPSETUP)&
+(  327)      &CALL ABOR1 ('error: power unallocated distributed_vector')
+(  328) # 329 "distributed_vectors_mix.F90"
+(  329) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  330)   POWER_AR_DV = PVEC(:) ** HANDLE%LOCAL(:)
+(  331) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  332)   POWER_AR_DV =PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)**HANDLE%LOCAL(:)
+(  333) ELSE
+(  334)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  335) ENDIF
+(  336) # 337 "distributed_vectors_mix.F90"
+(  337) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_AR_DV',1,ZHOOK_HANDLE)
+(  338) END FUNCTION POWER_AR_DV
+(  339) # 340 "distributed_vectors_mix.F90"
+(  340) FUNCTION ADD_AR_DV (PVEC,HANDLE)
+(  341) # 342 "distributed_vectors_mix.F90"
+(  342) !         add array and distributed_vector
+(  343) # 344 "distributed_vectors_mix.F90"
+(  344) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  345) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  346) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::ADD_AR_DV
+(  347) # 348 "distributed_vectors_mix.F90"
+(  348) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  349) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_AR_DV',0,ZHOOK_HANDLE)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 32
+
+(  350) IF (HANDLE%MSETUP /= JPSETUP)&
+(  351)      &CALL ABOR1 ('error: add unallocated distributed_vector')
+(  352) # 353 "distributed_vectors_mix.F90"
+(  353) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  354)   ADD_AR_DV = PVEC(:) + HANDLE%LOCAL(:)
+(  355) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  356)   ADD_AR_DV =PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)+HANDLE%LOCAL(:)
+(  357) ELSE
+(  358)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  359) ENDIF
+(  360) # 361 "distributed_vectors_mix.F90"
+(  361) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_AR_DV',1,ZHOOK_HANDLE)
+(  362) END FUNCTION ADD_AR_DV
+(  363) # 364 "distributed_vectors_mix.F90"
+(  364) FUNCTION SUBTRACT_AR_DV (PVEC,HANDLE)
+(  365) # 366 "distributed_vectors_mix.F90"
+(  366) !         subtract array and distributed_vector
+(  367) # 368 "distributed_vectors_mix.F90"
+(  368) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  369) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  370) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::SUBTRACT_AR_DV
+(  371) # 372 "distributed_vectors_mix.F90"
+(  372) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  373) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_AR_DV',0,ZHOOK_HANDLE)
+(  374) IF (HANDLE%MSETUP /= JPSETUP)&
+(  375)      &CALL ABOR1 ('error: subtract unallocated distributed_vector')
+(  376) # 377 "distributed_vectors_mix.F90"
+(  377) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  378)   SUBTRACT_AR_DV = PVEC(:) - HANDLE%LOCAL(:)
+(  379) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  380)   SUBTRACT_AR_DV =&
+(  381)    &PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)-HANDLE%LOCAL(:)
+(  382) ELSE
+(  383)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  384) ENDIF
+(  385) # 386 "distributed_vectors_mix.F90"
+(  386) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_AR_DV',1,ZHOOK_HANDLE)
+(  387) END FUNCTION SUBTRACT_AR_DV
+(  388) # 389 "distributed_vectors_mix.F90"
+(  389) FUNCTION NEGATE_DV (HANDLE)
+(  390) # 391 "distributed_vectors_mix.F90"
+(  391) !         negate a distributed_vector
+(  392) # 393 "distributed_vectors_mix.F90"
+(  393) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  394) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::NEGATE_DV
+(  395) # 396 "distributed_vectors_mix.F90"
+(  396) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  397) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:NEGATE_DV',0,ZHOOK_HANDLE)
+(  398) IF (HANDLE%MSETUP /= JPSETUP)&
+(  399)      &CALL ABOR1 ('error: negate unallocated distributed_vector')
+(  400) # 401 "distributed_vectors_mix.F90"
+(  401) NEGATE_DV =  -HANDLE%LOCAL(:)
+(  402) # 403 "distributed_vectors_mix.F90"
+(  403) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:NEGATE_DV',1,ZHOOK_HANDLE)
+(  404) END FUNCTION NEGATE_DV
+(  405) # 406 "distributed_vectors_mix.F90"
+(  406) SUBROUTINE ASSIGN_DV_DV (HANDLE1,HANDLE2)
+(  407) # 408 "distributed_vectors_mix.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 33
+
+(  408) !         copy one distributed_vector to another
+(  409) # 410 "distributed_vectors_mix.F90"
+(  410) TYPE (DISTRIBUTED_VECTOR), INTENT(IN)    :: HANDLE2
+(  411) TYPE (DISTRIBUTED_VECTOR), INTENT(INOUT) :: HANDLE1
+(  412) # 413 "distributed_vectors_mix.F90"
+(  413) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  414) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ASSIGN_DV_DV',0,ZHOOK_HANDLE)
+(  415) IF (HANDLE1%MSETUP /= JPSETUP)&
+(  416)      &CALL ABOR1 ('error: store to unallocated distributed_vector')
+(  417) # 418 "distributed_vectors_mix.F90"
+(  418) IF (HANDLE1%MSETUP /= JPSETUP)&
+(  419)      &CALL ABOR1('error: copy from unallocated distributed_vector')
+(  420) # 421 "distributed_vectors_mix.F90"
+(  421) IF (HANDLE1%GLOBAL_LENGTH == HANDLE2%GLOBAL_LENGTH) THEN
+(  422)   HANDLE1%LOCAL(:) = HANDLE2%LOCAL(:)
+(  423) ELSE
+(  424)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  425) ENDIF
+(  426) # 427 "distributed_vectors_mix.F90"
+(  427) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ASSIGN_DV_DV',1,ZHOOK_HANDLE)
+(  428) END SUBROUTINE ASSIGN_DV_DV
+(  429) # 430 "distributed_vectors_mix.F90"
+(  430) FUNCTION MULTIPLY_DV_DV (HANDLE1,HANDLE2)
+(  431) # 432 "distributed_vectors_mix.F90"
+(  432) !         multiply two distributed_vectors
+(  433) # 434 "distributed_vectors_mix.F90"
+(  434) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE2
+(  435) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE1
+(  436) REAL(KIND=JPRB), DIMENSION(HANDLE1%LOCAL_START:HANDLE1%LOCAL_END) ::MULTIPLY_DV_DV
+(  437) # 438 "distributed_vectors_mix.F90"
+(  438) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  439) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_DV_DV',0,ZHOOK_HANDLE)
+(  440) IF (HANDLE1%MSETUP /= JPSETUP .OR. HANDLE2%MSETUP /= JPSETUP     )&
+(  441)      &CALL ABOR1 ('error: multiply unallocated distributed_vector')
+(  442) # 443 "distributed_vectors_mix.F90"
+(  443) IF (HANDLE1%GLOBAL_LENGTH == HANDLE2%GLOBAL_LENGTH) THEN
+(  444)   MULTIPLY_DV_DV = HANDLE1%LOCAL(:) * HANDLE2%LOCAL(:)
+(  445) ELSE
+(  446)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  447) ENDIF
+(  448) # 449 "distributed_vectors_mix.F90"
+(  449) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_DV_DV',1,ZHOOK_HANDLE)
+(  450) END FUNCTION MULTIPLY_DV_DV
+(  451) # 452 "distributed_vectors_mix.F90"
+(  452) FUNCTION DIVIDE_DV_DV (HANDLE1,HANDLE2)
+(  453) # 454 "distributed_vectors_mix.F90"
+(  454) !         divide two distributed_vectors
+(  455) # 456 "distributed_vectors_mix.F90"
+(  456) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE2
+(  457) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE1
+(  458) REAL(KIND=JPRB), DIMENSION(HANDLE1%LOCAL_START:HANDLE1%LOCAL_END) ::DIVIDE_DV_DV
+(  459) # 460 "distributed_vectors_mix.F90"
+(  460) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  461) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_DV_DV',0,ZHOOK_HANDLE)
+(  462) IF (HANDLE1%MSETUP /= JPSETUP .OR. HANDLE2%MSETUP /= JPSETUP  )&
+(  463)      &CALL ABOR1 ('error: divide unallocated distributed_vector')
+(  464) # 465 "distributed_vectors_mix.F90"
+(  465) IF (HANDLE1%GLOBAL_LENGTH == HANDLE2%GLOBAL_LENGTH) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 34
+
+(  466)   DIVIDE_DV_DV = HANDLE1%LOCAL(:) / HANDLE2%LOCAL(:)
+(  467) ELSE
+(  468)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  469) ENDIF
+(  470) # 471 "distributed_vectors_mix.F90"
+(  471) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_DV_DV',1,ZHOOK_HANDLE)
+(  472) END FUNCTION DIVIDE_DV_DV
+(  473) # 474 "distributed_vectors_mix.F90"
+(  474) FUNCTION POWER_DV_DV (HANDLE1,HANDLE2)
+(  475) # 476 "distributed_vectors_mix.F90"
+(  476) !         power two distributed_vectors
+(  477) # 478 "distributed_vectors_mix.F90"
+(  478) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE2
+(  479) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE1
+(  480) REAL(KIND=JPRB), DIMENSION(HANDLE1%LOCAL_START:HANDLE1%LOCAL_END) ::POWER_DV_DV
+(  481) # 482 "distributed_vectors_mix.F90"
+(  482) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  483) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_DV_DV',0,ZHOOK_HANDLE)
+(  484) IF (HANDLE1%MSETUP /= JPSETUP .OR. HANDLE2%MSETUP /= JPSETUP     )&
+(  485)      &CALL ABOR1 ('error: power unallocated distributed_vector')
+(  486) # 487 "distributed_vectors_mix.F90"
+(  487) IF (HANDLE1%GLOBAL_LENGTH == HANDLE2%GLOBAL_LENGTH) THEN
+(  488)   POWER_DV_DV = HANDLE1%LOCAL(:) ** HANDLE2%LOCAL(:)
+(  489) ELSE
+(  490)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  491) ENDIF
+(  492) # 493 "distributed_vectors_mix.F90"
+(  493) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_DV_DV',1,ZHOOK_HANDLE)
+(  494) END FUNCTION POWER_DV_DV
+(  495) # 496 "distributed_vectors_mix.F90"
+(  496) FUNCTION ADD_DV_DV (HANDLE1,HANDLE2)
+(  497) # 498 "distributed_vectors_mix.F90"
+(  498) !         add two distributed_vectors
+(  499) # 500 "distributed_vectors_mix.F90"
+(  500) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE2
+(  501) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE1
+(  502) REAL(KIND=JPRB), DIMENSION(HANDLE1%LOCAL_START:HANDLE1%LOCAL_END) ::ADD_DV_DV
+(  503) # 504 "distributed_vectors_mix.F90"
+(  504) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  505) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_DV_DV',0,ZHOOK_HANDLE)
+(  506) IF (HANDLE1%MSETUP /= JPSETUP .OR. HANDLE2%MSETUP /= JPSETUP   )&
+(  507)      &CALL ABOR1 ('error: add unallocated distributed_vector')
+(  508) # 509 "distributed_vectors_mix.F90"
+(  509) IF (HANDLE1%GLOBAL_LENGTH == HANDLE2%GLOBAL_LENGTH) THEN
+(  510)   ADD_DV_DV = HANDLE1%LOCAL(:) + HANDLE2%LOCAL(:)
+(  511) ELSE
+(  512)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  513) ENDIF
+(  514) # 515 "distributed_vectors_mix.F90"
+(  515) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_DV_DV',1,ZHOOK_HANDLE)
+(  516) END FUNCTION ADD_DV_DV
+(  517) # 518 "distributed_vectors_mix.F90"
+(  518) FUNCTION SUBTRACT_DV_DV (HANDLE1,HANDLE2)
+(  519) # 520 "distributed_vectors_mix.F90"
+(  520) !         subtract two distributed_vectors
+(  521) # 522 "distributed_vectors_mix.F90"
+(  522) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE2
+(  523) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 35
+
+(  524) REAL(KIND=JPRB), DIMENSION(HANDLE1%LOCAL_START:HANDLE1%LOCAL_END) ::SUBTRACT_DV_DV
+(  525) # 526 "distributed_vectors_mix.F90"
+(  526) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  527) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_DV_DV',0,ZHOOK_HANDLE)
+(  528) IF (HANDLE1%MSETUP /= JPSETUP .OR. HANDLE2%MSETUP /= JPSETUP    )&
+(  529)      &CALL ABOR1 ('error: subtract unallocated distributed_vector')
+(  530) # 531 "distributed_vectors_mix.F90"
+(  531) IF (HANDLE1%GLOBAL_LENGTH == HANDLE2%GLOBAL_LENGTH) THEN
+(  532)   SUBTRACT_DV_DV = HANDLE1%LOCAL(:) - HANDLE2%LOCAL(:)
+(  533) ELSE
+(  534)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  535) ENDIF
+(  536) # 537 "distributed_vectors_mix.F90"
+(  537) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_DV_DV',1,ZHOOK_HANDLE)
+(  538) END FUNCTION SUBTRACT_DV_DV
+(  539) # 540 "distributed_vectors_mix.F90"
+(  540) SUBROUTINE ASSIGN_SCALAR_DV (HANDLE,SCALAR)
+(  541) # 542 "distributed_vectors_mix.F90"
+(  542) !         copy scalar to distributed_vector
+(  543) # 544 "distributed_vectors_mix.F90"
+(  544) REAL(KIND=JPRB),                      INTENT(IN)    :: SCALAR
+(  545) TYPE (DISTRIBUTED_VECTOR), INTENT(INOUT) :: HANDLE
+(  546) # 547 "distributed_vectors_mix.F90"
+(  547) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  548) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ASSIGN_SCALAR_DV',0,ZHOOK_HANDLE)
+(  549) IF (HANDLE%MSETUP /= JPSETUP)&
+(  550)      &CALL ABOR1 ('error: store to unallocated distributed_vector')
+(  551) # 552 "distributed_vectors_mix.F90"
+(  552) HANDLE%LOCAL(:) = SCALAR
+(  553) # 554 "distributed_vectors_mix.F90"
+(  554) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ASSIGN_SCALAR_DV',1,ZHOOK_HANDLE)
+(  555) END SUBROUTINE ASSIGN_SCALAR_DV
+(  556) # 557 "distributed_vectors_mix.F90"
+(  557) FUNCTION MULTIPLY_DV_SCALAR (HANDLE,SCALAR)
+(  558) # 559 "distributed_vectors_mix.F90"
+(  559) !         multiply scalar and distributed_vector
+(  560) # 561 "distributed_vectors_mix.F90"
+(  561) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  562) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  563) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::&
+(  564)       &MULTIPLY_DV_SCALAR
+(  565) # 566 "distributed_vectors_mix.F90"
+(  566) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  567) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_DV_SCALAR',0,ZHOOK_HANDLE)
+(  568) IF (HANDLE%MSETUP /= JPSETUP)&
+(  569)      &CALL ABOR1 ('error: multiply unallocated distributed_vector')
+(  570) # 571 "distributed_vectors_mix.F90"
+(  571) MULTIPLY_DV_SCALAR = HANDLE%LOCAL(:) * SCALAR
+(  572) # 573 "distributed_vectors_mix.F90"
+(  573) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_DV_SCALAR',1,ZHOOK_HANDLE)
+(  574) END FUNCTION MULTIPLY_DV_SCALAR
+(  575) # 576 "distributed_vectors_mix.F90"
+(  576) FUNCTION DIVIDE_DV_SCALAR (HANDLE,SCALAR)
+(  577) # 578 "distributed_vectors_mix.F90"
+(  578) !         divide scalar and distributed_vector
+(  579) # 580 "distributed_vectors_mix.F90"
+(  580) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  581) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 36
+
+(  582) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::DIVIDE_DV_SCALAR
+(  583) # 584 "distributed_vectors_mix.F90"
+(  584) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  585) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_DV_SCALAR',0,ZHOOK_HANDLE)
+(  586) IF (HANDLE%MSETUP /= JPSETUP)&
+(  587)      &CALL ABOR1 ('error: divide unallocated distributed_vector')
+(  588) # 589 "distributed_vectors_mix.F90"
+(  589) DIVIDE_DV_SCALAR = HANDLE%LOCAL(:) / SCALAR
+(  590) # 591 "distributed_vectors_mix.F90"
+(  591) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_DV_SCALAR',1,ZHOOK_HANDLE)
+(  592) END FUNCTION DIVIDE_DV_SCALAR
+(  593) # 594 "distributed_vectors_mix.F90"
+(  594) FUNCTION POWER_DV_SCALAR (HANDLE,SCALAR)
+(  595) # 596 "distributed_vectors_mix.F90"
+(  596) !         power scalar and distributed_vector
+(  597) # 598 "distributed_vectors_mix.F90"
+(  598) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  599) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  600) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::POWER_DV_SCALAR
+(  601) # 602 "distributed_vectors_mix.F90"
+(  602) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  603) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_DV_SCALAR',0,ZHOOK_HANDLE)
+(  604) IF (HANDLE%MSETUP /= JPSETUP)&
+(  605)      &CALL ABOR1 ('error: power unallocated distributed_vector')
+(  606) # 607 "distributed_vectors_mix.F90"
+(  607) POWER_DV_SCALAR = HANDLE%LOCAL(:) ** SCALAR
+(  608) # 609 "distributed_vectors_mix.F90"
+(  609) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_DV_SCALAR',1,ZHOOK_HANDLE)
+(  610) END FUNCTION POWER_DV_SCALAR
+(  611) # 612 "distributed_vectors_mix.F90"
+(  612) FUNCTION ADD_DV_SCALAR (HANDLE,SCALAR)
+(  613) # 614 "distributed_vectors_mix.F90"
+(  614) !         add scalar and distributed_vector
+(  615) # 616 "distributed_vectors_mix.F90"
+(  616) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  617) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  618) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::ADD_DV_SCALAR
+(  619) # 620 "distributed_vectors_mix.F90"
+(  620) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  621) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_DV_SCALAR',0,ZHOOK_HANDLE)
+(  622) IF (HANDLE%MSETUP /= JPSETUP)&
+(  623)      &CALL ABOR1 ('error: add unallocated distributed_vector')
+(  624) # 625 "distributed_vectors_mix.F90"
+(  625) ADD_DV_SCALAR = HANDLE%LOCAL(:) + SCALAR
+(  626) # 627 "distributed_vectors_mix.F90"
+(  627) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_DV_SCALAR',1,ZHOOK_HANDLE)
+(  628) END FUNCTION ADD_DV_SCALAR
+(  629) # 630 "distributed_vectors_mix.F90"
+(  630) FUNCTION SUBTRACT_DV_SCALAR (HANDLE,SCALAR)
+(  631) # 632 "distributed_vectors_mix.F90"
+(  632) !         subtract scalar and distributed_vector
+(  633) # 634 "distributed_vectors_mix.F90"
+(  634) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  635) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  636) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::&
+(  637)       &SUBTRACT_DV_SCALAR
+(  638) # 639 "distributed_vectors_mix.F90"
+(  639) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 37
+
+(  640) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_DV_SCALAR',0,ZHOOK_HANDLE)
+(  641) IF (HANDLE%MSETUP /= JPSETUP)&
+(  642)      &CALL ABOR1 ('error: subtract unallocated distributed_vector')
+(  643) # 644 "distributed_vectors_mix.F90"
+(  644) SUBTRACT_DV_SCALAR = HANDLE%LOCAL(:) - SCALAR
+(  645) # 646 "distributed_vectors_mix.F90"
+(  646) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_DV_SCALAR',1,ZHOOK_HANDLE)
+(  647) END FUNCTION SUBTRACT_DV_SCALAR
+(  648) # 649 "distributed_vectors_mix.F90"
+(  649) FUNCTION MULTIPLY_SCALAR_DV (SCALAR,HANDLE)
+(  650) # 651 "distributed_vectors_mix.F90"
+(  651) !         multiply scalar and distributed_vector
+(  652) # 653 "distributed_vectors_mix.F90"
+(  653) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  654) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  655) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::&
+(  656)       &MULTIPLY_SCALAR_DV
+(  657) # 658 "distributed_vectors_mix.F90"
+(  658) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  659) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_SCALAR_DV',0,ZHOOK_HANDLE)
+(  660) IF (HANDLE%MSETUP /= JPSETUP)&
+(  661)      &CALL ABOR1 ('error: multiply unallocated distributed_vector')
+(  662) # 663 "distributed_vectors_mix.F90"
+(  663) MULTIPLY_SCALAR_DV = SCALAR * HANDLE%LOCAL(:)
+(  664) # 665 "distributed_vectors_mix.F90"
+(  665) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_SCALAR_DV',1,ZHOOK_HANDLE)
+(  666) END FUNCTION MULTIPLY_SCALAR_DV
+(  667) # 668 "distributed_vectors_mix.F90"
+(  668) FUNCTION DIVIDE_SCALAR_DV (SCALAR,HANDLE)
+(  669) # 670 "distributed_vectors_mix.F90"
+(  670) !         divide scalar and distributed_vector
+(  671) # 672 "distributed_vectors_mix.F90"
+(  672) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  673) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  674) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::DIVIDE_SCALAR_DV
+(  675) # 676 "distributed_vectors_mix.F90"
+(  676) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  677) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_SCALAR_DV',0,ZHOOK_HANDLE)
+(  678) IF (HANDLE%MSETUP /= JPSETUP)&
+(  679)      &CALL ABOR1 ('error: divide unallocated distributed_vector')
+(  680) # 681 "distributed_vectors_mix.F90"
+(  681) DIVIDE_SCALAR_DV = SCALAR / HANDLE%LOCAL(:)
+(  682) # 683 "distributed_vectors_mix.F90"
+(  683) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_SCALAR_DV',1,ZHOOK_HANDLE)
+(  684) END FUNCTION DIVIDE_SCALAR_DV
+(  685) # 686 "distributed_vectors_mix.F90"
+(  686) FUNCTION POWER_SCALAR_DV (SCALAR,HANDLE)
+(  687) # 688 "distributed_vectors_mix.F90"
+(  688) !         power scalar and distributed_vector
+(  689) # 690 "distributed_vectors_mix.F90"
+(  690) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  691) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  692) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::POWER_SCALAR_DV
+(  693) # 694 "distributed_vectors_mix.F90"
+(  694) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  695) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_SCALAR_DV',0,ZHOOK_HANDLE)
+(  696) IF (HANDLE%MSETUP /= JPSETUP)&
+(  697)      &CALL ABOR1 ('error: power unallocated distributed_vector')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 38
+
+(  698) # 699 "distributed_vectors_mix.F90"
+(  699) POWER_SCALAR_DV = SCALAR ** HANDLE%LOCAL(:)
+(  700) # 701 "distributed_vectors_mix.F90"
+(  701) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_SCALAR_DV',1,ZHOOK_HANDLE)
+(  702) END FUNCTION POWER_SCALAR_DV
+(  703) # 704 "distributed_vectors_mix.F90"
+(  704) FUNCTION ADD_SCALAR_DV (SCALAR,HANDLE)
+(  705) # 706 "distributed_vectors_mix.F90"
+(  706) !         add scalar and distributed_vector
+(  707) # 708 "distributed_vectors_mix.F90"
+(  708) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  709) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  710) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::ADD_SCALAR_DV
+(  711) # 712 "distributed_vectors_mix.F90"
+(  712) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  713) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_SCALAR_DV',0,ZHOOK_HANDLE)
+(  714) IF (HANDLE%MSETUP /= JPSETUP)&
+(  715)      &CALL ABOR1 ('error: add unallocated distributed_vector')
+(  716) # 717 "distributed_vectors_mix.F90"
+(  717) ADD_SCALAR_DV = SCALAR + HANDLE%LOCAL(:)
+(  718) # 719 "distributed_vectors_mix.F90"
+(  719) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_SCALAR_DV',1,ZHOOK_HANDLE)
+(  720) END FUNCTION ADD_SCALAR_DV
+(  721) # 722 "distributed_vectors_mix.F90"
+(  722) FUNCTION SUBTRACT_SCALAR_DV (SCALAR,HANDLE)
+(  723) # 724 "distributed_vectors_mix.F90"
+(  724) !         subtract scalar and distributed_vector
+(  725) # 726 "distributed_vectors_mix.F90"
+(  726) REAL(KIND=JPRB),                      INTENT(IN) :: SCALAR
+(  727) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  728) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::&
+(  729)       &SUBTRACT_SCALAR_DV
+(  730) # 731 "distributed_vectors_mix.F90"
+(  731) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  732) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_SCALAR_DV',0,ZHOOK_HANDLE)
+(  733) IF (HANDLE%MSETUP /= JPSETUP)&
+(  734)      &CALL ABOR1 ('error: subtract unallocated distributed_vector')
+(  735) # 736 "distributed_vectors_mix.F90"
+(  736) SUBTRACT_SCALAR_DV = SCALAR - HANDLE%LOCAL(:)
+(  737) # 738 "distributed_vectors_mix.F90"
+(  738) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_SCALAR_DV',1,ZHOOK_HANDLE)
+(  739) END FUNCTION SUBTRACT_SCALAR_DV
+(  740) # 741 "distributed_vectors_mix.F90"
+(  741) SUBROUTINE ASSIGN_DV_AR (PVEC,HANDLE)
+(  742) TYPE (DISTRIBUTED_VECTOR), INTENT(IN)    :: HANDLE
+(  743) REAL(KIND=JPRB),                      INTENT(OUT)   :: PVEC(:)
+(  744) # 745 "distributed_vectors_mix.F90"
+(  745) !         copy a distributed_vector to array
+(  746) # 747 "distributed_vectors_mix.F90"
+(  747) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  748) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ASSIGN_DV_AR',0,ZHOOK_HANDLE)
+(  749) IF (HANDLE%MSETUP /= JPSETUP)&
+(  750)      &CALL ABOR1('error: copy from unallocated distributed_vector')
+(  751) # 752 "distributed_vectors_mix.F90"
+(  752) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  753)   PVEC(:) = HANDLE%LOCAL(:)
+(  754) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  755)   PVEC(:) = DVSECTION (HANDLE,1,HANDLE%GLOBAL_LENGTH)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 39
+
+(  756) ELSE
+(  757)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  758) ENDIF
+(  759) # 760 "distributed_vectors_mix.F90"
+(  760) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ASSIGN_DV_AR',1,ZHOOK_HANDLE)
+(  761) END SUBROUTINE ASSIGN_DV_AR
+(  762) # 763 "distributed_vectors_mix.F90"
+(  763) FUNCTION DVSECTION (HANDLE,KSTART,KEND)
+(  764) # 765 "distributed_vectors_mix.F90"
+(  765) !         copy a section of a distributed_vector to array
+(  766) # 767 "distributed_vectors_mix.F90"
+(  767) INTEGER(KIND=JPIM),                 INTENT(IN)    :: KSTART,KEND
+(  768) TYPE (DISTRIBUTED_VECTOR), INTENT(IN)    :: HANDLE
+(  769) REAL(KIND=JPRB), DIMENSION(KSTART:KEND)           :: DVSECTION
+(  770) # 771 "distributed_vectors_mix.F90"
+(  771) INTEGER(KIND=JPIM) :: IRECV_COUNTS(NPROC)
+(  772) INTEGER(KIND=JPIM) :: ISTART,IEND,JROC
+(  773) # 774 "distributed_vectors_mix.F90"
+(  774) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  775) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DVSECTION',0,ZHOOK_HANDLE)
+(  776) IF (HANDLE%MSETUP /= JPSETUP)&
+(  777)      &CALL ABOR1('error: copy from unallocated distributed_vector')
+(  778) # 779 "distributed_vectors_mix.F90"
+(  779) !         work out which bits of the vector to recieve from whom
+(  780) # 781 "distributed_vectors_mix.F90"
+(  781) DO JROC=1,NPROC
+(  782)   ISTART = MAX(KSTART,JSTART(JROC,HANDLE%GLOBAL_LENGTH))
+(  783)   IEND   = MIN(KEND  ,JEND  (JROC,HANDLE%GLOBAL_LENGTH))
+(  784)   IRECV_COUNTS(JROC) = MAX(0,IEND+1-ISTART)
+(  785) ENDDO
+(  786) # 787 "distributed_vectors_mix.F90"
+(  787) ISTART = MAX(KSTART,HANDLE%LOCAL_START)
+(  788) IEND   = MIN(KEND  ,HANDLE%LOCAL_END  )
+(  789) # 790 "distributed_vectors_mix.F90"
+(  790) !         send and recieve bits of the vector and concatenate into dvsection
+(  791) # 792 "distributed_vectors_mix.F90"
+(  792) CALL GSTATS(651,0)
+(  793) CALL MPL_ALLGATHERV(HANDLE%LOCAL(ISTART:IEND),DVSECTION,IRECV_COUNTS,&
+(  794)  &CDSTRING='Y_D_V dvsection:')
+(  795) CALL GSTATS(651,1)
+(  796) # 797 "distributed_vectors_mix.F90"
+(  797) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DVSECTION',1,ZHOOK_HANDLE)
+(  798) END FUNCTION DVSECTION
+(  799) # 800 "distributed_vectors_mix.F90"
+(  800) FUNCTION MULTIPLY_DV_AR (HANDLE,PVEC)
+(  801) # 802 "distributed_vectors_mix.F90"
+(  802) !         multiply distributed_vector and array
+(  803) # 804 "distributed_vectors_mix.F90"
+(  804) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  805) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  806) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::MULTIPLY_DV_AR
+(  807) # 808 "distributed_vectors_mix.F90"
+(  808) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  809) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_DV_AR',0,ZHOOK_HANDLE)
+(  810) IF (HANDLE%MSETUP /= JPSETUP)&
+(  811)      &CALL ABOR1 ('error: multiply unallocated distributed_vector')
+(  812) # 813 "distributed_vectors_mix.F90"
+(  813) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 40
+
+(  814)   MULTIPLY_DV_AR = HANDLE%LOCAL(:) * PVEC(:)
+(  815) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  816)   MULTIPLY_DV_AR =&
+(  817)    &HANDLE%LOCAL(:)*PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)
+(  818) ELSE
+(  819)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  820) ENDIF
+(  821) # 822 "distributed_vectors_mix.F90"
+(  822) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MULTIPLY_DV_AR',1,ZHOOK_HANDLE)
+(  823) END FUNCTION MULTIPLY_DV_AR
+(  824) # 825 "distributed_vectors_mix.F90"
+(  825) FUNCTION DIVIDE_DV_AR (HANDLE,PVEC)
+(  826) # 827 "distributed_vectors_mix.F90"
+(  827) !         divide distributed_vector and array
+(  828) # 829 "distributed_vectors_mix.F90"
+(  829) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  830) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  831) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::DIVIDE_DV_AR
+(  832) # 833 "distributed_vectors_mix.F90"
+(  833) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  834) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_DV_AR',0,ZHOOK_HANDLE)
+(  835) IF (HANDLE%MSETUP /= JPSETUP)&
+(  836)      &CALL ABOR1 ('error: divide unallocated distributed_vector')
+(  837) # 838 "distributed_vectors_mix.F90"
+(  838) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  839)   DIVIDE_DV_AR = HANDLE%LOCAL(:) / PVEC(:)
+(  840) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  841)   DIVIDE_DV_AR =HANDLE%LOCAL(:)/PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)
+(  842) ELSE
+(  843)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  844) ENDIF
+(  845) # 846 "distributed_vectors_mix.F90"
+(  846) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DIVIDE_DV_AR',1,ZHOOK_HANDLE)
+(  847) END FUNCTION DIVIDE_DV_AR
+(  848) # 849 "distributed_vectors_mix.F90"
+(  849) FUNCTION POWER_DV_AR (HANDLE,PVEC)
+(  850) # 851 "distributed_vectors_mix.F90"
+(  851) !         power distributed_vector and array
+(  852) # 853 "distributed_vectors_mix.F90"
+(  853) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  854) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  855) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::POWER_DV_AR
+(  856) # 857 "distributed_vectors_mix.F90"
+(  857) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  858) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_DV_AR',0,ZHOOK_HANDLE)
+(  859) IF (HANDLE%MSETUP /= JPSETUP)&
+(  860)      &CALL ABOR1 ('error: power unallocated distributed_vector')
+(  861) # 862 "distributed_vectors_mix.F90"
+(  862) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  863)   POWER_DV_AR = HANDLE%LOCAL(:) ** PVEC(:)
+(  864) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  865)   POWER_DV_AR =HANDLE%LOCAL(:)**PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)
+(  866) ELSE
+(  867)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  868) ENDIF
+(  869) # 870 "distributed_vectors_mix.F90"
+(  870) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:POWER_DV_AR',1,ZHOOK_HANDLE)
+(  871) END FUNCTION POWER_DV_AR
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 41
+
+(  872) # 873 "distributed_vectors_mix.F90"
+(  873) FUNCTION ADD_DV_AR (HANDLE,PVEC)
+(  874) # 875 "distributed_vectors_mix.F90"
+(  875) !         add distributed_vector and array
+(  876) # 877 "distributed_vectors_mix.F90"
+(  877) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  878) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  879) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::ADD_DV_AR
+(  880) # 881 "distributed_vectors_mix.F90"
+(  881) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  882) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_DV_AR',0,ZHOOK_HANDLE)
+(  883) IF (HANDLE%MSETUP /= JPSETUP)&
+(  884)      &CALL ABOR1 ('error: add unallocated distributed_vector')
+(  885) # 886 "distributed_vectors_mix.F90"
+(  886) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  887)   ADD_DV_AR = HANDLE%LOCAL(:) + PVEC(:)
+(  888) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  889)   ADD_DV_AR =HANDLE%LOCAL(:)+PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)
+(  890) ELSE
+(  891)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  892) ENDIF
+(  893) # 894 "distributed_vectors_mix.F90"
+(  894) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:ADD_DV_AR',1,ZHOOK_HANDLE)
+(  895) END FUNCTION ADD_DV_AR
+(  896) # 897 "distributed_vectors_mix.F90"
+(  897) FUNCTION SUBTRACT_DV_AR (HANDLE,PVEC)
+(  898) # 899 "distributed_vectors_mix.F90"
+(  899) !         subtract distributed_vector and array
+(  900) # 901 "distributed_vectors_mix.F90"
+(  901) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+(  902) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  903) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) ::SUBTRACT_DV_AR
+(  904) # 905 "distributed_vectors_mix.F90"
+(  905) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  906) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_DV_AR',0,ZHOOK_HANDLE)
+(  907) IF (HANDLE%MSETUP /= JPSETUP)&
+(  908)      &CALL ABOR1 ('error: subtract unallocated distributed_vector')
+(  909) # 910 "distributed_vectors_mix.F90"
+(  910) IF (SIZE(PVEC) == SIZE(HANDLE%LOCAL)) THEN
+(  911)   SUBTRACT_DV_AR = HANDLE%LOCAL(:) - PVEC(:)
+(  912) ELSE IF (SIZE(PVEC) == HANDLE%GLOBAL_LENGTH) THEN
+(  913)   SUBTRACT_DV_AR =&
+(  914)    &HANDLE%LOCAL(:)-PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)
+(  915) ELSE
+(  916)   CALL ABOR1 ('error: distributed_vector size mismatch')
+(  917) ENDIF
+(  918) # 919 "distributed_vectors_mix.F90"
+(  919) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUBTRACT_DV_AR',1,ZHOOK_HANDLE)
+(  920) END FUNCTION SUBTRACT_DV_AR
+(  921) # 922 "distributed_vectors_mix.F90"
+(  922) REAL(KIND=JPRB) FUNCTION DOT_PRODUCT_HELPER (PVEC1,PVEC2,MYSTART,MYEND,KLEN,NCHNKS)
+(  923) REAL(KIND=JPRB),    INTENT(IN), DIMENSION(:) :: PVEC1,PVEC2
+(  924) INTEGER(KIND=JPIM), INTENT(IN)  :: MYSTART,MYEND,KLEN,NCHNKS
+(  925) # 926 "distributed_vectors_mix.F90"
+(  926) INTEGER(KIND=JPIM) :: J,ISTART,IEND,JROC,IERR,IMSGLEN,&
+(  927)             &ICHNK1,ICHNK2,I2,IPROCS,JJ,ICHNK
+(  928) REAL(KIND=JPRB), DIMENSION(NCHNKS) :: PARTIAL,ZBUF
+(  929) INTEGER(KIND=JPIM) :: IRECVCOUNTS(NPROC)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 42
+
+(  930) # 932 "distributed_vectors_mix.F90"
+(  932) !   calculate the partial dot products for the local chunks
+(  933) # 935 "distributed_vectors_mix.F90"
+(  935) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  936) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DOT_PRODUCT_HELPER',0,ZHOOK_HANDLE)
+(  937) CALL GSTATS(1170,0)
+(  938) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(j,ichnk,i2,jj)
+(  939) DO J=1,MYEND-MYSTART+1,NDV_CHUNK_SIZE
+(  940)   ICHNK=(J-1)/NDV_CHUNK_SIZE+1
+(  941)   I2=MIN(J-1+NDV_CHUNK_SIZE,MYEND-MYSTART+1)
+(  942)   ZBUF(ICHNK) = 0.0_JPRB
+(  943)   DO JJ=J,I2
+(  944)     ZBUF(ICHNK)=ZBUF(ICHNK)+PVEC1(JJ)*PVEC2(JJ)
+(  945)   ENDDO
+(  946) ENDDO
+(  947) !$OMP END PARALLEL DO
+(  948) CALL GSTATS(1170,1)
+(  949) # 951 "distributed_vectors_mix.F90"
+(  951) IF(NPROC > 1) THEN  
+(  952)   DO JROC=1,NPROC 
+(  953)     ISTART = JSTART (JROC,KLEN)
+(  954)     IEND   = JEND   (JROC,KLEN)
+(  955)     ICHNK1 = 1+(ISTART-1)/NDV_CHUNK_SIZE
+(  956)     ICHNK2 = (IEND-1+NDV_CHUNK_SIZE)/NDV_CHUNK_SIZE
+(  957)     IRECVCOUNTS(JROC) = ICHNK2-ICHNK1+1
+(  958)   ENDDO
+(  959)   ICHNK=IRECVCOUNTS(MYPROC)
+(  960)   CALL GSTATS(652,0)
+(  961)   CALL MPL_ALLGATHERV(ZBUF(1:ICHNK),PARTIAL,IRECVCOUNTS,&
+(  962)    & CDSTRING='DISTRIBUTED VECTOR(DOT_PRODUCT):')
+(  963)   CALL GSTATS(652,1)
+(  964) ELSE
+(  965)   PARTIAL(:) = ZBUF(:)
+(  966) ENDIF
+(  967) # 968 "distributed_vectors_mix.F90"
+(  968) !   calculate the full dot product
+(  969) # 970 "distributed_vectors_mix.F90"
+(  970) DOT_PRODUCT_HELPER = SUM (PARTIAL)
+(  971) # 972 "distributed_vectors_mix.F90"
+(  972) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DOT_PRODUCT_HELPER',1,ZHOOK_HANDLE)
+(  973) END FUNCTION DOT_PRODUCT_HELPER
+(  974) # 975 "distributed_vectors_mix.F90"
+(  975) REAL(KIND=JPRB) FUNCTION DOT_PRODUCT_DV_DV (HANDLE1,HANDLE2)
+(  976) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE1,HANDLE2
+(  977) # 978 "distributed_vectors_mix.F90"
+(  978) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  979) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DOT_PRODUCT_DV_DV',0,ZHOOK_HANDLE)
+(  980) IF (HANDLE1%MSETUP /= JPSETUP .OR. HANDLE2%MSETUP /= JPSETUP     )&
+(  981)  & CALL ABOR1('error: dot_product with unallocated distributed_vector')
+(  982) # 983 "distributed_vectors_mix.F90"
+(  983) IF (HANDLE1%GLOBAL_LENGTH  /=  HANDLE2%GLOBAL_LENGTH)&
+(  984)  &CALL ABOR1 ('error: dot_product different length distributed_vectors')
+(  985) # 986 "distributed_vectors_mix.F90"
+(  986) DOT_PRODUCT_DV_DV =&
+(  987)       &DOT_PRODUCT_HELPER (HANDLE1%LOCAL,HANDLE2%LOCAL,&
+(  988)                           &HANDLE1%LOCAL_START,HANDLE1%LOCAL_END,&
+(  989)                           &HANDLE1%GLOBAL_LENGTH,HANDLE1%NCHNKS)
+(  990) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DOT_PRODUCT_DV_DV',1,ZHOOK_HANDLE)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 43
+
+(  991) END FUNCTION  DOT_PRODUCT_DV_DV
+(  992) # 993 "distributed_vectors_mix.F90"
+(  993) REAL(KIND=JPRB) FUNCTION DOT_PRODUCT_AR_DV (PVEC,HANDLE2)
+(  994) REAL(KIND=JPRB),                      INTENT(IN) :: PVEC(:)
+(  995) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE2
+(  996) # 997 "distributed_vectors_mix.F90"
+(  997) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  998) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DOT_PRODUCT_AR_DV',0,ZHOOK_HANDLE)
+(  999) IF (HANDLE2%MSETUP /= JPSETUP     ) CALL ABOR1 &
+( 1000)  &('error: dot_product with unallocated distributed_vector')
+( 1001) # 1002 "distributed_vectors_mix.F90"
+( 1002) IF (SIZE(PVEC)  ==  SIZE(HANDLE2%LOCAL)) THEN
+( 1003)   DOT_PRODUCT_AR_DV =&
+( 1004)    &DOT_PRODUCT_HELPER (PVEC,HANDLE2%LOCAL,&
+( 1005)    &HANDLE2%LOCAL_START,HANDLE2%LOCAL_END,&
+( 1006)    &HANDLE2%GLOBAL_LENGTH,HANDLE2%NCHNKS)
+( 1007) ELSEIF (SIZE(PVEC)  ==  HANDLE2%GLOBAL_LENGTH) THEN
+( 1008)   DOT_PRODUCT_AR_DV =&
+( 1009)    &DOT_PRODUCT_HELPER (PVEC(HANDLE2%LOCAL_START:&
+( 1010)    &HANDLE2%LOCAL_END),HANDLE2%LOCAL,&
+( 1011)    &HANDLE2%LOCAL_START,HANDLE2%LOCAL_END,&
+( 1012)    &HANDLE2%GLOBAL_LENGTH,HANDLE2%NCHNKS)
+( 1013) ELSE
+( 1014)   CALL ABOR1('error: dot_product different length distributed_vectors')
+( 1015) ENDIF
+( 1016) # 1017 "distributed_vectors_mix.F90"
+( 1017) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DOT_PRODUCT_AR_DV',1,ZHOOK_HANDLE)
+( 1018) END FUNCTION DOT_PRODUCT_AR_DV
+( 1019) # 1020 "distributed_vectors_mix.F90"
+( 1020) REAL(KIND=JPRB) FUNCTION DOT_PRODUCT_DV_AR (HANDLE1,PVEC)
+( 1021) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE1
+( 1022) REAL(KIND=JPRB),                    INTENT(IN) :: PVEC(:)
+( 1023) # 1024 "distributed_vectors_mix.F90"
+( 1024) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+( 1025) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DOT_PRODUCT_DV_AR',0,ZHOOK_HANDLE)
+( 1026) IF (HANDLE1%MSETUP /= JPSETUP     ) CALL ABOR1 &
+( 1027)  &('error: dot_product with unallocated distributed_vector')
+( 1028) # 1029 "distributed_vectors_mix.F90"
+( 1029) IF (SIZE(HANDLE1%LOCAL)  ==  SIZE(PVEC)) THEN
+( 1030)   DOT_PRODUCT_DV_AR =&
+( 1031)    &DOT_PRODUCT_HELPER (HANDLE1%LOCAL,PVEC,&
+( 1032)    &HANDLE1%LOCAL_START,HANDLE1%LOCAL_END,&
+( 1033)    &HANDLE1%GLOBAL_LENGTH,HANDLE1%NCHNKS)
+( 1034) ELSE IF (HANDLE1%GLOBAL_LENGTH  ==  SIZE(PVEC)) THEN
+( 1035)   DOT_PRODUCT_DV_AR =&
+( 1036)    &DOT_PRODUCT_HELPER (HANDLE1%LOCAL,&
+( 1037)    &PVEC(HANDLE1%LOCAL_START:&
+( 1038)    &HANDLE1%LOCAL_END),&
+( 1039)    &HANDLE1%LOCAL_START,HANDLE1%LOCAL_END,&
+( 1040)    &HANDLE1%GLOBAL_LENGTH,HANDLE1%NCHNKS)
+( 1041) ELSE
+( 1042)   CALL ABOR1('error: dot_product different length  &
+( 1043)    &distributed_vectors')
+( 1044) ENDIF
+( 1045) # 1046 "distributed_vectors_mix.F90"
+( 1046) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:DOT_PRODUCT_DV_AR',1,ZHOOK_HANDLE)
+( 1047) END FUNCTION DOT_PRODUCT_DV_AR
+( 1048) # 1049 "distributed_vectors_mix.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 44
+
+( 1049) REAL(KIND=JPRB) FUNCTION SUM_HELPER (PVEC,MYSTART,MYEND,KLEN,NCHNKS)
+( 1050) REAL(KIND=JPRB),    INTENT(IN), DIMENSION(:) :: PVEC
+( 1051) INTEGER(KIND=JPIM), INTENT(IN)  :: MYSTART,MYEND,KLEN,NCHNKS
+( 1052) # 1053 "distributed_vectors_mix.F90"
+( 1053) INTEGER(KIND=JPIM) :: J,ISTART,IEND,ITAG,JROC,IERR,&
+( 1054)  &ICHNK1,ICHNK2,I2,IPROCS,IROC,JJ,ISENDR
+( 1055) REAL(KIND=JPRB), DIMENSION(NCHNKS) :: PARTIAL,ZBUF
+( 1056) # 1057 "distributed_vectors_mix.F90"
+( 1057) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+( 1058) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUM_HELPER',0,ZHOOK_HANDLE)
+( 1059) ITAG    = MT_DISTRIBUTED_VECTOR
+( 1060) # 1061 "distributed_vectors_mix.F90"
+( 1061) !   calculate the partial sums for the local chunks
+( 1062) # 1063 "distributed_vectors_mix.F90"
+( 1063) IF (MYEND >= MYSTART) THEN
+( 1064)   ICHNK1 = 1+(MYSTART-1)/NDV_CHUNK_SIZE
+( 1065)   ICHNK2 = ICHNK1-1
+( 1066)   
+( 1067)   DO J=1,MYEND-MYSTART+1,NDV_CHUNK_SIZE
+( 1068)     I2=MIN(J-1+NDV_CHUNK_SIZE,MYEND-MYSTART+1)
+( 1069)     ICHNK2 = ICHNK2+1
+( 1070)     !              partial(ichnk2)= SUM (pvec(j:i2))
+( 1071)     PARTIAL(ICHNK2)=0.0_JPRB
+( 1072)     DO JJ=J,I2
+( 1073)       PARTIAL(ICHNK2)=PARTIAL(ICHNK2)+PVEC(JJ)
+( 1074)     ENDDO
+( 1075)     
+( 1076)   ENDDO
+( 1077) # 1078 "distributed_vectors_mix.F90"
+( 1078) !   broadcast the partial dot products for the local chunks
+( 1079) # 1080 "distributed_vectors_mix.F90"
+( 1080)   DO JROC=0,NPROC-2
+( 1081)     IROC=MOD(MYPROC+JROC,NPROC)+1
+( 1082)     CALL MPL_SEND (PARTIAL(ICHNK1:ICHNK2),KDEST=NPRCIDS(IROC), &
+( 1083)      &   KTAG=ITAG,CDSTRING='DISTRIBUTED VECTOR:')
+( 1084)   ENDDO
+( 1085) ENDIF
+( 1086) # 1087 "distributed_vectors_mix.F90"
+( 1087) !   gather the partial dot products from the other PEs
+( 1088) # 1090 "distributed_vectors_mix.F90"
+( 1090) IF (MYEND >= MYSTART) THEN
+( 1091)   IPROCS=MIN(NCHNKS,NPROC)-1
+( 1092) ELSE
+( 1093)   IPROCS=MIN(NCHNKS,NPROC)
+( 1094) ENDIF
+( 1095) # 1096 "distributed_vectors_mix.F90"
+( 1096) DO JROC=1,IPROCS
+( 1097)   CALL MPL_RECV(ZBUF(1:NCHNKS),KFROM=ISENDR, &
+( 1098)    & KTAG=ITAG,CDSTRING='DISTRIBUTED VECTOR:')
+( 1099)   ISTART = JSTART (ISENDR,KLEN)
+( 1100)   IEND   = JEND   (ISENDR,KLEN)
+( 1101)   ICHNK1 = 1+(ISTART-1)/NDV_CHUNK_SIZE
+( 1102)   ICHNK2 = (IEND-1+NDV_CHUNK_SIZE)/NDV_CHUNK_SIZE
+( 1103)   PARTIAL(ICHNK1:ICHNK2)=ZBUF(1:ICHNK2+1-ICHNK1)
+( 1104) ENDDO
+( 1105) # 1106 "distributed_vectors_mix.F90"
+( 1106) !   calculate the full sum
+( 1107) # 1108 "distributed_vectors_mix.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 45
+
+( 1108) SUM_HELPER = SUM (PARTIAL)
+( 1109) # 1110 "distributed_vectors_mix.F90"
+( 1110) !   synchronize
+( 1111) CALL MPL_BARRIER (CDSTRING='DISTRIBUTED VECTOR SUM:')
+( 1112) # 1113 "distributed_vectors_mix.F90"
+( 1113) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUM_HELPER',1,ZHOOK_HANDLE)
+( 1114) END FUNCTION SUM_HELPER
+( 1115) # 1116 "distributed_vectors_mix.F90"
+( 1116) REAL(KIND=JPRB) FUNCTION SUM_DV (HANDLE)
+( 1117) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+( 1118) # 1119 "distributed_vectors_mix.F90"
+( 1119) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+( 1120) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUM_DV',0,ZHOOK_HANDLE)
+( 1121) IF (HANDLE%MSETUP /= JPSETUP) CALL ABOR1 &
+( 1122)  &('error: sum with unallocated distributed_vector')
+( 1123) # 1125 "distributed_vectors_mix.F90"
+( 1125) SUM_DV =&
+( 1126)  &SUM_HELPER (HANDLE%LOCAL,&
+( 1127)  &HANDLE%LOCAL_START,HANDLE%LOCAL_END,&
+( 1128)  &HANDLE%GLOBAL_LENGTH,HANDLE%NCHNKS)
+( 1129) # 1130 "distributed_vectors_mix.F90"
+( 1130) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SUM_DV',1,ZHOOK_HANDLE)
+( 1131) END FUNCTION  SUM_DV
+( 1132) # 1133 "distributed_vectors_mix.F90"
+( 1133) REAL(KIND=JPRB) FUNCTION MAXVAL_HELPER (PVEC,MYSTART,MYEND,KLEN,NCHNKS)
+( 1134) REAL(KIND=JPRB),    INTENT(IN), DIMENSION(:) :: PVEC
+( 1135) INTEGER(KIND=JPIM), INTENT(IN)  :: MYSTART,MYEND,KLEN,NCHNKS
+( 1136) # 1137 "distributed_vectors_mix.F90"
+( 1137) INTEGER(KIND=JPIM) :: J,ISTART,IEND,ITAG,JROC,IERR,IMSGLEN,ISENDR,ITAGR,&
+( 1138)  &ICHNK1,ICHNK2,I2,IPROCS,IROC,JJ
+( 1139) REAL(KIND=JPRB), DIMENSION(NCHNKS) :: PARTIAL,ZBUF
+( 1140) # 1141 "distributed_vectors_mix.F90"
+( 1141) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+( 1142) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MAXVAL_HELPER',0,ZHOOK_HANDLE)
+( 1143) ITAG    = MT_DISTRIBUTED_VECTOR
+( 1144) # 1145 "distributed_vectors_mix.F90"
+( 1145) !   calculate the partial maxvals for the local chunks
+( 1146) # 1147 "distributed_vectors_mix.F90"
+( 1147) IF (MYEND >= MYSTART) THEN
+( 1148)   ICHNK1 = 1+(MYSTART-1)/NDV_CHUNK_SIZE
+( 1149)   ICHNK2 = ICHNK1-1
+( 1150) # 1151 "distributed_vectors_mix.F90"
+( 1151)   DO J=1,MYEND-MYSTART+1,NDV_CHUNK_SIZE
+( 1152)     I2=MIN(J-1+NDV_CHUNK_SIZE,MYEND-MYSTART+1)
+( 1153)     ICHNK2 = ICHNK2+1
+( 1154)     PARTIAL(ICHNK2)= MAXVAL (PVEC(J:I2))
+( 1155)   ENDDO
+( 1156) # 1157 "distributed_vectors_mix.F90"
+( 1157) !   broadcast the partial max values for the local chunks
+( 1158) # 1160 "distributed_vectors_mix.F90"
+( 1160)   DO JROC=0,NPROC-2
+( 1161)     IROC=MOD(MYPROC+JROC,NPROC)+1
+( 1162)     CALL MPL_SEND (PARTIAL(ICHNK1:ICHNK2),KDEST=NPRCIDS(IROC), &
+( 1163)      &   KTAG=ITAG,CDSTRING='DISTRIBUTED VECTOR:')
+( 1164)   ENDDO
+( 1165) ENDIF
+( 1166) # 1167 "distributed_vectors_mix.F90"
+( 1167) !   gather the partial max values from the other PEs
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 46
+
+( 1168) # 1170 "distributed_vectors_mix.F90"
+( 1170) IF (MYEND >= MYSTART) THEN
+( 1171)   IPROCS=MIN(NCHNKS,NPROC)-1
+( 1172) ELSE
+( 1173)   IPROCS=MIN(NCHNKS,NPROC)
+( 1174) ENDIF
+( 1175) # 1176 "distributed_vectors_mix.F90"
+( 1176) DO JROC=1,IPROCS
+( 1177)   CALL MPL_RECV(ZBUF(1:NCHNKS),KFROM=ISENDR, &
+( 1178)    & KTAG=ITAG,CDSTRING='DISTRIBUTED VECTOR:')
+( 1179)   ISTART = JSTART (ISENDR,KLEN)
+( 1180)   IEND   = JEND   (ISENDR,KLEN)
+( 1181)   ICHNK1 = 1+(ISTART-1)/NDV_CHUNK_SIZE
+( 1182)   ICHNK2 = (IEND-1+NDV_CHUNK_SIZE)/NDV_CHUNK_SIZE
+( 1183)   PARTIAL(ICHNK1:ICHNK2)=ZBUF(1:ICHNK2+1-ICHNK1)
+( 1184) ENDDO
+( 1185) # 1186 "distributed_vectors_mix.F90"
+( 1186) !   calculate the full max value
+( 1187) # 1188 "distributed_vectors_mix.F90"
+( 1188) MAXVAL_HELPER = MAXVAL (PARTIAL)
+( 1189) # 1190 "distributed_vectors_mix.F90"
+( 1190) !   synchronize
+( 1191) CALL MPL_BARRIER (CDSTRING='MAXVAL:')
+( 1192) # 1193 "distributed_vectors_mix.F90"
+( 1193) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MAXVAL_HELPER',1,ZHOOK_HANDLE)
+( 1194) END FUNCTION MAXVAL_HELPER
+( 1195) # 1196 "distributed_vectors_mix.F90"
+( 1196) REAL(KIND=JPRB) FUNCTION MAXVAL_DV (HANDLE)
+( 1197) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+( 1198) # 1199 "distributed_vectors_mix.F90"
+( 1199) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+( 1200) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MAXVAL_DV',0,ZHOOK_HANDLE)
+( 1201) IF (HANDLE%MSETUP /= JPSETUP) CALL ABOR1 &
+( 1202)  &('error: maxval with unallocated distributed_vector')
+( 1203) # 1205 "distributed_vectors_mix.F90"
+( 1205) MAXVAL_DV =&
+( 1206)  &MAXVAL_HELPER (HANDLE%LOCAL,&
+( 1207)  &HANDLE%LOCAL_START,HANDLE%LOCAL_END,&
+( 1208)  &HANDLE%GLOBAL_LENGTH,HANDLE%NCHNKS)
+( 1209) # 1210 "distributed_vectors_mix.F90"
+( 1210) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:MAXVAL_DV',1,ZHOOK_HANDLE)
+( 1211) END FUNCTION  MAXVAL_DV
+( 1212) # 1213 "distributed_vectors_mix.F90"
+( 1213) FUNCTION SQRT_DV (HANDLE)
+( 1214) # 1215 "distributed_vectors_mix.F90"
+( 1215) !         add two distributed_vectors
+( 1216) # 1217 "distributed_vectors_mix.F90"
+( 1217) TYPE (DISTRIBUTED_VECTOR), INTENT(IN) :: HANDLE
+( 1218) REAL(KIND=JPRB), DIMENSION(HANDLE%LOCAL_START:HANDLE%LOCAL_END) :: SQRT_DV
+( 1219) # 1220 "distributed_vectors_mix.F90"
+( 1220) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+( 1221) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SQRT_DV',0,ZHOOK_HANDLE)
+( 1222) IF (HANDLE%MSETUP /= JPSETUP .OR. HANDLE%MSETUP /= JPSETUP   )&
+( 1223)      &CALL ABOR1 ('error: sqrt unallocated distributed_vector')
+( 1224) # 1225 "distributed_vectors_mix.F90"
+( 1225) SQRT_DV = SQRT(HANDLE%LOCAL(:))
+( 1226) # 1227 "distributed_vectors_mix.F90"
+( 1227) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SQRT_DV',1,ZHOOK_HANDLE)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 47
+
+( 1228) END FUNCTION SQRT_DV
+( 1229) # 1231 "distributed_vectors_mix.F90"
+( 1231) SUBROUTINE SCATTER_VECTOR_DV (HANDLE,KROOT,PVEC)
+( 1232) # 1233 "distributed_vectors_mix.F90"
+( 1233) !         distribute vector
+( 1234) # 1235 "distributed_vectors_mix.F90"
+( 1235) TYPE (DISTRIBUTED_VECTOR), INTENT(OUT)  :: HANDLE
+( 1236) INTEGER(KIND=JPIM), INTENT(IN)                   :: KROOT
+( 1237) REAL(KIND=JPRB),OPTIONAL,           INTENT(IN)   :: PVEC(:)
+( 1238) INTEGER(KIND=JPIM) :: ITAG,JROC,ISTART,IEND,IERR,IMSGLEN,ISENDR,ITAGR
+( 1239) # 1240 "distributed_vectors_mix.F90"
+( 1240) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+( 1241) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SCATTER_VECTOR_DV',0,ZHOOK_HANDLE)
+( 1242) IF (HANDLE%MSETUP /= JPSETUP)&
+( 1243)  &CALL ABOR1 &
+( 1244)  &('scatter_vector: copy to unallocated distributed_vector')
+( 1245) # 1246 "distributed_vectors_mix.F90"
+( 1246) ITAG = MT_DISTRIBUTED_VECTOR
+( 1247) # 1248 "distributed_vectors_mix.F90"
+( 1248) IF(KROOT == MYPROC) THEN 
+( 1249)   IF(.NOT. PRESENT(PVEC)) &
+( 1250)    & CALL ABOR1 ('scatter_vector: pvec missing from kroot')
+( 1251)   IF (SIZE(PVEC) /= HANDLE%GLOBAL_LENGTH)&
+( 1252)    &CALL ABOR1 &
+( 1253)    &('scatter_vector: unequal size')
+( 1254) # 1255 "distributed_vectors_mix.F90"
+( 1255) !         broadcast the local part to the other PEs
+( 1256) # 1258 "distributed_vectors_mix.F90"
+( 1258)   DO JROC=1,NPROC
+( 1259)     IF (JROC /= MYPROC) THEN
+( 1260)       ISTART=JSTART(JROC,HANDLE%GLOBAL_LENGTH)
+( 1261)       IEND=JEND(JROC,HANDLE%GLOBAL_LENGTH)
+( 1262)       IF (IEND >= ISTART) THEN
+( 1263)         CALL MPL_SEND (PVEC(ISTART:IEND),KDEST=NPRCIDS(JROC), &
+( 1264)          &   KTAG=ITAG,CDSTRING='DISTRIBUTED VECTOR:')
+( 1265)       ENDIF
+( 1266)     ENDIF
+( 1267)   ENDDO
+( 1268) # 1269 "distributed_vectors_mix.F90"
+( 1269) !         copy the local part from pvec
+( 1270) # 1271 "distributed_vectors_mix.F90"
+( 1271)   HANDLE%LOCAL(:)=PVEC(HANDLE%LOCAL_START:HANDLE%LOCAL_END)
+( 1272) ELSE
+( 1273) # 1274 "distributed_vectors_mix.F90"
+( 1274) !         collect the local parts from the distributing PE
+( 1275)   
+( 1276)   ISTART = JSTART (MYPROC,HANDLE%GLOBAL_LENGTH)
+( 1277)   IEND   = JEND   (MYPROC,HANDLE%GLOBAL_LENGTH)
+( 1278)   IF (IEND >= ISTART) THEN
+( 1279)     CALL MPL_RECV(HANDLE%LOCAL(ISTART:IEND),KOUNT=IMSGLEN, &
+( 1280)      & KTAG=ITAG,CDSTRING='DISTRIBUTED VECTOR:')
+( 1281)     IF (IMSGLEN /= IEND+1-ISTART)&
+( 1282)      &CALL ABOR1('SCATTER_VECTOR:WRONG LENGTH IN MPL_RECV')
+( 1283)   ENDIF
+( 1284) ENDIF
+( 1285) # 1286 "distributed_vectors_mix.F90"
+( 1286) CALL MPL_BARRIER (CDSTRING='SCATTER_VECTOR:')
+( 1287) # 1288 "distributed_vectors_mix.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 48
+
+( 1288) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SCATTER_VECTOR_DV',1,ZHOOK_HANDLE)
+( 1289) END SUBROUTINE SCATTER_VECTOR_DV
+( 1290) # 1291 "distributed_vectors_mix.F90"
+( 1291) SUBROUTINE SCATTER_VECTOR_AR (PARRAY,KROOT,PVEC)
+( 1292) # 1293 "distributed_vectors_mix.F90"
+( 1293) !         distribute vector
+( 1294) # 1295 "distributed_vectors_mix.F90"
+( 1295) REAL(KIND=JPRB), INTENT(OUT)             :: PARRAY(:)
+( 1296) INTEGER(KIND=JPIM), INTENT(IN)           :: KROOT
+( 1297) REAL(KIND=JPRB),OPTIONAL, INTENT(IN)     :: PVEC(:)
+( 1298) INTEGER(KIND=JPIM) :: ITAG,ILEN,IERR
+( 1299) # 1301 "distributed_vectors_mix.F90"
+( 1301) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+( 1302) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SCATTER_VECTOR_AR',0,ZHOOK_HANDLE)
+( 1303) ITAG = MT_DISTRIBUTED_VECTOR
+( 1304) ILEN = SIZE(PARRAY)
+( 1305) # 1306 "distributed_vectors_mix.F90"
+( 1306) IF(KROOT == MYPROC) THEN 
+( 1307)   IF(.NOT. PRESENT(PVEC))& 
+( 1308)    & CALL ABOR1 ('scatter_vector: pvec missing from kroot')
+( 1309)   IF (SIZE(PVEC) /= ILEN) CALL ABOR1('scatter_vector: unequal size')
+( 1310) # 1311 "distributed_vectors_mix.F90"
+( 1311) !         copy  from pvec
+( 1312) # 1313 "distributed_vectors_mix.F90"
+( 1313)   PARRAY(:)=PVEC(:)
+( 1314) # 1315 "distributed_vectors_mix.F90"
+( 1315) ENDIF
+( 1316) # 1317 "distributed_vectors_mix.F90"
+( 1317) CALL GSTATS(653,0)
+( 1318) CALL MPL_BROADCAST(PARRAY,ITAG,KROOT=KROOT,&
+( 1319)  & CDSTRING='DISTRIBUTED VECTOR (SCATTER_VECTOR):')
+( 1320) CALL GSTATS(653,1)
+( 1321) # 1322 "distributed_vectors_mix.F90"
+( 1322) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:SCATTER_VECTOR_AR',1,ZHOOK_HANDLE)
+( 1323) END SUBROUTINE SCATTER_VECTOR_AR
+( 1324) # 1325 "distributed_vectors_mix.F90"
+( 1325) SUBROUTINE GATHER_VECTOR (HANDLE,KROOT,PVEC)
+( 1326) # 1327 "distributed_vectors_mix.F90"
+( 1327) !         distribute vector
+( 1328) # 1329 "distributed_vectors_mix.F90"
+( 1329) TYPE (DISTRIBUTED_VECTOR), INTENT(IN)   :: HANDLE
+( 1330) INTEGER(KIND=JPIM), INTENT(IN)                   :: KROOT
+( 1331) REAL(KIND=JPRB),OPTIONAL,           INTENT(OUT)  :: PVEC(:)
+( 1332) INTEGER(KIND=JPIM) :: ITAG,JROC,ISTART,IEND,IST,IEN
+( 1333) INTEGER(KIND=JPIM) :: IRECVCOUNTS(NPROC)
+( 1334) # 1335 "distributed_vectors_mix.F90"
+( 1335) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+( 1336) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:GATHER_VECTOR',0,ZHOOK_HANDLE)
+( 1337) IF (HANDLE%MSETUP /= JPSETUP)&
+( 1338)  &CALL ABOR1('gather_vector: copy to unallocated distributed_vector')
+( 1339) # 1340 "distributed_vectors_mix.F90"
+( 1340) DO JROC=1,NPROC
+( 1341)   IST=JSTART(JROC,HANDLE%GLOBAL_LENGTH)
+( 1342)   IEN=JEND(JROC,HANDLE%GLOBAL_LENGTH)
+( 1343)   IRECVCOUNTS(JROC) = IEN-IST+1
+( 1344) ENDDO
+( 1345) # 1346 "distributed_vectors_mix.F90"
+( 1346) CALL GSTATS(654,0)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:30      page 49
+
+( 1347) IF(KROOT == MYPROC) THEN 
+( 1348)   IF(.NOT. PRESENT(PVEC)) &
+( 1349)    & CALL ABOR1('gather_vector: pvec missing from kroot')
+( 1350)   IF (SIZE(PVEC) /= HANDLE%GLOBAL_LENGTH)&
+( 1351)    &CALL ABOR1('gather_vector: unequal size')
+( 1352)   
+( 1353) !         collect the local parts from all other PEs
+( 1354)   
+( 1355)   CALL MPL_GATHERV(HANDLE%LOCAL,KROOT=KROOT,&
+( 1356)    & KRECVCOUNTS=IRECVCOUNTS,PRECVBUF=PVEC,&
+( 1357)    & CDSTRING='DISTRIBUTED VECTOR(gather_VECTOR):')
+( 1358)   
+( 1359) ELSE
+( 1360)   CALL MPL_GATHERV(HANDLE%LOCAL,KROOT=KROOT,&
+( 1361)    & KRECVCOUNTS=IRECVCOUNTS,&
+( 1362)    & CDSTRING='DISTRIBUTED VECTOR(gather_VECTOR):')
+( 1363) ENDIF
+( 1364) CALL GSTATS(654,1)
+( 1365) # 1366 "distributed_vectors_mix.F90"
+( 1366) IF (LHOOK) CALL DR_HOOK('DISTRIBUTED_VECTORS_MIX:GATHER_VECTOR',1,ZHOOK_HANDLE)
+( 1367) END SUBROUTINE GATHER_VECTOR
+( 1368) # 1369 "distributed_vectors_mix.F90"
+( 1369) END MODULE DISTRIBUTED_VECTORS_MIX

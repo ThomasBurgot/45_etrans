@@ -1,0 +1,3483 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: trgtol_mod.F90
+
+(    1) MODULE TRGTOL_MOD 
+(    2)   CONTAINS
+(    3)   SUBROUTINE TRGTOL_CUDAAWARE(PGLAT,KF_FS,KF_GP,KF_SCALARS_G,KVSET,KPTRGP,&
+(    4)    &PGP,PGPUV,PGP3A,PGP3B,PGP2,LDGW)
+(    5)   
+(    6)   !**** *TRGTOL * - transposition of grid point data from column
+(    7)   !                 structure to latitudinal. Reorganize data between
+(    8)   !                 grid point calculations and direct Fourier Transform
+(    9)   
+(   10)   ! version using CUDA-aware MPI
+(   11)   
+(   12)   !     Purpose.
+(   13)   !     --------
+(   14)   
+(   15)   
+(   16)   !**   Interface.
+(   17)   !     ----------
+(   18)   !        *call* *trgtol(...)
+(   19)   
+(   20)   !        Explicit arguments :
+(   21)   !        --------------------
+(   22)   !           PGLAT    -  Latitudinal data ready for direct FFT (output)
+(   23)   !           PGP    -  Blocked grid point data    (input)
+(   24)   
+(   25)   !        Implicit arguments :
+(   26)   !        --------------------
+(   27)   
+(   28)   !     Method.
+(   29)   !     -------
+(   30)   !        See documentation
+(   31)   
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 2
+
+(   32)   !     Externals.
+(   33)   !     ----------
+(   34)   
+(   35)   !     Reference.
+(   36)   !     ----------
+(   37)   !        ECMWF Research Department documentation of the IFS
+(   38)   
+(   39)   !     Author.
+(   40)   !     -------
+(   41)   !        MPP Group *ECMWF*
+(   42)   
+(   43)   !     Modifications.
+(   44)   !     --------------
+(   45)   !        Original: 95-10-01
+(   46)   !        D.Dent  : 97-08-04   Reorganisation to allow
+(   47)   !                             NPRTRV to differ from NPRGPEW
+(   48)   !                : 98-06-17   add mailbox control logic (from TRLTOM)
+(   49)   !        =99-03-29= Mats Hamrud and Deborah Salmond
+(   50)   !                   JUMP in FFT's changed to 1
+(   51)   !                   KINDEX introduced and ZCOMBUF not used for same PE
+(   52)   !         01-11-23  Deborah Salmond and John Hague
+(   53)   !                    LIMP_NOOLAP Option for non-overlapping message passing
+(   54)   !                    and buffer packing
+(   55)   !         01-12-18  Peter Towers
+(   56)   !                   Improved vector performance of GTOL_PACK,GTOL_UNPACK
+(   57)   !         03-04-02  G. Radnoti: call barrier always when nproc>1
+(   58)   !         08-01-01  G.Mozdzynski: cleanup
+(   59)   !         09-01-02  G.Mozdzynski: use non-blocking recv and send
+(   60)   !     ------------------------------------------------------------------
+(   61)   
+(   62)   
+(   63)   
+(   64)   USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   65)   USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   66)   
+(   67)   USE MPL_MODULE  ,ONLY : MPL_RECV, MPL_SEND, MPL_WAIT, JP_NON_BLOCKING_STANDARD
+(   68)   
+(   69)   USE TPM_GEN         ,ONLY : NOUT
+(   70)   USE TPM_DISTR       ,ONLY : D, NPRCIDS, NPRTRNS, MTAGGL,  &
+(   71)        &                      MYSETV, MYSETW, MYPROC, NPROC
+(   72)   USE TPM_TRANS       ,ONLY : LDIVGP, LGPNORM, LSCDERS, LUVDER, LVORGP, NGPBLKS
+(   73)   
+(   74)   USE INIGPTR_MOD     ,ONLY : INIGPTR
+(   75)   USE PE2SET_MOD      ,ONLY : PE2SET
+(   76)   !USE MYSENDSET_MOD
+(   77)   !USE MYRECVSET_MOD
+(   78)   USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   79)   !
+(   80)   
+(   81)   USE MPI
+(   82)   
+(   83)   
+(   84)   !USE MPL_MPIF
+(   85)   USE MPL_DATA_MODULE, only: MPL_COMM_OML, OML_MY_THREAD
+(   86)   USE MPL_MESSAGE_MOD
+(   87)   USE MPL_NPROC_MOD
+(   88)   USE MPL_STATS_MOD
+(   89)   USE YOMMPLSTATS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 3
+
+(   90)   USE NVTX
+(   91) 
+(   92)   IMPLICIT NONE
+(   93)   
+(   94)   REAL(KIND=JPRBT),INTENT(OUT)   :: PGLAT(:,:)
+(   95)   INTEGER(KIND=JPIM),INTENT(IN) :: KVSET(:)
+(   96)   INTEGER(KIND=JPIM),INTENT(IN) :: KF_FS,KF_GP
+(   97)   INTEGER(KIND=JPIM),INTENT(IN) :: KF_SCALARS_G
+(   98)   INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KPTRGP(:)
+(   99)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGP(:,:,:)
+(  100)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGPUV(:,:,:,:)
+(  101)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGP3A(:,:,:,:)
+(  102)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGP3B(:,:,:,:)
+(  103)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGP2(:,:,:)
+(  104)   LOGICAL,        OPTIONAL,INTENT(IN)     :: LDGW
+(  105)   
+(  106)   REAL(KIND=JPRBT),ALLOCATABLE :: ZCOMBUFS(:,:),ZCOMBUFR(:,:)
+(  107)   REAL(KIND=JPRBT) :: ZDUM(2)
+(  108)   
+(  109)   INTEGER(KIND=JPIM) :: ISENT    (NPROC)
+(  110)   INTEGER(KIND=JPIM) :: IRCVD    (NPROC)
+(  111)   INTEGER(KIND=JPIM) :: ISENDTOT (NPROC)
+(  112)   INTEGER(KIND=JPIM) :: IRECVTOT (NPROC)
+(  113)   INTEGER(KIND=JPIM) :: IREQ     (NPROC*2)
+(  114)   INTEGER(KIND=JPIM) :: JRECV    (NPROC)
+(  115)   INTEGER(KIND=JPIM) :: JSEND    (NPROC)
+(  116)   
+(  117)   !     LOCAL INTEGER SCALARS
+(  118)   INTEGER(KIND=JPIM) :: IFIRST, IFIRSTLAT, IGL, IGLL, ILAST,&
+(  119)                &ILASTLAT, ILEN, JROC, IPOS, ISETA, &
+(  120)                &ISETB, IRECV, IRECVSET, &
+(  121)                &ISETV, ISEND, ISENDSET, ITAG, J, JBLK, JFLD, &
+(  122)                &JGL, JK, JL, JLOOP, ISETW,  IFLD, &
+(  123)                &II,INDOFFX,IBUFLENS,IBUFLENR,INRECV, IPROC,IFLDS, &
+(  124)                &INSEND,INS,INR,IR
+(  125)   
+(  126)   !     LOCAL LOGICAL SCALARS
+(  127)   LOGICAL   :: LLPGPUV,LLPGP3A,LLPGP3B,LLPGP2,LLPGPONLY
+(  128)   LOGICAL   :: LLUV(KF_GP),LLGP2(KF_GP),LLGP3A(KF_GP),LLGP3B(KF_GP)
+(  129)   LOGICAL :: LLDONE, LLINDER
+(  130)   INTEGER(KIND=JPIM) :: IUVLEVS(KF_GP),IUVPARS(KF_GP),IGP2PARS(KF_GP)
+(  131)   INTEGER(KIND=JPIM) :: IGP3APARS(KF_GP),IGP3ALEVS(KF_GP),IGP3BPARS(KF_GP),IGP3BLEVS(KF_GP)
+(  132)   INTEGER(KIND=JPIM) :: IUVPAR,IUVLEV,IGP2PAR,IGP3ALEV,IGP3APAR,IGP3BLEV,IGP3BPAR,IPAROFF
+(  133)   INTEGER(KIND=JPIM) :: IOFF,IOFF1,IOFFNS,IOFFEW,J1,J2
+(  134)   INTEGER(KIND=JPIM) :: KINDEX(D%NLENGTF),INDOFF(NPROC),IFLDOFF(KF_GP)
+(  135)   INTEGER(KIND=JPIM) :: ISEND_FLD_TOTAL(NPROC),ISEND_FLD_START(NPROC),ISEND_FLD_END
+(  136)   INTEGER(KIND=JPIM) :: IRECV_FLD_START,IRECV_FLD_END
+(  137)   INTEGER(KIND=JPIM) :: INUMFLDS
+(  138)   INTEGER(KIND=JPIM) :: IGPTRSEND(2,NGPBLKS,NPRTRNS)
+(  139)   INTEGER(KIND=JPIM) :: IGPTRRECV(NPRTRNS)
+(  140)   INTEGER(KIND=JPIM) :: IGPTROFF(NGPBLKS)
+(  141)   !     INTEGER FUNCTIONS
+(  142)   INTEGER(KIND=JPIM) :: IRECVCOUNT,ISENDCOUNT
+(  143)   INTEGER(KIND=JPIM) :: IJPOS(NGPBLKS),IFLDA(KF_GP),JJ,JI,IFLDT
+(  144)   REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  145)   REAL(KIND=JPRB) :: ZHOOK_HANDLE_BAR
+(  146)   
+(  147)   
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 4
+
+(  148)   INTEGER(KIND=JPIM), dimension(MPI_STATUS_SIZE,NPROC*2) :: ISTATUS
+(  149)   INTEGER(KIND=JPIM) :: IERROR, irank,ILASTMAX
+(  150)   LOGICAL :: LLGW
+(  151)   
+(  152)   REAL(KIND=JPRBT) :: T1, T2, TIMEF, tc
+(  153)   
+(  154)   !     ------------------------------------------------------------------
+(  155)   
+(  156)   !*       0.    Some initializations
+(  157)   !              --------------------
+(  158)   
+(  159)   IF (LHOOK) CALL DR_HOOK('TRGTOL',0,ZHOOK_HANDLE)
+(  160)   
+(  161)   LLGW = .FALSE.
+(  162)   IF (PRESENT (LDGW)) LLGW = LDGW
+(  163)   
+(  164)   CALL GSTATS(1805,0)
+(  165)   
+(  166)   LLINDER = .FALSE.
+(  167)   LLPGPUV = .FALSE.
+(  168)   LLPGP3A = .FALSE.
+(  169)   LLPGP3B = .FALSE.
+(  170)   LLPGP2  = .FALSE.
+(  171)   LLPGPONLY = .FALSE.
+(  172)   IF(PRESENT(KPTRGP))  LLINDER = .TRUE.
+(  173)   IF(PRESENT(PGP))     LLPGPONLY = .TRUE.
+(  174)   IF(PRESENT(PGPUV))   LLPGPUV = .TRUE.
+(  175)   IF(PRESENT(PGP3A))   LLPGP3A = .TRUE.
+(  176)   IF(PRESENT(PGP3B))   LLPGP3B = .TRUE.
+(  177)   IF(PRESENT(PGP2))    LLPGP2 = .TRUE.
+(  178)   IUVPAR=0
+(  179)   IUVLEV=0
+(  180)   IOFF1=0
+(  181)   IOFFNS=KF_SCALARS_G
+(  182)   IOFFEW=2*KF_SCALARS_G
+(  183)   LLUV(:) = .FALSE.
+(  184)   IUVPARS(:) = -99
+(  185)   IUVLEVS(:) = -99
+(  186)   IF (LLPGPUV) THEN
+(  187)     IOFF=0
+(  188)     IUVLEV=UBOUND(PGPUV,2)
+(  189)     IF(LVORGP) THEN
+(  190)       IUVPAR=IUVPAR+1
+(  191)       DO J=1,IUVLEV
+(  192)         IUVLEVS(IOFF+J)=J
+(  193)         IUVPARS(IOFF+J)=IUVPAR
+(  194)         LLUV(IOFF+J)=.TRUE.
+(  195)       ENDDO
+(  196)       IOFF=IOFF+IUVLEV
+(  197)     ENDIF
+(  198)     IF(LDIVGP) THEN
+(  199)       IUVPAR=IUVPAR+1
+(  200)       DO J=1,IUVLEV
+(  201)         IUVLEVS(IOFF+J)=J
+(  202)         IUVPARS(IOFF+J)=IUVPAR
+(  203)         LLUV(IOFF+J)=.TRUE.
+(  204)       ENDDO
+(  205)       IOFF=IOFF+IUVLEV
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 5
+
+(  206)     ENDIF
+(  207)     DO J=1,IUVLEV
+(  208)       IUVLEVS(IOFF+J)=J
+(  209)       IUVPARS(IOFF+J)=IUVPAR+1
+(  210)       IUVLEVS(IOFF+J+IUVLEV)=J
+(  211)       IUVPARS(IOFF+J+IUVLEV)=IUVPAR+2
+(  212)     ENDDO
+(  213)     IUVPAR=IUVPAR+2
+(  214)     LLUV(IOFF+1:IOFF+2*IUVLEV)=.TRUE.
+(  215)     IOFF=IOFF+2*IUVLEV
+(  216)     IOFF1=IOFF
+(  217)     IOFFNS=IOFFNS+IOFF
+(  218)     IOFFEW=IOFFEW+IOFF
+(  219)     IOFF=IUVPAR*IUVLEV+KF_SCALARS_G
+(  220)     IF(LUVDER) THEN
+(  221)       IF(LSCDERS) IOFF=IOFF+KF_SCALARS_G
+(  222)       DO J=1,IUVLEV
+(  223)         IUVLEVS(IOFF+J)=J
+(  224)         IUVPARS(IOFF+J)=IUVPAR+1
+(  225)         LLUV(IOFF+J)=.TRUE.
+(  226)         IUVLEVS(IOFF+J+IUVLEV)=J
+(  227)         IUVPARS(IOFF+J+IUVLEV)=IUVPAR+2
+(  228)         LLUV(IOFF+J+IUVLEV)=.TRUE.
+(  229)       ENDDO
+(  230)       IUVPAR=IUVPAR+2
+(  231)       IOFF=IOFF+2*IUVLEV
+(  232)       IOFFEW=IOFFEW+2*IUVLEV
+(  233)     ENDIF
+(  234)   ENDIF
+(  235)   LLGP2(:)=.FALSE.
+(  236)   IF(LLPGP2) THEN
+(  237)     IOFF=IOFF1
+(  238)     IGP2PAR=UBOUND(PGP2,2)
+(  239)     IF(LSCDERS) IGP2PAR=IGP2PAR/3
+(  240)     DO J=1,IGP2PAR
+(  241)       LLGP2(J+IOFF) = .TRUE.
+(  242)       IGP2PARS(J+IOFF)=J
+(  243)     ENDDO
+(  244)     IOFF1=IOFF1+IGP2PAR
+(  245)     IF(LSCDERS) THEN
+(  246)       IOFF=IOFFNS
+(  247)       DO J=1,IGP2PAR
+(  248)         LLGP2(J+IOFF) = .TRUE.
+(  249)         IGP2PARS(J+IOFF)=J+IGP2PAR
+(  250)       ENDDO
+(  251)       IOFFNS=IOFF+IGP2PAR
+(  252)       IOFF=IOFFEW
+(  253)       DO J=1,IGP2PAR
+(  254)         LLGP2(J+IOFF) = .TRUE.
+(  255)         IGP2PARS(J+IOFF)=J+2*IGP2PAR
+(  256)       ENDDO
+(  257)       IOFFEW=IOFF+IGP2PAR
+(  258)     ENDIF
+(  259)   ENDIF
+(  260)   LLGP3A(:) = .FALSE.
+(  261)   IF(LLPGP3A) THEN
+(  262)     IGP3ALEV=UBOUND(PGP3A,2)
+(  263)     IGP3APAR=UBOUND(PGP3A,3)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 6
+
+(  264)     IF(LSCDERS) IGP3APAR=IGP3APAR/3
+(  265)     IOFF=IOFF1
+(  266)     DO J1=1,IGP3APAR
+(  267)       DO J2=1,IGP3ALEV
+(  268)         LLGP3A(J2+(J1-1)*IGP3ALEV+IOFF) = .TRUE.
+(  269)         IGP3APARS(J2+(J1-1)*IGP3ALEV+IOFF)=J1
+(  270)         IGP3ALEVS(J2+(J1-1)*IGP3ALEV+IOFF)=J2
+(  271)       ENDDO
+(  272)     ENDDO
+(  273)     IPAROFF=IGP3APAR
+(  274)     IOFF1=IOFF1+IGP3APAR*IGP3ALEV
+(  275)     IF(LSCDERS) THEN
+(  276)       IOFF=IOFFNS
+(  277)       DO J1=1,IGP3APAR
+(  278)         DO J2=1,IGP3ALEV
+(  279)           LLGP3A(J2+(J1-1)*IGP3ALEV+IOFF) = .TRUE.
+(  280)           IGP3APARS(J2+(J1-1)*IGP3ALEV+IOFF)=J1+IPAROFF
+(  281)           IGP3ALEVS(J2+(J1-1)*IGP3ALEV+IOFF)=J2
+(  282)         ENDDO
+(  283)       ENDDO
+(  284)       IPAROFF=IPAROFF+IGP3APAR
+(  285)       IOFFNS=IOFFNS+IGP3APAR*IGP3ALEV
+(  286)       IOFF=IOFFEW
+(  287)       DO J1=1,IGP3APAR
+(  288)         DO J2=1,IGP3ALEV
+(  289)           LLGP3A(J2+(J1-1)*IGP3ALEV+IOFF) = .TRUE.
+(  290)           IGP3APARS(J2+(J1-1)*IGP3ALEV+IOFF)=J1+IPAROFF
+(  291)           IGP3ALEVS(J2+(J1-1)*IGP3ALEV+IOFF)=J2
+(  292)         ENDDO
+(  293)       ENDDO
+(  294)       IOFFEW=IOFFEW+IGP3APAR*IGP3ALEV
+(  295)     ENDIF
+(  296)   ENDIF
+(  297)   LLGP3B(:) = .FALSE.
+(  298)   IF(LLPGP3B) THEN
+(  299)     IGP3BLEV=UBOUND(PGP3B,2)
+(  300)     IGP3BPAR=UBOUND(PGP3B,3)
+(  301)     IF(LSCDERS) IGP3BPAR=IGP3BPAR/3
+(  302)     IOFF=IOFF1
+(  303)     DO J1=1,IGP3BPAR
+(  304)       DO J2=1,IGP3BLEV
+(  305)         LLGP3B(J2+(J1-1)*IGP3BLEV+IOFF) = .TRUE.
+(  306)         IGP3BPARS(J2+(J1-1)*IGP3BLEV+IOFF)=J1
+(  307)         IGP3BLEVS(J2+(J1-1)*IGP3BLEV+IOFF)=J2
+(  308)       ENDDO
+(  309)     ENDDO
+(  310)     IPAROFF=IGP3BPAR
+(  311)     IOFF1=IOFF1+IGP3BPAR*IGP3BLEV
+(  312)     IF(LSCDERS) THEN
+(  313)       IOFF=IOFFNS
+(  314)       DO J1=1,IGP3BPAR
+(  315)         DO J2=1,IGP3BLEV
+(  316)           LLGP3B(J2+(J1-1)*IGP3BLEV+IOFF) = .TRUE.
+(  317)           IGP3BPARS(J2+(J1-1)*IGP3BLEV+IOFF)=J1+IPAROFF
+(  318)           IGP3BLEVS(J2+(J1-1)*IGP3BLEV+IOFF)=J2
+(  319)         ENDDO
+(  320)       ENDDO
+(  321)       IPAROFF=IPAROFF+IGP3BPAR
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 7
+
+(  322)       IOFFNS=IOFFNS+IGP3BPAR*IGP3BLEV
+(  323)       IOFF=IOFFEW
+(  324)       DO J1=1,IGP3BPAR
+(  325)         DO J2=1,IGP3BLEV
+(  326)           LLGP3B(J2+(J1-1)*IGP3BLEV+IOFF) = .TRUE.
+(  327)           IGP3BPARS(J2+(J1-1)*IGP3BLEV+IOFF)=J1+IPAROFF
+(  328)           IGP3BLEVS(J2+(J1-1)*IGP3BLEV+IOFF)=J2
+(  329)         ENDDO
+(  330)       ENDDO
+(  331)       IOFFEW=IOFFEW+IGP3BPAR*IGP3BLEV
+(  332)     ENDIF
+(  333)   ENDIF
+(  334)   
+(  335)   
+(  336)   CALL INIGPTR(IGPTRSEND,IGPTRRECV)
+(  337)   LLDONE = .FALSE.
+(  338)   
+(  339)   ITAG = MTAGGL
+(  340)   
+(  341)   INDOFFX  = 0
+(  342)   IBUFLENS = 0
+(  343)   IBUFLENR = 0
+(  344)   INRECV   = 0
+(  345)   INSEND   = 0
+(  346)   
+(  347)   DO JROC=1,NPROC
+(  348)   
+(  349)     CALL PE2SET(JROC,ISETA,ISETB,ISETW,ISETV)
+(  350)     IRECVSET = ISETA
+(  351)     ISEND = JROC
+(  352)     ISENDSET = ISETV
+(  353)     ISENT(JROC) = 0
+(  354)     IRCVD(JROC) = 0
+(  355)   
+(  356)   !             count up expected number of fields
+(  357)     IPOS = 0
+(  358)     DO JFLD=1,KF_GP
+(  359)       IF(KVSET(JFLD) == ISENDSET .OR. KVSET(JFLD) == -1) IPOS = IPOS+1
+(  360)     ENDDO
+(  361)     ISEND_FLD_TOTAL(JROC) = IPOS
+(  362)     ISENDTOT(JROC) = IGPTRRECV(ISETW)*IPOS
+(  363)   
+(  364)     IF( JROC /= MYPROC) THEN
+(  365)       IBUFLENS = MAX(IBUFLENS,ISENDTOT(JROC))
+(  366)       IF(ISENDTOT(JROC) > 0) THEN
+(  367)         INSEND = INSEND+1
+(  368)         JSEND(INSEND)=JROC
+(  369)       ENDIF
+(  370)     ENDIF
+(  371)   
+(  372)     IFIRSTLAT = MAX(D%NPTRLS(MYSETW),D%NFRSTLAT(IRECVSET))
+(  373)     ILASTLAT  = MIN(D%NPTRLS(MYSETW)+D%NULTPP(MYSETW)-1,D%NLSTLAT(IRECVSET))
+(  374)   
+(  375)     IPOS = 0
+(  376)     DO JGL=IFIRSTLAT,ILASTLAT
+(  377)       IGL  = D%NPTRFRSTLAT(IRECVSET)+JGL-D%NFRSTLAT(IRECVSET)
+(  378)       IPOS = IPOS+D%NONL(IGL,ISETB)
+(  379)     ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 8
+
+(  380)   
+(  381)     IRECVTOT(JROC) = IPOS*KF_FS
+(  382)   
+(  383)     IF(IRECVTOT(JROC) > 0 .AND. MYPROC /= JROC) THEN
+(  384)       INRECV = INRECV + 1
+(  385)       JRECV(INRECV)=JROC
+(  386)     ENDIF
+(  387)   
+(  388)     IF( JROC /= MYPROC) IBUFLENR = MAX(IBUFLENR,IRECVTOT(JROC))
+(  389)   
+(  390)     IF(IPOS > 0) THEN
+(  391)       INDOFF(JROC) = INDOFFX
+(  392)       INDOFFX = INDOFFX+IPOS
+(  393)       IPOS = 0
+(  394)       DO JGL=IFIRSTLAT,ILASTLAT
+(  395)         IGL  = D%NPTRFRSTLAT(IRECVSET)+JGL-D%NFRSTLAT(IRECVSET)
+(  396)         IGLL = JGL-D%NPTRLS(MYSETW)+1
+(  397)         DO JL=D%NSTA(IGL,ISETB)+D%NSTAGTF(IGLL),&
+(  398)          &D%NSTA(IGL,ISETB)+D%NSTAGTF(IGLL)+D%NONL(IGL,ISETB)-1
+(  399)           IPOS = IPOS+1
+(  400)           KINDEX(IPOS+INDOFF(JROC)) = JL
+(  401)         ENDDO
+(  402)       ENDDO
+(  403)     ENDIF
+(  404)   
+(  405)   ENDDO
+(  406)   
+(  407)   ISENDCOUNT=0
+(  408)   IRECVCOUNT=0
+(  409)   DO J=1,NPROC
+(  410)     ISENDCOUNT=MAX(ISENDCOUNT,ISENDTOT(J))
+(  411)     IRECVCOUNT=MAX(IRECVCOUNT,IRECVTOT(J))
+(  412)   ENDDO
+(  413)   IF (IBUFLENS > 0) ALLOCATE(ZCOMBUFS(-1:ISENDCOUNT,INSEND))
+(  414)   IF (IBUFLENR > 0) ALLOCATE(ZCOMBUFR(-1:IRECVCOUNT,INRECV))
+(  415)   
+(  416)   CALL GSTATS(1805,1)
+(  417)   
+(  418)   ! Send loop.............................................................
+(  419)   
+(  420)    !$ACC data present(PGLAT) &
+(  421)    !$ACC      copyin(IGPTRSEND,INDOFF,KINDEX) &
+(  422)    !$ACC      copyin(KPTRGP,LLGP3B,LLGP3A,LLGP2,LLUV) &
+(  423)    !$ACC      create(IFLDOFF,IGPTROFF) 
+(  424) 
+(  425)    !$ACC data if(present(PGP))   present(PGP)   
+(  426)    !$ACC data if(present(PGPUV)) present(PGPUV) copyin(IUVLEVS,IUVPARS)
+(  427)    !$ACC data if(present(PGP2))  present(PGP2)  copyin(IGP2PARS)
+(  428)    !$ACC data if(present(PGP3A)) present(PGP3A) copyin(IGP3ALEVS,IGP3APARS)
+(  429)    !$ACC data if(present(PGP3B)) present(PGP3B) copyin(IGP3BLEVS,IGP3BPARS)
+(  430)   ! Copy local contribution
+(  431)   
+(  432)   IF(ISENDTOT(MYPROC) > 0 )THEN
+(  433)   
+(  434)     IFLDS = 0
+(  435)     DO JFLD=1,KF_GP
+(  436)       IF(KVSET(JFLD) == MYSETV .OR. KVSET(JFLD) == -1) THEN
+(  437)         IFLDS = IFLDS+1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 9
+
+(  438)         IF(LLINDER) THEN
+(  439)           IFLDOFF(IFLDS) = KPTRGP(JFLD)
+(  440)         ELSE
+(  441)           IFLDOFF(IFLDS) = JFLD
+(  442)         ENDIF
+(  443)       ENDIF
+(  444)     ENDDO
+(  445)   
+(  446)     IPOS=0
+(  447)     DO JBLK=1,NGPBLKS
+(  448)       IGPTROFF(JBLK)=IPOS
+(  449)       IFIRST = IGPTRSEND(1,JBLK,MYSETW)
+(  450)       IF(IFIRST > 0) THEN
+(  451)         ILAST = IGPTRSEND(2,JBLK,MYSETW)
+(  452)         IPOS=IPOS+ILAST-IFIRST+1
+(  453)       ENDIF
+(  454)     ENDDO
+(  455)     !$ACC update device (IGPTROFF,IFLDOFF)
+(  456) 
+(  457)     CALL GSTATS(1601,0)
+(  458) 
+(  459)     DO JBLK=1,NGPBLKS
+(  460)       IFIRST = IGPTRSEND(1,JBLK,MYSETW)
+(  461)       IF(IFIRST > 0) THEN
+(  462)         ILAST = IGPTRSEND(2,JBLK,MYSETW)
+(  463)         IF(LLPGPONLY) THEN
+(  464)           !$ACC parallel loop tile(16,32) private (IPOS,IFLD)
+(  465)           DO JK=IFIRST,ILAST
+(  466)             DO JFLD=1,IFLDS             
+(  467)                IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+(  468)                IFLD = IFLDOFF(JFLD)
+(  469)                IF (LLGW) THEN
+(  470)                  PGLAT(KINDEX(IPOS),JFLD) = PGP(JK,IFLD,JBLK)
+(  471)                ELSE
+(  472)                  PGLAT(JFLD,KINDEX(IPOS)) = PGP(JK,IFLD,JBLK)
+(  473)                ENDIF
+(  474)             ENDDO
+(  475)           ENDDO
+(  476)         ELSE
+(  477)           DO JFLD=1,IFLDS
+(  478)             IFLD = IFLDOFF(JFLD)
+(  479)             IF(LLUV(IFLD)) THEN
+(  480)               !$ACC parallel loop private (IPOS) default (none)
+(  481)               DO JK=IFIRST,ILAST
+(  482)                 IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+(  483)                 IF (LLGW) THEN
+(  484)                   PGLAT(KINDEX(IPOS),JFLD) = PGPUV(JK,IUVLEVS(IFLD),IUVPARS(IFLD),JBLK)
+(  485)                 ELSE
+(  486)                   PGLAT(JFLD,KINDEX(IPOS)) = PGPUV(JK,IUVLEVS(IFLD),IUVPARS(IFLD),JBLK)
+(  487)                 ENDIF
+(  488)               ENDDO
+(  489)             ELSEIF(LLGP2(IFLD)) THEN
+(  490)               !$ACC parallel loop private (IPOS) default (none)
+(  491)               DO JK=IFIRST,ILAST
+(  492)                 IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+(  493)                 IF (LLGW) THEN
+(  494)                   PGLAT(KINDEX(IPOS),JFLD) = PGP2(JK,IGP2PARS(IFLD),JBLK) 
+(  495)                 ELSE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 10
+
+(  496)                   PGLAT(JFLD,KINDEX(IPOS)) = PGP2(JK,IGP2PARS(IFLD),JBLK) 
+(  497)                 ENDIF
+(  498)               ENDDO
+(  499)             ELSEIF(LLGP3A(IFLD)) THEN
+(  500)               !$ACC parallel loop private (IPOS) default (none)
+(  501)               DO JK=IFIRST,ILAST
+(  502)                 IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+(  503)                 IF (LLGW) THEN
+(  504)                   PGLAT(KINDEX(IPOS),JFLD) = PGP3A(JK,IGP3ALEVS(IFLD),IGP3APARS(IFLD),JBLK)
+(  505)                 ELSE
+(  506)                   PGLAT(JFLD,KINDEX(IPOS)) = PGP3A(JK,IGP3ALEVS(IFLD),IGP3APARS(IFLD),JBLK)
+(  507)                 ENDIF
+(  508)               ENDDO
+(  509)             ELSEIF(LLGP3B(IFLD)) THEN
+(  510)               !$ACC parallel loop private (IPOS) default (none)
+(  511)               DO JK=IFIRST,ILAST
+(  512)                 IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+(  513)                 IF (LLGW) THEN
+(  514)                   PGLAT(KINDEX(IPOS),JFLD) = PGP3B(JK,IGP3BLEVS(IFLD),IGP3BPARS(IFLD),JBLK)
+(  515)                 ELSE
+(  516)                   PGLAT(JFLD,KINDEX(IPOS)) = PGP3B(JK,IGP3BLEVS(IFLD),IGP3BPARS(IFLD),JBLK)
+(  517)                 ENDIF
+(  518)               ENDDO
+(  519)             ELSE
+(  520)               WRITE(NOUT,*)'TRLTOG_MOD: ERROR',JFLD,IFLD
+(  521)               CALL ABORT_TRANS('TRLTOG_MOD: ERROR')
+(  522)             ENDIF
+(  523)           ENDDO
+(  524)         ENDIF
+(  525)       ENDIF
+(  526)     ENDDO
+(  527) 
+(  528)     !!$OMP END PARALLEL DO
+(  529)     CALL GSTATS(1601,1)
+(  530)   
+(  531)   ENDIF
+(  532)   
+(  533)   #ifdef COMVERBOSE
+(  534)     call MPI_BARRIER(MPI_COMM_WORLD,IERROR)
+(  535)     Tc=TIMEF()
+(  536)   #endif
+(  537)   !....Pack loop.........................................................
+(  538)   
+(  539)   !!$acc data create(ZCOMBUFR,ZCOMBUFS)
+(  540)   !$acc enter data create(ZCOMBUFS)
+(  541)   
+(  542)   ISEND_FLD_START=1
+(  543)   CALL GSTATS(1602,0)
+(  544)   
+(  545)   
+(  546)     DO INS=1,INSEND
+(  547)       ISEND=JSEND(INS)
+(  548)       CALL PE2SET(ISEND,ISETA,ISETB,ISETW,ISETV)
+(  549)       ISENDSET = ISETV
+(  550)       ISEND_FLD_END = ISEND_FLD_TOTAL(ISEND)
+(  551)       IFLD = 0
+(  552)       IPOS = 0
+(  553)       DO JFLD=1,KF_GP
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 11
+
+(  554)         IF(KVSET(JFLD) == ISENDSET .OR. KVSET(JFLD) == -1 ) THEN
+(  555)           IFLD = IFLD+1
+(  556)           IFLDA(IFLD)=JFLD
+(  557)         ENDIF
+(  558)       ENDDO
+(  559)   
+(  560)       DO JBLK=1,NGPBLKS
+(  561)         IFIRST = IGPTRSEND(1,JBLK,ISETW)
+(  562)         IF(IFIRST > 0) THEN
+(  563)           ILAST = IGPTRSEND(2,JBLK,ISETW)
+(  564)           IJPOS(JBLK)=IPOS
+(  565)           IPOS=IPOS+(ILAST-IFIRST+1)
+(  566)         ENDIF
+(  567)       ENDDO
+(  568)   
+(  569)  
+(  570)       !$acc parallel loop
+(  571)       DO JJ=ISEND_FLD_START(ISEND),ISEND_FLD_END
+(  572)         IFLDT=IFLDA(JJ)
+(  573)         !$acc loop
+(  574)         DO JBLK=1,NGPBLKS
+(  575)           IFIRST = IGPTRSEND(1,JBLK,ISETW)
+(  576)           IF(IFIRST > 0) THEN
+(  577)             ILAST = IGPTRSEND(2,JBLK,ISETW)
+(  578)             IF(LLINDER) THEN
+(  579)               !$acc loop
+(  580)               DO JK=IFIRST,ILAST
+(  581)                 JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+(  582)                 ZCOMBUFS(JI,INS) = PGP(JK,IFLDT,JBLK)
+(  583)               ENDDO
+(  584)             ELSE
+(  585)               IF(LLPGPONLY) THEN
+(  586)                 !$acc loop
+(  587)                 DO JK=IFIRST,ILAST
+(  588)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+(  589)                   ZCOMBUFS(JI,INS) = PGP(JK,IFLDT,JBLK)
+(  590)                 ENDDO
+(  591)               ELSEIF(LLUV(IFLDT)) THEN
+(  592)                 !$acc loop
+(  593)                 DO JK=IFIRST,ILAST
+(  594)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+(  595)                   ZCOMBUFS(JI,INS) = PGPUV(JK,IUVLEVS(IFLDT),IUVPARS(IFLDT),JBLK)
+(  596)                 ENDDO
+(  597)               ELSEIF(LLGP2(IFLDT)) THEN
+(  598)                 !$acc loop
+(  599)                 DO JK=IFIRST,ILAST
+(  600)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+(  601)                   ZCOMBUFS(JI,INS) = PGP2(JK,IGP2PARS(IFLDT),JBLK)
+(  602)                 ENDDO
+(  603)               ELSEIF(LLGP3A(IFLDT)) THEN
+(  604)                 !$acc loop
+(  605)                 DO JK=IFIRST,ILAST
+(  606)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+(  607)                   ZCOMBUFS(JI,INS) = PGP3A(JK,IGP3ALEVS(IFLDT),IGP3APARS(IFLDT),JBLK)
+(  608)                 ENDDO
+(  609)               ELSEIF(LLGP3B(IFLDT)) THEN
+(  610)                 !$acc loop
+(  611)                 DO JK=IFIRST,ILAST
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 12
+
+(  612)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+(  613)                   ZCOMBUFS(JI,INS) = PGP3B(JK,IGP3BLEVS(IFLDT),IGP3BPARS(IFLDT),JBLK)
+(  614)                 ENDDO
+(  615)               ENDIF
+(  616)             ENDIF
+(  617)           ENDIF
+(  618)         ENDDO 
+(  619)       ENDDO 
+(  620)    IPOS=(ISEND_FLD_END-ISEND_FLD_START(ISEND)+1)*IPOS
+(  621)    ZCOMBUFS(-1,INS) = 1
+(  622)    ZCOMBUFS(0,INS) = IFLD
+(  623)    !$acc update device (ZCOMBUFS(-1,INS),ZCOMBUFS(0,INS)) 
+(  624)    ENDDO
+(  625) 
+(  626)   !$acc end data
+(  627)   !$acc end data
+(  628)   !$acc end data
+(  629)   !$acc end data
+(  630)   !$acc end data
+(  631)   !$acc end data
+(  632)   
+(  633)   #ifdef COMVERBOSE
+(  634)     call MPI_BARRIER(MPI_COMM_WORLD,IERROR)
+(  635)     Tc=(TIMEF()-Tc)/1000.0_JPRBT
+(  636)     CALL MPI_COMM_RANK(MPI_COMM_WORLD, IRANK, IERROR)
+(  637)     !IF(irank==0) WRITE(*,*) "packing (trgtol) in sec: ", Tc
+(  638)   #endif
+(  639)   
+(  640)   CALL GSTATS(1602,1)
+(  641)   
+(  642)   IF (LHOOK) CALL DR_HOOK('TRGTOL_BAR',0,ZHOOK_HANDLE_BAR)
+(  643)   CALL GSTATS_BARRIER(761)
+(  644)   IF (LHOOK) CALL DR_HOOK('TRGTOL_BAR',1,ZHOOK_HANDLE_BAR)
+(  645)   
+(  646)   IF(.NOT.LGPNORM)THEN
+(  647)     CALL GSTATS(803,0)
+(  648)   ELSE
+(  649)     CALL GSTATS(804,0)
+(  650)   ENDIF
+(  651) 
+(  652) 
+(  653)  
+(  654) 
+(  655) 
+(  656)   #ifdef AGVERBOSE
+(  657)   T2=TIMEF()
+(  658)   call MPI_BARRIER(MPI_COMM_WORLD,IERROR)
+(  659)   T2=(TIMEF()-T2)/1000.0_JPRBT
+(  660)   !WRITE(*,*) "AGTIME BARRIER (trgtol 1) in sec: ", T2
+(  661)   #endif
+(  662)   
+(  663)   T1=TIMEF()
+(  664)   
+(  665)   #ifdef COMVERBOSE
+(  666)     call MPI_BARRIER(MPI_COMM_WORLD,IERROR)
+(  667)     Tc=TIMEF()
+(  668)   #endif
+(  669)   !$acc enter data create(ZCOMBUFR)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 13
+
+(  670)   
+(  671)   !$acc host_data use_device(ZCOMBUFR,ZCOMBUFS)
+(  672)   
+(  673)   IR=0
+(  674) 
+(  675) 
+(  676)   call nvtxStartRange("MPI communication") 
+(  677) 
+(  678)   !  Receive loop.........................................................
+(  679)   DO INR=1,INRECV
+(  680)     IR=IR+1
+(  681)     IRECV=JRECV(INR)
+(  682)     !CALL MPL_RECV(ZCOMBUFR(-1:IRECVTOT(IRECV),INR), &
+(  683)     !  & KSOURCE=NPRCIDS(IRECV), &
+(  684)     !  & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IREQ(IR), &
+(  685)     !  & KTAG=ITAG,CDSTRING='TRLTOG:' )
+(  686)   
+(  687)     IERROR=0
+(  688)     CALL MPI_IRECV(ZCOMBUFR(-1:IRECVTOT(IRECV),INR),SIZE(ZCOMBUFR(-1:IRECVTOT(IRECV),INR)),INT(MPI_REAL8),NPRCIDS(IRECV)-1,I
+(  689)   
+(  690)   ENDDO
+(  691)   
+(  692)   !....Send loop.........................................................
+(  693)   DO INS=1,INSEND
+(  694)     IR=IR+1
+(  695)     ISEND=JSEND(INS)
+(  696)     !CALL MPL_SEND(ZCOMBUFS(-1:ISENDTOT(ISEND),INS),KDEST=NPRCIDS(ISEND), &
+(  697)     ! & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IREQ(IR), &
+(  698)     ! & KTAG=ITAG,CDSTRING='TRGTOL:' )
+(  699)     IERROR=0
+(  700)     CALL MPI_ISEND(ZCOMBUFS(-1:ISENDTOT(ISEND),INS),SIZE(ZCOMBUFS(-1:ISENDTOT(ISEND),INS)),INT(MPI_REAL8),NPRCIDS(ISEND)-1,I
+(  701)   
+(  702)   
+(  703)   ENDDO
+(  704)   
+(  705)   IF(IR > 0) THEN
+(  706)     !CALL MPL_WAIT(ZDUM,KREQUEST=IREQ(1:IR), &
+(  707)     !  & CDSTRING='TRGTOL: WAIT FOR SENDS AND RECEIVES')
+(  708)      IERROR=0
+(  709)      CALL MPI_WAITALL(IR,IREQ,ISTATUS,IERROR)
+(  710)   
+(  711)   ENDIF
+(  712)   !$acc end host_data 
+(  713)  
+(  714)   call nvtxEndRange
+(  715) 
+(  716)   #ifdef COMVERBOSE
+(  717)     call MPI_BARRIER(MPI_COMM_WORLD,IERROR)
+(  718)     Tc=(TIMEF()-Tc)/1000.0_JPRBT
+(  719)     !IF(irank==0) WRITE(*,*) "CUDA-aware isend/irecv (trgtol) in sec: ", Tc
+(  720)   #endif
+(  721)   T2=TIMEF()
+(  722)   call MPI_BARRIER(MPI_COMM_WORLD,IERROR)
+(  723)   T2=(TIMEF()-T2)/1000.0_JPRBT
+(  724)   #ifdef AGVERBOSE
+(  725)   !WRITE(*,*) "AGTIME BARRIER (trgtol 2) in sec: ", T2
+(  726)   #endif
+(  727)   
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 14
+
+(  728)   T1=(TIMEF()-T1)/1000.0_JPRBT
+(  729)   #ifdef AGVERBOSE
+(  730)   !WRITE(*,*) "TRGTOL COMMS time (s): ", T1
+(  731)   #endif
+(  732)   
+(  733)   !$acc exit data delete(ZCOMBUFS)
+(  734)   
+(  735)   IF(.NOT.LGPNORM)THEN
+(  736)     CALL GSTATS(803,1)
+(  737)   ELSE
+(  738)     CALL GSTATS(804,1)
+(  739)   ENDIF
+(  740)   !CALL GSTATS_BARRIER2(761)
+(  741)   
+(  742)   #ifdef COMVERBOSE
+(  743)     call MPI_BARRIER(MPI_COMM_WORLD,IERROR)
+(  744)     Tc=TIMEF()
+(  745)   #endif
+(  746)   !  Unpack loop.........................................................
+(  747)   
+(  748)   CALL GSTATS(1603,0)
+(  749)     !$acc data copyin(JRECV,IRECVTOT,KF_FS,KINDEX,INDOFF,ISEND_FLD_START,ISEND_FLD_END) &
+(  750)     !$acc&     present(ZCOMBUFR,PGLAT)
+(  751)     !$acc update host(ZCOMBUFR(-1:0, :))
+(  752)     DO INR=1,INRECV
+(  753)       IRECV_FLD_START = ZCOMBUFR(-1,INR)
+(  754)       IRECV_FLD_END   = ZCOMBUFR(0,INR)
+(  755)       !$acc parallel loop collapse(2)
+(  756)       DO JFLD=IRECV_FLD_START,IRECV_FLD_END
+(  757)         DO JL=1,IBUFLENR/KF_FS
+(  758)          IRECV=JRECV(INR)
+(  759)          ILEN = IRECVTOT(IRECV)/KF_FS
+(  760)          if (JL .gt. ILEN) cycle
+(  761)          II = KINDEX(INDOFF(IRECV)+JL)
+(  762)          IF (LLGW) THEN
+(  763)            PGLAT(II,JFLD) = ZCOMBUFR(JL+(JFLD-IRECV_FLD_START)*ILEN,INR)
+(  764)          ELSE
+(  765)            PGLAT(JFLD,II) = ZCOMBUFR(JL+(JFLD-IRECV_FLD_START)*ILEN,INR)
+(  766)          ENDIF
+(  767)        ENDDO
+(  768)       ENDDO
+(  769)       IPOS = ILEN*(IRECV_FLD_END-IRECV_FLD_START+1)
+(  770)     ENDDO
+(  771)     !$acc end data
+(  772)   
+(  773)   #ifdef COMVERBOSE
+(  774)     call MPI_BARRIER(MPI_COMM_WORLD,IERROR)
+(  775)     Tc=(TIMEF()-Tc)/1000.0_JPRBT
+(  776)     !IF(irank==0) WRITE(*,*) "unpacking (trgtol) in sec: ", Tc
+(  777)   #endif
+(  778)   
+(  779)   CALL GSTATS(1603,1)
+(  780)   
+(  781)   !$acc exit data delete(ZCOMBUFR)
+(  782)   
+(  783)   IF (IBUFLENS > 0) DEALLOCATE(ZCOMBUFS)
+(  784)   IF (IBUFLENR > 0) DEALLOCATE(ZCOMBUFR)
+(  785)   
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 15
+
+(  786)   IF (LHOOK) CALL DR_HOOK('TRGTOL',1,ZHOOK_HANDLE)
+(  787)   
+(  788)   END SUBROUTINE TRGTOL_CUDAAWARE
+(  789) 
+(  790)   SUBROUTINE TRGTOL(PGLAT,KF_FS,KF_GP,KF_SCALARS_G,KVSET,KPTRGP,&
+(  791)    &PGP,PGPUV,PGP3A,PGP3B,PGP2,LDGW)
+(  792)   
+(  793)   !**** *TRGTOL * - transposition of grid point data from column
+(  794)   !                 structure to latitudinal. Reorganize data between
+(  795)   !                 grid point calculations and direct Fourier Transform
+(  796)   
+(  797)   !     Purpose.
+(  798)   !     --------
+(  799)   
+(  800)   
+(  801)   !**   Interface.
+(  802)   !     ----------
+(  803)   !        *call* *trgtol(...)
+(  804)   
+(  805)   !        Explicit arguments :
+(  806)   !        --------------------
+(  807)   !           PGLAT    -  Latitudinal data ready for direct FFT (output)
+(  808)   !           PGP    -  Blocked grid point data    (input)
+(  809)   
+(  810)   !        Implicit arguments :
+(  811)   !        --------------------
+(  812)   
+(  813)   !     Method.
+(  814)   !     -------
+(  815)   !        See documentation
+(  816)   
+(  817)   !     Externals.
+(  818)   !     ----------
+(  819)   
+(  820)   !     Reference.
+(  821)   !     ----------
+(  822)   !        ECMWF Research Department documentation of the IFS
+(  823)   
+(  824)   !     Author.
+(  825)   !     -------
+(  826)   !        MPP Group *ECMWF*
+(  827)   
+(  828)   !     Modifications.
+(  829)   !     --------------
+(  830)   !        Original: 95-10-01
+(  831)   !        D.Dent  : 97-08-04   Reorganisation to allow
+(  832)   !                             NPRTRV to differ from NPRGPEW
+(  833)   !                : 98-06-17   add mailbox control logic (from TRLTOM)
+(  834)   !        =99-03-29= Mats Hamrud and Deborah Salmond
+(  835)   !                   JUMP in FFT's changed to 1
+(  836)   !                   KINDEX introduced and ZCOMBUF not used for same PE
+(  837)   !         01-11-23  Deborah Salmond and John Hague
+(  838)   !                    LIMP_NOOLAP Option for non-overlapping message passing
+(  839)   !                    and buffer packing
+(  840)   !         01-12-18  Peter Towers
+(  841)   !                   Improved vector performance of GTOL_PACK,GTOL_UNPACK
+(  842)   !         03-04-02  G. Radnoti: call barrier always when nproc>1
+(  843)   !         08-01-01  G.Mozdzynski: cleanup
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 16
+
+(  844)   !         09-01-02  G.Mozdzynski: use non-blocking recv and send
+(  845)   !     ------------------------------------------------------------------
+(  846)   
+(  847)   
+(  848)   
+(  849)   USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(  850)   USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(  851)   
+(  852)   USE MPL_MODULE  ,ONLY : MPL_RECV, MPL_SEND, MPL_WAIT, JP_NON_BLOCKING_STANDARD
+(  853)   
+(  854)   USE TPM_GEN         ,ONLY : NOUT
+(  855)   USE TPM_DISTR       ,ONLY : D, NPRCIDS, NPRTRNS, MTAGGL,  &
+(  856)        &                      MYSETV, MYSETW, MYPROC, NPROC
+(  857)   USE TPM_TRANS       ,ONLY : LDIVGP, LGPNORM, LSCDERS, LUVDER, LVORGP, NGPBLKS
+(  858)   
+(  859)   USE INIGPTR_MOD     ,ONLY : INIGPTR
+(  860)   USE PE2SET_MOD      ,ONLY : PE2SET
+(  861)   !USE MYSENDSET_MOD
+(  862)   !USE MYRECVSET_MOD
+(  863)   USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(  864)   !
+(  865)   USE MPI
+(  866)   
+(  867)   IMPLICIT NONE
+(  868)   
+(  869)   REAL(KIND=JPRBT),INTENT(OUT)   :: PGLAT(:,:)
+(  870)   INTEGER(KIND=JPIM),INTENT(IN) :: KVSET(:)
+(  871)   INTEGER(KIND=JPIM),INTENT(IN) :: KF_FS,KF_GP
+(  872)   INTEGER(KIND=JPIM),INTENT(IN) :: KF_SCALARS_G
+(  873)   INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KPTRGP(:)
+(  874)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGP(:,:,:)
+(  875)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGPUV(:,:,:,:)
+(  876)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGP3A(:,:,:,:)
+(  877)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGP3B(:,:,:,:)
+(  878)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGP2(:,:,:)
+(  879)   LOGICAL,        OPTIONAL,INTENT(IN)     :: LDGW
+(  880)   
+(  881)   REAL(KIND=JPRBT),ALLOCATABLE :: ZCOMBUFS(:,:),ZCOMBUFR(:,:)
+(  882)   REAL(KIND=JPRBT) :: ZDUM(2)
+(  883)   
+(  884)   INTEGER(KIND=JPIM) :: ISENT    (NPROC)
+(  885)   INTEGER(KIND=JPIM) :: IRCVD    (NPROC)
+(  886)   INTEGER(KIND=JPIM) :: ISENDTOT (NPROC)
+(  887)   INTEGER(KIND=JPIM) :: IRECVTOT (NPROC)
+(  888)   INTEGER(KIND=JPIM) :: IREQ     (NPROC*2)
+(  889)   INTEGER(KIND=JPIM) :: JRECV    (NPROC)
+(  890)   INTEGER(KIND=JPIM) :: JSEND    (NPROC)
+(  891)   
+(  892)   !     LOCAL INTEGER SCALARS
+(  893)   INTEGER(KIND=JPIM) :: IFIRST, IFIRSTLAT, IGL, IGLL, ILAST,&
+(  894)                &ILASTLAT, ILEN, JROC, IPOS, ISETA, &
+(  895)                &ISETB, IRECV, IRECVSET, &
+(  896)                &ISETV, ISEND, ISENDSET, ITAG, J, JBLK, JFLD, &
+(  897)                &JGL, JK, JL, JLOOP, ISETW,  IFLD, &
+(  898)                &II,INDOFFX,IBUFLENS,IBUFLENR,INRECV, IPROC,IFLDS, &
+(  899)                &INSEND,INS,INR,IR, iunit
+(  900)   
+(  901)   !     LOCAL LOGICAL SCALARS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 17
+
+(  902)   LOGICAL   :: LLPGPUV,LLPGP3A,LLPGP3B,LLPGP2,LLPGPONLY
+(  903)   LOGICAL   :: LLUV(KF_GP),LLGP2(KF_GP),LLGP3A(KF_GP),LLGP3B(KF_GP)
+(  904)   LOGICAL :: LLDONE, LLINDER
+(  905)   INTEGER(KIND=JPIM) :: IUVLEVS(KF_GP),IUVPARS(KF_GP),IGP2PARS(KF_GP)
+(  906)   INTEGER(KIND=JPIM) :: IGP3APARS(KF_GP),IGP3ALEVS(KF_GP),IGP3BPARS(KF_GP),IGP3BLEVS(KF_GP)
+(  907)   INTEGER(KIND=JPIM) :: IUVPAR,IUVLEV,IGP2PAR,IGP3ALEV,IGP3APAR,IGP3BLEV,IGP3BPAR,IPAROFF
+(  908)   INTEGER(KIND=JPIM) :: IOFF,IOFF1,IOFFNS,IOFFEW,J1,J2
+(  909)   INTEGER(KIND=JPIM) :: KINDEX(D%NLENGTF),INDOFF(NPROC),IFLDOFF(MAX(KF_GP,KF_FS))
+(  910)   INTEGER(KIND=JPIM) :: ISEND_FLD_TOTAL(NPROC),ISEND_FLD_START(NPROC),ISEND_FLD_END
+(  911)   INTEGER(KIND=JPIM) :: IRECV_FLD_START,IRECV_FLD_END
+(  912)   INTEGER(KIND=JPIM) :: INUMFLDS
+(  913)   INTEGER(KIND=JPIM) :: IGPTRSEND(2,NGPBLKS,NPRTRNS)
+(  914)   INTEGER(KIND=JPIM) :: IGPTRRECV(NPRTRNS)
+(  915)   INTEGER(KIND=JPIM) :: IGPTROFF(NGPBLKS)
+(  916)   !     INTEGER FUNCTIONS
+(  917)   INTEGER(KIND=JPIM) :: IRECVCOUNT,ISENDCOUNT
+(  918)   INTEGER(KIND=JPIM) :: IJPOS(NGPBLKS),IFLDA(KF_GP),JJ,JI,IFLDT
+(  919)   REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  920)   REAL(KIND=JPRB) :: ZHOOK_HANDLE_BAR
+(  921)   
+(  922)   INTEGER(KIND=JPIM) :: IERROR, irank
+(  923)   LOGICAL :: LLGW
+(  924)   
+(  925)   REAL(KIND=JPRBT) :: TIMEF, tc
+(  926)   
+(  927)   !     ------------------------------------------------------------------
+(  928)   
+(  929)   !*       0.    Some initializations
+(  930)   !              --------------------
+(  931)   
+(  932)   IF (LHOOK) CALL DR_HOOK('TRGTOL',0,ZHOOK_HANDLE)
+(  933) 
+(  934)   LLGW = .FALSE.
+(  935)   IF (PRESENT (LDGW)) LLGW = LDGW
+(  936) 
+(  937)   iunit=300+myproc
+(  938) 
+(  939)   CALL GSTATS(1805,0)
+(  940)   
+(  941)   LLINDER = .FALSE.
+(  942)   LLPGPUV = .FALSE.
+(  943)   LLPGP3A = .FALSE.
+(  944)   LLPGP3B = .FALSE.
+(  945)   LLPGP2  = .FALSE.
+(  946)   LLPGPONLY = .FALSE.
+(  947)   IF(PRESENT(KPTRGP))  LLINDER = .TRUE.
+(  948)   IF(PRESENT(PGP))     LLPGPONLY = .TRUE.
+(  949)   IF(PRESENT(PGPUV))   LLPGPUV = .TRUE.
+(  950)   IF(PRESENT(PGP3A))   LLPGP3A = .TRUE.
+(  951)   IF(PRESENT(PGP3B))   LLPGP3B = .TRUE.
+(  952)   IF(PRESENT(PGP2))    LLPGP2 = .TRUE.
+(  953)   IUVPAR=0
+(  954)   IUVLEV=0
+(  955)   IOFF1=0
+(  956)   IOFFNS=KF_SCALARS_G
+(  957)   IOFFEW=2*KF_SCALARS_G
+(  958)   LLUV(:) = .FALSE.
+(  959)   IUVPARS(:) = -99
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 18
+
+(  960)   IUVLEVS(:) = -99
+(  961)   IF (LLPGPUV) THEN
+(  962)     IOFF=0
+(  963)     IUVLEV=UBOUND(PGPUV,2)
+(  964)     IF(LVORGP) THEN
+(  965)       IUVPAR=IUVPAR+1
+(  966)       DO J=1,IUVLEV
+(  967)         IUVLEVS(IOFF+J)=J
+(  968)         IUVPARS(IOFF+J)=IUVPAR
+(  969)         LLUV(IOFF+J)=.TRUE.
+(  970)       ENDDO
+(  971)       IOFF=IOFF+IUVLEV
+(  972)     ENDIF
+(  973)     IF(LDIVGP) THEN
+(  974)       IUVPAR=IUVPAR+1
+(  975)       DO J=1,IUVLEV
+(  976)         IUVLEVS(IOFF+J)=J
+(  977)         IUVPARS(IOFF+J)=IUVPAR
+(  978)         LLUV(IOFF+J)=.TRUE.
+(  979)       ENDDO
+(  980)       IOFF=IOFF+IUVLEV
+(  981)     ENDIF
+(  982)     DO J=1,IUVLEV
+(  983)       IUVLEVS(IOFF+J)=J
+(  984)       IUVPARS(IOFF+J)=IUVPAR+1
+(  985)       IUVLEVS(IOFF+J+IUVLEV)=J
+(  986)       IUVPARS(IOFF+J+IUVLEV)=IUVPAR+2
+(  987)     ENDDO
+(  988)     IUVPAR=IUVPAR+2
+(  989)     LLUV(IOFF+1:IOFF+2*IUVLEV)=.TRUE.
+(  990)     IOFF=IOFF+2*IUVLEV
+(  991)     IOFF1=IOFF
+(  992)     IOFFNS=IOFFNS+IOFF
+(  993)     IOFFEW=IOFFEW+IOFF
+(  994)     IOFF=IUVPAR*IUVLEV+KF_SCALARS_G
+(  995)     IF(LUVDER) THEN
+(  996)       IF(LSCDERS) IOFF=IOFF+KF_SCALARS_G
+(  997)       DO J=1,IUVLEV
+(  998)         IUVLEVS(IOFF+J)=J
+(  999)         IUVPARS(IOFF+J)=IUVPAR+1
+( 1000)         LLUV(IOFF+J)=.TRUE.
+( 1001)         IUVLEVS(IOFF+J+IUVLEV)=J
+( 1002)         IUVPARS(IOFF+J+IUVLEV)=IUVPAR+2
+( 1003)         LLUV(IOFF+J+IUVLEV)=.TRUE.
+( 1004)       ENDDO
+( 1005)       IUVPAR=IUVPAR+2
+( 1006)       IOFF=IOFF+2*IUVLEV
+( 1007)       IOFFEW=IOFFEW+2*IUVLEV
+( 1008)     ENDIF
+( 1009)   ENDIF
+( 1010)   LLGP2(:)=.FALSE.
+( 1011)   IF(LLPGP2) THEN
+( 1012)     IOFF=IOFF1
+( 1013)     IGP2PAR=UBOUND(PGP2,2)
+( 1014)     IF(LSCDERS) IGP2PAR=IGP2PAR/3
+( 1015)     DO J=1,IGP2PAR
+( 1016)       LLGP2(J+IOFF) = .TRUE.
+( 1017)       IGP2PARS(J+IOFF)=J
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 19
+
+( 1018)     ENDDO
+( 1019)     IOFF1=IOFF1+IGP2PAR
+( 1020)     IF(LSCDERS) THEN
+( 1021)       IOFF=IOFFNS
+( 1022)       DO J=1,IGP2PAR
+( 1023)         LLGP2(J+IOFF) = .TRUE.
+( 1024)         IGP2PARS(J+IOFF)=J+IGP2PAR
+( 1025)       ENDDO
+( 1026)       IOFFNS=IOFF+IGP2PAR
+( 1027)       IOFF=IOFFEW
+( 1028)       DO J=1,IGP2PAR
+( 1029)         LLGP2(J+IOFF) = .TRUE.
+( 1030)         IGP2PARS(J+IOFF)=J+2*IGP2PAR
+( 1031)       ENDDO
+( 1032)       IOFFEW=IOFF+IGP2PAR
+( 1033)     ENDIF
+( 1034)   ENDIF
+( 1035)   LLGP3A(:) = .FALSE.
+( 1036)   IF(LLPGP3A) THEN
+( 1037)     IGP3ALEV=UBOUND(PGP3A,2)
+( 1038)     IGP3APAR=UBOUND(PGP3A,3)
+( 1039)     IF(LSCDERS) IGP3APAR=IGP3APAR/3
+( 1040)     IOFF=IOFF1
+( 1041)     DO J1=1,IGP3APAR
+( 1042)       DO J2=1,IGP3ALEV
+( 1043)         LLGP3A(J2+(J1-1)*IGP3ALEV+IOFF) = .TRUE.
+( 1044)         IGP3APARS(J2+(J1-1)*IGP3ALEV+IOFF)=J1
+( 1045)         IGP3ALEVS(J2+(J1-1)*IGP3ALEV+IOFF)=J2
+( 1046)       ENDDO
+( 1047)     ENDDO
+( 1048)     IPAROFF=IGP3APAR
+( 1049)     IOFF1=IOFF1+IGP3APAR*IGP3ALEV
+( 1050)     IF(LSCDERS) THEN
+( 1051)       IOFF=IOFFNS
+( 1052)       DO J1=1,IGP3APAR
+( 1053)         DO J2=1,IGP3ALEV
+( 1054)           LLGP3A(J2+(J1-1)*IGP3ALEV+IOFF) = .TRUE.
+( 1055)           IGP3APARS(J2+(J1-1)*IGP3ALEV+IOFF)=J1+IPAROFF
+( 1056)           IGP3ALEVS(J2+(J1-1)*IGP3ALEV+IOFF)=J2
+( 1057)         ENDDO
+( 1058)       ENDDO
+( 1059)       IPAROFF=IPAROFF+IGP3APAR
+( 1060)       IOFFNS=IOFFNS+IGP3APAR*IGP3ALEV
+( 1061)       IOFF=IOFFEW
+( 1062)       DO J1=1,IGP3APAR
+( 1063)         DO J2=1,IGP3ALEV
+( 1064)           LLGP3A(J2+(J1-1)*IGP3ALEV+IOFF) = .TRUE.
+( 1065)           IGP3APARS(J2+(J1-1)*IGP3ALEV+IOFF)=J1+IPAROFF
+( 1066)           IGP3ALEVS(J2+(J1-1)*IGP3ALEV+IOFF)=J2
+( 1067)         ENDDO
+( 1068)       ENDDO
+( 1069)       IOFFEW=IOFFEW+IGP3APAR*IGP3ALEV
+( 1070)     ENDIF
+( 1071)   ENDIF
+( 1072)   LLGP3B(:) = .FALSE.
+( 1073)   IF(LLPGP3B) THEN
+( 1074)     IGP3BLEV=UBOUND(PGP3B,2)
+( 1075)     IGP3BPAR=UBOUND(PGP3B,3)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 20
+
+( 1076)     IF(LSCDERS) IGP3BPAR=IGP3BPAR/3
+( 1077)     IOFF=IOFF1
+( 1078)     DO J1=1,IGP3BPAR
+( 1079)       DO J2=1,IGP3BLEV
+( 1080)         LLGP3B(J2+(J1-1)*IGP3BLEV+IOFF) = .TRUE.
+( 1081)         IGP3BPARS(J2+(J1-1)*IGP3BLEV+IOFF)=J1
+( 1082)         IGP3BLEVS(J2+(J1-1)*IGP3BLEV+IOFF)=J2
+( 1083)       ENDDO
+( 1084)     ENDDO
+( 1085)     IPAROFF=IGP3BPAR
+( 1086)     IOFF1=IOFF1+IGP3BPAR*IGP3BLEV
+( 1087)     IF(LSCDERS) THEN
+( 1088)       IOFF=IOFFNS
+( 1089)       DO J1=1,IGP3BPAR
+( 1090)         DO J2=1,IGP3BLEV
+( 1091)           LLGP3B(J2+(J1-1)*IGP3BLEV+IOFF) = .TRUE.
+( 1092)           IGP3BPARS(J2+(J1-1)*IGP3BLEV+IOFF)=J1+IPAROFF
+( 1093)           IGP3BLEVS(J2+(J1-1)*IGP3BLEV+IOFF)=J2
+( 1094)         ENDDO
+( 1095)       ENDDO
+( 1096)       IPAROFF=IPAROFF+IGP3BPAR
+( 1097)       IOFFNS=IOFFNS+IGP3BPAR*IGP3BLEV
+( 1098)       IOFF=IOFFEW
+( 1099)       DO J1=1,IGP3BPAR
+( 1100)         DO J2=1,IGP3BLEV
+( 1101)           LLGP3B(J2+(J1-1)*IGP3BLEV+IOFF) = .TRUE.
+( 1102)           IGP3BPARS(J2+(J1-1)*IGP3BLEV+IOFF)=J1+IPAROFF
+( 1103)           IGP3BLEVS(J2+(J1-1)*IGP3BLEV+IOFF)=J2
+( 1104)         ENDDO
+( 1105)       ENDDO
+( 1106)       IOFFEW=IOFFEW+IGP3BPAR*IGP3BLEV
+( 1107)     ENDIF
+( 1108)   ENDIF
+( 1109)   
+( 1110)   
+( 1111)   CALL INIGPTR(IGPTRSEND,IGPTRRECV)
+( 1112)   LLDONE = .FALSE.
+( 1113)   
+( 1114)   ITAG = MTAGGL
+( 1115)   
+( 1116)   INDOFFX  = 0
+( 1117)   IBUFLENS = 0
+( 1118)   IBUFLENR = 0
+( 1119)   INRECV   = 0
+( 1120)   INSEND   = 0
+( 1121)   
+( 1122)   DO JROC=1,NPROC
+( 1123)   
+( 1124)     CALL PE2SET(JROC,ISETA,ISETB,ISETW,ISETV)
+( 1125)     IRECVSET = ISETA
+( 1126)     ISEND = JROC
+( 1127)     ISENDSET = ISETV
+( 1128)     ISENT(JROC) = 0
+( 1129)     IRCVD(JROC) = 0
+( 1130)   
+( 1131)   !             count up expected number of fields
+( 1132)     IPOS = 0
+( 1133)     DO JFLD=1,KF_GP
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 21
+
+( 1134)       IF(KVSET(JFLD) == ISENDSET .OR. KVSET(JFLD) == -1) IPOS = IPOS+1
+( 1135)     ENDDO
+( 1136)     ISEND_FLD_TOTAL(JROC) = IPOS
+( 1137)     ISENDTOT(JROC) = IGPTRRECV(ISETW)*IPOS
+( 1138)   
+( 1139)     IF( JROC /= MYPROC) THEN
+( 1140)       IBUFLENS = MAX(IBUFLENS,ISENDTOT(JROC))
+( 1141)       IF(ISENDTOT(JROC) > 0) THEN
+( 1142)         INSEND = INSEND+1
+( 1143)         JSEND(INSEND)=JROC
+( 1144)       ENDIF
+( 1145)     ENDIF
+( 1146)   
+( 1147)     IFIRSTLAT = MAX(D%NPTRLS(MYSETW),D%NFRSTLAT(IRECVSET))
+( 1148)     ILASTLAT  = MIN(D%NPTRLS(MYSETW)+D%NULTPP(MYSETW)-1,D%NLSTLAT(IRECVSET))
+( 1149)   
+( 1150)     IPOS = 0
+( 1151)     DO JGL=IFIRSTLAT,ILASTLAT
+( 1152)       IGL  = D%NPTRFRSTLAT(IRECVSET)+JGL-D%NFRSTLAT(IRECVSET)
+( 1153)       IPOS = IPOS+D%NONL(IGL,ISETB)
+( 1154)     ENDDO
+( 1155)   
+( 1156)     IRECVTOT(JROC) = IPOS*KF_FS
+( 1157)   
+( 1158)     IF(IRECVTOT(JROC) > 0 .AND. MYPROC /= JROC) THEN
+( 1159)       INRECV = INRECV + 1
+( 1160)       JRECV(INRECV)=JROC
+( 1161)     ENDIF
+( 1162)   
+( 1163)     IF( JROC /= MYPROC) IBUFLENR = MAX(IBUFLENR,IRECVTOT(JROC))
+( 1164)   
+( 1165)     IF(IPOS > 0) THEN
+( 1166)       INDOFF(JROC) = INDOFFX
+( 1167)       INDOFFX = INDOFFX+IPOS
+( 1168)       IPOS = 0
+( 1169)       DO JGL=IFIRSTLAT,ILASTLAT
+( 1170)         IGL  = D%NPTRFRSTLAT(IRECVSET)+JGL-D%NFRSTLAT(IRECVSET)
+( 1171)         IGLL = JGL-D%NPTRLS(MYSETW)+1
+( 1172)         DO JL=D%NSTA(IGL,ISETB)+D%NSTAGTF(IGLL),&
+( 1173)          &D%NSTA(IGL,ISETB)+D%NSTAGTF(IGLL)+D%NONL(IGL,ISETB)-1
+( 1174)           IPOS = IPOS+1
+( 1175)           KINDEX(IPOS+INDOFF(JROC)) = JL
+( 1176)         ENDDO
+( 1177)       ENDDO
+( 1178)     ENDIF
+( 1179)   
+( 1180)   ENDDO
+( 1181)   
+( 1182)   ISENDCOUNT=0
+( 1183)   IRECVCOUNT=0
+( 1184)   DO J=1,NPROC
+( 1185)     ISENDCOUNT=MAX(ISENDCOUNT,ISENDTOT(J))
+( 1186)     IRECVCOUNT=MAX(IRECVCOUNT,IRECVTOT(J))
+( 1187)   ENDDO
+( 1188)   IF (IBUFLENS > 0) ALLOCATE(ZCOMBUFS(-1:ISENDCOUNT,INSEND))
+( 1189)   IF (IBUFLENR > 0) ALLOCATE(ZCOMBUFR(-1:IRECVCOUNT,INRECV))
+( 1190)   CALL GSTATS(1805,1)
+( 1191)  
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 22
+
+( 1192)   ! Send loop.............................................................
+( 1193)   
+( 1194)   ! Copy local contribution
+( 1195)   
+( 1196)   IF(ISENDTOT(MYPROC) > 0 )THEN
+( 1197)     !!IF( NPROC > 1 )THEN
+( 1198)     !!$ACC if(present(PGPUV)) update host(PGPUV) async(1)
+( 1199)     !!$ACC if(present(PGP))   update host(PGP) async(1)
+( 1200)     !!$ACC if(present(PGP2))  update host(PGP2) async(1)
+( 1201)     !!$ACC if(present(PGP3a)) update host(PGP3a) async(1)
+( 1202)     !!$ACC if(present(PGP3b)) update host(PGP3b) async(1)
+( 1203)     !!ENDIF
+( 1204)     IFLDS = 0
+( 1205)     DO JFLD=1,KF_GP
+( 1206)       IF(KVSET(JFLD) == MYSETV .OR. KVSET(JFLD) == -1) THEN
+( 1207)         IFLDS = IFLDS+1
+( 1208)         IF(LLINDER) THEN
+( 1209)           IFLDOFF(IFLDS) = KPTRGP(JFLD)
+( 1210)         ELSE
+( 1211)           IFLDOFF(IFLDS) = JFLD
+( 1212)         ENDIF
+( 1213)       ENDIF
+( 1214)     ENDDO
+( 1215)   
+( 1216)     IPOS=0
+( 1217)     DO JBLK=1,NGPBLKS
+( 1218)       IGPTROFF(JBLK)=IPOS
+( 1219)       IFIRST = IGPTRSEND(1,JBLK,MYSETW)
+( 1220)       IF(IFIRST > 0) THEN
+( 1221)         ILAST = IGPTRSEND(2,JBLK,MYSETW)
+( 1222)         IPOS=IPOS+ILAST-IFIRST+1
+( 1223)       ENDIF
+( 1224)     ENDDO
+( 1225) 
+( 1226)     CALL GSTATS(1601,0)
+( 1227)   #ifdef NECSX
+( 1228)   !$OMP PARALLEL DO SCHEDULE(DYNAMIC) PRIVATE(JFLD,JBLK,JK,IFLD,IPOS,IFIRST,ILAST)
+( 1229)   #else
+( 1230)   !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JFLD,JBLK,JK,IFLD,IPOS,IFIRST,ILAST)
+( 1231)   #endif
+( 1232)    !!$ACC data &
+( 1233)    !!$ACC& copyin(IGPTRSEND,IUVLEVS,iuvpars,IGP2PARS,IGP3ALEVS,IGP3BLEVS,IGP3APARS,IGP3BPARS) &
+( 1234)    !!$ACC& copyin(IFLDOFF,INDOFF,IGPTROFF,KINDEX) &
+( 1235)    !!$ACC& copyin(LLUV,LLGP2,LLGP3A,LLGP3B)
+( 1236)    !!$ACC data if(present(PGPUV)) copyin(PGPUV)
+( 1237)    !!$ACC data if(present(PGP2))  copyin(PGP2)
+( 1238)    !!$ACC data if(present(PGP3a)) copyin(PGP3a)
+( 1239)    !!$ACC data if(present(PGP3b)) copyin(PGP3b)
+( 1240)    !!$ACC data if(present(PGP))   copyin(PGP)
+( 1241) 
+( 1242)   DO JBLK=1,NGPBLKS
+( 1243)       IFIRST = IGPTRSEND(1,JBLK,MYSETW)
+( 1244)       IF(IFIRST > 0) THEN
+( 1245)         ILAST = IGPTRSEND(2,JBLK,MYSETW)
+( 1246)         IF(LLPGPONLY) THEN
+( 1247)           !!$ACC parallel loop private(IPOS)
+( 1248)           DO JK=IFIRST,ILAST
+( 1249)             IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 23
+
+( 1250)             !!$ACC loop private(IFLD)
+( 1251)             DO JFLD=1,IFLDS
+( 1252)               IFLD = IFLDOFF(JFLD)
+( 1253)               IF (LLGW) THEN
+( 1254)                 PGLAT(KINDEX(IPOS),JFLD) = PGP(JK,IFLD,JBLK)
+( 1255)               ELSE
+( 1256)                 PGLAT(JFLD,KINDEX(IPOS)) = PGP(JK,IFLD,JBLK)
+( 1257)               ENDIF
+( 1258)             ENDDO
+( 1259)           ENDDO
+( 1260)         ELSE
+( 1261)           DO JFLD=1,IFLDS
+( 1262)             IFLD = IFLDOFF(JFLD)
+( 1263)             IF(LLUV(IFLD)) THEN
+( 1264)               !!$acc parallel loop private(ipos)
+( 1265)               DO JK=IFIRST,ILAST
+( 1266)                 IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+( 1267)                 IF (LLGW) THEN
+( 1268)                   PGLAT(KINDEX(IPOS),JFLD) = PGPUV(JK,IUVLEVS(IFLD),IUVPARS(IFLD),JBLK)
+( 1269)                 ELSE
+( 1270)                   PGLAT(JFLD,KINDEX(IPOS)) = PGPUV(JK,IUVLEVS(IFLD),IUVPARS(IFLD),JBLK)
+( 1271)                 ENDIF
+( 1272)                 !if(jfld<=5 .and. kindex(ipos)<5) write(nout,*)'trgtol: ipos=',ipos,' idx=',kindex(ipos),' jk=',jk,' lev=',i
+( 1273)                 !if( jfld.eq.1 ) write(nout,*)'trgtoluv: ',kindex(ipos),' lev=',iuvlevs(ifld),' pars=',iuvpars(ifld),' pglat
+( 1274)               ENDDO
+( 1275)             ELSEIF(LLGP2(IFLD)) THEN
+( 1276)               !!$acc parallel loop private(ipos)
+( 1277)               DO JK=IFIRST,ILAST
+( 1278)                 IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+( 1279)                 IF (LLGW) THEN
+( 1280)                   PGLAT(KINDEX(IPOS),JFLD) = PGP2(JK,IGP2PARS(IFLD),JBLK)
+( 1281)                 ELSE
+( 1282)                   PGLAT(JFLD,KINDEX(IPOS)) = PGP2(JK,IGP2PARS(IFLD),JBLK)
+( 1283)                 ENDIF
+( 1284)               ENDDO
+( 1285)             ELSEIF(LLGP3A(IFLD)) THEN
+( 1286)               !!$acc parallel loop private(ipos)
+( 1287)               DO JK=IFIRST,ILAST
+( 1288)                 IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+( 1289)                 IF (LLGW) THEN
+( 1290)                   PGLAT(KINDEX(IPOS),JFLD) = PGP3A(JK,IGP3ALEVS(IFLD),IGP3APARS(IFLD),JBLK)
+( 1291)                 ELSE
+( 1292)                   PGLAT(JFLD,KINDEX(IPOS)) = PGP3A(JK,IGP3ALEVS(IFLD),IGP3APARS(IFLD),JBLK)
+( 1293)                 ENDIF
+( 1294)                 !if( jk.eq.ifirst ) write(iunit,*)'trgtol: ',JK,JFLD,IFLD,kindex(ipos),' lev=',IGP3ALEVS(ifld),' pars=',IGP3
+( 1295)               ENDDO
+( 1296)             ELSEIF(LLGP3B(IFLD)) THEN
+( 1297)               !!$acc parallel loop private(ipos)
+( 1298)               DO JK=IFIRST,ILAST
+( 1299)                 IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+( 1300)                 IF (LLGW) THEN
+( 1301)                   PGLAT(KINDEX(IPOS),JFLD) = PGP3B(JK,IGP3BLEVS(IFLD),IGP3BPARS(IFLD),JBLK)
+( 1302)                 ELSE
+( 1303)                   PGLAT(JFLD,KINDEX(IPOS)) = PGP3B(JK,IGP3BLEVS(IFLD),IGP3BPARS(IFLD),JBLK)
+( 1304)                 ENDIF
+( 1305)               ENDDO
+( 1306)             ELSE
+( 1307)               CALL ABORT_TRANS('TRLTOG_MOD: ERROR')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 24
+
+( 1308)             ENDIF
+( 1309)           ENDDO
+( 1310)         ENDIF
+( 1311)       ENDIF
+( 1312)     ENDDO
+( 1313)     !$OMP END PARALLEL DO
+( 1314)     !!$ACC end data
+( 1315)     !!$ACC end data
+( 1316)     !!$ACC end data
+( 1317)     !!$ACC end data
+( 1318)     !!$ACC end data
+( 1319)     !!$ACC end data
+( 1320)     CALL GSTATS(1601,1)
+( 1321)   
+( 1322)   ENDIF
+( 1323)   !!!!$ACC update device(PGLAT)
+( 1324) 
+( 1325)   #ifdef COMVERBOSE
+( 1326)     call MPI_BARRIER(MPI_COMM_WORLD,IERROR)
+( 1327)     Tc=TIMEF()
+( 1328)   #endif
+( 1329)   !....Pack loop.........................................................
+( 1330)   
+( 1331)   ISEND_FLD_START=1
+( 1332)   CALL GSTATS(1602,0)
+( 1333)   !!IF( NPROC > 1 )THEN
+( 1334)     !!$ACC wait(1)
+( 1335)     !!$ACC update host(PGLAT)
+( 1336)   !!ENDIF
+( 1337)   !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(IFLDT,JBLK,IFIRST,ILAST,JK,JJ,JI,&
+( 1338)   !$OMP& INS,ISEND,ISETA,ISETB,ISETW,ISETV,ISENDSET,ISEND_FLD_END,IFLD,IPOS,&
+( 1339)   !$OMP& IFLDA,JFLD,IJPOS)
+( 1340)     DO INS=1,INSEND
+( 1341)       ISEND=JSEND(INS)
+( 1342)       CALL PE2SET(ISEND,ISETA,ISETB,ISETW,ISETV)
+( 1343)       ISENDSET = ISETV
+( 1344)       ISEND_FLD_END = ISEND_FLD_TOTAL(ISEND)
+( 1345)       IFLD = 0
+( 1346)       IPOS = 0
+( 1347)       DO JFLD=1,KF_GP
+( 1348)         IF(KVSET(JFLD) == ISENDSET .OR. KVSET(JFLD) == -1 ) THEN
+( 1349)           IFLD = IFLD+1
+( 1350)           IFLDA(IFLD)=JFLD
+( 1351)         ENDIF
+( 1352)       ENDDO
+( 1353)   
+( 1354)       DO JBLK=1,NGPBLKS
+( 1355)         IFIRST = IGPTRSEND(1,JBLK,ISETW)
+( 1356)         IF(IFIRST > 0) THEN
+( 1357)           ILAST = IGPTRSEND(2,JBLK,ISETW)
+( 1358)           IJPOS(JBLK)=IPOS
+( 1359)           IPOS=IPOS+(ILAST-IFIRST+1)
+( 1360)         ENDIF
+( 1361)       ENDDO
+( 1362)   
+( 1363)   
+( 1364)       DO JJ=ISEND_FLD_START(ISEND),ISEND_FLD_END
+( 1365)         IFLDT=IFLDA(JJ)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 25
+
+( 1366)         DO JBLK=1,NGPBLKS
+( 1367)           IFIRST = IGPTRSEND(1,JBLK,ISETW)
+( 1368)           IF(IFIRST > 0) THEN
+( 1369)             ILAST = IGPTRSEND(2,JBLK,ISETW)
+( 1370)             IF(LLINDER) THEN
+( 1371)               DO JK=IFIRST,ILAST
+( 1372)                 JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+( 1373)                 ZCOMBUFS(JI,INS) = PGP(JK,KPTRGP(IFLDT),JBLK)
+( 1374)               ENDDO
+( 1375)             ELSE
+( 1376)               IF(LLPGPONLY) THEN
+( 1377)                 DO JK=IFIRST,ILAST
+( 1378)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+( 1379)                   ZCOMBUFS(JI,INS) = PGP(JK,IFLDT,JBLK)
+( 1380)                 ENDDO
+( 1381)               ELSEIF(LLUV(IFLDT)) THEN
+( 1382)                 DO JK=IFIRST,ILAST
+( 1383)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+( 1384)                   ZCOMBUFS(JI,INS) = PGPUV(JK,IUVLEVS(IFLDT),IUVPARS(IFLDT),JBLK)
+( 1385)                 ENDDO
+( 1386)               ELSEIF(LLGP2(IFLDT)) THEN
+( 1387)                 DO JK=IFIRST,ILAST
+( 1388)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+( 1389)                   ZCOMBUFS(JI,INS) = PGP2(JK,IGP2PARS(IFLDT),JBLK)
+( 1390)                 ENDDO
+( 1391)               ELSEIF(LLGP3A(IFLDT)) THEN
+( 1392)                 DO JK=IFIRST,ILAST
+( 1393)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+( 1394)                   ZCOMBUFS(JI,INS) = PGP3A(JK,IGP3ALEVS(IFLDT),IGP3APARS(IFLDT),JBLK)
+( 1395)                 ENDDO
+( 1396)               ELSEIF(LLGP3B(IFLDT)) THEN
+( 1397)                 DO JK=IFIRST,ILAST
+( 1398)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+( 1399)                   ZCOMBUFS(JI,INS) = PGP3B(JK,IGP3BLEVS(IFLDT),IGP3BPARS(IFLDT),JBLK)
+( 1400)                 ENDDO
+( 1401)               ENDIF
+( 1402)             ENDIF
+( 1403)           ENDIF
+( 1404)         ENDDO
+( 1405)       ENDDO
+( 1406)   
+( 1407)       IPOS=(ISEND_FLD_END-ISEND_FLD_START(ISEND)+1)*IPOS
+( 1408)       ZCOMBUFS(-1,INS) = 1
+( 1409)       ZCOMBUFS(0,INS) = IFLD
+( 1410)     ENDDO
+( 1411)   !$OMP END PARALLEL DO
+( 1412)   #ifdef COMVERBOSE
+( 1413)     call MPI_BARRIER(MPI_COMM_WORLD,IERROR)
+( 1414)     Tc=(TIMEF()-Tc)/1000.0_JPRBT
+( 1415)     CALL MPI_COMM_RANK(MPI_COMM_WORLD, IRANK, IERROR)
+( 1416)     !IF(irank==0) WRITE(*,*) "packing (trgtol) in sec: ", Tc
+( 1417)   #endif
+( 1418)   
+( 1419)   CALL GSTATS(1602,1)
+( 1420)   
+( 1421)   IF (LHOOK) CALL DR_HOOK('TRGTOL_BAR',0,ZHOOK_HANDLE_BAR)
+( 1422)   CALL GSTATS_BARRIER(761)
+( 1423)   IF (LHOOK) CALL DR_HOOK('TRGTOL_BAR',1,ZHOOK_HANDLE_BAR)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 26
+
+( 1424)   
+( 1425)   IF(.NOT.LGPNORM)THEN
+( 1426)     CALL GSTATS(803,0)
+( 1427)   ELSE
+( 1428)     CALL GSTATS(804,0)
+( 1429)   ENDIF
+( 1430)   IR=0
+( 1431)   
+( 1432)   #ifdef COMVERBOSE
+( 1433)     call MPI_BARRIER(MPI_COMM_WORLD,IERROR)
+( 1434)     Tc=TIMEF()
+( 1435)   #endif
+( 1436)   !  Receive loop.........................................................
+( 1437)   DO INR=1,INRECV
+( 1438)     IR=IR+1
+( 1439)     IRECV=JRECV(INR)
+( 1440)     CALL MPL_RECV(ZCOMBUFR(-1:IRECVTOT(IRECV),INR), &
+( 1441)       & KSOURCE=NPRCIDS(IRECV), &
+( 1442)       & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IREQ(IR), &
+( 1443)       & KTAG=ITAG,CDSTRING='TRLTOG:' )
+( 1444)   !print*,irank,size(ZCOMBUFR(-1:IRECVTOT(IRECV),INR))
+( 1445)   ENDDO
+( 1446)   
+( 1447)   !....Send loop.........................................................
+( 1448)   DO INS=1,INSEND
+( 1449)     IR=IR+1
+( 1450)     ISEND=JSEND(INS)
+( 1451)     CALL MPL_SEND(ZCOMBUFS(-1:ISENDTOT(ISEND),INS),KDEST=NPRCIDS(ISEND), &
+( 1452)      & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IREQ(IR), &
+( 1453)      & KTAG=ITAG,CDSTRING='TRGTOL:' )
+( 1454)   ENDDO
+( 1455)   
+( 1456)   IF(IR > 0) THEN
+( 1457)     CALL MPL_WAIT(KREQUEST=IREQ(1:IR), &
+( 1458)       & CDSTRING='TRGTOL: WAIT FOR SENDS AND RECEIVES')
+( 1459)   ENDIF
+( 1460)   
+( 1461)   !#ifdef COMVERBOSE
+( 1462)   !  call MPI_BARRIER(MPI_COMM_WORLD,IERROR)
+( 1463)   !  Tc=(TIMEF()-Tc)/1000.0_JPRBT
+( 1464)   !  !IF(irank==0) WRITE(*,*) "non-CUDA-aware isend/irecv (trgtol) in sec: ", Tc
+( 1465)   !#endif
+( 1466)   
+( 1467)   IF(.NOT.LGPNORM)THEN
+( 1468)     CALL GSTATS(803,1)
+( 1469)   ELSE
+( 1470)     CALL GSTATS(804,1)
+( 1471)   ENDIF
+( 1472)   CALL GSTATS_BARRIER2(761)
+( 1473)   
+( 1474)   !#ifdef COMVERBOSE
+( 1475)   !  call MPI_BARRIER(MPI_COMM_WORLD,IERROR)
+( 1476)   !  Tc=TIMEF()
+( 1477)   !#endif
+( 1478)   !  Unpack loop.........................................................
+( 1479)   
+( 1480)   CALL GSTATS(1603,0)
+( 1481) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 27
+
+( 1482)   !!$ACC data &
+( 1483)   !!$ACC present(PGLAT) &
+( 1484)   !!$ACC copyin(ZCOMBUFR(-1:,:),JRECV,IRECVTOT) &
+( 1485)   !!$ACC copyin(INDOFF,KINDEX)
+( 1486) 
+( 1487)   !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JL,II,JFLD,INR,IRECV,ILEN,IRECV_FLD_START,IRECV_FLD_END,IPOS)
+( 1488)   DO INR=1,INRECV
+( 1489)       IRECV=JRECV(INR)
+( 1490)       ILEN = IRECVTOT(IRECV)/KF_FS
+( 1491)       IRECV_FLD_START = ZCOMBUFR(-1,INR)
+( 1492)       IRECV_FLD_END   = ZCOMBUFR(0,INR)
+( 1493)       !!!!!$ACC parallel loop collapse(2) private(II)
+( 1494)       DO JFLD=IRECV_FLD_START,IRECV_FLD_END
+( 1495)         DO JL=1,ILEN
+( 1496)           II = KINDEX(INDOFF(IRECV)+JL)
+( 1497)           IF (LLGW) THEN
+( 1498)             PGLAT(II,JFLD) = ZCOMBUFR(JL+(JFLD-IRECV_FLD_START)*ILEN,INR)
+( 1499)           ELSE
+( 1500)             PGLAT(JFLD,II) = ZCOMBUFR(JL+(JFLD-IRECV_FLD_START)*ILEN,INR)
+( 1501)           ENDIF
+( 1502)         ENDDO
+( 1503)       ENDDO
+( 1504)   ENDDO
+( 1505)   !$OMP END PARALLEL DO
+( 1506) 
+( 1507)   !!$ACC end data
+( 1508) 
+( 1509)   ! this appears to be important (otherwise, old data picked in PGLAT)
+( 1510)   ! in particular, one would have thought that above ACC copy and update on the
+( 1511)   ! device is the same as OMP loop + update device command below, but it seems not, and winds still in field index 1 from pr
+( 1512) 
+( 1513)     !$ACC update device(PGLAT)
+( 1514)     !$ACC wait
+( 1515)   
+( 1516)   !#ifdef COMVERBOSE
+( 1517)   !  call MPI_BARRIER(MPI_COMM_WORLD,IERROR)
+( 1518)   !  Tc=(TIMEF()-Tc)/1000.0_JPRBT
+( 1519)   !  !IF(irank==0) WRITE(*,*) "unpacking (trgtol) in sec: ", Tc
+( 1520)   !#endif
+( 1521) 
+( 1522)   CALL GSTATS(1603,1)
+( 1523)   
+( 1524)   IF (IBUFLENS > 0) DEALLOCATE(ZCOMBUFS)
+( 1525)   IF (IBUFLENR > 0) DEALLOCATE(ZCOMBUFR)
+( 1526)   
+( 1527)   IF (LHOOK) CALL DR_HOOK('TRGTOL',1,ZHOOK_HANDLE)
+( 1528)   
+( 1529)   END SUBROUTINE TRGTOL
+( 1530)   END MODULE TRGTOL_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 28
+
+(    1) # 1 "trgtol_mod.F90"
+(    1) MODULE TRGTOL_MOD 
+(    2)   CONTAINS
+(    3)   SUBROUTINE TRGTOL_CUDAAWARE(PGLAT,KF_FS,KF_GP,KF_SCALARS_G,KVSET,KPTRGP,&
+(    4)    &PGP,PGPUV,PGP3A,PGP3B,PGP2,LDGW)
+(    5)   
+(    6)   !**** *TRGTOL * - transposition of grid point data from column
+(    7)   !                 structure to latitudinal. Reorganize data between
+(    8)   !                 grid point calculations and direct Fourier Transform
+(    9)   
+(   10)   ! version using CUDA-aware MPI
+(   11)   
+(   12)   !     Purpose.
+(   13)   !     --------
+(   14)   
+(   15)   
+(   16)   !**   Interface.
+(   17)   !     ----------
+(   18)   !        *call* *trgtol(...)
+(   19)   
+(   20)   !        Explicit arguments :
+(   21)   !        --------------------
+(   22)   !           PGLAT    -  Latitudinal data ready for direct FFT (output)
+(   23)   !           PGP    -  Blocked grid point data    (input)
+(   24)   
+(   25)   !        Implicit arguments :
+(   26)   !        --------------------
+(   27)   
+(   28)   !     Method.
+(   29)   !     -------
+(   30)   !        See documentation
+(   31)   
+(   32)   !     Externals.
+(   33)   !     ----------
+(   34)   
+(   35)   !     Reference.
+(   36)   !     ----------
+(   37)   !        ECMWF Research Department documentation of the IFS
+(   38)   
+(   39)   !     Author.
+(   40)   !     -------
+(   41)   !        MPP Group *ECMWF*
+(   42)   
+(   43)   !     Modifications.
+(   44)   !     --------------
+(   45)   !        Original: 95-10-01
+(   46)   !        D.Dent  : 97-08-04   Reorganisation to allow
+(   47)   !                             NPRTRV to differ from NPRGPEW
+(   48)   !                : 98-06-17   add mailbox control logic (from TRLTOM)
+(   49)   !        =99-03-29= Mats Hamrud and Deborah Salmond
+(   50)   !                   JUMP in FFT's changed to 1
+(   51)   !                   KINDEX introduced and ZCOMBUF not used for same PE
+(   52)   !         01-11-23  Deborah Salmond and John Hague
+(   53)   !                    LIMP_NOOLAP Option for non-overlapping message passing
+(   54)   !                    and buffer packing
+(   55)   !         01-12-18  Peter Towers
+(   56)   !                   Improved vector performance of GTOL_PACK,GTOL_UNPACK
+(   57)   !         03-04-02  G. Radnoti: call barrier always when nproc>1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 29
+
+(   58)   !         08-01-01  G.Mozdzynski: cleanup
+(   59)   !         09-01-02  G.Mozdzynski: use non-blocking recv and send
+(   60)   !     ------------------------------------------------------------------
+(   61)   
+(   62)   
+(   63)   
+(   64)   USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   65)   USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   66)   
+(   67)   USE MPL_MODULE  ,ONLY : MPL_RECV, MPL_SEND, MPL_WAIT, JP_NON_BLOCKING_STANDARD
+(   68)   
+(   69)   USE TPM_GEN         ,ONLY : NOUT
+(   70)   USE TPM_DISTR       ,ONLY : D, NPRCIDS, NPRTRNS, MTAGGL,  &
+(   71)        &                      MYSETV, MYSETW, MYPROC, NPROC
+(   72)   USE TPM_TRANS       ,ONLY : LDIVGP, LGPNORM, LSCDERS, LUVDER, LVORGP, NGPBLKS
+(   73)   
+(   74)   USE INIGPTR_MOD     ,ONLY : INIGPTR
+(   75)   USE PE2SET_MOD      ,ONLY : PE2SET
+(   76)   !USE MYSENDSET_MOD
+(   77)   !USE MYRECVSET_MOD
+(   78)   USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   79)   !
+(   80)   
+(   81)   USE MPI
+(   82)   
+(   83)   
+(   84)   !USE MPL_MPIF
+(   85)   USE MPL_DATA_MODULE, only: MPL_COMM_OML, OML_MY_THREAD
+(   86)   USE MPL_MESSAGE_MOD
+(   87)   USE MPL_NPROC_MOD
+(   88)   USE MPL_STATS_MOD
+(   89)   USE YOMMPLSTATS
+(   90)   USE NVTX
+(   91) # 92 "trgtol_mod.F90"
+(   92)   IMPLICIT NONE
+(   93)   
+(   94)   REAL(KIND=JPRBT),INTENT(OUT)   :: PGLAT(:,:)
+(   95)   INTEGER(KIND=JPIM),INTENT(IN) :: KVSET(:)
+(   96)   INTEGER(KIND=JPIM),INTENT(IN) :: KF_FS,KF_GP
+(   97)   INTEGER(KIND=JPIM),INTENT(IN) :: KF_SCALARS_G
+(   98)   INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KPTRGP(:)
+(   99)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGP(:,:,:)
+(  100)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGPUV(:,:,:,:)
+(  101)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGP3A(:,:,:,:)
+(  102)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGP3B(:,:,:,:)
+(  103)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGP2(:,:,:)
+(  104)   LOGICAL,        OPTIONAL,INTENT(IN)     :: LDGW
+(  105)   
+(  106)   REAL(KIND=JPRBT),ALLOCATABLE :: ZCOMBUFS(:,:),ZCOMBUFR(:,:)
+(  107)   REAL(KIND=JPRBT) :: ZDUM(2)
+(  108)   
+(  109)   INTEGER(KIND=JPIM) :: ISENT    (NPROC)
+(  110)   INTEGER(KIND=JPIM) :: IRCVD    (NPROC)
+(  111)   INTEGER(KIND=JPIM) :: ISENDTOT (NPROC)
+(  112)   INTEGER(KIND=JPIM) :: IRECVTOT (NPROC)
+(  113)   INTEGER(KIND=JPIM) :: IREQ     (NPROC*2)
+(  114)   INTEGER(KIND=JPIM) :: JRECV    (NPROC)
+(  115)   INTEGER(KIND=JPIM) :: JSEND    (NPROC)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 30
+
+(  116)   
+(  117)   !     LOCAL INTEGER SCALARS
+(  118)   INTEGER(KIND=JPIM) :: IFIRST, IFIRSTLAT, IGL, IGLL, ILAST,&
+(  119)                &ILASTLAT, ILEN, JROC, IPOS, ISETA, &
+(  120)                &ISETB, IRECV, IRECVSET, &
+(  121)                &ISETV, ISEND, ISENDSET, ITAG, J, JBLK, JFLD, &
+(  122)                &JGL, JK, JL, JLOOP, ISETW,  IFLD, &
+(  123)                &II,INDOFFX,IBUFLENS,IBUFLENR,INRECV, IPROC,IFLDS, &
+(  124)                &INSEND,INS,INR,IR
+(  125)   
+(  126)   !     LOCAL LOGICAL SCALARS
+(  127)   LOGICAL   :: LLPGPUV,LLPGP3A,LLPGP3B,LLPGP2,LLPGPONLY
+(  128)   LOGICAL   :: LLUV(KF_GP),LLGP2(KF_GP),LLGP3A(KF_GP),LLGP3B(KF_GP)
+(  129)   LOGICAL :: LLDONE, LLINDER
+(  130)   INTEGER(KIND=JPIM) :: IUVLEVS(KF_GP),IUVPARS(KF_GP),IGP2PARS(KF_GP)
+(  131)   INTEGER(KIND=JPIM) :: IGP3APARS(KF_GP),IGP3ALEVS(KF_GP),IGP3BPARS(KF_GP),IGP3BLEVS(KF_GP)
+(  132)   INTEGER(KIND=JPIM) :: IUVPAR,IUVLEV,IGP2PAR,IGP3ALEV,IGP3APAR,IGP3BLEV,IGP3BPAR,IPAROFF
+(  133)   INTEGER(KIND=JPIM) :: IOFF,IOFF1,IOFFNS,IOFFEW,J1,J2
+(  134)   INTEGER(KIND=JPIM) :: KINDEX(D%NLENGTF),INDOFF(NPROC),IFLDOFF(KF_GP)
+(  135)   INTEGER(KIND=JPIM) :: ISEND_FLD_TOTAL(NPROC),ISEND_FLD_START(NPROC),ISEND_FLD_END
+(  136)   INTEGER(KIND=JPIM) :: IRECV_FLD_START,IRECV_FLD_END
+(  137)   INTEGER(KIND=JPIM) :: INUMFLDS
+(  138)   INTEGER(KIND=JPIM) :: IGPTRSEND(2,NGPBLKS,NPRTRNS)
+(  139)   INTEGER(KIND=JPIM) :: IGPTRRECV(NPRTRNS)
+(  140)   INTEGER(KIND=JPIM) :: IGPTROFF(NGPBLKS)
+(  141)   !     INTEGER FUNCTIONS
+(  142)   INTEGER(KIND=JPIM) :: IRECVCOUNT,ISENDCOUNT
+(  143)   INTEGER(KIND=JPIM) :: IJPOS(NGPBLKS),IFLDA(KF_GP),JJ,JI,IFLDT
+(  144)   REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  145)   REAL(KIND=JPRB) :: ZHOOK_HANDLE_BAR
+(  146)   
+(  147)   
+(  148)   INTEGER(KIND=JPIM), dimension(MPI_STATUS_SIZE,NPROC*2) :: ISTATUS
+(  149)   INTEGER(KIND=JPIM) :: IERROR, irank,ILASTMAX
+(  150)   LOGICAL :: LLGW
+(  151)   
+(  152)   REAL(KIND=JPRBT) :: T1, T2, TIMEF, tc
+(  153)   
+(  154)   !     ------------------------------------------------------------------
+(  155)   
+(  156)   !*       0.    Some initializations
+(  157)   !              --------------------
+(  158)   
+(  159)   IF (LHOOK) CALL DR_HOOK('TRGTOL',0,ZHOOK_HANDLE)
+(  160)   
+(  161)   LLGW = .FALSE.
+(  162)   IF (PRESENT (LDGW)) LLGW = LDGW
+(  163)   
+(  164)   CALL GSTATS(1805,0)
+(  165)   
+(  166)   LLINDER = .FALSE.
+(  167)   LLPGPUV = .FALSE.
+(  168)   LLPGP3A = .FALSE.
+(  169)   LLPGP3B = .FALSE.
+(  170)   LLPGP2  = .FALSE.
+(  171)   LLPGPONLY = .FALSE.
+(  172)   IF(PRESENT(KPTRGP))  LLINDER = .TRUE.
+(  173)   IF(PRESENT(PGP))     LLPGPONLY = .TRUE.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 31
+
+(  174)   IF(PRESENT(PGPUV))   LLPGPUV = .TRUE.
+(  175)   IF(PRESENT(PGP3A))   LLPGP3A = .TRUE.
+(  176)   IF(PRESENT(PGP3B))   LLPGP3B = .TRUE.
+(  177)   IF(PRESENT(PGP2))    LLPGP2 = .TRUE.
+(  178)   IUVPAR=0
+(  179)   IUVLEV=0
+(  180)   IOFF1=0
+(  181)   IOFFNS=KF_SCALARS_G
+(  182)   IOFFEW=2*KF_SCALARS_G
+(  183)   LLUV(:) = .FALSE.
+(  184)   IUVPARS(:) = -99
+(  185)   IUVLEVS(:) = -99
+(  186)   IF (LLPGPUV) THEN
+(  187)     IOFF=0
+(  188)     IUVLEV=UBOUND(PGPUV,2)
+(  189)     IF(LVORGP) THEN
+(  190)       IUVPAR=IUVPAR+1
+(  191)       DO J=1,IUVLEV
+(  192)         IUVLEVS(IOFF+J)=J
+(  193)         IUVPARS(IOFF+J)=IUVPAR
+(  194)         LLUV(IOFF+J)=.TRUE.
+(  195)       ENDDO
+(  196)       IOFF=IOFF+IUVLEV
+(  197)     ENDIF
+(  198)     IF(LDIVGP) THEN
+(  199)       IUVPAR=IUVPAR+1
+(  200)       DO J=1,IUVLEV
+(  201)         IUVLEVS(IOFF+J)=J
+(  202)         IUVPARS(IOFF+J)=IUVPAR
+(  203)         LLUV(IOFF+J)=.TRUE.
+(  204)       ENDDO
+(  205)       IOFF=IOFF+IUVLEV
+(  206)     ENDIF
+(  207)     DO J=1,IUVLEV
+(  208)       IUVLEVS(IOFF+J)=J
+(  209)       IUVPARS(IOFF+J)=IUVPAR+1
+(  210)       IUVLEVS(IOFF+J+IUVLEV)=J
+(  211)       IUVPARS(IOFF+J+IUVLEV)=IUVPAR+2
+(  212)     ENDDO
+(  213)     IUVPAR=IUVPAR+2
+(  214)     LLUV(IOFF+1:IOFF+2*IUVLEV)=.TRUE.
+(  215)     IOFF=IOFF+2*IUVLEV
+(  216)     IOFF1=IOFF
+(  217)     IOFFNS=IOFFNS+IOFF
+(  218)     IOFFEW=IOFFEW+IOFF
+(  219)     IOFF=IUVPAR*IUVLEV+KF_SCALARS_G
+(  220)     IF(LUVDER) THEN
+(  221)       IF(LSCDERS) IOFF=IOFF+KF_SCALARS_G
+(  222)       DO J=1,IUVLEV
+(  223)         IUVLEVS(IOFF+J)=J
+(  224)         IUVPARS(IOFF+J)=IUVPAR+1
+(  225)         LLUV(IOFF+J)=.TRUE.
+(  226)         IUVLEVS(IOFF+J+IUVLEV)=J
+(  227)         IUVPARS(IOFF+J+IUVLEV)=IUVPAR+2
+(  228)         LLUV(IOFF+J+IUVLEV)=.TRUE.
+(  229)       ENDDO
+(  230)       IUVPAR=IUVPAR+2
+(  231)       IOFF=IOFF+2*IUVLEV
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 32
+
+(  232)       IOFFEW=IOFFEW+2*IUVLEV
+(  233)     ENDIF
+(  234)   ENDIF
+(  235)   LLGP2(:)=.FALSE.
+(  236)   IF(LLPGP2) THEN
+(  237)     IOFF=IOFF1
+(  238)     IGP2PAR=UBOUND(PGP2,2)
+(  239)     IF(LSCDERS) IGP2PAR=IGP2PAR/3
+(  240)     DO J=1,IGP2PAR
+(  241)       LLGP2(J+IOFF) = .TRUE.
+(  242)       IGP2PARS(J+IOFF)=J
+(  243)     ENDDO
+(  244)     IOFF1=IOFF1+IGP2PAR
+(  245)     IF(LSCDERS) THEN
+(  246)       IOFF=IOFFNS
+(  247)       DO J=1,IGP2PAR
+(  248)         LLGP2(J+IOFF) = .TRUE.
+(  249)         IGP2PARS(J+IOFF)=J+IGP2PAR
+(  250)       ENDDO
+(  251)       IOFFNS=IOFF+IGP2PAR
+(  252)       IOFF=IOFFEW
+(  253)       DO J=1,IGP2PAR
+(  254)         LLGP2(J+IOFF) = .TRUE.
+(  255)         IGP2PARS(J+IOFF)=J+2*IGP2PAR
+(  256)       ENDDO
+(  257)       IOFFEW=IOFF+IGP2PAR
+(  258)     ENDIF
+(  259)   ENDIF
+(  260)   LLGP3A(:) = .FALSE.
+(  261)   IF(LLPGP3A) THEN
+(  262)     IGP3ALEV=UBOUND(PGP3A,2)
+(  263)     IGP3APAR=UBOUND(PGP3A,3)
+(  264)     IF(LSCDERS) IGP3APAR=IGP3APAR/3
+(  265)     IOFF=IOFF1
+(  266)     DO J1=1,IGP3APAR
+(  267)       DO J2=1,IGP3ALEV
+(  268)         LLGP3A(J2+(J1-1)*IGP3ALEV+IOFF) = .TRUE.
+(  269)         IGP3APARS(J2+(J1-1)*IGP3ALEV+IOFF)=J1
+(  270)         IGP3ALEVS(J2+(J1-1)*IGP3ALEV+IOFF)=J2
+(  271)       ENDDO
+(  272)     ENDDO
+(  273)     IPAROFF=IGP3APAR
+(  274)     IOFF1=IOFF1+IGP3APAR*IGP3ALEV
+(  275)     IF(LSCDERS) THEN
+(  276)       IOFF=IOFFNS
+(  277)       DO J1=1,IGP3APAR
+(  278)         DO J2=1,IGP3ALEV
+(  279)           LLGP3A(J2+(J1-1)*IGP3ALEV+IOFF) = .TRUE.
+(  280)           IGP3APARS(J2+(J1-1)*IGP3ALEV+IOFF)=J1+IPAROFF
+(  281)           IGP3ALEVS(J2+(J1-1)*IGP3ALEV+IOFF)=J2
+(  282)         ENDDO
+(  283)       ENDDO
+(  284)       IPAROFF=IPAROFF+IGP3APAR
+(  285)       IOFFNS=IOFFNS+IGP3APAR*IGP3ALEV
+(  286)       IOFF=IOFFEW
+(  287)       DO J1=1,IGP3APAR
+(  288)         DO J2=1,IGP3ALEV
+(  289)           LLGP3A(J2+(J1-1)*IGP3ALEV+IOFF) = .TRUE.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 33
+
+(  290)           IGP3APARS(J2+(J1-1)*IGP3ALEV+IOFF)=J1+IPAROFF
+(  291)           IGP3ALEVS(J2+(J1-1)*IGP3ALEV+IOFF)=J2
+(  292)         ENDDO
+(  293)       ENDDO
+(  294)       IOFFEW=IOFFEW+IGP3APAR*IGP3ALEV
+(  295)     ENDIF
+(  296)   ENDIF
+(  297)   LLGP3B(:) = .FALSE.
+(  298)   IF(LLPGP3B) THEN
+(  299)     IGP3BLEV=UBOUND(PGP3B,2)
+(  300)     IGP3BPAR=UBOUND(PGP3B,3)
+(  301)     IF(LSCDERS) IGP3BPAR=IGP3BPAR/3
+(  302)     IOFF=IOFF1
+(  303)     DO J1=1,IGP3BPAR
+(  304)       DO J2=1,IGP3BLEV
+(  305)         LLGP3B(J2+(J1-1)*IGP3BLEV+IOFF) = .TRUE.
+(  306)         IGP3BPARS(J2+(J1-1)*IGP3BLEV+IOFF)=J1
+(  307)         IGP3BLEVS(J2+(J1-1)*IGP3BLEV+IOFF)=J2
+(  308)       ENDDO
+(  309)     ENDDO
+(  310)     IPAROFF=IGP3BPAR
+(  311)     IOFF1=IOFF1+IGP3BPAR*IGP3BLEV
+(  312)     IF(LSCDERS) THEN
+(  313)       IOFF=IOFFNS
+(  314)       DO J1=1,IGP3BPAR
+(  315)         DO J2=1,IGP3BLEV
+(  316)           LLGP3B(J2+(J1-1)*IGP3BLEV+IOFF) = .TRUE.
+(  317)           IGP3BPARS(J2+(J1-1)*IGP3BLEV+IOFF)=J1+IPAROFF
+(  318)           IGP3BLEVS(J2+(J1-1)*IGP3BLEV+IOFF)=J2
+(  319)         ENDDO
+(  320)       ENDDO
+(  321)       IPAROFF=IPAROFF+IGP3BPAR
+(  322)       IOFFNS=IOFFNS+IGP3BPAR*IGP3BLEV
+(  323)       IOFF=IOFFEW
+(  324)       DO J1=1,IGP3BPAR
+(  325)         DO J2=1,IGP3BLEV
+(  326)           LLGP3B(J2+(J1-1)*IGP3BLEV+IOFF) = .TRUE.
+(  327)           IGP3BPARS(J2+(J1-1)*IGP3BLEV+IOFF)=J1+IPAROFF
+(  328)           IGP3BLEVS(J2+(J1-1)*IGP3BLEV+IOFF)=J2
+(  329)         ENDDO
+(  330)       ENDDO
+(  331)       IOFFEW=IOFFEW+IGP3BPAR*IGP3BLEV
+(  332)     ENDIF
+(  333)   ENDIF
+(  334)   
+(  335)   
+(  336)   CALL INIGPTR(IGPTRSEND,IGPTRRECV)
+(  337)   LLDONE = .FALSE.
+(  338)   
+(  339)   ITAG = MTAGGL
+(  340)   
+(  341)   INDOFFX  = 0
+(  342)   IBUFLENS = 0
+(  343)   IBUFLENR = 0
+(  344)   INRECV   = 0
+(  345)   INSEND   = 0
+(  346)   
+(  347)   DO JROC=1,NPROC
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 34
+
+(  348)   
+(  349)     CALL PE2SET(JROC,ISETA,ISETB,ISETW,ISETV)
+(  350)     IRECVSET = ISETA
+(  351)     ISEND = JROC
+(  352)     ISENDSET = ISETV
+(  353)     ISENT(JROC) = 0
+(  354)     IRCVD(JROC) = 0
+(  355)   
+(  356)   !             count up expected number of fields
+(  357)     IPOS = 0
+(  358)     DO JFLD=1,KF_GP
+(  359)       IF(KVSET(JFLD) == ISENDSET .OR. KVSET(JFLD) == -1) IPOS = IPOS+1
+(  360)     ENDDO
+(  361)     ISEND_FLD_TOTAL(JROC) = IPOS
+(  362)     ISENDTOT(JROC) = IGPTRRECV(ISETW)*IPOS
+(  363)   
+(  364)     IF( JROC /= MYPROC) THEN
+(  365)       IBUFLENS = MAX(IBUFLENS,ISENDTOT(JROC))
+(  366)       IF(ISENDTOT(JROC) > 0) THEN
+(  367)         INSEND = INSEND+1
+(  368)         JSEND(INSEND)=JROC
+(  369)       ENDIF
+(  370)     ENDIF
+(  371)   
+(  372)     IFIRSTLAT = MAX(D%NPTRLS(MYSETW),D%NFRSTLAT(IRECVSET))
+(  373)     ILASTLAT  = MIN(D%NPTRLS(MYSETW)+D%NULTPP(MYSETW)-1,D%NLSTLAT(IRECVSET))
+(  374)   
+(  375)     IPOS = 0
+(  376)     DO JGL=IFIRSTLAT,ILASTLAT
+(  377)       IGL  = D%NPTRFRSTLAT(IRECVSET)+JGL-D%NFRSTLAT(IRECVSET)
+(  378)       IPOS = IPOS+D%NONL(IGL,ISETB)
+(  379)     ENDDO
+(  380)   
+(  381)     IRECVTOT(JROC) = IPOS*KF_FS
+(  382)   
+(  383)     IF(IRECVTOT(JROC) > 0 .AND. MYPROC /= JROC) THEN
+(  384)       INRECV = INRECV + 1
+(  385)       JRECV(INRECV)=JROC
+(  386)     ENDIF
+(  387)   
+(  388)     IF( JROC /= MYPROC) IBUFLENR = MAX(IBUFLENR,IRECVTOT(JROC))
+(  389)   
+(  390)     IF(IPOS > 0) THEN
+(  391)       INDOFF(JROC) = INDOFFX
+(  392)       INDOFFX = INDOFFX+IPOS
+(  393)       IPOS = 0
+(  394)       DO JGL=IFIRSTLAT,ILASTLAT
+(  395)         IGL  = D%NPTRFRSTLAT(IRECVSET)+JGL-D%NFRSTLAT(IRECVSET)
+(  396)         IGLL = JGL-D%NPTRLS(MYSETW)+1
+(  397)         DO JL=D%NSTA(IGL,ISETB)+D%NSTAGTF(IGLL),&
+(  398)          &D%NSTA(IGL,ISETB)+D%NSTAGTF(IGLL)+D%NONL(IGL,ISETB)-1
+(  399)           IPOS = IPOS+1
+(  400)           KINDEX(IPOS+INDOFF(JROC)) = JL
+(  401)         ENDDO
+(  402)       ENDDO
+(  403)     ENDIF
+(  404)   
+(  405)   ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 35
+
+(  406)   
+(  407)   ISENDCOUNT=0
+(  408)   IRECVCOUNT=0
+(  409)   DO J=1,NPROC
+(  410)     ISENDCOUNT=MAX(ISENDCOUNT,ISENDTOT(J))
+(  411)     IRECVCOUNT=MAX(IRECVCOUNT,IRECVTOT(J))
+(  412)   ENDDO
+(  413)   IF (IBUFLENS > 0) ALLOCATE(ZCOMBUFS(-1:ISENDCOUNT,INSEND))
+(  414)   IF (IBUFLENR > 0) ALLOCATE(ZCOMBUFR(-1:IRECVCOUNT,INRECV))
+(  415)   
+(  416)   CALL GSTATS(1805,1)
+(  417)   
+(  418)   ! Send loop.............................................................
+(  419)   
+(  421)    !$ACC      copyin(IGPTRSEND,INDOFF,KINDEX) &
+(  422)    !$ACC      copyin(KPTRGP,LLGP3B,LLGP3A,LLGP2,LLUV) &
+(  423)    !$ACC      create(IFLDOFF,IGPTROFF) 
+(  424) # 425 "trgtol_mod.F90"
+(  425)    !$ACC data if(present(PGP))   present(PGP)   
+(  426)    !$ACC data if(present(PGPUV)) present(PGPUV) copyin(IUVLEVS,IUVPARS)
+(  427)    !$ACC data if(present(PGP2))  present(PGP2)  copyin(IGP2PARS)
+(  428)    !$ACC data if(present(PGP3A)) present(PGP3A) copyin(IGP3ALEVS,IGP3APARS)
+(  429)    !$ACC data if(present(PGP3B)) present(PGP3B) copyin(IGP3BLEVS,IGP3BPARS)
+(  430)   ! Copy local contribution
+(  431)   
+(  432)   IF(ISENDTOT(MYPROC) > 0 )THEN
+(  433)   
+(  434)     IFLDS = 0
+(  435)     DO JFLD=1,KF_GP
+(  436)       IF(KVSET(JFLD) == MYSETV .OR. KVSET(JFLD) == -1) THEN
+(  437)         IFLDS = IFLDS+1
+(  438)         IF(LLINDER) THEN
+(  439)           IFLDOFF(IFLDS) = KPTRGP(JFLD)
+(  440)         ELSE
+(  441)           IFLDOFF(IFLDS) = JFLD
+(  442)         ENDIF
+(  443)       ENDIF
+(  444)     ENDDO
+(  445)   
+(  446)     IPOS=0
+(  447)     DO JBLK=1,NGPBLKS
+(  448)       IGPTROFF(JBLK)=IPOS
+(  449)       IFIRST = IGPTRSEND(1,JBLK,MYSETW)
+(  450)       IF(IFIRST > 0) THEN
+(  451)         ILAST = IGPTRSEND(2,JBLK,MYSETW)
+(  452)         IPOS=IPOS+ILAST-IFIRST+1
+(  453)       ENDIF
+(  454)     ENDDO
+(  455)     !$ACC update device (IGPTROFF,IFLDOFF)
+(  456) # 457 "trgtol_mod.F90"
+(  457)     CALL GSTATS(1601,0)
+(  458) # 459 "trgtol_mod.F90"
+(  459)     DO JBLK=1,NGPBLKS
+(  460)       IFIRST = IGPTRSEND(1,JBLK,MYSETW)
+(  461)       IF(IFIRST > 0) THEN
+(  462)         ILAST = IGPTRSEND(2,JBLK,MYSETW)
+(  463)         IF(LLPGPONLY) THEN
+(  464)           !$ACC parallel loop tile(16,32) private (IPOS,IFLD)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 36
+
+(  465)           DO JK=IFIRST,ILAST
+(  466)             DO JFLD=1,IFLDS             
+(  467)                IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+(  468)                IFLD = IFLDOFF(JFLD)
+(  469)                IF (LLGW) THEN
+(  470)                  PGLAT(KINDEX(IPOS),JFLD) = PGP(JK,IFLD,JBLK)
+(  471)                ELSE
+(  472)                  PGLAT(JFLD,KINDEX(IPOS)) = PGP(JK,IFLD,JBLK)
+(  473)                ENDIF
+(  474)             ENDDO
+(  475)           ENDDO
+(  476)         ELSE
+(  477)           DO JFLD=1,IFLDS
+(  478)             IFLD = IFLDOFF(JFLD)
+(  479)             IF(LLUV(IFLD)) THEN
+(  480)               !$ACC parallel loop private (IPOS) default (none)
+(  481)               DO JK=IFIRST,ILAST
+(  482)                 IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+(  483)                 IF (LLGW) THEN
+(  484)                   PGLAT(KINDEX(IPOS),JFLD) = PGPUV(JK,IUVLEVS(IFLD),IUVPARS(IFLD),JBLK)
+(  485)                 ELSE
+(  486)                   PGLAT(JFLD,KINDEX(IPOS)) = PGPUV(JK,IUVLEVS(IFLD),IUVPARS(IFLD),JBLK)
+(  487)                 ENDIF
+(  488)               ENDDO
+(  489)             ELSEIF(LLGP2(IFLD)) THEN
+(  490)               !$ACC parallel loop private (IPOS) default (none)
+(  491)               DO JK=IFIRST,ILAST
+(  492)                 IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+(  493)                 IF (LLGW) THEN
+(  494)                   PGLAT(KINDEX(IPOS),JFLD) = PGP2(JK,IGP2PARS(IFLD),JBLK) 
+(  495)                 ELSE
+(  496)                   PGLAT(JFLD,KINDEX(IPOS)) = PGP2(JK,IGP2PARS(IFLD),JBLK) 
+(  497)                 ENDIF
+(  498)               ENDDO
+(  499)             ELSEIF(LLGP3A(IFLD)) THEN
+(  500)               !$ACC parallel loop private (IPOS) default (none)
+(  501)               DO JK=IFIRST,ILAST
+(  502)                 IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+(  503)                 IF (LLGW) THEN
+(  504)                   PGLAT(KINDEX(IPOS),JFLD) = PGP3A(JK,IGP3ALEVS(IFLD),IGP3APARS(IFLD),JBLK)
+(  505)                 ELSE
+(  506)                   PGLAT(JFLD,KINDEX(IPOS)) = PGP3A(JK,IGP3ALEVS(IFLD),IGP3APARS(IFLD),JBLK)
+(  507)                 ENDIF
+(  508)               ENDDO
+(  509)             ELSEIF(LLGP3B(IFLD)) THEN
+(  510)               !$ACC parallel loop private (IPOS) default (none)
+(  511)               DO JK=IFIRST,ILAST
+(  512)                 IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+(  513)                 IF (LLGW) THEN
+(  514)                   PGLAT(KINDEX(IPOS),JFLD) = PGP3B(JK,IGP3BLEVS(IFLD),IGP3BPARS(IFLD),JBLK)
+(  515)                 ELSE
+(  516)                   PGLAT(JFLD,KINDEX(IPOS)) = PGP3B(JK,IGP3BLEVS(IFLD),IGP3BPARS(IFLD),JBLK)
+(  517)                 ENDIF
+(  518)               ENDDO
+(  519)             ELSE
+(  520)               WRITE(NOUT,*)'TRLTOG_MOD: ERROR',JFLD,IFLD
+(  521)               CALL ABORT_TRANS('TRLTOG_MOD: ERROR')
+(  522)             ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 37
+
+(  523)           ENDDO
+(  524)         ENDIF
+(  525)       ENDIF
+(  526)     ENDDO
+(  527) # 528 "trgtol_mod.F90"
+(  528)     !!$OMP END PARALLEL DO
+(  529)     CALL GSTATS(1601,1)
+(  530)   
+(  531)   ENDIF
+(  532)   
+(  533)   
+(  534) # 537 "trgtol_mod.F90"
+(  537)   !....Pack loop.........................................................
+(  538)   
+(  539)   !!$acc data create(ZCOMBUFR,ZCOMBUFS)
+(  540)   !$acc enter data create(ZCOMBUFS)
+(  541)   
+(  542)   ISEND_FLD_START=1
+(  543)   CALL GSTATS(1602,0)
+(  544)   
+(  545)   
+(  546)     DO INS=1,INSEND
+(  547)       ISEND=JSEND(INS)
+(  548)       CALL PE2SET(ISEND,ISETA,ISETB,ISETW,ISETV)
+(  549)       ISENDSET = ISETV
+(  550)       ISEND_FLD_END = ISEND_FLD_TOTAL(ISEND)
+(  551)       IFLD = 0
+(  552)       IPOS = 0
+(  553)       DO JFLD=1,KF_GP
+(  554)         IF(KVSET(JFLD) == ISENDSET .OR. KVSET(JFLD) == -1 ) THEN
+(  555)           IFLD = IFLD+1
+(  556)           IFLDA(IFLD)=JFLD
+(  557)         ENDIF
+(  558)       ENDDO
+(  559)   
+(  560)       DO JBLK=1,NGPBLKS
+(  561)         IFIRST = IGPTRSEND(1,JBLK,ISETW)
+(  562)         IF(IFIRST > 0) THEN
+(  563)           ILAST = IGPTRSEND(2,JBLK,ISETW)
+(  564)           IJPOS(JBLK)=IPOS
+(  565)           IPOS=IPOS+(ILAST-IFIRST+1)
+(  566)         ENDIF
+(  567)       ENDDO
+(  568)   
+(  569)  
+(  570)       !$acc parallel loop
+(  571)       DO JJ=ISEND_FLD_START(ISEND),ISEND_FLD_END
+(  572)         IFLDT=IFLDA(JJ)
+(  573)         !$acc loop
+(  574)         DO JBLK=1,NGPBLKS
+(  575)           IFIRST = IGPTRSEND(1,JBLK,ISETW)
+(  576)           IF(IFIRST > 0) THEN
+(  577)             ILAST = IGPTRSEND(2,JBLK,ISETW)
+(  578)             IF(LLINDER) THEN
+(  579)               !$acc loop
+(  580)               DO JK=IFIRST,ILAST
+(  581)                 JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+(  582)                 ZCOMBUFS(JI,INS) = PGP(JK,IFLDT,JBLK)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 38
+
+(  583)               ENDDO
+(  584)             ELSE
+(  585)               IF(LLPGPONLY) THEN
+(  586)                 !$acc loop
+(  587)                 DO JK=IFIRST,ILAST
+(  588)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+(  589)                   ZCOMBUFS(JI,INS) = PGP(JK,IFLDT,JBLK)
+(  590)                 ENDDO
+(  591)               ELSEIF(LLUV(IFLDT)) THEN
+(  592)                 !$acc loop
+(  593)                 DO JK=IFIRST,ILAST
+(  594)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+(  595)                   ZCOMBUFS(JI,INS) = PGPUV(JK,IUVLEVS(IFLDT),IUVPARS(IFLDT),JBLK)
+(  596)                 ENDDO
+(  597)               ELSEIF(LLGP2(IFLDT)) THEN
+(  598)                 !$acc loop
+(  599)                 DO JK=IFIRST,ILAST
+(  600)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+(  601)                   ZCOMBUFS(JI,INS) = PGP2(JK,IGP2PARS(IFLDT),JBLK)
+(  602)                 ENDDO
+(  603)               ELSEIF(LLGP3A(IFLDT)) THEN
+(  604)                 !$acc loop
+(  605)                 DO JK=IFIRST,ILAST
+(  606)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+(  607)                   ZCOMBUFS(JI,INS) = PGP3A(JK,IGP3ALEVS(IFLDT),IGP3APARS(IFLDT),JBLK)
+(  608)                 ENDDO
+(  609)               ELSEIF(LLGP3B(IFLDT)) THEN
+(  610)                 !$acc loop
+(  611)                 DO JK=IFIRST,ILAST
+(  612)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+(  613)                   ZCOMBUFS(JI,INS) = PGP3B(JK,IGP3BLEVS(IFLDT),IGP3BPARS(IFLDT),JBLK)
+(  614)                 ENDDO
+(  615)               ENDIF
+(  616)             ENDIF
+(  617)           ENDIF
+(  618)         ENDDO 
+(  619)       ENDDO 
+(  620)    IPOS=(ISEND_FLD_END-ISEND_FLD_START(ISEND)+1)*IPOS
+(  621)    ZCOMBUFS(-1,INS) = 1
+(  622)    ZCOMBUFS(0,INS) = IFLD
+(  623)    !$acc update device (ZCOMBUFS(-1,INS),ZCOMBUFS(0,INS)) 
+(  624)    ENDDO
+(  625) # 626 "trgtol_mod.F90"
+(  626)   !$acc end data
+(  627)   !$acc end data
+(  628)   !$acc end data
+(  629)   !$acc end data
+(  630)   !$acc end data
+(  631)   !$acc end data
+(  632)   
+(  633)   
+(  634) # 639 "trgtol_mod.F90"
+(  639)   
+(  640)   CALL GSTATS(1602,1)
+(  641)   
+(  642)   IF (LHOOK) CALL DR_HOOK('TRGTOL_BAR',0,ZHOOK_HANDLE_BAR)
+(  643)   CALL GSTATS_BARRIER(761)
+(  644)   IF (LHOOK) CALL DR_HOOK('TRGTOL_BAR',1,ZHOOK_HANDLE_BAR)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 39
+
+(  645)   
+(  646)   IF(.NOT.LGPNORM)THEN
+(  647)     CALL GSTATS(803,0)
+(  648)   ELSE
+(  649)     CALL GSTATS(804,0)
+(  650)   ENDIF
+(  651) # 653 "trgtol_mod.F90"
+(  653)  
+(  654) # 656 "trgtol_mod.F90"
+(  656)   
+(  657) # 662 "trgtol_mod.F90"
+(  662)   
+(  663)   T1=TIMEF()
+(  664)   
+(  665)   
+(  666) # 669 "trgtol_mod.F90"
+(  669)   !$acc enter data create(ZCOMBUFR)
+(  670)   
+(  671)   !$acc host_data use_device(ZCOMBUFR,ZCOMBUFS)
+(  672)   
+(  673)   IR=0
+(  674) # 676 "trgtol_mod.F90"
+(  676)   call nvtxStartRange("MPI communication") 
+(  677) # 678 "trgtol_mod.F90"
+(  678)   !  Receive loop.........................................................
+(  679)   DO INR=1,INRECV
+(  680)     IR=IR+1
+(  681)     IRECV=JRECV(INR)
+(  682)     !CALL MPL_RECV(ZCOMBUFR(-1:IRECVTOT(IRECV),INR), &
+(  683)     !  & KSOURCE=NPRCIDS(IRECV), &
+(  684)     !  & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IREQ(IR), &
+(  685)     !  & KTAG=ITAG,CDSTRING='TRLTOG:' )
+(  686)   
+(  687)     IERROR=0
+(  688)     CALL MPI_IRECV(ZCOMBUFR(-1:IRECVTOT(IRECV),INR),SIZE(ZCOMBUFR(-1:IRECVTOT(IRECV),INR)),INT(MPI_REAL8),NPRCIDS(IRECV)-1,ITAG,MPL_COMM_OML(OML_MY_THREAD()),IREQ(IR),IERROR)
+(  689)   
+(  690)   ENDDO
+(  691)   
+(  692)   !....Send loop.........................................................
+(  693)   DO INS=1,INSEND
+(  694)     IR=IR+1
+(  695)     ISEND=JSEND(INS)
+(  696)     !CALL MPL_SEND(ZCOMBUFS(-1:ISENDTOT(ISEND),INS),KDEST=NPRCIDS(ISEND), &
+(  697)     ! & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IREQ(IR), &
+(  698)     ! & KTAG=ITAG,CDSTRING='TRGTOL:' )
+(  699)     IERROR=0
+(  700)     CALL MPI_ISEND(ZCOMBUFS(-1:ISENDTOT(ISEND),INS),SIZE(ZCOMBUFS(-1:ISENDTOT(ISEND),INS)),INT(MPI_REAL8),NPRCIDS(ISEND)-1,ITAG,MPL_COMM_OML(OML_MY_THREAD()),IREQ(IR),IERROR)
+(  701)   
+(  702)   
+(  703)   ENDDO
+(  704)   
+(  705)   IF(IR > 0) THEN
+(  706)     !CALL MPL_WAIT(ZDUM,KREQUEST=IREQ(1:IR), &
+(  707)     !  & CDSTRING='TRGTOL: WAIT FOR SENDS AND RECEIVES')
+(  708)      IERROR=0
+(  709)      CALL MPI_WAITALL(IR,IREQ,ISTATUS,IERROR)
+(  710)   
+(  711)   ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 40
+
+(  712)   !$acc end host_data 
+(  713)  
+(  714)   call nvtxEndRange
+(  715) # 716 "trgtol_mod.F90"
+(  716)   
+(  717) # 721 "trgtol_mod.F90"
+(  721)   T2=TIMEF()
+(  722)   call MPI_BARRIER(MPI_COMM_WORLD,IERROR)
+(  723)   T2=(TIMEF()-T2)/1000.0_JPRBT
+(  724)   
+(  725) # 727 "trgtol_mod.F90"
+(  727)   
+(  728)   T1=(TIMEF()-T1)/1000.0_JPRBT
+(  729)   
+(  730) # 732 "trgtol_mod.F90"
+(  732)   
+(  733)   !$acc exit data delete(ZCOMBUFS)
+(  734)   
+(  735)   IF(.NOT.LGPNORM)THEN
+(  736)     CALL GSTATS(803,1)
+(  737)   ELSE
+(  738)     CALL GSTATS(804,1)
+(  739)   ENDIF
+(  740)   !CALL GSTATS_BARRIER2(761)
+(  741)   
+(  742)   
+(  743) # 746 "trgtol_mod.F90"
+(  746)   !  Unpack loop.........................................................
+(  747)   
+(  748)   CALL GSTATS(1603,0)
+(  750)     !$acc&     present(ZCOMBUFR,PGLAT)
+(  751)     !$acc update host(ZCOMBUFR(-1:0, :))
+(  752)     DO INR=1,INRECV
+(  753)       IRECV_FLD_START = ZCOMBUFR(-1,INR)
+(  754)       IRECV_FLD_END   = ZCOMBUFR(0,INR)
+(  755)       !$acc parallel loop collapse(2)
+(  756)       DO JFLD=IRECV_FLD_START,IRECV_FLD_END
+(  757)         DO JL=1,IBUFLENR/KF_FS
+(  758)          IRECV=JRECV(INR)
+(  759)          ILEN = IRECVTOT(IRECV)/KF_FS
+(  760)          if (JL .gt. ILEN) cycle
+(  761)          II = KINDEX(INDOFF(IRECV)+JL)
+(  762)          IF (LLGW) THEN
+(  763)            PGLAT(II,JFLD) = ZCOMBUFR(JL+(JFLD-IRECV_FLD_START)*ILEN,INR)
+(  764)          ELSE
+(  765)            PGLAT(JFLD,II) = ZCOMBUFR(JL+(JFLD-IRECV_FLD_START)*ILEN,INR)
+(  766)          ENDIF
+(  767)        ENDDO
+(  768)       ENDDO
+(  769)       IPOS = ILEN*(IRECV_FLD_END-IRECV_FLD_START+1)
+(  770)     ENDDO
+(  771)     !$acc end data
+(  772)   
+(  773)   
+(  774) # 778 "trgtol_mod.F90"
+(  778)   
+(  779)   CALL GSTATS(1603,1)
+(  780)   
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 41
+
+(  781)   !$acc exit data delete(ZCOMBUFR)
+(  782)   
+(  783)   IF (IBUFLENS > 0) DEALLOCATE(ZCOMBUFS)
+(  784)   IF (IBUFLENR > 0) DEALLOCATE(ZCOMBUFR)
+(  785)   
+(  786)   IF (LHOOK) CALL DR_HOOK('TRGTOL',1,ZHOOK_HANDLE)
+(  787)   
+(  788)   END SUBROUTINE TRGTOL_CUDAAWARE
+(  789) # 790 "trgtol_mod.F90"
+(  790)   SUBROUTINE TRGTOL(PGLAT,KF_FS,KF_GP,KF_SCALARS_G,KVSET,KPTRGP,&
+(  791)    &PGP,PGPUV,PGP3A,PGP3B,PGP2,LDGW)
+(  792)   
+(  793)   !**** *TRGTOL * - transposition of grid point data from column
+(  794)   !                 structure to latitudinal. Reorganize data between
+(  795)   !                 grid point calculations and direct Fourier Transform
+(  796)   
+(  797)   !     Purpose.
+(  798)   !     --------
+(  799)   
+(  800)   
+(  801)   !**   Interface.
+(  802)   !     ----------
+(  803)   !        *call* *trgtol(...)
+(  804)   
+(  805)   !        Explicit arguments :
+(  806)   !        --------------------
+(  807)   !           PGLAT    -  Latitudinal data ready for direct FFT (output)
+(  808)   !           PGP    -  Blocked grid point data    (input)
+(  809)   
+(  810)   !        Implicit arguments :
+(  811)   !        --------------------
+(  812)   
+(  813)   !     Method.
+(  814)   !     -------
+(  815)   !        See documentation
+(  816)   
+(  817)   !     Externals.
+(  818)   !     ----------
+(  819)   
+(  820)   !     Reference.
+(  821)   !     ----------
+(  822)   !        ECMWF Research Department documentation of the IFS
+(  823)   
+(  824)   !     Author.
+(  825)   !     -------
+(  826)   !        MPP Group *ECMWF*
+(  827)   
+(  828)   !     Modifications.
+(  829)   !     --------------
+(  830)   !        Original: 95-10-01
+(  831)   !        D.Dent  : 97-08-04   Reorganisation to allow
+(  832)   !                             NPRTRV to differ from NPRGPEW
+(  833)   !                : 98-06-17   add mailbox control logic (from TRLTOM)
+(  834)   !        =99-03-29= Mats Hamrud and Deborah Salmond
+(  835)   !                   JUMP in FFT's changed to 1
+(  836)   !                   KINDEX introduced and ZCOMBUF not used for same PE
+(  837)   !         01-11-23  Deborah Salmond and John Hague
+(  838)   !                    LIMP_NOOLAP Option for non-overlapping message passing
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 42
+
+(  839)   !                    and buffer packing
+(  840)   !         01-12-18  Peter Towers
+(  841)   !                   Improved vector performance of GTOL_PACK,GTOL_UNPACK
+(  842)   !         03-04-02  G. Radnoti: call barrier always when nproc>1
+(  843)   !         08-01-01  G.Mozdzynski: cleanup
+(  844)   !         09-01-02  G.Mozdzynski: use non-blocking recv and send
+(  845)   !     ------------------------------------------------------------------
+(  846)   
+(  847)   
+(  848)   
+(  849)   USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(  850)   USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(  851)   
+(  852)   USE MPL_MODULE  ,ONLY : MPL_RECV, MPL_SEND, MPL_WAIT, JP_NON_BLOCKING_STANDARD
+(  853)   
+(  854)   USE TPM_GEN         ,ONLY : NOUT
+(  855)   USE TPM_DISTR       ,ONLY : D, NPRCIDS, NPRTRNS, MTAGGL,  &
+(  856)        &                      MYSETV, MYSETW, MYPROC, NPROC
+(  857)   USE TPM_TRANS       ,ONLY : LDIVGP, LGPNORM, LSCDERS, LUVDER, LVORGP, NGPBLKS
+(  858)   
+(  859)   USE INIGPTR_MOD     ,ONLY : INIGPTR
+(  860)   USE PE2SET_MOD      ,ONLY : PE2SET
+(  861)   !USE MYSENDSET_MOD
+(  862)   !USE MYRECVSET_MOD
+(  863)   USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(  864)   !
+(  865)   USE MPI
+(  866)   
+(  867)   IMPLICIT NONE
+(  868)   
+(  869)   REAL(KIND=JPRBT),INTENT(OUT)   :: PGLAT(:,:)
+(  870)   INTEGER(KIND=JPIM),INTENT(IN) :: KVSET(:)
+(  871)   INTEGER(KIND=JPIM),INTENT(IN) :: KF_FS,KF_GP
+(  872)   INTEGER(KIND=JPIM),INTENT(IN) :: KF_SCALARS_G
+(  873)   INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KPTRGP(:)
+(  874)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGP(:,:,:)
+(  875)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGPUV(:,:,:,:)
+(  876)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGP3A(:,:,:,:)
+(  877)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGP3B(:,:,:,:)
+(  878)   REAL(KIND=JPRB),OPTIONAL,INTENT(IN)     :: PGP2(:,:,:)
+(  879)   LOGICAL,        OPTIONAL,INTENT(IN)     :: LDGW
+(  880)   
+(  881)   REAL(KIND=JPRBT),ALLOCATABLE :: ZCOMBUFS(:,:),ZCOMBUFR(:,:)
+(  882)   REAL(KIND=JPRBT) :: ZDUM(2)
+(  883)   
+(  884)   INTEGER(KIND=JPIM) :: ISENT    (NPROC)
+(  885)   INTEGER(KIND=JPIM) :: IRCVD    (NPROC)
+(  886)   INTEGER(KIND=JPIM) :: ISENDTOT (NPROC)
+(  887)   INTEGER(KIND=JPIM) :: IRECVTOT (NPROC)
+(  888)   INTEGER(KIND=JPIM) :: IREQ     (NPROC*2)
+(  889)   INTEGER(KIND=JPIM) :: JRECV    (NPROC)
+(  890)   INTEGER(KIND=JPIM) :: JSEND    (NPROC)
+(  891)   
+(  892)   !     LOCAL INTEGER SCALARS
+(  893)   INTEGER(KIND=JPIM) :: IFIRST, IFIRSTLAT, IGL, IGLL, ILAST,&
+(  894)                &ILASTLAT, ILEN, JROC, IPOS, ISETA, &
+(  895)                &ISETB, IRECV, IRECVSET, &
+(  896)                &ISETV, ISEND, ISENDSET, ITAG, J, JBLK, JFLD, &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 43
+
+(  897)                &JGL, JK, JL, JLOOP, ISETW,  IFLD, &
+(  898)                &II,INDOFFX,IBUFLENS,IBUFLENR,INRECV, IPROC,IFLDS, &
+(  899)                &INSEND,INS,INR,IR, iunit
+(  900)   
+(  901)   !     LOCAL LOGICAL SCALARS
+(  902)   LOGICAL   :: LLPGPUV,LLPGP3A,LLPGP3B,LLPGP2,LLPGPONLY
+(  903)   LOGICAL   :: LLUV(KF_GP),LLGP2(KF_GP),LLGP3A(KF_GP),LLGP3B(KF_GP)
+(  904)   LOGICAL :: LLDONE, LLINDER
+(  905)   INTEGER(KIND=JPIM) :: IUVLEVS(KF_GP),IUVPARS(KF_GP),IGP2PARS(KF_GP)
+(  906)   INTEGER(KIND=JPIM) :: IGP3APARS(KF_GP),IGP3ALEVS(KF_GP),IGP3BPARS(KF_GP),IGP3BLEVS(KF_GP)
+(  907)   INTEGER(KIND=JPIM) :: IUVPAR,IUVLEV,IGP2PAR,IGP3ALEV,IGP3APAR,IGP3BLEV,IGP3BPAR,IPAROFF
+(  908)   INTEGER(KIND=JPIM) :: IOFF,IOFF1,IOFFNS,IOFFEW,J1,J2
+(  909)   INTEGER(KIND=JPIM) :: KINDEX(D%NLENGTF),INDOFF(NPROC),IFLDOFF(MAX(KF_GP,KF_FS))
+(  910)   INTEGER(KIND=JPIM) :: ISEND_FLD_TOTAL(NPROC),ISEND_FLD_START(NPROC),ISEND_FLD_END
+(  911)   INTEGER(KIND=JPIM) :: IRECV_FLD_START,IRECV_FLD_END
+(  912)   INTEGER(KIND=JPIM) :: INUMFLDS
+(  913)   INTEGER(KIND=JPIM) :: IGPTRSEND(2,NGPBLKS,NPRTRNS)
+(  914)   INTEGER(KIND=JPIM) :: IGPTRRECV(NPRTRNS)
+(  915)   INTEGER(KIND=JPIM) :: IGPTROFF(NGPBLKS)
+(  916)   !     INTEGER FUNCTIONS
+(  917)   INTEGER(KIND=JPIM) :: IRECVCOUNT,ISENDCOUNT
+(  918)   INTEGER(KIND=JPIM) :: IJPOS(NGPBLKS),IFLDA(KF_GP),JJ,JI,IFLDT
+(  919)   REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  920)   REAL(KIND=JPRB) :: ZHOOK_HANDLE_BAR
+(  921)   
+(  922)   INTEGER(KIND=JPIM) :: IERROR, irank
+(  923)   LOGICAL :: LLGW
+(  924)   
+(  925)   REAL(KIND=JPRBT) :: TIMEF, tc
+(  926)   
+(  927)   !     ------------------------------------------------------------------
+(  928)   
+(  929)   !*       0.    Some initializations
+(  930)   !              --------------------
+(  931)   
+(  932)   IF (LHOOK) CALL DR_HOOK('TRGTOL',0,ZHOOK_HANDLE)
+(  933) # 934 "trgtol_mod.F90"
+(  934)   LLGW = .FALSE.
+(  935)   IF (PRESENT (LDGW)) LLGW = LDGW
+(  936) # 937 "trgtol_mod.F90"
+(  937)   iunit=300+myproc
+(  938) # 939 "trgtol_mod.F90"
+(  939)   CALL GSTATS(1805,0)
+(  940)   
+(  941)   LLINDER = .FALSE.
+(  942)   LLPGPUV = .FALSE.
+(  943)   LLPGP3A = .FALSE.
+(  944)   LLPGP3B = .FALSE.
+(  945)   LLPGP2  = .FALSE.
+(  946)   LLPGPONLY = .FALSE.
+(  947)   IF(PRESENT(KPTRGP))  LLINDER = .TRUE.
+(  948)   IF(PRESENT(PGP))     LLPGPONLY = .TRUE.
+(  949)   IF(PRESENT(PGPUV))   LLPGPUV = .TRUE.
+(  950)   IF(PRESENT(PGP3A))   LLPGP3A = .TRUE.
+(  951)   IF(PRESENT(PGP3B))   LLPGP3B = .TRUE.
+(  952)   IF(PRESENT(PGP2))    LLPGP2 = .TRUE.
+(  953)   IUVPAR=0
+(  954)   IUVLEV=0
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 44
+
+(  955)   IOFF1=0
+(  956)   IOFFNS=KF_SCALARS_G
+(  957)   IOFFEW=2*KF_SCALARS_G
+(  958)   LLUV(:) = .FALSE.
+(  959)   IUVPARS(:) = -99
+(  960)   IUVLEVS(:) = -99
+(  961)   IF (LLPGPUV) THEN
+(  962)     IOFF=0
+(  963)     IUVLEV=UBOUND(PGPUV,2)
+(  964)     IF(LVORGP) THEN
+(  965)       IUVPAR=IUVPAR+1
+(  966)       DO J=1,IUVLEV
+(  967)         IUVLEVS(IOFF+J)=J
+(  968)         IUVPARS(IOFF+J)=IUVPAR
+(  969)         LLUV(IOFF+J)=.TRUE.
+(  970)       ENDDO
+(  971)       IOFF=IOFF+IUVLEV
+(  972)     ENDIF
+(  973)     IF(LDIVGP) THEN
+(  974)       IUVPAR=IUVPAR+1
+(  975)       DO J=1,IUVLEV
+(  976)         IUVLEVS(IOFF+J)=J
+(  977)         IUVPARS(IOFF+J)=IUVPAR
+(  978)         LLUV(IOFF+J)=.TRUE.
+(  979)       ENDDO
+(  980)       IOFF=IOFF+IUVLEV
+(  981)     ENDIF
+(  982)     DO J=1,IUVLEV
+(  983)       IUVLEVS(IOFF+J)=J
+(  984)       IUVPARS(IOFF+J)=IUVPAR+1
+(  985)       IUVLEVS(IOFF+J+IUVLEV)=J
+(  986)       IUVPARS(IOFF+J+IUVLEV)=IUVPAR+2
+(  987)     ENDDO
+(  988)     IUVPAR=IUVPAR+2
+(  989)     LLUV(IOFF+1:IOFF+2*IUVLEV)=.TRUE.
+(  990)     IOFF=IOFF+2*IUVLEV
+(  991)     IOFF1=IOFF
+(  992)     IOFFNS=IOFFNS+IOFF
+(  993)     IOFFEW=IOFFEW+IOFF
+(  994)     IOFF=IUVPAR*IUVLEV+KF_SCALARS_G
+(  995)     IF(LUVDER) THEN
+(  996)       IF(LSCDERS) IOFF=IOFF+KF_SCALARS_G
+(  997)       DO J=1,IUVLEV
+(  998)         IUVLEVS(IOFF+J)=J
+(  999)         IUVPARS(IOFF+J)=IUVPAR+1
+( 1000)         LLUV(IOFF+J)=.TRUE.
+( 1001)         IUVLEVS(IOFF+J+IUVLEV)=J
+( 1002)         IUVPARS(IOFF+J+IUVLEV)=IUVPAR+2
+( 1003)         LLUV(IOFF+J+IUVLEV)=.TRUE.
+( 1004)       ENDDO
+( 1005)       IUVPAR=IUVPAR+2
+( 1006)       IOFF=IOFF+2*IUVLEV
+( 1007)       IOFFEW=IOFFEW+2*IUVLEV
+( 1008)     ENDIF
+( 1009)   ENDIF
+( 1010)   LLGP2(:)=.FALSE.
+( 1011)   IF(LLPGP2) THEN
+( 1012)     IOFF=IOFF1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 45
+
+( 1013)     IGP2PAR=UBOUND(PGP2,2)
+( 1014)     IF(LSCDERS) IGP2PAR=IGP2PAR/3
+( 1015)     DO J=1,IGP2PAR
+( 1016)       LLGP2(J+IOFF) = .TRUE.
+( 1017)       IGP2PARS(J+IOFF)=J
+( 1018)     ENDDO
+( 1019)     IOFF1=IOFF1+IGP2PAR
+( 1020)     IF(LSCDERS) THEN
+( 1021)       IOFF=IOFFNS
+( 1022)       DO J=1,IGP2PAR
+( 1023)         LLGP2(J+IOFF) = .TRUE.
+( 1024)         IGP2PARS(J+IOFF)=J+IGP2PAR
+( 1025)       ENDDO
+( 1026)       IOFFNS=IOFF+IGP2PAR
+( 1027)       IOFF=IOFFEW
+( 1028)       DO J=1,IGP2PAR
+( 1029)         LLGP2(J+IOFF) = .TRUE.
+( 1030)         IGP2PARS(J+IOFF)=J+2*IGP2PAR
+( 1031)       ENDDO
+( 1032)       IOFFEW=IOFF+IGP2PAR
+( 1033)     ENDIF
+( 1034)   ENDIF
+( 1035)   LLGP3A(:) = .FALSE.
+( 1036)   IF(LLPGP3A) THEN
+( 1037)     IGP3ALEV=UBOUND(PGP3A,2)
+( 1038)     IGP3APAR=UBOUND(PGP3A,3)
+( 1039)     IF(LSCDERS) IGP3APAR=IGP3APAR/3
+( 1040)     IOFF=IOFF1
+( 1041)     DO J1=1,IGP3APAR
+( 1042)       DO J2=1,IGP3ALEV
+( 1043)         LLGP3A(J2+(J1-1)*IGP3ALEV+IOFF) = .TRUE.
+( 1044)         IGP3APARS(J2+(J1-1)*IGP3ALEV+IOFF)=J1
+( 1045)         IGP3ALEVS(J2+(J1-1)*IGP3ALEV+IOFF)=J2
+( 1046)       ENDDO
+( 1047)     ENDDO
+( 1048)     IPAROFF=IGP3APAR
+( 1049)     IOFF1=IOFF1+IGP3APAR*IGP3ALEV
+( 1050)     IF(LSCDERS) THEN
+( 1051)       IOFF=IOFFNS
+( 1052)       DO J1=1,IGP3APAR
+( 1053)         DO J2=1,IGP3ALEV
+( 1054)           LLGP3A(J2+(J1-1)*IGP3ALEV+IOFF) = .TRUE.
+( 1055)           IGP3APARS(J2+(J1-1)*IGP3ALEV+IOFF)=J1+IPAROFF
+( 1056)           IGP3ALEVS(J2+(J1-1)*IGP3ALEV+IOFF)=J2
+( 1057)         ENDDO
+( 1058)       ENDDO
+( 1059)       IPAROFF=IPAROFF+IGP3APAR
+( 1060)       IOFFNS=IOFFNS+IGP3APAR*IGP3ALEV
+( 1061)       IOFF=IOFFEW
+( 1062)       DO J1=1,IGP3APAR
+( 1063)         DO J2=1,IGP3ALEV
+( 1064)           LLGP3A(J2+(J1-1)*IGP3ALEV+IOFF) = .TRUE.
+( 1065)           IGP3APARS(J2+(J1-1)*IGP3ALEV+IOFF)=J1+IPAROFF
+( 1066)           IGP3ALEVS(J2+(J1-1)*IGP3ALEV+IOFF)=J2
+( 1067)         ENDDO
+( 1068)       ENDDO
+( 1069)       IOFFEW=IOFFEW+IGP3APAR*IGP3ALEV
+( 1070)     ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 46
+
+( 1071)   ENDIF
+( 1072)   LLGP3B(:) = .FALSE.
+( 1073)   IF(LLPGP3B) THEN
+( 1074)     IGP3BLEV=UBOUND(PGP3B,2)
+( 1075)     IGP3BPAR=UBOUND(PGP3B,3)
+( 1076)     IF(LSCDERS) IGP3BPAR=IGP3BPAR/3
+( 1077)     IOFF=IOFF1
+( 1078)     DO J1=1,IGP3BPAR
+( 1079)       DO J2=1,IGP3BLEV
+( 1080)         LLGP3B(J2+(J1-1)*IGP3BLEV+IOFF) = .TRUE.
+( 1081)         IGP3BPARS(J2+(J1-1)*IGP3BLEV+IOFF)=J1
+( 1082)         IGP3BLEVS(J2+(J1-1)*IGP3BLEV+IOFF)=J2
+( 1083)       ENDDO
+( 1084)     ENDDO
+( 1085)     IPAROFF=IGP3BPAR
+( 1086)     IOFF1=IOFF1+IGP3BPAR*IGP3BLEV
+( 1087)     IF(LSCDERS) THEN
+( 1088)       IOFF=IOFFNS
+( 1089)       DO J1=1,IGP3BPAR
+( 1090)         DO J2=1,IGP3BLEV
+( 1091)           LLGP3B(J2+(J1-1)*IGP3BLEV+IOFF) = .TRUE.
+( 1092)           IGP3BPARS(J2+(J1-1)*IGP3BLEV+IOFF)=J1+IPAROFF
+( 1093)           IGP3BLEVS(J2+(J1-1)*IGP3BLEV+IOFF)=J2
+( 1094)         ENDDO
+( 1095)       ENDDO
+( 1096)       IPAROFF=IPAROFF+IGP3BPAR
+( 1097)       IOFFNS=IOFFNS+IGP3BPAR*IGP3BLEV
+( 1098)       IOFF=IOFFEW
+( 1099)       DO J1=1,IGP3BPAR
+( 1100)         DO J2=1,IGP3BLEV
+( 1101)           LLGP3B(J2+(J1-1)*IGP3BLEV+IOFF) = .TRUE.
+( 1102)           IGP3BPARS(J2+(J1-1)*IGP3BLEV+IOFF)=J1+IPAROFF
+( 1103)           IGP3BLEVS(J2+(J1-1)*IGP3BLEV+IOFF)=J2
+( 1104)         ENDDO
+( 1105)       ENDDO
+( 1106)       IOFFEW=IOFFEW+IGP3BPAR*IGP3BLEV
+( 1107)     ENDIF
+( 1108)   ENDIF
+( 1109)   
+( 1110)   
+( 1111)   CALL INIGPTR(IGPTRSEND,IGPTRRECV)
+( 1112)   LLDONE = .FALSE.
+( 1113)   
+( 1114)   ITAG = MTAGGL
+( 1115)   
+( 1116)   INDOFFX  = 0
+( 1117)   IBUFLENS = 0
+( 1118)   IBUFLENR = 0
+( 1119)   INRECV   = 0
+( 1120)   INSEND   = 0
+( 1121)   
+( 1122)   DO JROC=1,NPROC
+( 1123)   
+( 1124)     CALL PE2SET(JROC,ISETA,ISETB,ISETW,ISETV)
+( 1125)     IRECVSET = ISETA
+( 1126)     ISEND = JROC
+( 1127)     ISENDSET = ISETV
+( 1128)     ISENT(JROC) = 0
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 47
+
+( 1129)     IRCVD(JROC) = 0
+( 1130)   
+( 1131)   !             count up expected number of fields
+( 1132)     IPOS = 0
+( 1133)     DO JFLD=1,KF_GP
+( 1134)       IF(KVSET(JFLD) == ISENDSET .OR. KVSET(JFLD) == -1) IPOS = IPOS+1
+( 1135)     ENDDO
+( 1136)     ISEND_FLD_TOTAL(JROC) = IPOS
+( 1137)     ISENDTOT(JROC) = IGPTRRECV(ISETW)*IPOS
+( 1138)   
+( 1139)     IF( JROC /= MYPROC) THEN
+( 1140)       IBUFLENS = MAX(IBUFLENS,ISENDTOT(JROC))
+( 1141)       IF(ISENDTOT(JROC) > 0) THEN
+( 1142)         INSEND = INSEND+1
+( 1143)         JSEND(INSEND)=JROC
+( 1144)       ENDIF
+( 1145)     ENDIF
+( 1146)   
+( 1147)     IFIRSTLAT = MAX(D%NPTRLS(MYSETW),D%NFRSTLAT(IRECVSET))
+( 1148)     ILASTLAT  = MIN(D%NPTRLS(MYSETW)+D%NULTPP(MYSETW)-1,D%NLSTLAT(IRECVSET))
+( 1149)   
+( 1150)     IPOS = 0
+( 1151)     DO JGL=IFIRSTLAT,ILASTLAT
+( 1152)       IGL  = D%NPTRFRSTLAT(IRECVSET)+JGL-D%NFRSTLAT(IRECVSET)
+( 1153)       IPOS = IPOS+D%NONL(IGL,ISETB)
+( 1154)     ENDDO
+( 1155)   
+( 1156)     IRECVTOT(JROC) = IPOS*KF_FS
+( 1157)   
+( 1158)     IF(IRECVTOT(JROC) > 0 .AND. MYPROC /= JROC) THEN
+( 1159)       INRECV = INRECV + 1
+( 1160)       JRECV(INRECV)=JROC
+( 1161)     ENDIF
+( 1162)   
+( 1163)     IF( JROC /= MYPROC) IBUFLENR = MAX(IBUFLENR,IRECVTOT(JROC))
+( 1164)   
+( 1165)     IF(IPOS > 0) THEN
+( 1166)       INDOFF(JROC) = INDOFFX
+( 1167)       INDOFFX = INDOFFX+IPOS
+( 1168)       IPOS = 0
+( 1169)       DO JGL=IFIRSTLAT,ILASTLAT
+( 1170)         IGL  = D%NPTRFRSTLAT(IRECVSET)+JGL-D%NFRSTLAT(IRECVSET)
+( 1171)         IGLL = JGL-D%NPTRLS(MYSETW)+1
+( 1172)         DO JL=D%NSTA(IGL,ISETB)+D%NSTAGTF(IGLL),&
+( 1173)          &D%NSTA(IGL,ISETB)+D%NSTAGTF(IGLL)+D%NONL(IGL,ISETB)-1
+( 1174)           IPOS = IPOS+1
+( 1175)           KINDEX(IPOS+INDOFF(JROC)) = JL
+( 1176)         ENDDO
+( 1177)       ENDDO
+( 1178)     ENDIF
+( 1179)   
+( 1180)   ENDDO
+( 1181)   
+( 1182)   ISENDCOUNT=0
+( 1183)   IRECVCOUNT=0
+( 1184)   DO J=1,NPROC
+( 1185)     ISENDCOUNT=MAX(ISENDCOUNT,ISENDTOT(J))
+( 1186)     IRECVCOUNT=MAX(IRECVCOUNT,IRECVTOT(J))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 48
+
+( 1187)   ENDDO
+( 1188)   IF (IBUFLENS > 0) ALLOCATE(ZCOMBUFS(-1:ISENDCOUNT,INSEND))
+( 1189)   IF (IBUFLENR > 0) ALLOCATE(ZCOMBUFR(-1:IRECVCOUNT,INRECV))
+( 1190)   CALL GSTATS(1805,1)
+( 1191)  
+( 1192)   ! Send loop.............................................................
+( 1193)   
+( 1194)   ! Copy local contribution
+( 1195)   
+( 1196)   IF(ISENDTOT(MYPROC) > 0 )THEN
+( 1197)     !!IF( NPROC > 1 )THEN
+( 1198)     !!$ACC if(present(PGPUV)) update host(PGPUV) async(1)
+( 1199)     !!$ACC if(present(PGP))   update host(PGP) async(1)
+( 1200)     !!$ACC if(present(PGP2))  update host(PGP2) async(1)
+( 1201)     !!$ACC if(present(PGP3a)) update host(PGP3a) async(1)
+( 1202)     !!$ACC if(present(PGP3b)) update host(PGP3b) async(1)
+( 1203)     !!ENDIF
+( 1204)     IFLDS = 0
+( 1205)     DO JFLD=1,KF_GP
+( 1206)       IF(KVSET(JFLD) == MYSETV .OR. KVSET(JFLD) == -1) THEN
+( 1207)         IFLDS = IFLDS+1
+( 1208)         IF(LLINDER) THEN
+( 1209)           IFLDOFF(IFLDS) = KPTRGP(JFLD)
+( 1210)         ELSE
+( 1211)           IFLDOFF(IFLDS) = JFLD
+( 1212)         ENDIF
+( 1213)       ENDIF
+( 1214)     ENDDO
+( 1215)   
+( 1216)     IPOS=0
+( 1217)     DO JBLK=1,NGPBLKS
+( 1218)       IGPTROFF(JBLK)=IPOS
+( 1219)       IFIRST = IGPTRSEND(1,JBLK,MYSETW)
+( 1220)       IF(IFIRST > 0) THEN
+( 1221)         ILAST = IGPTRSEND(2,JBLK,MYSETW)
+( 1222)         IPOS=IPOS+ILAST-IFIRST+1
+( 1223)       ENDIF
+( 1224)     ENDDO
+( 1225) # 1226 "trgtol_mod.F90"
+( 1226)     CALL GSTATS(1601,0)
+( 1227)   
+( 1228) # 1230 "trgtol_mod.F90"
+( 1230)   !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JFLD,JBLK,JK,IFLD,IPOS,IFIRST,ILAST)
+( 1231)   
+( 1232)    !!$ACC data &
+( 1233)    !!$ACC& copyin(IGPTRSEND,IUVLEVS,iuvpars,IGP2PARS,IGP3ALEVS,IGP3BLEVS,IGP3APARS,IGP3BPARS) &
+( 1234)    !!$ACC& copyin(IFLDOFF,INDOFF,IGPTROFF,KINDEX) &
+( 1235)    !!$ACC& copyin(LLUV,LLGP2,LLGP3A,LLGP3B)
+( 1236)    !!$ACC data if(present(PGPUV)) copyin(PGPUV)
+( 1237)    !!$ACC data if(present(PGP2))  copyin(PGP2)
+( 1238)    !!$ACC data if(present(PGP3a)) copyin(PGP3a)
+( 1239)    !!$ACC data if(present(PGP3b)) copyin(PGP3b)
+( 1240)    !!$ACC data if(present(PGP))   copyin(PGP)
+( 1241) # 1242 "trgtol_mod.F90"
+( 1242)   DO JBLK=1,NGPBLKS
+( 1243)       IFIRST = IGPTRSEND(1,JBLK,MYSETW)
+( 1244)       IF(IFIRST > 0) THEN
+( 1245)         ILAST = IGPTRSEND(2,JBLK,MYSETW)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 49
+
+( 1246)         IF(LLPGPONLY) THEN
+( 1247)           !!$ACC parallel loop private(IPOS)
+( 1248)           DO JK=IFIRST,ILAST
+( 1249)             IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+( 1250)             !!$ACC loop private(IFLD)
+( 1251)             DO JFLD=1,IFLDS
+( 1252)               IFLD = IFLDOFF(JFLD)
+( 1253)               IF (LLGW) THEN
+( 1254)                 PGLAT(KINDEX(IPOS),JFLD) = PGP(JK,IFLD,JBLK)
+( 1255)               ELSE
+( 1256)                 PGLAT(JFLD,KINDEX(IPOS)) = PGP(JK,IFLD,JBLK)
+( 1257)               ENDIF
+( 1258)             ENDDO
+( 1259)           ENDDO
+( 1260)         ELSE
+( 1261)           DO JFLD=1,IFLDS
+( 1262)             IFLD = IFLDOFF(JFLD)
+( 1263)             IF(LLUV(IFLD)) THEN
+( 1264)               !!$acc parallel loop private(ipos)
+( 1265)               DO JK=IFIRST,ILAST
+( 1266)                 IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+( 1267)                 IF (LLGW) THEN
+( 1268)                   PGLAT(KINDEX(IPOS),JFLD) = PGPUV(JK,IUVLEVS(IFLD),IUVPARS(IFLD),JBLK)
+( 1269)                 ELSE
+( 1270)                   PGLAT(JFLD,KINDEX(IPOS)) = PGPUV(JK,IUVLEVS(IFLD),IUVPARS(IFLD),JBLK)
+( 1271)                 ENDIF
+( 1272)                 !if(jfld<=5 .and. kindex(ipos)<5) write(nout,*)'trgtol: ipos=',ipos,' idx=',kindex(ipos),' jk=',jk,' lev=',iuvlevs(ifld),' pars=',iuvpars(ifld),' pglat=',PGLAT(JFLD,KINDEX(IPOS))
+( 1273)                 !if( jfld.eq.1 ) write(nout,*)'trgtoluv: ',kindex(ipos),' lev=',iuvlevs(ifld),' pars=',iuvpars(ifld),' pglat=',PGLAT(JFLD,KINDEX(IPOS))
+( 1274)               ENDDO
+( 1275)             ELSEIF(LLGP2(IFLD)) THEN
+( 1276)               !!$acc parallel loop private(ipos)
+( 1277)               DO JK=IFIRST,ILAST
+( 1278)                 IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+( 1279)                 IF (LLGW) THEN
+( 1280)                   PGLAT(KINDEX(IPOS),JFLD) = PGP2(JK,IGP2PARS(IFLD),JBLK)
+( 1281)                 ELSE
+( 1282)                   PGLAT(JFLD,KINDEX(IPOS)) = PGP2(JK,IGP2PARS(IFLD),JBLK)
+( 1283)                 ENDIF
+( 1284)               ENDDO
+( 1285)             ELSEIF(LLGP3A(IFLD)) THEN
+( 1286)               !!$acc parallel loop private(ipos)
+( 1287)               DO JK=IFIRST,ILAST
+( 1288)                 IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+( 1289)                 IF (LLGW) THEN
+( 1290)                   PGLAT(KINDEX(IPOS),JFLD) = PGP3A(JK,IGP3ALEVS(IFLD),IGP3APARS(IFLD),JBLK)
+( 1291)                 ELSE
+( 1292)                   PGLAT(JFLD,KINDEX(IPOS)) = PGP3A(JK,IGP3ALEVS(IFLD),IGP3APARS(IFLD),JBLK)
+( 1293)                 ENDIF
+( 1294)                 !if( jk.eq.ifirst ) write(iunit,*)'trgtol: ',JK,JFLD,IFLD,kindex(ipos),' lev=',IGP3ALEVS(ifld),' pars=',IGP3APARS(ifld),' pglat=',PGLAT(JFLD,KINDEX(IPOS))
+( 1295)               ENDDO
+( 1296)             ELSEIF(LLGP3B(IFLD)) THEN
+( 1297)               !!$acc parallel loop private(ipos)
+( 1298)               DO JK=IFIRST,ILAST
+( 1299)                 IPOS = INDOFF(MYPROC)+IGPTROFF(JBLK)+JK-IFIRST+1
+( 1300)                 IF (LLGW) THEN
+( 1301)                   PGLAT(KINDEX(IPOS),JFLD) = PGP3B(JK,IGP3BLEVS(IFLD),IGP3BPARS(IFLD),JBLK)
+( 1302)                 ELSE
+( 1303)                   PGLAT(JFLD,KINDEX(IPOS)) = PGP3B(JK,IGP3BLEVS(IFLD),IGP3BPARS(IFLD),JBLK)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 50
+
+( 1304)                 ENDIF
+( 1305)               ENDDO
+( 1306)             ELSE
+( 1307)               CALL ABORT_TRANS('TRLTOG_MOD: ERROR')
+( 1308)             ENDIF
+( 1309)           ENDDO
+( 1310)         ENDIF
+( 1311)       ENDIF
+( 1312)     ENDDO
+( 1313)     !$OMP END PARALLEL DO
+( 1314)     !!$ACC end data
+( 1315)     !!$ACC end data
+( 1316)     !!$ACC end data
+( 1317)     !!$ACC end data
+( 1318)     !!$ACC end data
+( 1319)     !!$ACC end data
+( 1320)     CALL GSTATS(1601,1)
+( 1321)   
+( 1322)   ENDIF
+( 1323)   !!!!$ACC update device(PGLAT)
+( 1324) # 1325 "trgtol_mod.F90"
+( 1325)   
+( 1326) # 1329 "trgtol_mod.F90"
+( 1329)   !....Pack loop.........................................................
+( 1330)   
+( 1331)   ISEND_FLD_START=1
+( 1332)   CALL GSTATS(1602,0)
+( 1333)   !!IF( NPROC > 1 )THEN
+( 1334)     !!$ACC wait(1)
+( 1335)     !!$ACC update host(PGLAT)
+( 1336)   !!ENDIF
+( 1337)   !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(IFLDT,JBLK,IFIRST,ILAST,JK,JJ,JI,&
+( 1338)   !$OMP& INS,ISEND,ISETA,ISETB,ISETW,ISETV,ISENDSET,ISEND_FLD_END,IFLD,IPOS,&
+( 1339)   !$OMP& IFLDA,JFLD,IJPOS)
+( 1340)     DO INS=1,INSEND
+( 1341)       ISEND=JSEND(INS)
+( 1342)       CALL PE2SET(ISEND,ISETA,ISETB,ISETW,ISETV)
+( 1343)       ISENDSET = ISETV
+( 1344)       ISEND_FLD_END = ISEND_FLD_TOTAL(ISEND)
+( 1345)       IFLD = 0
+( 1346)       IPOS = 0
+( 1347)       DO JFLD=1,KF_GP
+( 1348)         IF(KVSET(JFLD) == ISENDSET .OR. KVSET(JFLD) == -1 ) THEN
+( 1349)           IFLD = IFLD+1
+( 1350)           IFLDA(IFLD)=JFLD
+( 1351)         ENDIF
+( 1352)       ENDDO
+( 1353)   
+( 1354)       DO JBLK=1,NGPBLKS
+( 1355)         IFIRST = IGPTRSEND(1,JBLK,ISETW)
+( 1356)         IF(IFIRST > 0) THEN
+( 1357)           ILAST = IGPTRSEND(2,JBLK,ISETW)
+( 1358)           IJPOS(JBLK)=IPOS
+( 1359)           IPOS=IPOS+(ILAST-IFIRST+1)
+( 1360)         ENDIF
+( 1361)       ENDDO
+( 1362)   
+( 1363)   
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 51
+
+( 1364)       DO JJ=ISEND_FLD_START(ISEND),ISEND_FLD_END
+( 1365)         IFLDT=IFLDA(JJ)
+( 1366)         DO JBLK=1,NGPBLKS
+( 1367)           IFIRST = IGPTRSEND(1,JBLK,ISETW)
+( 1368)           IF(IFIRST > 0) THEN
+( 1369)             ILAST = IGPTRSEND(2,JBLK,ISETW)
+( 1370)             IF(LLINDER) THEN
+( 1371)               DO JK=IFIRST,ILAST
+( 1372)                 JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+( 1373)                 ZCOMBUFS(JI,INS) = PGP(JK,KPTRGP(IFLDT),JBLK)
+( 1374)               ENDDO
+( 1375)             ELSE
+( 1376)               IF(LLPGPONLY) THEN
+( 1377)                 DO JK=IFIRST,ILAST
+( 1378)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+( 1379)                   ZCOMBUFS(JI,INS) = PGP(JK,IFLDT,JBLK)
+( 1380)                 ENDDO
+( 1381)               ELSEIF(LLUV(IFLDT)) THEN
+( 1382)                 DO JK=IFIRST,ILAST
+( 1383)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+( 1384)                   ZCOMBUFS(JI,INS) = PGPUV(JK,IUVLEVS(IFLDT),IUVPARS(IFLDT),JBLK)
+( 1385)                 ENDDO
+( 1386)               ELSEIF(LLGP2(IFLDT)) THEN
+( 1387)                 DO JK=IFIRST,ILAST
+( 1388)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+( 1389)                   ZCOMBUFS(JI,INS) = PGP2(JK,IGP2PARS(IFLDT),JBLK)
+( 1390)                 ENDDO
+( 1391)               ELSEIF(LLGP3A(IFLDT)) THEN
+( 1392)                 DO JK=IFIRST,ILAST
+( 1393)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+( 1394)                   ZCOMBUFS(JI,INS) = PGP3A(JK,IGP3ALEVS(IFLDT),IGP3APARS(IFLDT),JBLK)
+( 1395)                 ENDDO
+( 1396)               ELSEIF(LLGP3B(IFLDT)) THEN
+( 1397)                 DO JK=IFIRST,ILAST
+( 1398)                   JI=(JJ-ISEND_FLD_START(ISEND))*IPOS+IJPOS(JBLK)+JK-IFIRST+1
+( 1399)                   ZCOMBUFS(JI,INS) = PGP3B(JK,IGP3BLEVS(IFLDT),IGP3BPARS(IFLDT),JBLK)
+( 1400)                 ENDDO
+( 1401)               ENDIF
+( 1402)             ENDIF
+( 1403)           ENDIF
+( 1404)         ENDDO
+( 1405)       ENDDO
+( 1406)   
+( 1407)       IPOS=(ISEND_FLD_END-ISEND_FLD_START(ISEND)+1)*IPOS
+( 1408)       ZCOMBUFS(-1,INS) = 1
+( 1409)       ZCOMBUFS(0,INS) = IFLD
+( 1410)     ENDDO
+( 1411)   !$OMP END PARALLEL DO
+( 1412)   
+( 1413) # 1418 "trgtol_mod.F90"
+( 1418)   
+( 1419)   CALL GSTATS(1602,1)
+( 1420)   
+( 1421)   IF (LHOOK) CALL DR_HOOK('TRGTOL_BAR',0,ZHOOK_HANDLE_BAR)
+( 1422)   CALL GSTATS_BARRIER(761)
+( 1423)   IF (LHOOK) CALL DR_HOOK('TRGTOL_BAR',1,ZHOOK_HANDLE_BAR)
+( 1424)   
+( 1425)   IF(.NOT.LGPNORM)THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 52
+
+( 1426)     CALL GSTATS(803,0)
+( 1427)   ELSE
+( 1428)     CALL GSTATS(804,0)
+( 1429)   ENDIF
+( 1430)   IR=0
+( 1431)   
+( 1432)   
+( 1433) # 1436 "trgtol_mod.F90"
+( 1436)   !  Receive loop.........................................................
+( 1437)   DO INR=1,INRECV
+( 1438)     IR=IR+1
+( 1439)     IRECV=JRECV(INR)
+( 1440)     CALL MPL_RECV(ZCOMBUFR(-1:IRECVTOT(IRECV),INR), &
+( 1441)       & KSOURCE=NPRCIDS(IRECV), &
+( 1442)       & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IREQ(IR), &
+( 1443)       & KTAG=ITAG,CDSTRING='TRLTOG:' )
+( 1444)   !print*,irank,size(ZCOMBUFR(-1:IRECVTOT(IRECV),INR))
+( 1445)   ENDDO
+( 1446)   
+( 1447)   !....Send loop.........................................................
+( 1448)   DO INS=1,INSEND
+( 1449)     IR=IR+1
+( 1450)     ISEND=JSEND(INS)
+( 1451)     CALL MPL_SEND(ZCOMBUFS(-1:ISENDTOT(ISEND),INS),KDEST=NPRCIDS(ISEND), &
+( 1452)      & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IREQ(IR), &
+( 1453)      & KTAG=ITAG,CDSTRING='TRGTOL:' )
+( 1454)   ENDDO
+( 1455)   
+( 1456)   IF(IR > 0) THEN
+( 1457)     CALL MPL_WAIT(KREQUEST=IREQ(1:IR), &
+( 1458)       & CDSTRING='TRGTOL: WAIT FOR SENDS AND RECEIVES')
+( 1459)   ENDIF
+( 1460)   
+( 1461)   !#ifdef COMVERBOSE
+( 1462)   !  call MPI_BARRIER(MPI_COMM_WORLD,IERROR)
+( 1463)   !  Tc=(TIMEF()-Tc)/1000.0_JPRBT
+( 1464)   !  !IF(irank==0) WRITE(*,*) "non-CUDA-aware isend/irecv (trgtol) in sec: ", Tc
+( 1465)   !#endif
+( 1466)   
+( 1467)   IF(.NOT.LGPNORM)THEN
+( 1468)     CALL GSTATS(803,1)
+( 1469)   ELSE
+( 1470)     CALL GSTATS(804,1)
+( 1471)   ENDIF
+( 1472)   CALL GSTATS_BARRIER2(761)
+( 1473)   
+( 1474)   !#ifdef COMVERBOSE
+( 1475)   !  call MPI_BARRIER(MPI_COMM_WORLD,IERROR)
+( 1476)   !  Tc=TIMEF()
+( 1477)   !#endif
+( 1478)   !  Unpack loop.........................................................
+( 1479)   
+( 1480)   CALL GSTATS(1603,0)
+( 1481) # 1482 "trgtol_mod.F90"
+( 1482)   !!$ACC data &
+( 1483)   !!$ACC present(PGLAT) &
+( 1484)   !!$ACC copyin(ZCOMBUFR(-1:,:),JRECV,IRECVTOT) &
+( 1485)   !!$ACC copyin(INDOFF,KINDEX)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:44      page 53
+
+( 1486) # 1487 "trgtol_mod.F90"
+( 1487)   !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JL,II,JFLD,INR,IRECV,ILEN,IRECV_FLD_START,IRECV_FLD_END,IPOS)
+( 1488)   DO INR=1,INRECV
+( 1489)       IRECV=JRECV(INR)
+( 1490)       ILEN = IRECVTOT(IRECV)/KF_FS
+( 1491)       IRECV_FLD_START = ZCOMBUFR(-1,INR)
+( 1492)       IRECV_FLD_END   = ZCOMBUFR(0,INR)
+( 1493)       !!!!!$ACC parallel loop collapse(2) private(II)
+( 1494)       DO JFLD=IRECV_FLD_START,IRECV_FLD_END
+( 1495)         DO JL=1,ILEN
+( 1496)           II = KINDEX(INDOFF(IRECV)+JL)
+( 1497)           IF (LLGW) THEN
+( 1498)             PGLAT(II,JFLD) = ZCOMBUFR(JL+(JFLD-IRECV_FLD_START)*ILEN,INR)
+( 1499)           ELSE
+( 1500)             PGLAT(JFLD,II) = ZCOMBUFR(JL+(JFLD-IRECV_FLD_START)*ILEN,INR)
+( 1501)           ENDIF
+( 1502)         ENDDO
+( 1503)       ENDDO
+( 1504)   ENDDO
+( 1505)   !$OMP END PARALLEL DO
+( 1506) # 1507 "trgtol_mod.F90"
+( 1507)   !!$ACC end data
+( 1508) # 1509 "trgtol_mod.F90"
+( 1509)   ! this appears to be important (otherwise, old data picked in PGLAT)
+( 1510)   ! in particular, one would have thought that above ACC copy and update on the
+( 1511)   ! device is the same as OMP loop + update device command below, but it seems not, and winds still in field index 1 from prev inv_trans !!!
+( 1512) # 1513 "trgtol_mod.F90"
+( 1513)     !$ACC update device(PGLAT)
+( 1514)     !$ACC wait
+( 1515)   
+( 1516)   !#ifdef COMVERBOSE
+( 1517)   !  call MPI_BARRIER(MPI_COMM_WORLD,IERROR)
+( 1518)   !  Tc=(TIMEF()-Tc)/1000.0_JPRBT
+( 1519)   !  !IF(irank==0) WRITE(*,*) "unpacking (trgtol) in sec: ", Tc
+( 1520)   !#endif
+( 1521) # 1522 "trgtol_mod.F90"
+( 1522)   CALL GSTATS(1603,1)
+( 1523)   
+( 1524)   IF (IBUFLENS > 0) DEALLOCATE(ZCOMBUFS)
+( 1525)   IF (IBUFLENR > 0) DEALLOCATE(ZCOMBUFR)
+( 1526)   
+( 1527)   IF (LHOOK) CALL DR_HOOK('TRGTOL',1,ZHOOK_HANDLE)
+( 1528)   
+( 1529)   END SUBROUTINE TRGTOL
+( 1530)   END MODULE TRGTOL_MOD

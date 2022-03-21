@@ -1,0 +1,490 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:29      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: ledirad_mod.F90
+
+(    1) MODULE LEDIRAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE LEDIRAD(KM,KMLOC,KFC,KIFC,KDGLU,KLED2,PAIA,PSIA,POA1)
+(    4) 
+(    5) !**** *LEDIRAD* - Direct Legendre transform.
+(    6) 
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Direct Legendre tranform of state variables.
+(   10) 
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        CALL LEDIRAD(...)
+(   14) 
+(   15) !        Explicit arguments :  KM - zonal wavenumber
+(   16) !        --------------------  KFC - number of field to transform
+(   17) !                              PAIA - antisymmetric part of Fourier
+(   18) !                              fields for zonal wavenumber KM
+(   19) !                              PSIA - symmetric part of Fourier
+(   20) !                              fields for zonal wavenumber KM
+(   21) !                              POA1 -  spectral
+(   22) !                              fields for zonal wavenumber KM
+(   23) !                              PLEPO - Legendre polonomials
+(   24) 
+(   25) !        Implicit arguments :  None.
+(   26) !        --------------------
+(   27) 
+(   28) !     Method.
+(   29) !     -------
+(   30) 
+(   31) !     Externals.   MXMAOP - matrix multiply
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:29      page 2
+
+(   32) !     ----------
+(   33) 
+(   34) !     Reference.
+(   35) !     ----------
+(   36) !        ECMWF Research Department documentation of the IFS
+(   37) 
+(   38) !     Author.
+(   39) !     -------
+(   40) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   41) 
+(   42) !     Modifications.
+(   43) !     --------------
+(   44) !        Original : 88-01-28
+(   45) !        Modified : 91-07-01 Philippe Courtier/Mats Hamrud - Rewrite
+(   46) !                            for uv formulation
+(   47) !        Modified : 93-03-19 D. Giard - NTMAX instead of NSMAX
+(   48) !        Modified : 04/06/99 D.Salmond : change order of AIA and SIA
+(   49) !        Modified ! 16/10/12 J.Hague : DR_HOOK round calls to DGEMM:
+(   50) !     ------------------------------------------------------------------
+(   51) 
+(   52) USE PARKIND1  ,ONLY : JPIM     ,JPRBT     ,JPRD
+(   53) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   54) 
+(   55) USE TPM_DIM         ,ONLY : R
+(   56) USE TPM_GEOMETRY    ,ONLY : G
+(   57) !USE TPM_TRANS
+(   58) !
+(   59) USE TPM_FLT
+(   60) USE TPM_FIELDS
+(   61) USE TPM_DISTR
+(   62) USE BUTTERFLY_ALG_MOD
+(   63) 
+(   64) IMPLICIT NONE
+(   65) 
+(   66) 
+(   67) !     DUMMY ARGUMENTS
+(   68) INTEGER(KIND=JPIM), INTENT(IN)  :: KM
+(   69) INTEGER(KIND=JPIM), INTENT(IN)  :: KMLOC
+(   70) INTEGER(KIND=JPIM), INTENT(IN)  :: KFC
+(   71) INTEGER(KIND=JPIM), INTENT(IN)  :: KIFC
+(   72) INTEGER(KIND=JPIM), INTENT(IN)  :: KDGLU
+(   73) INTEGER(KIND=JPIM), INTENT(IN)  :: KLED2
+(   74) 
+(   75) REAL(KIND=JPRBT),    INTENT(OUT)  :: PSIA(:,:),   PAIA(:,:)
+(   76) REAL(KIND=JPRBT),    INTENT(IN)   :: POA1(:,:)
+(   77) 
+(   78) INTEGER(KIND=JPIM) :: IA, ILA, ILS, IS, ISKIP, ISL, J, JK,JGL,J1
+(   79) INTEGER(KIND=JPIM) :: IF,ITHRESHOLD
+(   80) REAL(KIND=JPRBT)    :: ZB(KDGLU,KIFC), ZCA((R%NTMAX-KM+2)/2,KIFC), ZCS((R%NTMAX-KM+3)/2,KIFC)
+(   81) LOGICAL, PARAMETER :: LLDOUBLE = (JPRD == JPRBT)
+(   82) CHARACTER(LEN=1) :: CLX
+(   83) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   84) 
+(   85) !     ------------------------------------------------------------------
+(   86) 
+(   87) !*       1.       PERFORM LEGENDRE TRANFORM.
+(   88) !                 --------------------------
+(   89) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:29      page 3
+
+(   90) !*       1.1      PREPARATIONS.
+(   91) 
+(   92) CLX = 'S'
+(   93) IF (LLDOUBLE) CLX = 'D'
+(   94) 
+(   95) IA  = 1+MOD(R%NTMAX-KM+2,2)
+(   96) IS  = 1+MOD(R%NTMAX-KM+1,2)
+(   97) ILA = (R%NTMAX-KM+2)/2
+(   98) ILS = (R%NTMAX-KM+3)/2
+(   99) ISL = MAX(R%NDGNH-G%NDGLU(KM)+1,1)
+(  100) 
+(  101) IF(KM == 0)THEN
+(  102)   ISKIP = 2
+(  103)   DO JGL=ISL,R%NDGNH
+(  104)     DO J1=2,KFC,2
+(  105)       PSIA(J1,JGL)=0.0_JPRBT
+(  106)       PAIA(J1,JGL)=0.0_JPRBT
+(  107)     ENDDO
+(  108)   ENDDO
+(  109) ELSE
+(  110)   ISKIP = 1
+(  111) ENDIF
+(  112) 
+(  113) 
+(  114) IF (KIFC > 0 .AND. KDGLU > 0 ) THEN
+(  115) 
+(  116)   ITHRESHOLD=S%ITHRESHOLD
+(  117)  
+(  118) !*       1. ANTISYMMETRIC PART.
+(  119) 
+(  120)   IF=0
+(  121)   DO JK=1,KFC,ISKIP
+(  122)     IF=IF+1
+(  123)     DO J=1,ILA
+(  124)       ZCA(J,IF) = POA1(IA+(J-1)*2,JK) 
+(  125)     ENDDO
+(  126)   ENDDO
+(  127)   
+(  128)   IF(ILA <= ITHRESHOLD .OR. .NOT.S%LUSEFLT) THEN
+(  129)      IF (LHOOK) CALL DR_HOOK('LE_'//CLX//'GEMM_1',0,ZHOOK_HANDLE)
+(  130)      IF(LLDOUBLE)THEN
+(  131)         CALL DGEMM('N','N',KDGLU,KIFC,ILA,1.0_JPRBT,S%FA(KMLOC)%RPNMA,KDGLU,&
+(  132)              &ZCA,ILA,0._JPRBT,ZB,KDGLU)
+(  133)      ELSE
+(  134)         CALL SGEMM('N','N',KDGLU,KIFC,ILA,1.0_JPRBT,S%FA(KMLOC)%RPNMA,KDGLU,&
+(  135)              &ZCA,ILA,0._JPRBT,ZB,KDGLU)
+(  136)      END IF
+(  137)      IF (LHOOK) CALL DR_HOOK('LE_'//CLX//'GEMM_1',1,ZHOOK_HANDLE)
+(  138) 
+(  139)   ELSE
+(  140) 
+(  141)     CALL MULT_BUTM('N',S%FA(KMLOC)%YBUT_STRUCT_A,KIFC,ZCA,ZB)
+(  142) 
+(  143)   ENDIF
+(  144) 
+(  145)   IF=0
+(  146)   DO JK=1,KFC,ISKIP
+(  147)     IF=IF+1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:29      page 4
+
+(  148)     DO J=1,KDGLU
+(  149)       PAIA(JK,ISL+J-1) = ZB(J,IF)*F%RW(ISL+J-1)
+(  150)     ENDDO
+(  151)   ENDDO
+(  152) 
+(  153)   
+(  154) !*       1.3      SYMMETRIC PART.
+(  155) 
+(  156)   IF=0
+(  157)   DO JK=1,KFC,ISKIP
+(  158)     IF=IF+1
+(  159)     DO J=1,ILS
+(  160)       ZCS(J,IF) = POA1(IS+(J-1)*2,JK)
+(  161)     ENDDO
+(  162)   ENDDO
+(  163)   
+(  164)   
+(  165)   IF(ILS <= ITHRESHOLD .OR. .NOT.S%LUSEFLT) THEN
+(  166) 
+(  167)     IF (LHOOK) CALL DR_HOOK('LE_'//CLX//'GEMM_2',0,ZHOOK_HANDLE)
+(  168)     IF(LLDOUBLE)THEN
+(  169)        CALL DGEMM('N','N',KDGLU,KIFC,ILS,1.0_JPRBT,S%FA(KMLOC)%RPNMS,KDGLU,&
+(  170)             &ZCS,ILS,0._JPRBT,ZB,KDGLU)
+(  171)     ELSE
+(  172)        CALL SGEMM('N','N',KDGLU,KIFC,ILS,1.0_JPRBT,S%FA(KMLOC)%RPNMS,KDGLU,&
+(  173)             &ZCS,ILS,0._JPRBT,ZB,KDGLU)
+(  174) 
+(  175)     END IF
+(  176)     IF (LHOOK) CALL DR_HOOK('LE_'//CLX//'GEMM_2',1,ZHOOK_HANDLE)
+(  177)     
+(  178)   ELSE
+(  179) 
+(  180)     CALL MULT_BUTM('N',S%FA(KMLOC)%YBUT_STRUCT_S,KIFC,ZCS,ZB)
+(  181)     
+(  182)   ENDIF
+(  183) 
+(  184)   IF=0
+(  185)   DO JK=1,KFC,ISKIP
+(  186)     IF=IF+1
+(  187)     DO J=1,KDGLU
+(  188)       PSIA(JK,ISL+J-1) = ZB(J,IF)*F%RW(ISL+J-1)
+(  189)     ENDDO
+(  190)   ENDDO
+(  191)   
+(  192) ENDIF
+(  193) 
+(  194) !     ------------------------------------------------------------------
+(  195) 
+(  196) END SUBROUTINE LEDIRAD
+(  197) END MODULE LEDIRAD_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:29      page 5
+
+(    1) # 1 "ledirad_mod.F90"
+(    1) MODULE LEDIRAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE LEDIRAD(KM,KMLOC,KFC,KIFC,KDGLU,KLED2,PAIA,PSIA,POA1)
+(    4) # 5 "ledirad_mod.F90"
+(    5) !**** *LEDIRAD* - Direct Legendre transform.
+(    6) # 7 "ledirad_mod.F90"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Direct Legendre tranform of state variables.
+(   10) # 11 "ledirad_mod.F90"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        CALL LEDIRAD(...)
+(   14) # 15 "ledirad_mod.F90"
+(   15) !        Explicit arguments :  KM - zonal wavenumber
+(   16) !        --------------------  KFC - number of field to transform
+(   17) !                              PAIA - antisymmetric part of Fourier
+(   18) !                              fields for zonal wavenumber KM
+(   19) !                              PSIA - symmetric part of Fourier
+(   20) !                              fields for zonal wavenumber KM
+(   21) !                              POA1 -  spectral
+(   22) !                              fields for zonal wavenumber KM
+(   23) !                              PLEPO - Legendre polonomials
+(   24) # 25 "ledirad_mod.F90"
+(   25) !        Implicit arguments :  None.
+(   26) !        --------------------
+(   27) # 28 "ledirad_mod.F90"
+(   28) !     Method.
+(   29) !     -------
+(   30) # 31 "ledirad_mod.F90"
+(   31) !     Externals.   MXMAOP - matrix multiply
+(   32) !     ----------
+(   33) # 34 "ledirad_mod.F90"
+(   34) !     Reference.
+(   35) !     ----------
+(   36) !        ECMWF Research Department documentation of the IFS
+(   37) # 38 "ledirad_mod.F90"
+(   38) !     Author.
+(   39) !     -------
+(   40) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   41) # 42 "ledirad_mod.F90"
+(   42) !     Modifications.
+(   43) !     --------------
+(   44) !        Original : 88-01-28
+(   45) !        Modified : 91-07-01 Philippe Courtier/Mats Hamrud - Rewrite
+(   46) !                            for uv formulation
+(   47) !        Modified : 93-03-19 D. Giard - NTMAX instead of NSMAX
+(   48) !        Modified : 04/06/99 D.Salmond : change order of AIA and SIA
+(   49) !        Modified ! 16/10/12 J.Hague : DR_HOOK round calls to DGEMM:
+(   50) !     ------------------------------------------------------------------
+(   51) # 52 "ledirad_mod.F90"
+(   52) USE PARKIND1  ,ONLY : JPIM     ,JPRBT     ,JPRD
+(   53) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   54) # 55 "ledirad_mod.F90"
+(   55) USE TPM_DIM         ,ONLY : R
+(   56) USE TPM_GEOMETRY    ,ONLY : G
+(   57) !USE TPM_TRANS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:29      page 6
+
+(   58) !
+(   59) USE TPM_FLT
+(   60) USE TPM_FIELDS
+(   61) USE TPM_DISTR
+(   62) USE BUTTERFLY_ALG_MOD
+(   63) # 64 "ledirad_mod.F90"
+(   64) IMPLICIT NONE
+(   65) # 67 "ledirad_mod.F90"
+(   67) !     DUMMY ARGUMENTS
+(   68) INTEGER(KIND=JPIM), INTENT(IN)  :: KM
+(   69) INTEGER(KIND=JPIM), INTENT(IN)  :: KMLOC
+(   70) INTEGER(KIND=JPIM), INTENT(IN)  :: KFC
+(   71) INTEGER(KIND=JPIM), INTENT(IN)  :: KIFC
+(   72) INTEGER(KIND=JPIM), INTENT(IN)  :: KDGLU
+(   73) INTEGER(KIND=JPIM), INTENT(IN)  :: KLED2
+(   74) # 75 "ledirad_mod.F90"
+(   75) REAL(KIND=JPRBT),    INTENT(OUT)  :: PSIA(:,:),   PAIA(:,:)
+(   76) REAL(KIND=JPRBT),    INTENT(IN)   :: POA1(:,:)
+(   77) # 78 "ledirad_mod.F90"
+(   78) INTEGER(KIND=JPIM) :: IA, ILA, ILS, IS, ISKIP, ISL, J, JK,JGL,J1
+(   79) INTEGER(KIND=JPIM) :: IF,ITHRESHOLD
+(   80) REAL(KIND=JPRBT)    :: ZB(KDGLU,KIFC), ZCA((R%NTMAX-KM+2)/2,KIFC), ZCS((R%NTMAX-KM+3)/2,KIFC)
+(   81) LOGICAL, PARAMETER :: LLDOUBLE = (JPRD == JPRBT)
+(   82) CHARACTER(LEN=1) :: CLX
+(   83) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   84) # 85 "ledirad_mod.F90"
+(   85) !     ------------------------------------------------------------------
+(   86) # 87 "ledirad_mod.F90"
+(   87) !*       1.       PERFORM LEGENDRE TRANFORM.
+(   88) !                 --------------------------
+(   89) # 90 "ledirad_mod.F90"
+(   90) !*       1.1      PREPARATIONS.
+(   91) # 92 "ledirad_mod.F90"
+(   92) CLX = 'S'
+(   93) IF (LLDOUBLE) CLX = 'D'
+(   94) # 95 "ledirad_mod.F90"
+(   95) IA  = 1+MOD(R%NTMAX-KM+2,2)
+(   96) IS  = 1+MOD(R%NTMAX-KM+1,2)
+(   97) ILA = (R%NTMAX-KM+2)/2
+(   98) ILS = (R%NTMAX-KM+3)/2
+(   99) ISL = MAX(R%NDGNH-G%NDGLU(KM)+1,1)
+(  100) # 101 "ledirad_mod.F90"
+(  101) IF(KM == 0)THEN
+(  102)   ISKIP = 2
+(  103)   DO JGL=ISL,R%NDGNH
+(  104)     DO J1=2,KFC,2
+(  105)       PSIA(J1,JGL)=0.0_JPRBT
+(  106)       PAIA(J1,JGL)=0.0_JPRBT
+(  107)     ENDDO
+(  108)   ENDDO
+(  109) ELSE
+(  110)   ISKIP = 1
+(  111) ENDIF
+(  112) # 114 "ledirad_mod.F90"
+(  114) IF (KIFC > 0 .AND. KDGLU > 0 ) THEN
+(  115) # 116 "ledirad_mod.F90"
+(  116)   ITHRESHOLD=S%ITHRESHOLD
+(  117)  
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:29      page 7
+
+(  118) !*       1. ANTISYMMETRIC PART.
+(  119) # 120 "ledirad_mod.F90"
+(  120)   IF=0
+(  121)   DO JK=1,KFC,ISKIP
+(  122)     IF=IF+1
+(  123)     DO J=1,ILA
+(  124)       ZCA(J,IF) = POA1(IA+(J-1)*2,JK) 
+(  125)     ENDDO
+(  126)   ENDDO
+(  127)   
+(  128)   IF(ILA <= ITHRESHOLD .OR. .NOT.S%LUSEFLT) THEN
+(  129)      IF (LHOOK) CALL DR_HOOK('LE_'//CLX//'GEMM_1',0,ZHOOK_HANDLE)
+(  130)      IF(LLDOUBLE)THEN
+(  131)         CALL DGEMM('N','N',KDGLU,KIFC,ILA,1.0_JPRBT,S%FA(KMLOC)%RPNMA,KDGLU,&
+(  132)              &ZCA,ILA,0._JPRBT,ZB,KDGLU)
+(  133)      ELSE
+(  134)         CALL SGEMM('N','N',KDGLU,KIFC,ILA,1.0_JPRBT,S%FA(KMLOC)%RPNMA,KDGLU,&
+(  135)              &ZCA,ILA,0._JPRBT,ZB,KDGLU)
+(  136)      END IF
+(  137)      IF (LHOOK) CALL DR_HOOK('LE_'//CLX//'GEMM_1',1,ZHOOK_HANDLE)
+(  138) # 139 "ledirad_mod.F90"
+(  139)   ELSE
+(  140) # 141 "ledirad_mod.F90"
+(  141)     CALL MULT_BUTM('N',S%FA(KMLOC)%YBUT_STRUCT_A,KIFC,ZCA,ZB)
+(  142) # 143 "ledirad_mod.F90"
+(  143)   ENDIF
+(  144) # 145 "ledirad_mod.F90"
+(  145)   IF=0
+(  146)   DO JK=1,KFC,ISKIP
+(  147)     IF=IF+1
+(  148)     DO J=1,KDGLU
+(  149)       PAIA(JK,ISL+J-1) = ZB(J,IF)*F%RW(ISL+J-1)
+(  150)     ENDDO
+(  151)   ENDDO
+(  152) # 153 "ledirad_mod.F90"
+(  153)   
+(  154) !*       1.3      SYMMETRIC PART.
+(  155) # 156 "ledirad_mod.F90"
+(  156)   IF=0
+(  157)   DO JK=1,KFC,ISKIP
+(  158)     IF=IF+1
+(  159)     DO J=1,ILS
+(  160)       ZCS(J,IF) = POA1(IS+(J-1)*2,JK)
+(  161)     ENDDO
+(  162)   ENDDO
+(  163)   
+(  164)   
+(  165)   IF(ILS <= ITHRESHOLD .OR. .NOT.S%LUSEFLT) THEN
+(  166) # 167 "ledirad_mod.F90"
+(  167)     IF (LHOOK) CALL DR_HOOK('LE_'//CLX//'GEMM_2',0,ZHOOK_HANDLE)
+(  168)     IF(LLDOUBLE)THEN
+(  169)        CALL DGEMM('N','N',KDGLU,KIFC,ILS,1.0_JPRBT,S%FA(KMLOC)%RPNMS,KDGLU,&
+(  170)             &ZCS,ILS,0._JPRBT,ZB,KDGLU)
+(  171)     ELSE
+(  172)        CALL SGEMM('N','N',KDGLU,KIFC,ILS,1.0_JPRBT,S%FA(KMLOC)%RPNMS,KDGLU,&
+(  173)             &ZCS,ILS,0._JPRBT,ZB,KDGLU)
+(  174) # 175 "ledirad_mod.F90"
+(  175)     END IF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:29      page 8
+
+(  176)     IF (LHOOK) CALL DR_HOOK('LE_'//CLX//'GEMM_2',1,ZHOOK_HANDLE)
+(  177)     
+(  178)   ELSE
+(  179) # 180 "ledirad_mod.F90"
+(  180)     CALL MULT_BUTM('N',S%FA(KMLOC)%YBUT_STRUCT_S,KIFC,ZCS,ZB)
+(  181)     
+(  182)   ENDIF
+(  183) # 184 "ledirad_mod.F90"
+(  184)   IF=0
+(  185)   DO JK=1,KFC,ISKIP
+(  186)     IF=IF+1
+(  187)     DO J=1,KDGLU
+(  188)       PSIA(JK,ISL+J-1) = ZB(J,IF)*F%RW(ISL+J-1)
+(  189)     ENDDO
+(  190)   ENDDO
+(  191)   
+(  192) ENDIF
+(  193) # 194 "ledirad_mod.F90"
+(  194) !     ------------------------------------------------------------------
+(  195) # 196 "ledirad_mod.F90"
+(  196) END SUBROUTINE LEDIRAD
+(  197) END MODULE LEDIRAD_MOD

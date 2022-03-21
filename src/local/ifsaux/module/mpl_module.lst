@@ -1,0 +1,192 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:08      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: mpl_module.F90
+
+(    1) MODULE MPL_MODULE
+(    2) !
+(    3) !    Message Passing Library (MPL)
+(    4) !
+(    5) !    Interface between parallel applications and the
+(    6) !    Message Passing Interface (MPI standard) provided by the computer vendors
+(    7) !    This version requires only MPI release 1.
+(    8) !
+(    9) !    designed and developed by
+(   10) !      Mats Hamrud and David Dent,      ECMWF,      September 2000
+(   11) !
+(   12) !    all routines which wish to call MPL routines must contain:
+(   13) !    USE MPL_MODULE
+(   14) 
+(   15) USE MPL_DATA_MODULE
+(   16) USE MPL_INIT_MOD
+(   17) USE MPL_BUFFER_METHOD_MOD
+(   18) USE MPL_SEND_MOD
+(   19) USE MPL_RECV_MOD
+(   20) USE MPL_WAIT_MOD
+(   21) USE MPL_BARRIER_MOD
+(   22) USE MPL_BROADCAST_MOD
+(   23) USE MPL_PROBE_MOD
+(   24) USE MPL_END_MOD
+(   25) USE MPL_MESSAGE_MOD
+(   26) USE MPL_ABORT_MOD
+(   27) USE MPL_COMM_CREATE_MOD
+(   28) USE MPL_COMM_FREE_MOD
+(   29) USE MPL_COMM_SPLIT_MOD
+(   30) USE MPL_SETDFLT_COMM_MOD
+(   31) USE MPL_ALLGATHER_MOD
+(   32) USE MPL_MYRANK_MOD
+(   33) USE MPL_NPROC_MOD
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:08      page 2
+
+(   34) USE MPL_IOINIT_MOD
+(   35) USE MPL_OPEN_MOD
+(   36) USE MPL_CLOSE_MOD
+(   37) USE MPL_READ_MOD
+(   38) USE MPL_WRITE_MOD
+(   39) USE MPL_ALLREDUCE_MOD
+(   40) USE MPL_GATHERV_MOD
+(   41) USE MPL_MYGATHERV_MOD
+(   42) USE MPL_ALLGATHERV_MOD
+(   43) USE MPL_ALLTOALLV_MOD
+(   44) USE MPL_SCATTERV_MOD
+(   45) USE MPL_GROUPS
+(   46) USE MPL_ARG_MOD
+(   47) USE MPL_LOCOMM_CREATE_MOD
+(   48) USE MPL_TOUR_TABLE_MOD
+(   49) USE MPL_TESTSOME_MOD
+(   50) USE MPL_WAITANY_MOD
+(   51) USE MPL_BYTES_MOD
+(   52) 
+(   53) END MODULE MPL_MODULE
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:08      page 3
+
+(    1) # 1 "mpl_module.F90"
+(    1) MODULE MPL_MODULE
+(    2) !
+(    3) !    Message Passing Library (MPL)
+(    4) !
+(    5) !    Interface between parallel applications and the
+(    6) !    Message Passing Interface (MPI standard) provided by the computer vendors
+(    7) !    This version requires only MPI release 1.
+(    8) !
+(    9) !    designed and developed by
+(   10) !      Mats Hamrud and David Dent,      ECMWF,      September 2000
+(   11) !
+(   12) !    all routines which wish to call MPL routines must contain:
+(   13) !    USE MPL_MODULE
+(   14) # 15 "mpl_module.F90"
+(   15) USE MPL_DATA_MODULE
+(   16) USE MPL_INIT_MOD
+(   17) USE MPL_BUFFER_METHOD_MOD
+(   18) USE MPL_SEND_MOD
+(   19) USE MPL_RECV_MOD
+(   20) USE MPL_WAIT_MOD
+(   21) USE MPL_BARRIER_MOD
+(   22) USE MPL_BROADCAST_MOD
+(   23) USE MPL_PROBE_MOD
+(   24) USE MPL_END_MOD
+(   25) USE MPL_MESSAGE_MOD
+(   26) USE MPL_ABORT_MOD
+(   27) USE MPL_COMM_CREATE_MOD
+(   28) USE MPL_COMM_FREE_MOD
+(   29) USE MPL_COMM_SPLIT_MOD
+(   30) USE MPL_SETDFLT_COMM_MOD
+(   31) USE MPL_ALLGATHER_MOD
+(   32) USE MPL_MYRANK_MOD
+(   33) USE MPL_NPROC_MOD
+(   34) USE MPL_IOINIT_MOD
+(   35) USE MPL_OPEN_MOD
+(   36) USE MPL_CLOSE_MOD
+(   37) USE MPL_READ_MOD
+(   38) USE MPL_WRITE_MOD
+(   39) USE MPL_ALLREDUCE_MOD
+(   40) USE MPL_GATHERV_MOD
+(   41) USE MPL_MYGATHERV_MOD
+(   42) USE MPL_ALLGATHERV_MOD
+(   43) USE MPL_ALLTOALLV_MOD
+(   44) USE MPL_SCATTERV_MOD
+(   45) USE MPL_GROUPS
+(   46) USE MPL_ARG_MOD
+(   47) USE MPL_LOCOMM_CREATE_MOD
+(   48) USE MPL_TOUR_TABLE_MOD
+(   49) USE MPL_TESTSOME_MOD
+(   50) USE MPL_WAITANY_MOD
+(   51) USE MPL_BYTES_MOD
+(   52) # 53 "mpl_module.F90"
+(   53) END MODULE MPL_MODULE

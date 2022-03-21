@@ -1,0 +1,313 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:09      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: prepsnm_mod.F90
+
+(    1) MODULE PREPSNM_MOD
+(    2)   CONTAINS
+(    3)   SUBROUTINE PREPSNM(PEPSNM)
+(    4)   
+(    5)   
+(    6)   !**** *PREPSNM* - Prepare REPSNM for wavenumber KM
+(    7)   
+(    8)   !     Purpose.
+(    9)   !     --------
+(   10)   !        Copy the REPSNM values for specific zonal wavenumber M
+(   11)   !        to work array
+(   12)   
+(   13)   !**   Interface.
+(   14)   !     ----------
+(   15)   !        CALL PREPSNM(...)
+(   16)   
+(   17)   !        Explicit arguments :  KM - zonal wavenumber
+(   18)   !        -------------------   KMLOC - local zonal wavenumber
+(   19)   !                              PEPSNM - REPSNM for zonal
+(   20)   !                                      wavenumber KM
+(   21)   
+(   22)   !        Implicit arguments :
+(   23)   !        --------------------
+(   24)   
+(   25)   !     Method.
+(   26)   !     -------
+(   27)   
+(   28)   
+(   29)   !     Reference.
+(   30)   !     ----------
+(   31)   
+(   32)   
+(   33)   !     Author.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:09      page 2
+
+(   34)   !     -------
+(   35)   !        Lars Isaksen *ECMWF*
+(   36)   
+(   37)   !     Modifications.
+(   38)   !     --------------
+(   39)   !        Original : 00-02-01 From LTINV in IFS CY22R1
+(   40)   
+(   41)   !     ------------------------------------------------------------------
+(   42)   
+(   43)   USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   44)   
+(   45)   USE TPM_DIM         ,ONLY : R
+(   46)   USE TPM_FIELDS      ,ONLY : F
+(   47)   USE TPM_DISTR       ,ONLY : D
+(   48)   use tpm_gen, only: nout
+(   49)   !
+(   50)   
+(   51)   IMPLICIT NONE
+(   52)   
+(   53)   INTEGER(KIND=JPIM)  :: KM,KMLOC
+(   54)   REAL(KIND=JPRBT),    INTENT(OUT) :: PEPSNM(1:d%nump,0:R%NTMAX+2)
+(   55)   !REAL(KIND=JPRBT),    INTENT(OUT) :: PEPSNM(:,:)
+(   56)   
+(   57)   !     LOCAL INTEGER SCALARS
+(   58)   INTEGER(KIND=JPIM) :: JN
+(   59)   INTEGER(KIND=JPIM) :: R_NTMAX
+(   60)   
+(   61)   
+(   62)   !     ------------------------------------------------------------------
+(   63)   
+(   64)   !*       1.       COPY REPSNM.
+(   65)   !                 ------------
+(   66)   
+(   67)   
+(   68)   
+(   69)   R_NTMAX = R%NTMAX
+(   70)   
+(   71)   !$ACC data &
+(   72)   !$ACC& COPYIN(D,F,D%NPMT,D%NUMP,D%MYMS,F%REPSNM) &
+(   73)   !$ACC& present(PEPSNM)
+(   74)   
+(   75)   !$ACC parallel loop
+(   76)   DO KMLOC=1,D%NUMP
+(   77)      KM = D%MYMS(KMLOC)
+(   78)      
+(   79)      
+(   80)      IF (KM > 0) THEN
+(   81)         !PEPSNM(0:KM-1) = 0.0_JPRBT
+(   82)         !$ACC loop
+(   83)         DO JN=0,KM-1
+(   84)            PEPSNM(KMLOC,JN) = 0.0_JPRBT
+(   85)         ENDDO
+(   86)      ENDIF
+(   87)   
+(   88)      !$ACC loop
+(   89)      DO JN=KM,R_NTMAX+2
+(   90)         PEPSNM(KMLOC,JN) = F%REPSNM(D%NPMT(KM)+KMLOC-KM+JN)
+(   91)      ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:09      page 3
+
+(   92)      ! end loop over wavenumber
+(   93)   END DO
+(   94) 
+(   95)   !$ACC end data
+(   96)   
+(   97)   !     ------------------------------------------------------------------
+(   98)   
+(   99)   END SUBROUTINE PREPSNM
+(  100)   
+(  101)   END MODULE PREPSNM_MOD  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:09      page 4
+
+(    1) # 1 "prepsnm_mod.F90"
+(    1) MODULE PREPSNM_MOD
+(    2)   CONTAINS
+(    3)   SUBROUTINE PREPSNM(PEPSNM)
+(    4)   
+(    5)   
+(    6)   !**** *PREPSNM* - Prepare REPSNM for wavenumber KM
+(    7)   
+(    8)   !     Purpose.
+(    9)   !     --------
+(   10)   !        Copy the REPSNM values for specific zonal wavenumber M
+(   11)   !        to work array
+(   12)   
+(   13)   !**   Interface.
+(   14)   !     ----------
+(   15)   !        CALL PREPSNM(...)
+(   16)   
+(   17)   !        Explicit arguments :  KM - zonal wavenumber
+(   18)   !        -------------------   KMLOC - local zonal wavenumber
+(   19)   !                              PEPSNM - REPSNM for zonal
+(   20)   !                                      wavenumber KM
+(   21)   
+(   22)   !        Implicit arguments :
+(   23)   !        --------------------
+(   24)   
+(   25)   !     Method.
+(   26)   !     -------
+(   27)   
+(   28)   
+(   29)   !     Reference.
+(   30)   !     ----------
+(   31)   
+(   32)   
+(   33)   !     Author.
+(   34)   !     -------
+(   35)   !        Lars Isaksen *ECMWF*
+(   36)   
+(   37)   !     Modifications.
+(   38)   !     --------------
+(   39)   !        Original : 00-02-01 From LTINV in IFS CY22R1
+(   40)   
+(   41)   !     ------------------------------------------------------------------
+(   42)   
+(   43)   USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   44)   
+(   45)   USE TPM_DIM         ,ONLY : R
+(   46)   USE TPM_FIELDS      ,ONLY : F
+(   47)   USE TPM_DISTR       ,ONLY : D
+(   48)   use tpm_gen, only: nout
+(   49)   !
+(   50)   
+(   51)   IMPLICIT NONE
+(   52)   
+(   53)   INTEGER(KIND=JPIM)  :: KM,KMLOC
+(   54)   REAL(KIND=JPRBT),    INTENT(OUT) :: PEPSNM(1:d%nump,0:R%NTMAX+2)
+(   55)   !REAL(KIND=JPRBT),    INTENT(OUT) :: PEPSNM(:,:)
+(   56)   
+(   57)   !     LOCAL INTEGER SCALARS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:09      page 5
+
+(   58)   INTEGER(KIND=JPIM) :: JN
+(   59)   INTEGER(KIND=JPIM) :: R_NTMAX
+(   60)   
+(   61)   
+(   62)   !     ------------------------------------------------------------------
+(   63)   
+(   64)   !*       1.       COPY REPSNM.
+(   65)   !                 ------------
+(   66)   
+(   67)   
+(   68)   
+(   69)   R_NTMAX = R%NTMAX
+(   70)   
+(   72)   !$ACC& COPYIN(D,F,D%NPMT,D%NUMP,D%MYMS,F%REPSNM) &
+(   73)   !$ACC& present(PEPSNM)
+(   74)   
+(   75)   !$ACC parallel loop
+(   76)   DO KMLOC=1,D%NUMP
+(   77)      KM = D%MYMS(KMLOC)
+(   78)      
+(   79)      
+(   80)      IF (KM > 0) THEN
+(   81)         !PEPSNM(0:KM-1) = 0.0_JPRBT
+(   82)         !$ACC loop
+(   83)         DO JN=0,KM-1
+(   84)            PEPSNM(KMLOC,JN) = 0.0_JPRBT
+(   85)         ENDDO
+(   86)      ENDIF
+(   87)   
+(   88)      !$ACC loop
+(   89)      DO JN=KM,R_NTMAX+2
+(   90)         PEPSNM(KMLOC,JN) = F%REPSNM(D%NPMT(KM)+KMLOC-KM+JN)
+(   91)      ENDDO
+(   92)      ! end loop over wavenumber
+(   93)   END DO
+(   94) # 95 "prepsnm_mod.F90"
+(   95)   !$ACC end data
+(   96)   
+(   97)   !     ------------------------------------------------------------------
+(   98)   
+(   99)   END SUBROUTINE PREPSNM
+(  100)   
+(  101)   END MODULE PREPSNM_MOD  

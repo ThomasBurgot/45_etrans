@@ -1,0 +1,380 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:50      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: extper_mod.F90
+
+(    1) MODULE EXTPER_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EXTPER(PWORK,KDIM,KPSTA,KPOINTS,KFLDS,KUNITS,&
+(    4)   & KPOINTERS,KALFA) 
+(    5) 
+(    6) !   purpose  :
+(    7) !   --------
+(    8) !     Make spline extension.
+(    9) 
+(   10) !    *CALL* *EXTPER(PWORK,KDIM,KPSTA,KPOINTS,KFLDS,KUNITS,&
+(   11) !         & KPOINTERS,KALFA)
+(   12) 
+(   13) !      externals :
+(   14) !      ----------
+(   15) !             None
+(   16) 
+(   17) !      explicit arguments :
+(   18) !      ------------------
+(   19) !     PWORK   : Input:  values in C U I area
+(   20) !             : Output: input+(spline extension on the E area)
+(   21) !     KDIM    : Dimension of the C U I U E unit of work (one row or one m)
+(   22) !     KPSTA   : Position where the unit of work starts
+(   23) !     KPOINTS : Position where the unit of work ends       
+(   24) !     KFLDS   : number of 2D fields
+(   25) !     KUNITS  : Number of units of work
+(   26) !     KPOINTERS : Array of pointers for the units of work
+(   27) !     KALFA : boundary condition of a spline:
+(   28) !             = 0 ... natural spline
+(   29) !             = 1 ... boundary condition computed differentially
+(   30) !                      (additional option)
+(   31) !      references :
+(   32) !      ----------
+(   33) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:50      page 2
+
+(   34) !      author :
+(   35) !      ------
+(   36) !         M. Hortal 03-11-2009
+(   37) !      -----------------------------------------------
+(   38) 
+(   39) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   40) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   41) 
+(   42) USE TPM_GEN
+(   43) USE TPM_DISTR
+(   44) 
+(   45) IMPLICIT NONE
+(   46) 
+(   47) REAL(KIND=JPRB)   ,INTENT(INOUT) :: PWORK(:,:) 
+(   48) INTEGER(KIND=JPIM),INTENT(IN)    :: KDIM 
+(   49) INTEGER(KIND=JPIM),INTENT(IN)    :: KPSTA 
+(   50) INTEGER(KIND=JPIM),INTENT(IN)    :: KPOINTS 
+(   51) INTEGER(KIND=JPIM),INTENT(IN)    :: KFLDS 
+(   52) INTEGER(KIND=JPIM),INTENT(IN)    :: KUNITS 
+(   53) INTEGER(KIND=JPIM),INTENT(IN)    :: KPOINTERS(:) 
+(   54) INTEGER(KIND=JPIM),INTENT(IN)    :: KALFA 
+(   55) 
+(   56) !      arrays :
+(   57) !     --------
+(   58) INTEGER(KIND=JPIM) :: IENDX, IENDY, JFL, JLAT, JLON, IA
+(   59) 
+(   60) REAL(KIND=JPRB) :: ZA, ZB, ZC, ZD, ZEPSA, ZEPSB, ZJ, ZK, ZKP1,&
+(   61)  & ZLAM, ZLAMB, ZM1, ZM2, ZMM, ZNY  
+(   62) REAL(KIND=JPRB) :: ZMAX(KUNITS), ZMIN(KUNITS)
+(   63) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   64)  
+(   65) !     ------------------------------------------------------------------
+(   66) 
+(   67) #include "abor1.intfb.h"
+(   68) 
+(   69) !     ------------------------------------------------------------------
+(   70) 
+(   71) IF (LHOOK) CALL DR_HOOK('EXTPER',0,ZHOOK_HANDLE)
+(   72) 
+(   73) !*         0. Security
+(   74) !             --------
+(   75) 
+(   76) IF(UBOUND(PWORK,1) < KFLDS) THEN
+(   77)   CALL ABOR1(' EXTPER, PWORK first dimension too small')
+(   78) ENDIF
+(   79) IF(UBOUND(PWORK,2) < KDIM+2) THEN
+(   80)   WRITE(NOUT,*) ' UBOUND(PWORK,2)=',UBOUND(PWORK,2),' KDIM=',KDIM,' KUNITS=',&
+(   81)     &KUNITS
+(   82)   CALL ABOR1(' EXTPER, PWORK second dimension too small')
+(   83) ENDIF
+(   84) IF(UBOUND(KPOINTERS,1) < KUNITS) THEN
+(   85)   CALL ABOR1(' EXTPER, KPOINTERS too small')
+(   86) ENDIF
+(   87) IF(UBOUND(PWORK,2) < KPOINTERS(KUNITS)+KDIM) THEN
+(   88)   WRITE(NERR,*) ' EXTPER, KUNITS=',KUNITS,' KPOINTERS=',KPOINTERS(1:KUNITS),&
+(   89)     &' KDIM=',KDIM,' UBOUND(PWORK,2)=',UBOUND(PWORK,2)
+(   90)   CALL ABOR1(' EXTPER, value of KPOINTERS too large')
+(   91) ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:50      page 3
+
+(   92) 
+(   93) !*         1. Spline   Extension.
+(   94) !             -------------------
+(   95) 
+(   96) DO JFL = 1, KFLDS
+(   97) 
+(   98)   ZK    = REAL(KDIM-KPOINTS+1,JPRB)
+(   99)   ZKP1  = ZK + 1.0_JPRB
+(  100)   ZLAMB = ZK/ZKP1
+(  101)   ZNY   = REAL(KALFA,JPRB)/ZKP1
+(  102) 
+(  103)   DO JLAT=1,KUNITS
+(  104)     ZEPSA = &
+(  105)      &((PWORK(JFL,KPOINTERS(JLAT)+KPSTA)-&
+(  106)      & PWORK(JFL,KPOINTERS(JLAT)+KPOINTS))/ZK -&
+(  107)      & PWORK(JFL,KPOINTERS(JLAT)+KPOINTS)+&
+(  108)      & PWORK(JFL,KPOINTERS(JLAT)+KPOINTS-1))*6._JPRB/ZKP1 -&
+(  109)      & ZNY*(PWORK(JFL,KPOINTERS(JLAT)+KPOINTS)-&
+(  110)      & 2.0_JPRB* PWORK(JFL,KPOINTERS(JLAT)+KPOINTS-1)+&
+(  111)      & PWORK(JFL,KPOINTERS(JLAT)+KPOINTS-2)) 
+(  112) 
+(  113)     ZEPSB = (PWORK(JFL,KPOINTERS(JLAT)+KPSTA+1)-&
+(  114)      & PWORK(JFL,KPOINTERS(JLAT)+KPSTA) -&
+(  115)      & (PWORK(JFL,KPOINTERS(JLAT)+KPSTA)-&
+(  116)      & PWORK(JFL,KPOINTERS(JLAT)+KPOINTS))/ZK)*6._JPRB/ZKP1-&
+(  117)      & ZNY*(PWORK(JFL,KPOINTERS(JLAT)+KPSTA+2)-&
+(  118)      & 2.0_JPRB* PWORK(JFL,KPOINTERS(JLAT)+KPSTA+1)+&
+(  119)      & PWORK(JFL,KPOINTERS(JLAT)+KPSTA))  
+(  120) 
+(  121)     ZMM = 4._JPRB - ZLAMB*ZLAMB
+(  122)     ZM1 = (2.0_JPRB*ZEPSA - ZLAMB*ZEPSB)/ZMM
+(  123)     ZM2 = (2.0_JPRB*ZEPSB - ZLAMB*ZEPSA)/ZMM
+(  124)     ZA  = PWORK(JFL,KPOINTERS(JLAT)+KPOINTS)
+(  125)     ZB  = (PWORK(JFL,KPOINTERS(JLAT)+KPSTA)-&
+(  126)         & PWORK(JFL,KPOINTERS(JLAT)+KPOINTS))/ZK-&
+(  127)      & (2.0_JPRB*ZM1 + ZM2) * ZK/6._JPRB  
+(  128)     ZC  = 0.5_JPRB * ZM1
+(  129)     ZD  = (ZM2 - ZM1)/(6._JPRB*ZK)
+(  130) 
+(  131) 
+(  132)     DO JLON=KPOINTERS(JLAT)+KPOINTS+1,KPOINTERS(JLAT)+KDIM
+(  133) 
+(  134)       ZJ  = REAL(JLON - (KPOINTERS(JLAT)+KPOINTS),JPRB)
+(  135)       PWORK(JFL,JLON) = ZA + ZJ * (ZB + ZJ * (ZC + ZD * ZJ))
+(  136)     ENDDO 
+(  137)   ENDDO 
+(  138) 
+(  139) 
+(  140) ENDDO
+(  141) 
+(  142) IF (LHOOK) CALL DR_HOOK('EXTPER',1,ZHOOK_HANDLE)
+(  143) END SUBROUTINE EXTPER
+(  144) END MODULE EXTPER_MOD
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:50      page 4
+
+(    1) # 1 "extper_mod.F90"
+(    1) MODULE EXTPER_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EXTPER(PWORK,KDIM,KPSTA,KPOINTS,KFLDS,KUNITS,&
+(    4)   & KPOINTERS,KALFA) 
+(    5) # 6 "extper_mod.F90"
+(    6) !   purpose  :
+(    7) !   --------
+(    8) !     Make spline extension.
+(    9) # 10 "extper_mod.F90"
+(   10) !    *CALL* *EXTPER(PWORK,KDIM,KPSTA,KPOINTS,KFLDS,KUNITS,&
+(   11) !         & KPOINTERS,KALFA)
+(   12) # 13 "extper_mod.F90"
+(   13) !      externals :
+(   14) !      ----------
+(   15) !             None
+(   16) # 17 "extper_mod.F90"
+(   17) !      explicit arguments :
+(   18) !      ------------------
+(   19) !     PWORK   : Input:  values in C U I area
+(   20) !             : Output: input+(spline extension on the E area)
+(   21) !     KDIM    : Dimension of the C U I U E unit of work (one row or one m)
+(   22) !     KPSTA   : Position where the unit of work starts
+(   23) !     KPOINTS : Position where the unit of work ends       
+(   24) !     KFLDS   : number of 2D fields
+(   25) !     KUNITS  : Number of units of work
+(   26) !     KPOINTERS : Array of pointers for the units of work
+(   27) !     KALFA : boundary condition of a spline:
+(   28) !             = 0 ... natural spline
+(   29) !             = 1 ... boundary condition computed differentially
+(   30) !                      (additional option)
+(   31) !      references :
+(   32) !      ----------
+(   33) # 34 "extper_mod.F90"
+(   34) !      author :
+(   35) !      ------
+(   36) !         M. Hortal 03-11-2009
+(   37) !      -----------------------------------------------
+(   38) # 39 "extper_mod.F90"
+(   39) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   40) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   41) # 42 "extper_mod.F90"
+(   42) USE TPM_GEN
+(   43) USE TPM_DISTR
+(   44) # 45 "extper_mod.F90"
+(   45) IMPLICIT NONE
+(   46) # 47 "extper_mod.F90"
+(   47) REAL(KIND=JPRB)   ,INTENT(INOUT) :: PWORK(:,:) 
+(   48) INTEGER(KIND=JPIM),INTENT(IN)    :: KDIM 
+(   49) INTEGER(KIND=JPIM),INTENT(IN)    :: KPSTA 
+(   50) INTEGER(KIND=JPIM),INTENT(IN)    :: KPOINTS 
+(   51) INTEGER(KIND=JPIM),INTENT(IN)    :: KFLDS 
+(   52) INTEGER(KIND=JPIM),INTENT(IN)    :: KUNITS 
+(   53) INTEGER(KIND=JPIM),INTENT(IN)    :: KPOINTERS(:) 
+(   54) INTEGER(KIND=JPIM),INTENT(IN)    :: KALFA 
+(   55) # 56 "extper_mod.F90"
+(   56) !      arrays :
+(   57) !     --------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:50      page 5
+
+(   58) INTEGER(KIND=JPIM) :: IENDX, IENDY, JFL, JLAT, JLON, IA
+(   59) # 60 "extper_mod.F90"
+(   60) REAL(KIND=JPRB) :: ZA, ZB, ZC, ZD, ZEPSA, ZEPSB, ZJ, ZK, ZKP1,&
+(   61)  & ZLAM, ZLAMB, ZM1, ZM2, ZMM, ZNY  
+(   62) REAL(KIND=JPRB) :: ZMAX(KUNITS), ZMIN(KUNITS)
+(   63) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   64)  
+(   65) !     ------------------------------------------------------------------
+(   66) # 67 "extper_mod.F90"
+(   67) # 1 ".D[15]/abor1.intfb.h"
+(    1) INTERFACE
+(    2) # 3 ".D[15]/abor1.intfb.h"
+(    3) SUBROUTINE ABOR1(CDTEXT)
+(    4) CHARACTER(LEN=*), INTENT(IN) :: CDTEXT
+(    5) END SUBROUTINE ABOR1
+(    6) # 7 ".D[15]/abor1.intfb.h"
+(    7) SUBROUTINE ABOR1FL(CDFILE, KLINENUM, CDTEXT)
+(    8) USE PARKIND1  ,ONLY : JPIM
+(    9) CHARACTER(LEN=*), INTENT(IN) :: CDFILE,CDTEXT
+(   10) INTEGER(KIND=JPIM), INTENT(IN) :: KLINENUM
+(   11) END SUBROUTINE ABOR1FL
+(   12) # 13 ".D[15]/abor1.intfb.h"
+(   13) SUBROUTINE ABOR1_EXCEPTION_HANDLER()
+(   14) END SUBROUTINE ABOR1_EXCEPTION_HANDLER
+(   15) # 16 ".D[15]/abor1.intfb.h"
+(   16) END INTERFACE
+(   17) # 68 "extper_mod.F90"
+(   68) # 69 "extper_mod.F90"
+(   69) !     ------------------------------------------------------------------
+(   70) # 71 "extper_mod.F90"
+(   71) IF (LHOOK) CALL DR_HOOK('EXTPER',0,ZHOOK_HANDLE)
+(   72) # 73 "extper_mod.F90"
+(   73) !*         0. Security
+(   74) !             --------
+(   75) # 76 "extper_mod.F90"
+(   76) IF(UBOUND(PWORK,1) < KFLDS) THEN
+(   77)   CALL ABOR1(' EXTPER, PWORK first dimension too small')
+(   78) ENDIF
+(   79) IF(UBOUND(PWORK,2) < KDIM+2) THEN
+(   80)   WRITE(NOUT,*) ' UBOUND(PWORK,2)=',UBOUND(PWORK,2),' KDIM=',KDIM,' KUNITS=',&
+(   81)     &KUNITS
+(   82)   CALL ABOR1(' EXTPER, PWORK second dimension too small')
+(   83) ENDIF
+(   84) IF(UBOUND(KPOINTERS,1) < KUNITS) THEN
+(   85)   CALL ABOR1(' EXTPER, KPOINTERS too small')
+(   86) ENDIF
+(   87) IF(UBOUND(PWORK,2) < KPOINTERS(KUNITS)+KDIM) THEN
+(   88)   WRITE(NERR,*) ' EXTPER, KUNITS=',KUNITS,' KPOINTERS=',KPOINTERS(1:KUNITS),&
+(   89)     &' KDIM=',KDIM,' UBOUND(PWORK,2)=',UBOUND(PWORK,2)
+(   90)   CALL ABOR1(' EXTPER, value of KPOINTERS too large')
+(   91) ENDIF
+(   92) # 93 "extper_mod.F90"
+(   93) !*         1. Spline   Extension.
+(   94) !             -------------------
+(   95) # 96 "extper_mod.F90"
+(   96) DO JFL = 1, KFLDS
+(   97) # 98 "extper_mod.F90"
+(   98)   ZK    = REAL(KDIM-KPOINTS+1,JPRB)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:50      page 6
+
+(   99)   ZKP1  = ZK + 1.0_JPRB
+(  100)   ZLAMB = ZK/ZKP1
+(  101)   ZNY   = REAL(KALFA,JPRB)/ZKP1
+(  102) # 103 "extper_mod.F90"
+(  103)   DO JLAT=1,KUNITS
+(  104)     ZEPSA = &
+(  105)      &((PWORK(JFL,KPOINTERS(JLAT)+KPSTA)-&
+(  106)      & PWORK(JFL,KPOINTERS(JLAT)+KPOINTS))/ZK -&
+(  107)      & PWORK(JFL,KPOINTERS(JLAT)+KPOINTS)+&
+(  108)      & PWORK(JFL,KPOINTERS(JLAT)+KPOINTS-1))*6._JPRB/ZKP1 -&
+(  109)      & ZNY*(PWORK(JFL,KPOINTERS(JLAT)+KPOINTS)-&
+(  110)      & 2.0_JPRB* PWORK(JFL,KPOINTERS(JLAT)+KPOINTS-1)+&
+(  111)      & PWORK(JFL,KPOINTERS(JLAT)+KPOINTS-2)) 
+(  112) # 113 "extper_mod.F90"
+(  113)     ZEPSB = (PWORK(JFL,KPOINTERS(JLAT)+KPSTA+1)-&
+(  114)      & PWORK(JFL,KPOINTERS(JLAT)+KPSTA) -&
+(  115)      & (PWORK(JFL,KPOINTERS(JLAT)+KPSTA)-&
+(  116)      & PWORK(JFL,KPOINTERS(JLAT)+KPOINTS))/ZK)*6._JPRB/ZKP1-&
+(  117)      & ZNY*(PWORK(JFL,KPOINTERS(JLAT)+KPSTA+2)-&
+(  118)      & 2.0_JPRB* PWORK(JFL,KPOINTERS(JLAT)+KPSTA+1)+&
+(  119)      & PWORK(JFL,KPOINTERS(JLAT)+KPSTA))  
+(  120) # 121 "extper_mod.F90"
+(  121)     ZMM = 4._JPRB - ZLAMB*ZLAMB
+(  122)     ZM1 = (2.0_JPRB*ZEPSA - ZLAMB*ZEPSB)/ZMM
+(  123)     ZM2 = (2.0_JPRB*ZEPSB - ZLAMB*ZEPSA)/ZMM
+(  124)     ZA  = PWORK(JFL,KPOINTERS(JLAT)+KPOINTS)
+(  125)     ZB  = (PWORK(JFL,KPOINTERS(JLAT)+KPSTA)-&
+(  126)         & PWORK(JFL,KPOINTERS(JLAT)+KPOINTS))/ZK-&
+(  127)      & (2.0_JPRB*ZM1 + ZM2) * ZK/6._JPRB  
+(  128)     ZC  = 0.5_JPRB * ZM1
+(  129)     ZD  = (ZM2 - ZM1)/(6._JPRB*ZK)
+(  130) # 132 "extper_mod.F90"
+(  132)     DO JLON=KPOINTERS(JLAT)+KPOINTS+1,KPOINTERS(JLAT)+KDIM
+(  133) # 134 "extper_mod.F90"
+(  134)       ZJ  = REAL(JLON - (KPOINTERS(JLAT)+KPOINTS),JPRB)
+(  135)       PWORK(JFL,JLON) = ZA + ZJ * (ZB + ZJ * (ZC + ZD * ZJ))
+(  136)     ENDDO 
+(  137)   ENDDO 
+(  138) # 140 "extper_mod.F90"
+(  140) ENDDO
+(  141) # 142 "extper_mod.F90"
+(  142) IF (LHOOK) CALL DR_HOOK('EXTPER',1,ZHOOK_HANDLE)
+(  143) END SUBROUTINE EXTPER
+(  144) END MODULE EXTPER_MOD

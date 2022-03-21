@@ -1,0 +1,754 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:38      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: prism_dummy_mod.F90
+
+(    1) !**** PRISM_DUMMY_MOD.F90
+(    2) !
+(    3) !     Purpose.
+(    4) !     --------
+(    5) !     Define interface and dummy routines needed to compile and link ifsMASTER 
+(    6) !     with OASIS4 interfaces (ifs/prism/couplo4*) without linking 
+(    7) !     to original prism libraries   
+(    8) !
+(    9) !     
+(   10) !     Contains   
+(   11) !     ----------
+(   12) !     
+(   13) !      MODULE PRISM_CONSTANTS 
+(   14) !
+(   15) !      MODULE PRISM_DUMMY 
+(   16) !         INTERFACES for prism routines called in ifs/prism/couplo4* 
+(   17) !
+(   18) !      SUBROUTINES
+(   19) !          prism_dummy_* referenced in PRISM_DUMMY    
+(   20) !
+(   21) !      Method
+(   22) !      -------            
+(   23) !      Provide interfaces with original prism rouinte names and refers to 
+(   24) !        dummy subroutines named  prism_dummy_*  if original name is prism_*  
+(   25) !
+(   26) !      To run coupled runs with OASIS4 USE PRISM in ifs/prism/couplo4* instead !      of USE PRISM_DUMMY    
+(   27) !          
+(   28) !     Reference:
+(   29) !     ---------
+(   30) !       S. Valcke, 2006: OASIS4 User Guide  
+(   31) !       PRISM Support Initiative Report No 3,
+(   32) !       CERFACS, Toulouse, France, 64 pp.
+(   33) !
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:38      page 2
+
+(   34) !     Author:
+(   35) !     -------
+(   36) !       Johannes Flemming 
+(   37) !
+(   38) !     Modifications.
+(   39) !     --------------
+(   40) !      F. Vana  05-Mar-2015  Support for single precision
+(   41) 
+(   42) 
+(   43) 
+(   44) 
+(   45) !**************************************************************************
+(   46) 
+(   47) MODULE PRISM_DUMMY_MOD
+(   48) 
+(   49) USE PARKIND1 , ONLY : JPRD, JPIM
+(   50) USE YOMPRISM 
+(   51) USE MPL_MODULE, ONLY : MPL_ABORT
+(   52) IMPLICIT NONE
+(   53) SAVE
+(   54) 
+(   55) INTERFACE PRISM_SET_POINTS
+(   56) MODULE PROCEDURE PRISM_DUMMY_SET_POINTS_GRIDLESS,PRISM_DUMMY_SET_POINTS_3D_DBLE
+(   57) END INTERFACE
+(   58) 
+(   59) INTERFACE PRISM_PUT
+(   60) MODULE PROCEDURE PRISM_DUMMY_PUT
+(   61) END INTERFACE 
+(   62) 
+(   63) 
+(   64) INTERFACE PRISM_GET
+(   65) MODULE PROCEDURE PRISM_DUMMY_GET
+(   66) END INTERFACE 
+(   67) 
+(   68) 
+(   69) INTERFACE PRISM_INITIALIZED
+(   70) MODULE PROCEDURE PRISM_DUMMY_INITIALIZED
+(   71) END INTERFACE
+(   72) 
+(   73)  
+(   74) INTERFACE  PRISM_INIT 
+(   75) MODULE PROCEDURE PRISM_DUMMY_INIT
+(   76) END INTERFACE
+(   77) 
+(   78) INTERFACE PRISM_INIT_COMP 
+(   79) MODULE PROCEDURE PRISM_DUMMY_INIT_COMP
+(   80) END INTERFACE
+(   81) 
+(   82) INTERFACE   PRISM_ENDDEF
+(   83) MODULE PROCEDURE PRISM_DUMMY_ENDDEF
+(   84) END INTERFACE
+(   85) 
+(   86) INTERFACE PRISM_TERMINATE
+(   87) MODULE PROCEDURE PRISM_DUMMY_TERMINATE
+(   88) END INTERFACE
+(   89) 
+(   90) INTERFACE PRISM_GET_LOCALCOMM
+(   91) MODULE PROCEDURE PRISM_DUMMY_GET_LOCALCOMM
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:38      page 3
+
+(   92) END INTERFACE
+(   93) 
+(   94) INTERFACE  PRISM_DEF_VAR
+(   95) MODULE PROCEDURE PRISM_DUMMY_DEF_VAR
+(   96) END INTERFACE
+(   97) 
+(   98) INTERFACE PRISM_DEF_GRID
+(   99) MODULE PROCEDURE PRISM_DUMMY_DEF_GRID
+(  100) END INTERFACE
+(  101) 
+(  102) 
+(  103) INTERFACE PRISM_DEF_PARTITION
+(  104) MODULE PROCEDURE PRISM_DUMMY_DEF_PARTITION
+(  105) END INTERFACE
+(  106) 
+(  107) 
+(  108) INTERFACE PRISM_REDUCEDGRID_MAP
+(  109) MODULE PROCEDURE PRISM_DUMMY_REDUCEDGRID_MAP
+(  110) END INTERFACE
+(  111) 
+(  112) INTERFACE PRISM_SET_CORNERS
+(  113) MODULE PROCEDURE PRISM_DUMMY_SET_CORNERS
+(  114) END INTERFACE
+(  115) 
+(  116) 
+(  117) INTERFACE PRISM_CALC_NEWDATE
+(  118) MODULE PROCEDURE PRISM_DUMMY_CALC_NEWDATE
+(  119) END INTERFACE
+(  120) 
+(  121) 
+(  122) 
+(  123) 
+(  124) !**************************************************************************
+(  125) CONTAINS
+(  126) 
+(  127) SUBROUTINE PRISM_DUMMY_SET_POINTS_GRIDLESS (METHOD_ID, POINT_NAME, GRID_ID, &
+(  128)                                  &          NEW_POINTS, IERROR)
+(  129)        CHARACTER (LEN=*), INTENT(IN)                   :: POINT_NAME
+(  130)        INTEGER(KIND=JPIM),           INTENT(IN)                   :: GRID_ID
+(  131)        LOGICAL,           INTENT(IN)                   :: NEW_POINTS
+(  132)        INTEGER(KIND=JPIM),           INTENT(INOUT)                :: METHOD_ID
+(  133)        INTEGER(KIND=JPIM),           INTENT(OUT)                  :: IERROR
+(  134) 
+(  135)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  136) 
+(  137) 
+(  138) END SUBROUTINE PRISM_DUMMY_SET_POINTS_GRIDLESS
+(  139) 
+(  140) !**************************************************************************
+(  141) 
+(  142) SUBROUTINE  PRISM_DUMMY_SET_POINTS_3D_DBLE(METHOD_ID, POINT_NAME, GRID_ID, & 
+(  143)                   &        POINTS_ACTUAL_SHAPE, POINTS_1ST_ARRAY, POINTS_2ND_ARRAY, & 
+(  144)                   &        POINTS_3RD_ARRAY, NEW_POINTS, IERROR)
+(  145)        CHARACTER (LEN=*), INTENT(IN)                   :: POINT_NAME
+(  146)        INTEGER(KIND=JPIM),           INTENT(IN)                   :: GRID_ID
+(  147)        INTEGER(KIND=JPIM),           INTENT(INOUT)                :: METHOD_ID
+(  148)        REAL(KIND=JPRD),  INTENT(IN), DIMENSION (:)    :: POINTS_1ST_ARRAY, POINTS_2ND_ARRAY, POINTS_3RD_ARRAY
+(  149)        INTEGER(KIND=JPIM),           INTENT(IN)                   :: POINTS_ACTUAL_SHAPE (2, *)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:38      page 4
+
+(  150)        LOGICAL,           INTENT(IN)                   :: NEW_POINTS
+(  151)        INTEGER(KIND=JPIM),           INTENT(OUT)                  :: IERROR
+(  152) 
+(  153)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  154) 
+(  155) END SUBROUTINE PRISM_DUMMY_SET_POINTS_3D_DBLE
+(  156) 
+(  157) !**************************************************************************
+(  158) 
+(  159) SUBROUTINE PRISM_DUMMY_INIT ( APPL_NAME, IERROR )
+(  160)        CHARACTER (LEN=*), INTENT(IN) :: APPL_NAME
+(  161)        INTEGER(KIND=JPIM), INTENT (OUT)         :: IERROR
+(  162) 
+(  163)         STOP 'ABORT PRISM_DUMMY'
+(  164) 
+(  165) END SUBROUTINE PRISM_DUMMY_INIT
+(  166) 
+(  167) !**************************************************************************
+(  168) 
+(  169) SUBROUTINE PRISM_DUMMY_INIT_COMP ( COMP_ID, COMP_NAME, IERROR )  
+(  170)        CHARACTER (LEN=*), INTENT(IN) :: COMP_NAME
+(  171)        INTEGER(KIND=JPIM), INTENT (OUT) :: COMP_ID, IERROR
+(  172) 
+(  173)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  174) 
+(  175) END SUBROUTINE PRISM_DUMMY_INIT_COMP
+(  176) 
+(  177) !**************************************************************************
+(  178) 
+(  179) SUBROUTINE PRISM_DUMMY_ENDDEF ( IERROR )
+(  180)        INTEGER(KIND=JPIM), INTENT (OUT) :: IERROR
+(  181) 
+(  182)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  183) 
+(  184) END SUBROUTINE PRISM_DUMMY_ENDDEF
+(  185) 
+(  186) !**************************************************************************
+(  187) 
+(  188) SUBROUTINE PRISM_DUMMY_TERMINATE ( IERROR )
+(  189)       INTEGER(KIND=JPIM), INTENT (OUT) :: IERROR
+(  190) 
+(  191)       CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  192) 
+(  193) END SUBROUTINE PRISM_DUMMY_TERMINATE
+(  194) 
+(  195) !**************************************************************************
+(  196) 
+(  197) SUBROUTINE PRISM_DUMMY_GET_LOCALCOMM ( COMP_ID, LOCAL_COMM, IERROR )
+(  198)        INTEGER(KIND=JPIM), INTENT (IN)  :: COMP_ID
+(  199)        INTEGER(KIND=JPIM), INTENT (OUT) :: LOCAL_COMM, IERROR
+(  200) 
+(  201)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  202) 
+(  203) END SUBROUTINE PRISM_DUMMY_GET_LOCALCOMM
+(  204) 
+(  205) !**************************************************************************
+(  206) 
+(  207) SUBROUTINE PRISM_DUMMY_DEF_VAR (VAR_ID, NAME, GRID_ID, METHOD_ID, MASK_ID, &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:38      page 5
+
+(  208)                      &      VAR_NODIMS, VAR_ACTUAL_SHAPE, VAR_TYPE, IERROR )
+(  209)        INTEGER(KIND=JPIM), INTENT(OUT)         :: VAR_ID
+(  210)        CHARACTER (LEN=*), INTENT(IN) :: NAME
+(  211)        INTEGER(KIND=JPIM), INTENT(IN)          :: GRID_ID
+(  212)        INTEGER(KIND=JPIM), INTENT(IN)          :: METHOD_ID
+(  213)        INTEGER(KIND=JPIM), INTENT(IN)          :: MASK_ID
+(  214)        INTEGER(KIND=JPIM), INTENT(IN)          :: VAR_NODIMS(2)
+(  215)        INTEGER(KIND=JPIM), INTENT(IN)          :: VAR_ACTUAL_SHAPE(1:2, 1:VAR_NODIMS(1)+VAR_NODIMS(2))
+(  216)        INTEGER(KIND=JPIM), INTENT(IN)          :: VAR_TYPE
+(  217)        INTEGER(KIND=JPIM), INTENT(OUT)         :: IERROR 
+(  218) 
+(  219)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  220)      END SUBROUTINE PRISM_DUMMY_DEF_VAR
+(  221) 
+(  222) !**************************************************************************  
+(  223) 
+(  224) SUBROUTINE PRISM_DUMMY_DEF_GRID ( GRID_ID, GRID_NAME, COMP_ID, GRID_VALID_SHAPE, &
+(  225)                               &     GRID_TYPE, IERROR)
+(  226)        CHARACTER(LEN=*), INTENT(IN) :: GRID_NAME
+(  227)        INTEGER(KIND=JPIM), INTENT(IN)          :: COMP_ID
+(  228)        INTEGER(KIND=JPIM), INTENT(IN)          :: GRID_VALID_SHAPE (2, *)
+(  229)        INTEGER(KIND=JPIM), INTENT(IN)          :: GRID_TYPE
+(  230)        INTEGER(KIND=JPIM), INTENT(OUT)         :: GRID_ID, IERROR
+(  231) 
+(  232)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  233) 
+(  234) END SUBROUTINE PRISM_DUMMY_DEF_GRID
+(  235) 
+(  236) !**************************************************************************
+(  237) 
+(  238) SUBROUTINE PRISM_DUMMY_DEF_PARTITION ( GRID_ID, NBR_BLOCKS, &
+(  239)                       &           PARTITION_ARRAY, EXTENT_ARRAY, IERROR )
+(  240)        INTEGER(KIND=JPIM), INTENT (IN)                :: GRID_ID
+(  241)        INTEGER(KIND=JPIM), INTENT (IN)                :: NBR_BLOCKS
+(  242)        INTEGER(KIND=JPIM), INTENT (IN)                :: PARTITION_ARRAY(1:NBR_BLOCKS,*)
+(  243)        INTEGER(KIND=JPIM), INTENT (IN)                :: EXTENT_ARRAY(1:NBR_BLOCKS,*)
+(  244)        INTEGER(KIND=JPIM), INTENT (OUT)               :: IERROR
+(  245) 
+(  246)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  247) 
+(  248) END SUBROUTINE PRISM_DUMMY_DEF_PARTITION
+(  249) 
+(  250) !**************************************************************************
+(  251) 
+(  252) SUBROUTINE PRISM_DUMMY_REDUCEDGRID_MAP( GRID_ID,  NBR_LATITUDES, &
+(  253)              &    NBR_POINTS_PER_LAT, IERROR )
+(  254)        INTEGER(KIND=JPIM), INTENT (IN)                :: GRID_ID
+(  255)        INTEGER(KIND=JPIM), INTENT (IN)                :: NBR_LATITUDES
+(  256)        INTEGER(KIND=JPIM), INTENT (IN)                :: NBR_POINTS_PER_LAT(NBR_LATITUDES)
+(  257)        INTEGER(KIND=JPIM), INTENT (OUT)               :: IERROR
+(  258) 
+(  259)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  260) 
+(  261) END SUBROUTINE PRISM_DUMMY_REDUCEDGRID_MAP
+(  262) 
+(  263) !**************************************************************************
+(  264) 
+(  265) SUBROUTINE PRISM_DUMMY_SET_CORNERS(GRID_ID, NBR_CORNERS, CORNERS_ACTUAL_SHAPE, &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:38      page 6
+
+(  266)         &    CORNERS_1ST_ARRAY, CORNERS_2ND_ARRAY, CORNERS_3RD_ARRAY, IERROR)
+(  267)        INTEGER(KIND=JPIM), INTENT (IN)                :: GRID_ID
+(  268)        INTEGER(KIND=JPIM), INTENT (IN)                :: NBR_CORNERS
+(  269)        REAL(KIND=JPRD), INTENT (IN)       :: CORNERS_1ST_ARRAY (:,:)
+(  270)        REAL(KIND=JPRD), INTENT (IN)       :: CORNERS_2ND_ARRAY (:,:)
+(  271)        REAL(KIND=JPRD), INTENT (IN)       :: CORNERS_3RD_ARRAY (:,:)
+(  272)        INTEGER(KIND=JPIM), INTENT (IN)                :: CORNERS_ACTUAL_SHAPE (1:2, *)
+(  273)        INTEGER(KIND=JPIM), INTENT(OUT)                :: IERROR
+(  274) 
+(  275)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  276) END SUBROUTINE PRISM_DUMMY_SET_CORNERS
+(  277) 
+(  278) !**************************************************************************
+(  279) 
+(  280) SUBROUTINE PRISM_DUMMY_CALC_NEWDATE ( DATE, DATE_INCR, IERROR )
+(  281)        REAL(KIND=JPRD), INTENT(IN)                     :: DATE_INCR
+(  282)        TYPE (PRISM_TIME_STRUCT), INTENT(INOUT) :: DATE
+(  283)        INTEGER(KIND=JPIM), INTENT(OUT)                    :: IERROR
+(  284) 
+(  285)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  286) END SUBROUTINE PRISM_DUMMY_CALC_NEWDATE
+(  287) 
+(  288) !**************************************************************************
+(  289) 
+(  290) SUBROUTINE PRISM_DUMMY_PUT ( FIELD_ID, DATE, DATE_BOUNDS, DATA_ARRAY, INFO, IERROR )
+(  291)       INTEGER(KIND=JPIM), INTENT (IN)                 :: FIELD_ID
+(  292)       TYPE(PRISM_TIME_STRUCT), INTENT (IN) :: DATE
+(  293)       TYPE(PRISM_TIME_STRUCT), INTENT (IN) :: DATE_BOUNDS(2)
+(  294)       DOUBLE PRECISION, INTENT (IN)        :: DATA_ARRAY(:,:)
+(  295)       INTEGER(KIND=JPIM), INTENT (OUT)               :: INFO
+(  296)       INTEGER(KIND=JPIM), INTENT (OUT)               :: IERROR
+(  297) 
+(  298)       CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  299) 
+(  300) END   SUBROUTINE PRISM_DUMMY_PUT
+(  301) 
+(  302) !**************************************************************************
+(  303) 
+(  304) SUBROUTINE PRISM_DUMMY_GET ( FIELD_ID, DATE, DATE_BOUNDS, DATA_ARRAY, INFO, IERROR )
+(  305)       INTEGER(KIND=JPIM), INTENT (IN)                 :: FIELD_ID
+(  306)       TYPE(PRISM_TIME_STRUCT), INTENT (IN) :: DATE
+(  307)       TYPE(PRISM_TIME_STRUCT), INTENT (IN) :: DATE_BOUNDS(2)
+(  308)       DOUBLE PRECISION, INTENT (OUT)        :: DATA_ARRAY(:,:)
+(  309)       INTEGER(KIND=JPIM), INTENT (OUT)               :: INFO
+(  310)       INTEGER(KIND=JPIM), INTENT (OUT)               :: IERROR
+(  311) 
+(  312)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  313) END   SUBROUTINE PRISM_DUMMY_GET
+(  314) 
+(  315) !**************************************************************************
+(  316) 
+(  317) SUBROUTINE PRISM_DUMMY_INITIALIZED ( FLAG, IERROR )
+(  318)        LOGICAL, INTENT (OUT) :: FLAG
+(  319)        INTEGER(KIND=JPIM), INTENT (OUT) :: IERROR
+(  320)       
+(  321)         CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  322) END SUBROUTINE PRISM_DUMMY_INITIALIZED
+(  323) END MODULE PRISM_DUMMY_MOD
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:38      page 7
+
+(    1) # 1 "prism_dummy_mod.F90"
+(    1) !**** PRISM_DUMMY_MOD.F90
+(    2) !
+(    3) !     Purpose.
+(    4) !     --------
+(    5) !     Define interface and dummy routines needed to compile and link ifsMASTER 
+(    6) !     with OASIS4 interfaces (ifs/prism/couplo4*) without linking 
+(    7) !     to original prism libraries   
+(    8) !
+(    9) !     
+(   10) !     Contains   
+(   11) !     ----------
+(   12) !     
+(   13) !      MODULE PRISM_CONSTANTS 
+(   14) !
+(   15) !      MODULE PRISM_DUMMY 
+(   16) !         INTERFACES for prism routines called in ifs/prism/couplo4* 
+(   17) !
+(   18) !      SUBROUTINES
+(   19) !          prism_dummy_* referenced in PRISM_DUMMY    
+(   20) !
+(   21) !      Method
+(   22) !      -------            
+(   23) !      Provide interfaces with original prism rouinte names and refers to 
+(   24) !        dummy subroutines named  prism_dummy_*  if original name is prism_*  
+(   25) !
+(   26) !      To run coupled runs with OASIS4 USE PRISM in ifs/prism/couplo4* instead !      of USE PRISM_DUMMY    
+(   27) !          
+(   28) !     Reference:
+(   29) !     ---------
+(   30) !       S. Valcke, 2006: OASIS4 User Guide  
+(   31) !       PRISM Support Initiative Report No 3,
+(   32) !       CERFACS, Toulouse, France, 64 pp.
+(   33) !
+(   34) !     Author:
+(   35) !     -------
+(   36) !       Johannes Flemming 
+(   37) !
+(   38) !     Modifications.
+(   39) !     --------------
+(   40) !      F. Vana  05-Mar-2015  Support for single precision
+(   41) # 45 "prism_dummy_mod.F90"
+(   45) !**************************************************************************
+(   46) # 47 "prism_dummy_mod.F90"
+(   47) MODULE PRISM_DUMMY_MOD
+(   48) # 49 "prism_dummy_mod.F90"
+(   49) USE PARKIND1 , ONLY : JPRD, JPIM
+(   50) USE YOMPRISM 
+(   51) USE MPL_MODULE, ONLY : MPL_ABORT
+(   52) IMPLICIT NONE
+(   53) SAVE
+(   54) # 55 "prism_dummy_mod.F90"
+(   55) INTERFACE PRISM_SET_POINTS
+(   56) MODULE PROCEDURE PRISM_DUMMY_SET_POINTS_GRIDLESS,PRISM_DUMMY_SET_POINTS_3D_DBLE
+(   57) END INTERFACE
+(   58) # 59 "prism_dummy_mod.F90"
+(   59) INTERFACE PRISM_PUT
+(   60) MODULE PROCEDURE PRISM_DUMMY_PUT
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:38      page 8
+
+(   61) END INTERFACE 
+(   62) # 64 "prism_dummy_mod.F90"
+(   64) INTERFACE PRISM_GET
+(   65) MODULE PROCEDURE PRISM_DUMMY_GET
+(   66) END INTERFACE 
+(   67) # 69 "prism_dummy_mod.F90"
+(   69) INTERFACE PRISM_INITIALIZED
+(   70) MODULE PROCEDURE PRISM_DUMMY_INITIALIZED
+(   71) END INTERFACE
+(   72) # 73 "prism_dummy_mod.F90"
+(   73)  
+(   74) INTERFACE  PRISM_INIT 
+(   75) MODULE PROCEDURE PRISM_DUMMY_INIT
+(   76) END INTERFACE
+(   77) # 78 "prism_dummy_mod.F90"
+(   78) INTERFACE PRISM_INIT_COMP 
+(   79) MODULE PROCEDURE PRISM_DUMMY_INIT_COMP
+(   80) END INTERFACE
+(   81) # 82 "prism_dummy_mod.F90"
+(   82) INTERFACE   PRISM_ENDDEF
+(   83) MODULE PROCEDURE PRISM_DUMMY_ENDDEF
+(   84) END INTERFACE
+(   85) # 86 "prism_dummy_mod.F90"
+(   86) INTERFACE PRISM_TERMINATE
+(   87) MODULE PROCEDURE PRISM_DUMMY_TERMINATE
+(   88) END INTERFACE
+(   89) # 90 "prism_dummy_mod.F90"
+(   90) INTERFACE PRISM_GET_LOCALCOMM
+(   91) MODULE PROCEDURE PRISM_DUMMY_GET_LOCALCOMM
+(   92) END INTERFACE
+(   93) # 94 "prism_dummy_mod.F90"
+(   94) INTERFACE  PRISM_DEF_VAR
+(   95) MODULE PROCEDURE PRISM_DUMMY_DEF_VAR
+(   96) END INTERFACE
+(   97) # 98 "prism_dummy_mod.F90"
+(   98) INTERFACE PRISM_DEF_GRID
+(   99) MODULE PROCEDURE PRISM_DUMMY_DEF_GRID
+(  100) END INTERFACE
+(  101) # 103 "prism_dummy_mod.F90"
+(  103) INTERFACE PRISM_DEF_PARTITION
+(  104) MODULE PROCEDURE PRISM_DUMMY_DEF_PARTITION
+(  105) END INTERFACE
+(  106) # 108 "prism_dummy_mod.F90"
+(  108) INTERFACE PRISM_REDUCEDGRID_MAP
+(  109) MODULE PROCEDURE PRISM_DUMMY_REDUCEDGRID_MAP
+(  110) END INTERFACE
+(  111) # 112 "prism_dummy_mod.F90"
+(  112) INTERFACE PRISM_SET_CORNERS
+(  113) MODULE PROCEDURE PRISM_DUMMY_SET_CORNERS
+(  114) END INTERFACE
+(  115) # 117 "prism_dummy_mod.F90"
+(  117) INTERFACE PRISM_CALC_NEWDATE
+(  118) MODULE PROCEDURE PRISM_DUMMY_CALC_NEWDATE
+(  119) END INTERFACE
+(  120) # 124 "prism_dummy_mod.F90"
+(  124) !**************************************************************************
+(  125) CONTAINS
+(  126) # 127 "prism_dummy_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:38      page 9
+
+(  127) SUBROUTINE PRISM_DUMMY_SET_POINTS_GRIDLESS (METHOD_ID, POINT_NAME, GRID_ID, &
+(  128)                                  &          NEW_POINTS, IERROR)
+(  129)        CHARACTER (LEN=*), INTENT(IN)                   :: POINT_NAME
+(  130)        INTEGER(KIND=JPIM),           INTENT(IN)                   :: GRID_ID
+(  131)        LOGICAL,           INTENT(IN)                   :: NEW_POINTS
+(  132)        INTEGER(KIND=JPIM),           INTENT(INOUT)                :: METHOD_ID
+(  133)        INTEGER(KIND=JPIM),           INTENT(OUT)                  :: IERROR
+(  134) # 135 "prism_dummy_mod.F90"
+(  135)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  136) # 138 "prism_dummy_mod.F90"
+(  138) END SUBROUTINE PRISM_DUMMY_SET_POINTS_GRIDLESS
+(  139) # 140 "prism_dummy_mod.F90"
+(  140) !**************************************************************************
+(  141) # 142 "prism_dummy_mod.F90"
+(  142) SUBROUTINE  PRISM_DUMMY_SET_POINTS_3D_DBLE(METHOD_ID, POINT_NAME, GRID_ID, & 
+(  143)                   &        POINTS_ACTUAL_SHAPE, POINTS_1ST_ARRAY, POINTS_2ND_ARRAY, & 
+(  144)                   &        POINTS_3RD_ARRAY, NEW_POINTS, IERROR)
+(  145)        CHARACTER (LEN=*), INTENT(IN)                   :: POINT_NAME
+(  146)        INTEGER(KIND=JPIM),           INTENT(IN)                   :: GRID_ID
+(  147)        INTEGER(KIND=JPIM),           INTENT(INOUT)                :: METHOD_ID
+(  148)        REAL(KIND=JPRD),  INTENT(IN), DIMENSION (:)    :: POINTS_1ST_ARRAY, POINTS_2ND_ARRAY, POINTS_3RD_ARRAY
+(  149)        INTEGER(KIND=JPIM),           INTENT(IN)                   :: POINTS_ACTUAL_SHAPE (2, *)
+(  150)        LOGICAL,           INTENT(IN)                   :: NEW_POINTS
+(  151)        INTEGER(KIND=JPIM),           INTENT(OUT)                  :: IERROR
+(  152) # 153 "prism_dummy_mod.F90"
+(  153)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  154) # 155 "prism_dummy_mod.F90"
+(  155) END SUBROUTINE PRISM_DUMMY_SET_POINTS_3D_DBLE
+(  156) # 157 "prism_dummy_mod.F90"
+(  157) !**************************************************************************
+(  158) # 159 "prism_dummy_mod.F90"
+(  159) SUBROUTINE PRISM_DUMMY_INIT ( APPL_NAME, IERROR )
+(  160)        CHARACTER (LEN=*), INTENT(IN) :: APPL_NAME
+(  161)        INTEGER(KIND=JPIM), INTENT (OUT)         :: IERROR
+(  162) # 163 "prism_dummy_mod.F90"
+(  163)         STOP 'ABORT PRISM_DUMMY'
+(  164) # 165 "prism_dummy_mod.F90"
+(  165) END SUBROUTINE PRISM_DUMMY_INIT
+(  166) # 167 "prism_dummy_mod.F90"
+(  167) !**************************************************************************
+(  168) # 169 "prism_dummy_mod.F90"
+(  169) SUBROUTINE PRISM_DUMMY_INIT_COMP ( COMP_ID, COMP_NAME, IERROR )  
+(  170)        CHARACTER (LEN=*), INTENT(IN) :: COMP_NAME
+(  171)        INTEGER(KIND=JPIM), INTENT (OUT) :: COMP_ID, IERROR
+(  172) # 173 "prism_dummy_mod.F90"
+(  173)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  174) # 175 "prism_dummy_mod.F90"
+(  175) END SUBROUTINE PRISM_DUMMY_INIT_COMP
+(  176) # 177 "prism_dummy_mod.F90"
+(  177) !**************************************************************************
+(  178) # 179 "prism_dummy_mod.F90"
+(  179) SUBROUTINE PRISM_DUMMY_ENDDEF ( IERROR )
+(  180)        INTEGER(KIND=JPIM), INTENT (OUT) :: IERROR
+(  181) # 182 "prism_dummy_mod.F90"
+(  182)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  183) # 184 "prism_dummy_mod.F90"
+(  184) END SUBROUTINE PRISM_DUMMY_ENDDEF
+(  185) # 186 "prism_dummy_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:38      page 10
+
+(  186) !**************************************************************************
+(  187) # 188 "prism_dummy_mod.F90"
+(  188) SUBROUTINE PRISM_DUMMY_TERMINATE ( IERROR )
+(  189)       INTEGER(KIND=JPIM), INTENT (OUT) :: IERROR
+(  190) # 191 "prism_dummy_mod.F90"
+(  191)       CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  192) # 193 "prism_dummy_mod.F90"
+(  193) END SUBROUTINE PRISM_DUMMY_TERMINATE
+(  194) # 195 "prism_dummy_mod.F90"
+(  195) !**************************************************************************
+(  196) # 197 "prism_dummy_mod.F90"
+(  197) SUBROUTINE PRISM_DUMMY_GET_LOCALCOMM ( COMP_ID, LOCAL_COMM, IERROR )
+(  198)        INTEGER(KIND=JPIM), INTENT (IN)  :: COMP_ID
+(  199)        INTEGER(KIND=JPIM), INTENT (OUT) :: LOCAL_COMM, IERROR
+(  200) # 201 "prism_dummy_mod.F90"
+(  201)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  202) # 203 "prism_dummy_mod.F90"
+(  203) END SUBROUTINE PRISM_DUMMY_GET_LOCALCOMM
+(  204) # 205 "prism_dummy_mod.F90"
+(  205) !**************************************************************************
+(  206) # 207 "prism_dummy_mod.F90"
+(  207) SUBROUTINE PRISM_DUMMY_DEF_VAR (VAR_ID, NAME, GRID_ID, METHOD_ID, MASK_ID, &
+(  208)                      &      VAR_NODIMS, VAR_ACTUAL_SHAPE, VAR_TYPE, IERROR )
+(  209)        INTEGER(KIND=JPIM), INTENT(OUT)         :: VAR_ID
+(  210)        CHARACTER (LEN=*), INTENT(IN) :: NAME
+(  211)        INTEGER(KIND=JPIM), INTENT(IN)          :: GRID_ID
+(  212)        INTEGER(KIND=JPIM), INTENT(IN)          :: METHOD_ID
+(  213)        INTEGER(KIND=JPIM), INTENT(IN)          :: MASK_ID
+(  214)        INTEGER(KIND=JPIM), INTENT(IN)          :: VAR_NODIMS(2)
+(  215)        INTEGER(KIND=JPIM), INTENT(IN)          :: VAR_ACTUAL_SHAPE(1:2, 1:VAR_NODIMS(1)+VAR_NODIMS(2))
+(  216)        INTEGER(KIND=JPIM), INTENT(IN)          :: VAR_TYPE
+(  217)        INTEGER(KIND=JPIM), INTENT(OUT)         :: IERROR 
+(  218) # 219 "prism_dummy_mod.F90"
+(  219)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  220)      END SUBROUTINE PRISM_DUMMY_DEF_VAR
+(  221) # 222 "prism_dummy_mod.F90"
+(  222) !**************************************************************************  
+(  223) # 224 "prism_dummy_mod.F90"
+(  224) SUBROUTINE PRISM_DUMMY_DEF_GRID ( GRID_ID, GRID_NAME, COMP_ID, GRID_VALID_SHAPE, &
+(  225)                               &     GRID_TYPE, IERROR)
+(  226)        CHARACTER(LEN=*), INTENT(IN) :: GRID_NAME
+(  227)        INTEGER(KIND=JPIM), INTENT(IN)          :: COMP_ID
+(  228)        INTEGER(KIND=JPIM), INTENT(IN)          :: GRID_VALID_SHAPE (2, *)
+(  229)        INTEGER(KIND=JPIM), INTENT(IN)          :: GRID_TYPE
+(  230)        INTEGER(KIND=JPIM), INTENT(OUT)         :: GRID_ID, IERROR
+(  231) # 232 "prism_dummy_mod.F90"
+(  232)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  233) # 234 "prism_dummy_mod.F90"
+(  234) END SUBROUTINE PRISM_DUMMY_DEF_GRID
+(  235) # 236 "prism_dummy_mod.F90"
+(  236) !**************************************************************************
+(  237) # 238 "prism_dummy_mod.F90"
+(  238) SUBROUTINE PRISM_DUMMY_DEF_PARTITION ( GRID_ID, NBR_BLOCKS, &
+(  239)                       &           PARTITION_ARRAY, EXTENT_ARRAY, IERROR )
+(  240)        INTEGER(KIND=JPIM), INTENT (IN)                :: GRID_ID
+(  241)        INTEGER(KIND=JPIM), INTENT (IN)                :: NBR_BLOCKS
+(  242)        INTEGER(KIND=JPIM), INTENT (IN)                :: PARTITION_ARRAY(1:NBR_BLOCKS,*)
+(  243)        INTEGER(KIND=JPIM), INTENT (IN)                :: EXTENT_ARRAY(1:NBR_BLOCKS,*)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:38      page 11
+
+(  244)        INTEGER(KIND=JPIM), INTENT (OUT)               :: IERROR
+(  245) # 246 "prism_dummy_mod.F90"
+(  246)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  247) # 248 "prism_dummy_mod.F90"
+(  248) END SUBROUTINE PRISM_DUMMY_DEF_PARTITION
+(  249) # 250 "prism_dummy_mod.F90"
+(  250) !**************************************************************************
+(  251) # 252 "prism_dummy_mod.F90"
+(  252) SUBROUTINE PRISM_DUMMY_REDUCEDGRID_MAP( GRID_ID,  NBR_LATITUDES, &
+(  253)              &    NBR_POINTS_PER_LAT, IERROR )
+(  254)        INTEGER(KIND=JPIM), INTENT (IN)                :: GRID_ID
+(  255)        INTEGER(KIND=JPIM), INTENT (IN)                :: NBR_LATITUDES
+(  256)        INTEGER(KIND=JPIM), INTENT (IN)                :: NBR_POINTS_PER_LAT(NBR_LATITUDES)
+(  257)        INTEGER(KIND=JPIM), INTENT (OUT)               :: IERROR
+(  258) # 259 "prism_dummy_mod.F90"
+(  259)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  260) # 261 "prism_dummy_mod.F90"
+(  261) END SUBROUTINE PRISM_DUMMY_REDUCEDGRID_MAP
+(  262) # 263 "prism_dummy_mod.F90"
+(  263) !**************************************************************************
+(  264) # 265 "prism_dummy_mod.F90"
+(  265) SUBROUTINE PRISM_DUMMY_SET_CORNERS(GRID_ID, NBR_CORNERS, CORNERS_ACTUAL_SHAPE, &
+(  266)         &    CORNERS_1ST_ARRAY, CORNERS_2ND_ARRAY, CORNERS_3RD_ARRAY, IERROR)
+(  267)        INTEGER(KIND=JPIM), INTENT (IN)                :: GRID_ID
+(  268)        INTEGER(KIND=JPIM), INTENT (IN)                :: NBR_CORNERS
+(  269)        REAL(KIND=JPRD), INTENT (IN)       :: CORNERS_1ST_ARRAY (:,:)
+(  270)        REAL(KIND=JPRD), INTENT (IN)       :: CORNERS_2ND_ARRAY (:,:)
+(  271)        REAL(KIND=JPRD), INTENT (IN)       :: CORNERS_3RD_ARRAY (:,:)
+(  272)        INTEGER(KIND=JPIM), INTENT (IN)                :: CORNERS_ACTUAL_SHAPE (1:2, *)
+(  273)        INTEGER(KIND=JPIM), INTENT(OUT)                :: IERROR
+(  274) # 275 "prism_dummy_mod.F90"
+(  275)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  276) END SUBROUTINE PRISM_DUMMY_SET_CORNERS
+(  277) # 278 "prism_dummy_mod.F90"
+(  278) !**************************************************************************
+(  279) # 280 "prism_dummy_mod.F90"
+(  280) SUBROUTINE PRISM_DUMMY_CALC_NEWDATE ( DATE, DATE_INCR, IERROR )
+(  281)        REAL(KIND=JPRD), INTENT(IN)                     :: DATE_INCR
+(  282)        TYPE (PRISM_TIME_STRUCT), INTENT(INOUT) :: DATE
+(  283)        INTEGER(KIND=JPIM), INTENT(OUT)                    :: IERROR
+(  284) # 285 "prism_dummy_mod.F90"
+(  285)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  286) END SUBROUTINE PRISM_DUMMY_CALC_NEWDATE
+(  287) # 288 "prism_dummy_mod.F90"
+(  288) !**************************************************************************
+(  289) # 290 "prism_dummy_mod.F90"
+(  290) SUBROUTINE PRISM_DUMMY_PUT ( FIELD_ID, DATE, DATE_BOUNDS, DATA_ARRAY, INFO, IERROR )
+(  291)       INTEGER(KIND=JPIM), INTENT (IN)                 :: FIELD_ID
+(  292)       TYPE(PRISM_TIME_STRUCT), INTENT (IN) :: DATE
+(  293)       TYPE(PRISM_TIME_STRUCT), INTENT (IN) :: DATE_BOUNDS(2)
+(  294)       DOUBLE PRECISION, INTENT (IN)        :: DATA_ARRAY(:,:)
+(  295)       INTEGER(KIND=JPIM), INTENT (OUT)               :: INFO
+(  296)       INTEGER(KIND=JPIM), INTENT (OUT)               :: IERROR
+(  297) # 298 "prism_dummy_mod.F90"
+(  298)       CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  299) # 300 "prism_dummy_mod.F90"
+(  300) END   SUBROUTINE PRISM_DUMMY_PUT
+(  301) # 302 "prism_dummy_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:38      page 12
+
+(  302) !**************************************************************************
+(  303) # 304 "prism_dummy_mod.F90"
+(  304) SUBROUTINE PRISM_DUMMY_GET ( FIELD_ID, DATE, DATE_BOUNDS, DATA_ARRAY, INFO, IERROR )
+(  305)       INTEGER(KIND=JPIM), INTENT (IN)                 :: FIELD_ID
+(  306)       TYPE(PRISM_TIME_STRUCT), INTENT (IN) :: DATE
+(  307)       TYPE(PRISM_TIME_STRUCT), INTENT (IN) :: DATE_BOUNDS(2)
+(  308)       DOUBLE PRECISION, INTENT (OUT)        :: DATA_ARRAY(:,:)
+(  309)       INTEGER(KIND=JPIM), INTENT (OUT)               :: INFO
+(  310)       INTEGER(KIND=JPIM), INTENT (OUT)               :: IERROR
+(  311) # 312 "prism_dummy_mod.F90"
+(  312)        CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  313) END   SUBROUTINE PRISM_DUMMY_GET
+(  314) # 315 "prism_dummy_mod.F90"
+(  315) !**************************************************************************
+(  316) # 317 "prism_dummy_mod.F90"
+(  317) SUBROUTINE PRISM_DUMMY_INITIALIZED ( FLAG, IERROR )
+(  318)        LOGICAL, INTENT (OUT) :: FLAG
+(  319)        INTEGER(KIND=JPIM), INTENT (OUT) :: IERROR
+(  320)       
+(  321)         CALL MPL_ABORT('ABORT PRISM_DUMMY')
+(  322) END SUBROUTINE PRISM_DUMMY_INITIALIZED
+(  323) END MODULE PRISM_DUMMY_MOD

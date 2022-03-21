@@ -1,0 +1,452 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:02      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eltdirad_mod.F90
+
+(    1) MODULE ELTDIRAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ELTDIRAD(KM,KMLOC,KF_FS,KF_UV,KF_SCALARS,KLED2,&
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2 , &
+(    6)  & KFLDPTRUV,KFLDPTRSC,PSPMEANU,PSPMEANV)
+(    7) 
+(    8) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    9) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   10) 
+(   11) USE TPM_DIM         ,ONLY : R
+(   12) USE TPMALD_DIM      ,ONLY : RALD
+(   13) 
+(   14) USE EPRFI2AD_MOD    ,ONLY : EPRFI2AD
+(   15) USE ELEDIRAD_MOD    ,ONLY : ELEDIRAD
+(   16) USE EUVTVDAD_MOD
+(   17) USE EUPDSPAD_MOD    ,ONLY : EUPDSPAD
+(   18)  
+(   19) 
+(   20) !**** *ELTDIRAD* - Control of Direct Legendre transform step - adjoint
+(   21) 
+(   22) !     Purpose.
+(   23) !     --------
+(   24) !        Tranform from Fourier space to spectral space, compute
+(   25) !        vorticity and divergence.
+(   26) 
+(   27) !**   Interface.
+(   28) !     ----------
+(   29) !        *CALL* *ELTDIRAD(...)*
+(   30) 
+(   31) !        Explicit arguments :
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:02      page 2
+
+(   32) !        --------------------  KM     - zonal wavenumber
+(   33) !                              KMLOC  - local zonal wavenumber
+(   34) !                              PSPVOR - spectral vorticity
+(   35) !                              PSPDIV - spectral divergence
+(   36) !                              PSPSCALAR - spectral scalar variables
+(   37) 
+(   38) !        Implicit arguments :  None
+(   39) !        --------------------
+(   40) 
+(   41) !     Method.
+(   42) !     -------
+(   43) 
+(   44) !     Externals.
+(   45) !     ----------
+(   46) !         EPRFI2AD   - prepares the Fourier work arrays for model variables.
+(   47) !         ELEDIRAD   - direct Legendre transform
+(   48) !         EUVTVDAD   -
+(   49) !         EUPDSPAD   - updating of spectral arrays (fields)
+(   50) 
+(   51) !     Reference.
+(   52) !     ----------
+(   53) !        ECMWF Research Department documentation of the IFS
+(   54) 
+(   55) !     Author.
+(   56) !     -------
+(   57) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   58) 
+(   59) !     Modifications.
+(   60) !     --------------
+(   61) !        Original : 87-11-24
+(   62) !        Modified : 91-07-01 Philippe Courtier/Mats Hamrud - Rewrite
+(   63) !                            for uv formulation
+(   64) !        Modified 93-03-19 D. Giard - CDCONF='T' for tendencies
+(   65) !        Modified 93-11-18 M. Hamrud - use only one Fourier buffer
+(   66) !        Modified 94-04-06 R. El khatib Full-POS implementation
+(   67) !        M.Hamrud  : 94-11-01 New conf 'G' - vor,div->vor,div
+(   68) !                             instead of u,v->vor,div
+(   69) !        MPP Group : 95-10-01 Support for Distributed Memory version
+(   70) !        K. YESSAD (AUGUST 1996):
+(   71) !               - Legendre transforms for transmission coefficients.
+(   72) !        Modified : 04/06/99 D.Salmond : change order of AIA and SIA
+(   73) !     01-08-27 : R. El Khatib Fix for NPROMATR /= 0
+(   74) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   75) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   76) !        N. Lopes & R. El Khatib 15-Jun-2012 Scalability enhancement +
+(   77) !        thread-safety
+(   78) !     ------------------------------------------------------------------
+(   79) !
+(   80) IMPLICIT NONE
+(   81) !
+(   82) INTEGER(KIND=JPIM), INTENT(IN)  :: KM
+(   83) INTEGER(KIND=JPIM), INTENT(IN)  :: KMLOC
+(   84) INTEGER(KIND=JPIM),INTENT(IN)   :: KF_FS,KF_UV,KF_SCALARS,KLED2
+(   85) 
+(   86) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPVOR(:,:)
+(   87) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPDIV(:,:)
+(   88) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPSCALAR(:,:)
+(   89) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PSPSC2(:,:)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:02      page 3
+
+(   90) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PSPSC3A(:,:,:)
+(   91) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PSPSC3B(:,:,:)
+(   92) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRUV(:)
+(   93) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRSC(:)
+(   94) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPMEANU(:)
+(   95) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPMEANV(:)
+(   96) 
+(   97) INTEGER(KIND=JPIM) :: IFC
+(   98) INTEGER(KIND=JPIM) :: IUS,IUE,IVS,IVE,IVORS,IVORE,IDIVS,IDIVE
+(   99) 
+(  100) REAL(KIND=JPRB) :: ZFFT(RALD%NDGLSUR+R%NNOEXTZG,KLED2)
+(  101) REAL(KIND=JPRB) :: ZVODI(RALD%NDGLSUR+R%NNOEXTZG,MAX(4*KF_UV,1))
+(  102) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  103) 
+(  104) !     ------------------------------------------------------------------
+(  105) 
+(  106) !*       1.    PREPARE LEGENDRE POLONOMIALS AND EPSNM
+(  107) !              --------------------------------------
+(  108) 
+(  109) IF (LHOOK) CALL DR_HOOK('ELTDIRAD_MOD:ELTDIRAD',0,ZHOOK_HANDLE)
+(  110) ZFFT=0.0_JPRB
+(  111) ZVODI=0.0_JPRB
+(  112) 
+(  113) !     ------------------------------------------------------------------
+(  114) 
+(  115) !*       6.    UPDATE SPECTRAL ARRAYS.
+(  116) !              -----------------------
+(  117) 
+(  118) CALL EUPDSPAD(KM,KF_UV,KF_SCALARS,ZFFT,ZVODI, &
+(  119)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(  120)  & PSPSC3A,PSPSC3B,PSPSC2 , &
+(  121)  & KFLDPTRUV,KFLDPTRSC)
+(  122) 
+(  123) !     ------------------------------------------------------------------
+(  124) 
+(  125) !*       5.    COMPUTE VORTICITY AND DIVERGENCE.
+(  126) !              ---------------------------------
+(  127) IF( KF_UV > 0 ) THEN
+(  128)   IUS = 1
+(  129)   IUE = 2*KF_UV
+(  130)   IVS = 2*KF_UV+1
+(  131)   IVE = 4*KF_UV
+(  132)   IVORS = 1
+(  133)   IVORE = 2*KF_UV
+(  134)   IDIVS = 2*KF_UV+1
+(  135)   IDIVE = 4*KF_UV
+(  136) ! SET PART OF ZFFT CONTAINING U AND V TO 0.
+(  137)   ZFFT(:,IUS:IVE) = 0.0_JPRB
+(  138)   CALL EUVTVDAD(KM,KMLOC,KF_UV,KFLDPTRUV,ZFFT(:,IUS:IUE),ZFFT(:,IVS:IVE),&
+(  139)    & ZVODI(:,IVORS:IVORE),ZVODI(:,IDIVS:IDIVE),PSPMEANU,PSPMEANV)
+(  140) ENDIF
+(  141) 
+(  142) !     ------------------------------------------------------------------
+(  143) 
+(  144) !*       4.    DIRECT LEGENDRE TRANSFORM.
+(  145) !              --------------------------
+(  146) IFC = 2*KF_FS
+(  147) CALL ELEDIRAD(KM,IFC,KLED2,ZFFT)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:02      page 4
+
+(  148) 
+(  149) !     ------------------------------------------------------------------
+(  150) 
+(  151) !*       3.    FOURIER SPACE COMPUTATIONS.
+(  152) !              ---------------------------
+(  153) 
+(  154) !     ------------------------------------------------------------------
+(  155) 
+(  156) !*       2.    PREPARE WORK ARRAYS.
+(  157) !              --------------------
+(  158) 
+(  159) CALL EPRFI2AD(KM,KMLOC,KF_FS,ZFFT)
+(  160) IF (LHOOK) CALL DR_HOOK('ELTDIRAD_MOD:ELTDIRAD',1,ZHOOK_HANDLE)
+(  161) 
+(  162) !     ------------------------------------------------------------------
+(  163) 
+(  164) END SUBROUTINE ELTDIRAD
+(  165) END MODULE ELTDIRAD_MOD
+(  166) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:02      page 5
+
+(    1) # 1 "eltdirad_mod.F90"
+(    1) MODULE ELTDIRAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ELTDIRAD(KM,KMLOC,KF_FS,KF_UV,KF_SCALARS,KLED2,&
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2 , &
+(    6)  & KFLDPTRUV,KFLDPTRSC,PSPMEANU,PSPMEANV)
+(    7) # 8 "eltdirad_mod.F90"
+(    8) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    9) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   10) # 11 "eltdirad_mod.F90"
+(   11) USE TPM_DIM         ,ONLY : R
+(   12) USE TPMALD_DIM      ,ONLY : RALD
+(   13) # 14 "eltdirad_mod.F90"
+(   14) USE EPRFI2AD_MOD    ,ONLY : EPRFI2AD
+(   15) USE ELEDIRAD_MOD    ,ONLY : ELEDIRAD
+(   16) USE EUVTVDAD_MOD
+(   17) USE EUPDSPAD_MOD    ,ONLY : EUPDSPAD
+(   18)  
+(   19) # 20 "eltdirad_mod.F90"
+(   20) !**** *ELTDIRAD* - Control of Direct Legendre transform step - adjoint
+(   21) # 22 "eltdirad_mod.F90"
+(   22) !     Purpose.
+(   23) !     --------
+(   24) !        Tranform from Fourier space to spectral space, compute
+(   25) !        vorticity and divergence.
+(   26) # 27 "eltdirad_mod.F90"
+(   27) !**   Interface.
+(   28) !     ----------
+(   29) !        *CALL* *ELTDIRAD(...)*
+(   30) # 31 "eltdirad_mod.F90"
+(   31) !        Explicit arguments :
+(   32) !        --------------------  KM     - zonal wavenumber
+(   33) !                              KMLOC  - local zonal wavenumber
+(   34) !                              PSPVOR - spectral vorticity
+(   35) !                              PSPDIV - spectral divergence
+(   36) !                              PSPSCALAR - spectral scalar variables
+(   37) # 38 "eltdirad_mod.F90"
+(   38) !        Implicit arguments :  None
+(   39) !        --------------------
+(   40) # 41 "eltdirad_mod.F90"
+(   41) !     Method.
+(   42) !     -------
+(   43) # 44 "eltdirad_mod.F90"
+(   44) !     Externals.
+(   45) !     ----------
+(   46) !         EPRFI2AD   - prepares the Fourier work arrays for model variables.
+(   47) !         ELEDIRAD   - direct Legendre transform
+(   48) !         EUVTVDAD   -
+(   49) !         EUPDSPAD   - updating of spectral arrays (fields)
+(   50) # 51 "eltdirad_mod.F90"
+(   51) !     Reference.
+(   52) !     ----------
+(   53) !        ECMWF Research Department documentation of the IFS
+(   54) # 55 "eltdirad_mod.F90"
+(   55) !     Author.
+(   56) !     -------
+(   57) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:02      page 6
+
+(   58) # 59 "eltdirad_mod.F90"
+(   59) !     Modifications.
+(   60) !     --------------
+(   61) !        Original : 87-11-24
+(   62) !        Modified : 91-07-01 Philippe Courtier/Mats Hamrud - Rewrite
+(   63) !                            for uv formulation
+(   64) !        Modified 93-03-19 D. Giard - CDCONF='T' for tendencies
+(   65) !        Modified 93-11-18 M. Hamrud - use only one Fourier buffer
+(   66) !        Modified 94-04-06 R. El khatib Full-POS implementation
+(   67) !        M.Hamrud  : 94-11-01 New conf 'G' - vor,div->vor,div
+(   68) !                             instead of u,v->vor,div
+(   69) !        MPP Group : 95-10-01 Support for Distributed Memory version
+(   70) !        K. YESSAD (AUGUST 1996):
+(   71) !               - Legendre transforms for transmission coefficients.
+(   72) !        Modified : 04/06/99 D.Salmond : change order of AIA and SIA
+(   73) !     01-08-27 : R. El Khatib Fix for NPROMATR /= 0
+(   74) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   75) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   76) !        N. Lopes & R. El Khatib 15-Jun-2012 Scalability enhancement +
+(   77) !        thread-safety
+(   78) !     ------------------------------------------------------------------
+(   79) !
+(   80) IMPLICIT NONE
+(   81) !
+(   82) INTEGER(KIND=JPIM), INTENT(IN)  :: KM
+(   83) INTEGER(KIND=JPIM), INTENT(IN)  :: KMLOC
+(   84) INTEGER(KIND=JPIM),INTENT(IN)   :: KF_FS,KF_UV,KF_SCALARS,KLED2
+(   85) # 86 "eltdirad_mod.F90"
+(   86) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPVOR(:,:)
+(   87) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPDIV(:,:)
+(   88) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPSCALAR(:,:)
+(   89) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PSPSC2(:,:)
+(   90) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PSPSC3A(:,:,:)
+(   91) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PSPSC3B(:,:,:)
+(   92) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRUV(:)
+(   93) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRSC(:)
+(   94) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPMEANU(:)
+(   95) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPMEANV(:)
+(   96) # 97 "eltdirad_mod.F90"
+(   97) INTEGER(KIND=JPIM) :: IFC
+(   98) INTEGER(KIND=JPIM) :: IUS,IUE,IVS,IVE,IVORS,IVORE,IDIVS,IDIVE
+(   99) # 100 "eltdirad_mod.F90"
+(  100) REAL(KIND=JPRB) :: ZFFT(RALD%NDGLSUR+R%NNOEXTZG,KLED2)
+(  101) REAL(KIND=JPRB) :: ZVODI(RALD%NDGLSUR+R%NNOEXTZG,MAX(4*KF_UV,1))
+(  102) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  103) # 104 "eltdirad_mod.F90"
+(  104) !     ------------------------------------------------------------------
+(  105) # 106 "eltdirad_mod.F90"
+(  106) !*       1.    PREPARE LEGENDRE POLONOMIALS AND EPSNM
+(  107) !              --------------------------------------
+(  108) # 109 "eltdirad_mod.F90"
+(  109) IF (LHOOK) CALL DR_HOOK('ELTDIRAD_MOD:ELTDIRAD',0,ZHOOK_HANDLE)
+(  110) ZFFT=0.0_JPRB
+(  111) ZVODI=0.0_JPRB
+(  112) # 113 "eltdirad_mod.F90"
+(  113) !     ------------------------------------------------------------------
+(  114) # 115 "eltdirad_mod.F90"
+(  115) !*       6.    UPDATE SPECTRAL ARRAYS.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:02      page 7
+
+(  116) !              -----------------------
+(  117) # 118 "eltdirad_mod.F90"
+(  118) CALL EUPDSPAD(KM,KF_UV,KF_SCALARS,ZFFT,ZVODI, &
+(  119)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(  120)  & PSPSC3A,PSPSC3B,PSPSC2 , &
+(  121)  & KFLDPTRUV,KFLDPTRSC)
+(  122) # 123 "eltdirad_mod.F90"
+(  123) !     ------------------------------------------------------------------
+(  124) # 125 "eltdirad_mod.F90"
+(  125) !*       5.    COMPUTE VORTICITY AND DIVERGENCE.
+(  126) !              ---------------------------------
+(  127) IF( KF_UV > 0 ) THEN
+(  128)   IUS = 1
+(  129)   IUE = 2*KF_UV
+(  130)   IVS = 2*KF_UV+1
+(  131)   IVE = 4*KF_UV
+(  132)   IVORS = 1
+(  133)   IVORE = 2*KF_UV
+(  134)   IDIVS = 2*KF_UV+1
+(  135)   IDIVE = 4*KF_UV
+(  136) ! SET PART OF ZFFT CONTAINING U AND V TO 0.
+(  137)   ZFFT(:,IUS:IVE) = 0.0_JPRB
+(  138)   CALL EUVTVDAD(KM,KMLOC,KF_UV,KFLDPTRUV,ZFFT(:,IUS:IUE),ZFFT(:,IVS:IVE),&
+(  139)    & ZVODI(:,IVORS:IVORE),ZVODI(:,IDIVS:IDIVE),PSPMEANU,PSPMEANV)
+(  140) ENDIF
+(  141) # 142 "eltdirad_mod.F90"
+(  142) !     ------------------------------------------------------------------
+(  143) # 144 "eltdirad_mod.F90"
+(  144) !*       4.    DIRECT LEGENDRE TRANSFORM.
+(  145) !              --------------------------
+(  146) IFC = 2*KF_FS
+(  147) CALL ELEDIRAD(KM,IFC,KLED2,ZFFT)
+(  148) # 149 "eltdirad_mod.F90"
+(  149) !     ------------------------------------------------------------------
+(  150) # 151 "eltdirad_mod.F90"
+(  151) !*       3.    FOURIER SPACE COMPUTATIONS.
+(  152) !              ---------------------------
+(  153) # 154 "eltdirad_mod.F90"
+(  154) !     ------------------------------------------------------------------
+(  155) # 156 "eltdirad_mod.F90"
+(  156) !*       2.    PREPARE WORK ARRAYS.
+(  157) !              --------------------
+(  158) # 159 "eltdirad_mod.F90"
+(  159) CALL EPRFI2AD(KM,KMLOC,KF_FS,ZFFT)
+(  160) IF (LHOOK) CALL DR_HOOK('ELTDIRAD_MOD:ELTDIRAD',1,ZHOOK_HANDLE)
+(  161) # 162 "eltdirad_mod.F90"
+(  162) !     ------------------------------------------------------------------
+(  163) # 164 "eltdirad_mod.F90"
+(  164) END SUBROUTINE ELTDIRAD
+(  165) END MODULE ELTDIRAD_MOD

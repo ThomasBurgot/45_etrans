@@ -1,0 +1,479 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:24      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: leinvad_mod.F90
+
+(    1) MODULE LEINVAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE LEINVAD(KM,KMLOC,KFC,KIFC,KF_OUT_LT,KDGLU,PIA,PAOA1,PSOA1)
+(    4) 
+(    5) !**** *LEINVAD* - Inverse Legendre transform.
+(    6) 
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Inverse Legendre tranform of all variables(kernel).
+(   10) 
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        CALL LEINVAD(...)
+(   14) 
+(   15) !        Explicit arguments :  KM - zonal wavenumber (input-c)
+(   16) !        --------------------  KFC - number of fields to tranform (input-c)
+(   17) !                              PIA - spectral fields
+(   18) !                              for zonal wavenumber KM (input)
+(   19) !                              PAOA1 - antisymmetric part of Fourier
+(   20) !                              fields for zonal wavenumber KM (output)
+(   21) !                              PSOA1 - symmetric part of Fourier
+(   22) !                              fields for zonal wavenumber KM (output)
+(   23) 
+(   24) !        Implicit arguments :  None.
+(   25) !        --------------------
+(   26) 
+(   27) !     Method.
+(   28) !     -------
+(   29) 
+(   30) !     Externals.   MXMAOP - calls SGEMVX (matrix multiply)
+(   31) !     ----------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:24      page 2
+
+(   32) 
+(   33) !     Reference.
+(   34) !     ----------
+(   35) !        ECMWF Research Department documentation of the IFS
+(   36) 
+(   37) !     Author.
+(   38) !     -------
+(   39) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   40) 
+(   41) !     Modifications.
+(   42) !     --------------
+(   43) !        Original : 00-02-01 From LEINVAD in IFS CY22R1
+(   44) !        Modified ! 16/10/12 J.Hague : DR_HOOK round calls to DGEMM:
+(   45) !     ------------------------------------------------------------------
+(   46) 
+(   47) USE PARKIND1  ,ONLY : JPIM     ,JPRBT, JPRB     ,JPRD
+(   48) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   49) 
+(   50) USE TPM_DIM         ,ONLY : R
+(   51) USE TPM_GEOMETRY    ,ONLY : G
+(   52) USE TPM_FIELDS      ,ONLY : F
+(   53) !USE TPM_TRANS
+(   54) USE TPM_DISTR       ,ONLY : D
+(   55) !
+(   56) USE TPM_FLT
+(   57) USE BUTTERFLY_ALG_MOD
+(   58) 
+(   59) IMPLICIT NONE
+(   60) 
+(   61) INTEGER(KIND=JPIM), INTENT(IN)    :: KM
+(   62) INTEGER(KIND=JPIM), INTENT(IN)    :: KMLOC
+(   63) INTEGER(KIND=JPIM), INTENT(IN)    :: KFC
+(   64) INTEGER(KIND=JPIM), INTENT(IN)    :: KIFC
+(   65) INTEGER(KIND=JPIM), INTENT(IN)    :: KDGLU
+(   66) INTEGER(KIND=JPIM), INTENT(IN)    :: KF_OUT_LT
+(   67) REAL(KIND=JPRB),    INTENT(OUT)   :: PIA(:,:)
+(   68) REAL(KIND=JPRBT),    INTENT(INOUT) :: PSOA1(:,:)
+(   69) REAL(KIND=JPRBT),    INTENT(INOUT) :: PAOA1(:,:)
+(   70) 
+(   71) !     LOCAL VARIABLES
+(   72) INTEGER(KIND=JPIM) :: IA, ILA, ILS, IS, ISKIP, ISL, IOAD1, JK,JI
+(   73) INTEGER(KIND=JPIM) :: IF,ITHRESHOLD
+(   74) REAL(KIND=JPRBT)    :: ZBA((R%NSMAX-KM+2)/2,KIFC), ZBS((R%NSMAX-KM+3)/2,KIFC), ZC(KDGLU,KIFC)
+(   75) LOGICAL, PARAMETER :: LLDOUBLE = (JPRD == JPRBT)
+(   76) CHARACTER(LEN=1) :: CLX
+(   77) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   78) 
+(   79) !     ------------------------------------------------------------------
+(   80) 
+(   81) !*       1.       PERFORM LEGENDRE TRANFORM.
+(   82) !                 --------------------------
+(   83) 
+(   84) !*       1.1      PREPARATIONS.
+(   85) 
+(   86) CLX = 'S'
+(   87) IF (LLDOUBLE) CLX = 'D'
+(   88) 
+(   89) IA  = 1+MOD(R%NSMAX-KM+2,2)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:24      page 3
+
+(   90) IS  = 1+MOD(R%NSMAX-KM+1,2)
+(   91) ILA = (R%NSMAX-KM+2)/2
+(   92) ILS = (R%NSMAX-KM+3)/2
+(   93) ISL = MAX(R%NDGNH-G%NDGLU(KM)+1,1)
+(   94) IOAD1 = 2*KF_OUT_LT
+(   95) 
+(   96) IF(KM == 0)THEN
+(   97)   ISKIP = 2
+(   98) ELSE
+(   99)   ISKIP = 1
+(  100) ENDIF
+(  101) 
+(  102) IF( KDGLU > 0 ) THEN
+(  103) 
+(  104)   ITHRESHOLD=S%ITHRESHOLD
+(  105) 
+(  106) 
+(  107) ! 1. +++++++++++++ anti-symmetric
+(  108) 
+(  109)  ! we need the transpose of C
+(  110)   IF=0
+(  111)   DO JK=1,KFC,ISKIP
+(  112)     IF=IF+1
+(  113)     DO JI=1,KDGLU
+(  114)       ZC(JI,IF) = PAOA1(JK,ISL+JI-1)
+(  115)     ENDDO
+(  116)   ENDDO
+(  117) 
+(  118)   IF(ILA <= ITHRESHOLD .OR. .NOT.S%LUSEFLT) THEN
+(  119)      IF (LHOOK) CALL DR_HOOK('LE_'//CLX//'GEMM_1',0,ZHOOK_HANDLE)
+(  120)      IF(LLDOUBLE)THEN
+(  121)         CALL DGEMM('T','N',ILA,KIFC,KDGLU,1.0_JPRBT,S%FA(KMLOC)%RPNMA,KDGLU,&
+(  122)              &ZC,KDGLU,0._JPRBT,ZBA,ILA)
+(  123)      ELSE
+(  124)         CALL SGEMM('T','N',ILA,KIFC,KDGLU,1.0_JPRBT,S%FA(KMLOC)%RPNMA,KDGLU,&
+(  125)              &ZC,KDGLU,0._JPRBT,ZBA,ILA)
+(  126)      END IF
+(  127)      IF (LHOOK) CALL DR_HOOK('LE_'//CLX//'GEMM_1',1,ZHOOK_HANDLE)
+(  128) 
+(  129)   ELSE
+(  130)     
+(  131)     CALL MULT_BUTM('T',S%FA(KMLOC)%YBUT_STRUCT_A,KIFC,ZC,ZBA)
+(  132) 
+(  133)   ENDIF
+(  134) 
+(  135)   IF=0
+(  136)   DO JK=1,KFC,ISKIP
+(  137)     IF=IF+1
+(  138)     DO JI=1,ILA
+(  139)       PIA(IA+1+(JI-1)*2,JK) = ZBA(JI,IF)
+(  140)     ENDDO
+(  141)   ENDDO
+(  142) 
+(  143) ! 2. +++++++++++++ symmetric
+(  144) 
+(  145)  ! we need the transpose of C
+(  146)   IF=0
+(  147)   DO JK=1,KFC,ISKIP
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:24      page 4
+
+(  148)     IF=IF+1
+(  149)     DO JI=1,KDGLU
+(  150)       ZC(JI,IF) = PSOA1(JK,ISL+JI-1)
+(  151)     ENDDO
+(  152)   ENDDO
+(  153) 
+(  154)   IF(ILS <= ITHRESHOLD .OR. .NOT.S%LUSEFLT ) THEN
+(  155) 
+(  156)     IF (LHOOK) CALL DR_HOOK('LE_'//CLX//'GEMM_2',0,ZHOOK_HANDLE)
+(  157)     IF(LLDOUBLE)THEN
+(  158)        CALL DGEMM('T','N',ILS,KIFC,KDGLU,1.0_JPRBT,S%FA(KMLOC)%RPNMS,KDGLU,&
+(  159)             &ZC,KDGLU,0._JPRBT,ZBS,ILS)
+(  160)     ELSE
+(  161)        CALL SGEMM('T','N',ILS,KIFC,KDGLU,1.0_JPRBT,S%FA(KMLOC)%RPNMS,KDGLU,&
+(  162)             &ZC,KDGLU,0._JPRBT,ZBS,ILS)
+(  163)     END IF
+(  164)     IF (LHOOK) CALL DR_HOOK('LE_'//CLX//'GEMM_2',1,ZHOOK_HANDLE)
+(  165) 
+(  166)   ELSE
+(  167) 
+(  168)     CALL MULT_BUTM('T',S%FA(KMLOC)%YBUT_STRUCT_S,KIFC,ZC,ZBS)
+(  169) 
+(  170)   ENDIF
+(  171) 
+(  172)   IF=0
+(  173)   DO JK=1,KFC,ISKIP
+(  174)     IF=IF+1
+(  175)     DO JI=1,ILS
+(  176)       PIA(IS+1+(JI-1)*2,JK) = ZBS(JI,IF)
+(  177)     ENDDO
+(  178)   ENDDO
+(  179) 
+(  180) 
+(  181) ENDIF
+(  182) !
+(  183) !     ------------------------------------------------------------------
+(  184) 
+(  185) 
+(  186) END SUBROUTINE LEINVAD
+(  187) END MODULE LEINVAD_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:24      page 5
+
+(    1) # 1 "leinvad_mod.F90"
+(    1) MODULE LEINVAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE LEINVAD(KM,KMLOC,KFC,KIFC,KF_OUT_LT,KDGLU,PIA,PAOA1,PSOA1)
+(    4) # 5 "leinvad_mod.F90"
+(    5) !**** *LEINVAD* - Inverse Legendre transform.
+(    6) # 7 "leinvad_mod.F90"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Inverse Legendre tranform of all variables(kernel).
+(   10) # 11 "leinvad_mod.F90"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        CALL LEINVAD(...)
+(   14) # 15 "leinvad_mod.F90"
+(   15) !        Explicit arguments :  KM - zonal wavenumber (input-c)
+(   16) !        --------------------  KFC - number of fields to tranform (input-c)
+(   17) !                              PIA - spectral fields
+(   18) !                              for zonal wavenumber KM (input)
+(   19) !                              PAOA1 - antisymmetric part of Fourier
+(   20) !                              fields for zonal wavenumber KM (output)
+(   21) !                              PSOA1 - symmetric part of Fourier
+(   22) !                              fields for zonal wavenumber KM (output)
+(   23) # 24 "leinvad_mod.F90"
+(   24) !        Implicit arguments :  None.
+(   25) !        --------------------
+(   26) # 27 "leinvad_mod.F90"
+(   27) !     Method.
+(   28) !     -------
+(   29) # 30 "leinvad_mod.F90"
+(   30) !     Externals.   MXMAOP - calls SGEMVX (matrix multiply)
+(   31) !     ----------
+(   32) # 33 "leinvad_mod.F90"
+(   33) !     Reference.
+(   34) !     ----------
+(   35) !        ECMWF Research Department documentation of the IFS
+(   36) # 37 "leinvad_mod.F90"
+(   37) !     Author.
+(   38) !     -------
+(   39) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   40) # 41 "leinvad_mod.F90"
+(   41) !     Modifications.
+(   42) !     --------------
+(   43) !        Original : 00-02-01 From LEINVAD in IFS CY22R1
+(   44) !        Modified ! 16/10/12 J.Hague : DR_HOOK round calls to DGEMM:
+(   45) !     ------------------------------------------------------------------
+(   46) # 47 "leinvad_mod.F90"
+(   47) USE PARKIND1  ,ONLY : JPIM     ,JPRBT, JPRB     ,JPRD
+(   48) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   49) # 50 "leinvad_mod.F90"
+(   50) USE TPM_DIM         ,ONLY : R
+(   51) USE TPM_GEOMETRY    ,ONLY : G
+(   52) USE TPM_FIELDS      ,ONLY : F
+(   53) !USE TPM_TRANS
+(   54) USE TPM_DISTR       ,ONLY : D
+(   55) !
+(   56) USE TPM_FLT
+(   57) USE BUTTERFLY_ALG_MOD
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:24      page 6
+
+(   58) # 59 "leinvad_mod.F90"
+(   59) IMPLICIT NONE
+(   60) # 61 "leinvad_mod.F90"
+(   61) INTEGER(KIND=JPIM), INTENT(IN)    :: KM
+(   62) INTEGER(KIND=JPIM), INTENT(IN)    :: KMLOC
+(   63) INTEGER(KIND=JPIM), INTENT(IN)    :: KFC
+(   64) INTEGER(KIND=JPIM), INTENT(IN)    :: KIFC
+(   65) INTEGER(KIND=JPIM), INTENT(IN)    :: KDGLU
+(   66) INTEGER(KIND=JPIM), INTENT(IN)    :: KF_OUT_LT
+(   67) REAL(KIND=JPRB),    INTENT(OUT)   :: PIA(:,:)
+(   68) REAL(KIND=JPRBT),    INTENT(INOUT) :: PSOA1(:,:)
+(   69) REAL(KIND=JPRBT),    INTENT(INOUT) :: PAOA1(:,:)
+(   70) # 71 "leinvad_mod.F90"
+(   71) !     LOCAL VARIABLES
+(   72) INTEGER(KIND=JPIM) :: IA, ILA, ILS, IS, ISKIP, ISL, IOAD1, JK,JI
+(   73) INTEGER(KIND=JPIM) :: IF,ITHRESHOLD
+(   74) REAL(KIND=JPRBT)    :: ZBA((R%NSMAX-KM+2)/2,KIFC), ZBS((R%NSMAX-KM+3)/2,KIFC), ZC(KDGLU,KIFC)
+(   75) LOGICAL, PARAMETER :: LLDOUBLE = (JPRD == JPRBT)
+(   76) CHARACTER(LEN=1) :: CLX
+(   77) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   78) # 79 "leinvad_mod.F90"
+(   79) !     ------------------------------------------------------------------
+(   80) # 81 "leinvad_mod.F90"
+(   81) !*       1.       PERFORM LEGENDRE TRANFORM.
+(   82) !                 --------------------------
+(   83) # 84 "leinvad_mod.F90"
+(   84) !*       1.1      PREPARATIONS.
+(   85) # 86 "leinvad_mod.F90"
+(   86) CLX = 'S'
+(   87) IF (LLDOUBLE) CLX = 'D'
+(   88) # 89 "leinvad_mod.F90"
+(   89) IA  = 1+MOD(R%NSMAX-KM+2,2)
+(   90) IS  = 1+MOD(R%NSMAX-KM+1,2)
+(   91) ILA = (R%NSMAX-KM+2)/2
+(   92) ILS = (R%NSMAX-KM+3)/2
+(   93) ISL = MAX(R%NDGNH-G%NDGLU(KM)+1,1)
+(   94) IOAD1 = 2*KF_OUT_LT
+(   95) # 96 "leinvad_mod.F90"
+(   96) IF(KM == 0)THEN
+(   97)   ISKIP = 2
+(   98) ELSE
+(   99)   ISKIP = 1
+(  100) ENDIF
+(  101) # 102 "leinvad_mod.F90"
+(  102) IF( KDGLU > 0 ) THEN
+(  103) # 104 "leinvad_mod.F90"
+(  104)   ITHRESHOLD=S%ITHRESHOLD
+(  105) # 107 "leinvad_mod.F90"
+(  107) ! 1. +++++++++++++ anti-symmetric
+(  108) # 109 "leinvad_mod.F90"
+(  109)  ! we need the transpose of C
+(  110)   IF=0
+(  111)   DO JK=1,KFC,ISKIP
+(  112)     IF=IF+1
+(  113)     DO JI=1,KDGLU
+(  114)       ZC(JI,IF) = PAOA1(JK,ISL+JI-1)
+(  115)     ENDDO
+(  116)   ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:24      page 7
+
+(  117) # 118 "leinvad_mod.F90"
+(  118)   IF(ILA <= ITHRESHOLD .OR. .NOT.S%LUSEFLT) THEN
+(  119)      IF (LHOOK) CALL DR_HOOK('LE_'//CLX//'GEMM_1',0,ZHOOK_HANDLE)
+(  120)      IF(LLDOUBLE)THEN
+(  121)         CALL DGEMM('T','N',ILA,KIFC,KDGLU,1.0_JPRBT,S%FA(KMLOC)%RPNMA,KDGLU,&
+(  122)              &ZC,KDGLU,0._JPRBT,ZBA,ILA)
+(  123)      ELSE
+(  124)         CALL SGEMM('T','N',ILA,KIFC,KDGLU,1.0_JPRBT,S%FA(KMLOC)%RPNMA,KDGLU,&
+(  125)              &ZC,KDGLU,0._JPRBT,ZBA,ILA)
+(  126)      END IF
+(  127)      IF (LHOOK) CALL DR_HOOK('LE_'//CLX//'GEMM_1',1,ZHOOK_HANDLE)
+(  128) # 129 "leinvad_mod.F90"
+(  129)   ELSE
+(  130)     
+(  131)     CALL MULT_BUTM('T',S%FA(KMLOC)%YBUT_STRUCT_A,KIFC,ZC,ZBA)
+(  132) # 133 "leinvad_mod.F90"
+(  133)   ENDIF
+(  134) # 135 "leinvad_mod.F90"
+(  135)   IF=0
+(  136)   DO JK=1,KFC,ISKIP
+(  137)     IF=IF+1
+(  138)     DO JI=1,ILA
+(  139)       PIA(IA+1+(JI-1)*2,JK) = ZBA(JI,IF)
+(  140)     ENDDO
+(  141)   ENDDO
+(  142) # 143 "leinvad_mod.F90"
+(  143) ! 2. +++++++++++++ symmetric
+(  144) # 145 "leinvad_mod.F90"
+(  145)  ! we need the transpose of C
+(  146)   IF=0
+(  147)   DO JK=1,KFC,ISKIP
+(  148)     IF=IF+1
+(  149)     DO JI=1,KDGLU
+(  150)       ZC(JI,IF) = PSOA1(JK,ISL+JI-1)
+(  151)     ENDDO
+(  152)   ENDDO
+(  153) # 154 "leinvad_mod.F90"
+(  154)   IF(ILS <= ITHRESHOLD .OR. .NOT.S%LUSEFLT ) THEN
+(  155) # 156 "leinvad_mod.F90"
+(  156)     IF (LHOOK) CALL DR_HOOK('LE_'//CLX//'GEMM_2',0,ZHOOK_HANDLE)
+(  157)     IF(LLDOUBLE)THEN
+(  158)        CALL DGEMM('T','N',ILS,KIFC,KDGLU,1.0_JPRBT,S%FA(KMLOC)%RPNMS,KDGLU,&
+(  159)             &ZC,KDGLU,0._JPRBT,ZBS,ILS)
+(  160)     ELSE
+(  161)        CALL SGEMM('T','N',ILS,KIFC,KDGLU,1.0_JPRBT,S%FA(KMLOC)%RPNMS,KDGLU,&
+(  162)             &ZC,KDGLU,0._JPRBT,ZBS,ILS)
+(  163)     END IF
+(  164)     IF (LHOOK) CALL DR_HOOK('LE_'//CLX//'GEMM_2',1,ZHOOK_HANDLE)
+(  165) # 166 "leinvad_mod.F90"
+(  166)   ELSE
+(  167) # 168 "leinvad_mod.F90"
+(  168)     CALL MULT_BUTM('T',S%FA(KMLOC)%YBUT_STRUCT_S,KIFC,ZC,ZBS)
+(  169) # 170 "leinvad_mod.F90"
+(  170)   ENDIF
+(  171) # 172 "leinvad_mod.F90"
+(  172)   IF=0
+(  173)   DO JK=1,KFC,ISKIP
+(  174)     IF=IF+1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:24      page 8
+
+(  175)     DO JI=1,ILS
+(  176)       PIA(IS+1+(JI-1)*2,JK) = ZBS(JI,IF)
+(  177)     ENDDO
+(  178)   ENDDO
+(  179) # 181 "leinvad_mod.F90"
+(  181) ENDIF
+(  182) !
+(  183) !     ------------------------------------------------------------------
+(  184) # 186 "leinvad_mod.F90"
+(  186) END SUBROUTINE LEINVAD
+(  187) END MODULE LEINVAD_MOD

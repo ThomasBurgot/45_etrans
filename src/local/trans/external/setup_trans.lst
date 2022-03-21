@@ -1,0 +1,1828 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: setup_trans.F90
+
+(    1) SUBROUTINE SETUP_TRANS(KSMAX,KDGL,KDLON,KLOEN,LDSPLIT,PSTRET,&
+(    2) &KFLEV,KTMAX,KRESOL,PWEIGHT,LDGRIDONLY,LDUSERPNM,LDKEEPRPNM,LDUSEFLT,&
+(    3) &LDSPSETUPONLY,LDPNMONLY,LDUSEFFTW,&
+(    4) &LDLL,LDSHIFTLL,CDIO_LEGPOL,CDLEGPOLFNAME,KLEGPOLPTR,KLEGPOLPTR_LEN)
+(    5) 
+(    6) !**** *SETUP_TRANS* - Setup transform package for specific resolution
+(    7) 
+(    8) !     Purpose.
+(    9) !     --------
+(   10) !     To setup for making spectral transforms. Each call to this routine
+(   11) !     creates a new resolution up to a maximum of NMAX_RESOL set up in
+(   12) !     SETUP_TRANS0. You need to call SETUP_TRANS0 before this routine can
+(   13) !     be called.
+(   14) 
+(   15) !**   Interface.
+(   16) !     ----------
+(   17) !     CALL SETUP_TRANS(...)
+(   18) 
+(   19) !     Explicit arguments : KLOEN,LDSPLIT are optional arguments
+(   20) !     --------------------
+(   21) !     KSMAX - spectral truncation required
+(   22) !     KDGL  - number of Gaussian latitudes
+(   23) !     KDLON - number of points on each Gaussian latitude [2*KDGL]
+(   24) !     KLOEN(:) - number of points on each Gaussian latitude [2*KDGL]
+(   25) !     LDSPLIT - true if split latitudes in grid-point space [false]
+(   26) !     KTMAX - truncation order for tendencies?
+(   27) !     KRESOL - the resolution identifier
+(   28) !     PWEIGHT - the weight per grid-point (for a weighted distribution)
+(   29) !     LDGRIDONLY - true if only grid space is required
+(   30) 
+(   31) !     KSMAX,KDGL,KTMAX and KLOEN are GLOBAL variables desribing the resolution
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 2
+
+(   32) !     in spectral and grid-point space
+(   33) 
+(   34) !     LDSPLIT describe the distribution among processors of grid-point data and
+(   35) !     has no relevance if you are using a single processor
+(   36) 
+(   37) !     PSTRET     - stretching factor - for the case the Legendre polynomials are
+(   38) !                  computed on the stretched sphere - works with LSOUTHPNM
+(   39) !     LDUSEFLT   - use Fast Legandre Transform (Butterfly algorithm)
+(   40) !     LDUSERPNM  - Use Belusov algorithm to compute legendre pol. (else new alg.)
+(   41) !     LDKEEPRPNM - Keep Legendre Polynomials (only applicable when using
+(   42) !                  FLT, otherwise always kept)
+(   43) !     LDPNMONLY  - Compute the Legendre polynomials only, not the FFTs.
+(   44) !     LDUSEFFTW    - Use FFTW for FFTs
+(   45) !     LDLL                 - Setup second set of input/output latitudes
+(   46) !                                 the number of input/output latitudes to transform is equal KDGL
+(   47) !                                 or KDGL+2 in the case that includes poles + equator
+(   48) !                                 the number of input/output longitudes to transform is 2*KDGL
+(   49) !     LDSHIFTLL       - Shift output lon/lat data by 0.5*dx and 0.5*dy
+(   50) !     CDIO_LEGPOL  - IO option on Legendre polinomials :  N.B. Only works for NPROC=1
+(   51) !                    Options:
+(   52) !                    'READF' -  read Leg.Pol. from file CDLEGPOLFNAME
+(   53) !                    'WRITEF' - write Leg.Pol. to file CDLEGPOLFNAME
+(   54) !                    'MEMBUF' - Leg. Pol provided in shared memory segment pointed to by KLEGPOLPTR of
+(   55) !                               length KLEGPOLPTR_LEN
+(   56) !     CDLEGPOLFNAME - file name for Leg.Pol. IO
+(   57) !     KLEGPOLPTR    - pointer to Legendre polynomials memory segment
+(   58) !     KLEGPOLPTR_LEN  - length of  Legendre polynomials memory segment
+(   59) 
+(   60) !     Method.
+(   61) !     -------
+(   62) 
+(   63) !     Externals.  SET_RESOL   - set resolution
+(   64) !     ----------  SETUP_DIMS  - setup distribution independent dimensions
+(   65) !                 SUMP_TRANS_PRELEG - first part of setup of distr. environment
+(   66) !                 SULEG - Compute Legandre polonomial and Gaussian
+(   67) !                         Latitudes and Weights
+(   68) !                 SUMP_TRANS - Second part of setup of distributed environment
+(   69) !                 SUFFT - setup for FFT
+(   70) !                 SHAREDMEM_CREATE - create memory buffer for Leg.pol.
+(   71) 
+(   72) !     Author.
+(   73) !     -------
+(   74) !        Mats Hamrud *ECMWF*
+(   75) 
+(   76) !     Modifications.
+(   77) !     --------------
+(   78) !        Original : 00-03-03
+(   79) !        Daan Degrauwe : Mar 2012 E'-zone dimensions
+(   80) !        R. El Khatib 09-Aug-2012 %LAM in GEOM_TYPE
+(   81) !        R. El Khatib 14-Jun-2013 PSTRET, LDPNMONLY, LENABLED
+(   82) !        G. Mozdzynski : Oct 2014 Support f
+(   83) !        N. Wedi       : Apr 2015 Support dual set of lat/lon
+(   84) !        G. Mozdzynski : Jun 2015 Support alternative FFTs to FFTW
+(   85) !        M.Hamrud/W.Deconinck : July 2015 IO options for Legenndre polynomials
+(   86) !        R. El Khatib 07-Mar-2016 Better flexibility for Legendre polynomials computation in stretched mode
+(   87) !     ------------------------------------------------------------------
+(   88) 
+(   89) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB ,  JPRD
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 3
+
+(   90) USE, INTRINSIC :: ISO_C_BINDING, ONLY:  C_PTR, C_INT,C_ASSOCIATED,C_SIZE_T
+(   91) 
+(   92) !ifndef INTERFACE
+(   93) 
+(   94) USE TPM_GEN         ,ONLY : NOUT, MSETUP0, NCUR_RESOL, NDEF_RESOL, &
+(   95)      &                      NMAX_RESOL, NPRINTLEV, LENABLED, NERR
+(   96) USE TPM_DIM         ,ONLY : R, DIM_RESOL, R_NSMAX,R_NTMAX, R_NDGNH, R_NDGL, R_NNOEXTZL
+(   97) USE TPM_DISTR       ,ONLY : D, DISTR_RESOL,NPROC,nprtrv, D_NUMP,D_MYMS,D_NSTAGT0B,D_NSTAGT1B,D_NPROCL,D_NPNTGTB1, D_NASM0, &
+(   98) & D_NSTAGTF,D_MSTABF,D_NPNTGTB0,D_NPROCM,D_NPTRLS,mysetv,mysetw
+(   99) USE TPM_GEOMETRY    ,ONLY : G, GEOM_RESOL, G_NDGLU, G_NMEN, G_NMEN_MAX,G_NLOEN, G_NLOEN_MAX
+(  100) USE TPM_FIELDS      ,ONLY : FIELDS_RESOL, F,F_RW, ZIA,ZEPSNM,ZSOA1,ZAOA1,ISTAN,ISTAS,ZSIA,ZAIA,ZOA1,ZOA2, &
+(  101) & ZAA,ZAS,LDZAA,LDZAS,TDZAA,TDZAS,&
+(  102) & IZBA,IZBS,ILDZBA,ILDZBS,ITDZBA,ITDZBS,&
+(  103) & IZCA,IZCS,IZCAT,IZCST,ILDZCA,ILDZCS,ITDZCA,ITDZCS,&
+(  104) & DZBAT,DZBST,DLDZBA,DLDZBS,DTDZBA,DTDZBS,&
+(  105) & DZCAT,DZCST,DLDZCA,DLDZCS,DTDZCA,DTDZCS
+(  106) USE TPM_FFT         ,ONLY : T, FFT_RESOL, TB, FFTB_RESOL
+(  107) #ifdef WITH_FFTW
+(  108) USE TPM_FFTW        ,ONLY : TW, FFTW_RESOL
+(  109) #endif
+(  110) USE TPM_FFTC        ,ONLY : TC, FFTC_RESOL
+(  111) USE TPM_FLT
+(  112) USE TPM_TRANS       ,ONLY : FOUBUF_IN, FOUBUF, ZGTF, ZAVE, ZMINGL, ZMAXGL, ZMINGPN, ZMAXGPN
+(  113) USE TPM_CTL
+(  114) 
+(  115) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(  116) USE SETUP_DIMS_MOD  ,ONLY : SETUP_DIMS
+(  117) USE SUMP_TRANS_MOD  ,ONLY : SUMP_TRANS
+(  118) USE SUMP_TRANS_PRELEG_MOD ,ONLY : SUMP_TRANS_PRELEG
+(  119) USE SULEG_MOD       ,ONLY : SULEG
+(  120) USE PRE_SULEG_MOD   ,ONLY : PRE_SULEG
+(  121) USE SUFFT_MOD       ,ONLY : SUFFT
+(  122) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(  123) USE SHAREDMEM_MOD    ,ONLY : SHAREDMEM_CREATE
+(  124) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(  125) #ifdef _OPENACC
+(  126) use openacc
+(  127) #endif
+(  128) 
+(  129) !endif INTERFACE
+(  130) 
+(  131) IMPLICIT NONE
+(  132) 
+(  133) ! Dummy arguments
+(  134) 
+(  135) INTEGER(KIND=JPIM) ,INTENT(IN) :: KSMAX,KDGL
+(  136) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KDLON
+(  137) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KLOEN(:)
+(  138) LOGICAL   ,OPTIONAL,INTENT(IN) :: LDSPLIT
+(  139) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KTMAX
+(  140) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT):: KRESOL
+(  141) REAL(KIND=JPRB)    ,OPTIONAL,INTENT(IN) :: PWEIGHT(:)
+(  142) REAL(KIND=JPRB)    ,OPTIONAL,INTENT(IN) :: PSTRET
+(  143) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KFLEV
+(  144) LOGICAL   ,OPTIONAL,INTENT(IN):: LDGRIDONLY
+(  145) LOGICAL   ,OPTIONAL,INTENT(IN):: LDUSEFLT
+(  146) LOGICAL   ,OPTIONAL,INTENT(IN):: LDUSERPNM
+(  147) LOGICAL   ,OPTIONAL,INTENT(IN):: LDKEEPRPNM
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 4
+
+(  148) LOGICAL   ,OPTIONAL,INTENT(IN):: LDSPSETUPONLY
+(  149) LOGICAL   ,OPTIONAL,INTENT(IN):: LDPNMONLY
+(  150) LOGICAL   ,OPTIONAL,INTENT(IN):: LDUSEFFTW
+(  151) LOGICAL   ,OPTIONAL,INTENT(IN):: LDLL
+(  152) LOGICAL   ,OPTIONAL,INTENT(IN):: LDSHIFTLL
+(  153) CHARACTER(LEN=*),OPTIONAL,INTENT(IN):: CDIO_LEGPOL
+(  154) CHARACTER(LEN=*),OPTIONAL,INTENT(IN):: CDLEGPOLFNAME
+(  155) TYPE(C_PTR) ,OPTIONAL,INTENT(IN) :: KLEGPOLPTR
+(  156) INTEGER(C_SIZE_T) ,OPTIONAL,INTENT(IN) :: KLEGPOLPTR_LEN
+(  157) 
+(  158) !ifndef INTERFACE
+(  159) 
+(  160) ! Local variables
+(  161) INTEGER(KIND=JPIM),PARAMETER :: IMAXFLD=240
+(  162) INTEGER(KIND=JPIM) :: JGL,JRES,IDEF_RESOL
+(  163) INTEGER(KIND=JPIM) :: NFLEV, NFLEVL, JMLOC, KM, ILA, ILS, KMLOC, KDGLU, JK, i, J, IF_FS, IF_OUT_LT, IF_UV, IF_SCALARS
+(  164) INTEGER(KIND=JPIM) :: IF_FS_INV, IF_FS_DIR, ippnum, IF_PP, IF_FOUBUF
+(  165) 
+(  166) LOGICAL :: LLP1,LLP2, LLSPSETUPONLY
+(  167) REAL(KIND=JPRD)    :: ZTIME0,ZTIME1,ZTIME2
+(  168) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  169) 
+(  170) #include "user_clock.h"
+(  171) !     ------------------------------------------------------------------
+(  172) 
+(  173) IF (LHOOK) CALL DR_HOOK('SETUP_TRANS',0,ZHOOK_HANDLE)
+(  174) 
+(  175) IF(MSETUP0 == 0) THEN
+(  176)   CALL ABORT_TRANS('SETUP_TRANS: SETUP_TRANS0 HAS TO BE CALLED BEFORE SETUP_TRANS')
+(  177) ENDIF
+(  178) LLP1 = NPRINTLEV>0
+(  179) LLP2 = NPRINTLEV>1
+(  180) IF(LLP1) WRITE(NOUT,*) '=== ENTER ROUTINE SETUP_TRANS ==='
+(  181) 
+(  182) ! Allocate resolution dependent structures
+(  183) IF(.NOT. ALLOCATED(DIM_RESOL)) THEN
+(  184)   IDEF_RESOL = 1
+(  185)   ALLOCATE(DIM_RESOL(NMAX_RESOL))
+(  186)   ALLOCATE(FIELDS_RESOL(NMAX_RESOL))
+(  187)   ALLOCATE(GEOM_RESOL(NMAX_RESOL))
+(  188)   ALLOCATE(DISTR_RESOL(NMAX_RESOL))
+(  189)   ALLOCATE(FFT_RESOL(NMAX_RESOL))
+(  190)   ALLOCATE(FFTB_RESOL(NMAX_RESOL))
+(  191) #ifdef WITH_FFTW
+(  192)   ALLOCATE(FFTW_RESOL(NMAX_RESOL))
+(  193) #endif
+(  194)   ALLOCATE(FFTC_RESOL(NMAX_RESOL))
+(  195)   ALLOCATE(FLT_RESOL(NMAX_RESOL))
+(  196)   ALLOCATE(CTL_RESOL(NMAX_RESOL))
+(  197)   GEOM_RESOL(:)%LAM=.FALSE.
+(  198)   ALLOCATE(LENABLED(NMAX_RESOL))
+(  199)   LENABLED(:)=.FALSE.
+(  200) ELSE
+(  201)   IDEF_RESOL = NMAX_RESOL+1
+(  202)   DO JRES=1,NMAX_RESOL
+(  203)     IF(.NOT.LENABLED(JRES)) THEN
+(  204)       IDEF_RESOL = JRES
+(  205)       EXIT
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 5
+
+(  206)     ENDIF
+(  207)   ENDDO
+(  208)   IF(IDEF_RESOL > NMAX_RESOL) THEN
+(  209)     CALL ABORT_TRANS('SETUP_TRANS:IDEF_RESOL > NMAX_RESOL')
+(  210)   ENDIF
+(  211) ENDIF
+(  212) 
+(  213) IF (PRESENT(KRESOL)) THEN
+(  214)   KRESOL=IDEF_RESOL
+(  215) ENDIF
+(  216) 
+(  217) ! Point at structures due to be initialized
+(  218) CALL SET_RESOL(IDEF_RESOL,LDSETUP=.TRUE.)
+(  219) 
+(  220) IF(LLP1) WRITE(NOUT,*) '=== DEFINING RESOLUTION ',NCUR_RESOL
+(  221) 
+(  222) 
+(  223) 
+(  224) ! Defaults for optional arguments
+(  225) 
+(  226) 
+(  227) G%LREDUCED_GRID = .FALSE.
+(  228) G%RSTRET=1.0_JPRBT
+(  229) D%LGRIDONLY = .FALSE.
+(  230) D%LSPLIT = .FALSE.
+(  231) D%LCPNMONLY=.FALSE.
+(  232) S%LUSE_BELUSOV=.TRUE. ! use Belusov algorithm to compute RPNM array instead of per m
+(  233) S%LKEEPRPNM=.FALSE. ! Keep Legendre polonomials (RPNM)
+(  234) S%LUSEFLT=.FALSE. ! Use fast legendre transforms
+(  235) #ifdef WITH_FFTW
+(  236) TW%LFFTW=.FALSE. ! Use FFTW interface for FFTs
+(  237) #endif
+(  238) LLSPSETUPONLY = .FALSE. ! Only create distributed spectral setup
+(  239) S%LDLL = .FALSE. ! use mapping to/from second set of latitudes
+(  240) S%LSHIFTLL = .FALSE. ! shift output lat-lon by 0.5dx, 0.5dy
+(  241) C%LREAD_LEGPOL = .FALSE.
+(  242) C%LWRITE_LEGPOL = .FALSE.
+(  243) 
+(  244) 
+(  245) ! NON-OPTIONAL ARGUMENTS
+(  246) R%NSMAX = KSMAX
+(  247) R%NDGL  = KDGL
+(  248) ! E'-defaults
+(  249) R%NNOEXTZL=0
+(  250) R%NNOEXTZG=0
+(  251) 
+(  252) ! IMPLICIT argument :
+(  253) G%LAM = .FALSE.
+(  254) 
+(  255) IF(PRESENT(KDLON)) THEN
+(  256)   R%NDLON = KDLON
+(  257) ELSE
+(  258)   R%NDLON = 2*R%NDGL
+(  259) ENDIF
+(  260) 
+(  261) IF(PRESENT(LDLL)) THEN
+(  262)   S%LDLL=LDLL
+(  263)   IF( LDLL ) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 6
+
+(  264)     S%NDLON=R%NDLON
+(  265)     ! account for pole + equator
+(  266)     R%NDGL=R%NDGL+2
+(  267)     IF(PRESENT(LDSHIFTLL)) THEN
+(  268)       S%LSHIFTLL = LDSHIFTLL
+(  269)       ! geophysical (shifted) lat-lon without pole and equator
+(  270)       IF(S%LSHIFTLL) R%NDGL=R%NDGL-2
+(  271)     ENDIF
+(  272)     S%NDGL=R%NDGL
+(  273)   ENDIF
+(  274) ENDIF
+(  275) 
+(  276) IF (R%NDGL <= 0 .OR. MOD(R%NDGL,2) /= 0) THEN
+(  277)   CALL ABORT_TRANS ('SETUP_TRANS: KDGL IS NOT A POSITIVE, EVEN NUMBER')
+(  278) ENDIF
+(  279) 
+(  280) ! Optional arguments
+(  281) 
+(  282) ALLOCATE(G%NLOEN(R%NDGL))
+(  283) IF(LLP2)WRITE(NOUT,9) 'NLOEN   ',SIZE(G%NLOEN   ),SHAPE(G%NLOEN   )
+(  284) IF(PRESENT(KLOEN)) THEN
+(  285)   IF( MINVAL(KLOEN(:)) <= 0 )THEN
+(  286)      CALL ABORT_TRANS ('SETUP_TRANS: KLOEN INVALID (ONE or MORE POINTS <= 0)')
+(  287)   ENDIF
+(  288)   R%NDLON=MAXVAL(KLOEN(:))
+(  289)   DO JGL=1,R%NDGL
+(  290)     IF(KLOEN(JGL) /= R%NDLON) THEN
+(  291)       G%LREDUCED_GRID = .TRUE.
+(  292)       EXIT
+(  293)     ENDIF
+(  294)   ENDDO
+(  295) ENDIF
+(  296) 
+(  297) IF (G%LREDUCED_GRID) THEN
+(  298)   G%NLOEN(:) = KLOEN(1:R%NDGL)
+(  299) ELSE
+(  300)   G%NLOEN(:) = R%NDLON
+(  301) ENDIF
+(  302) 
+(  303) IF(PRESENT(LDSPLIT)) THEN
+(  304)   D%LSPLIT = LDSPLIT
+(  305) ENDIF
+(  306) 
+(  307) IF(PRESENT(KTMAX)) THEN
+(  308)   R%NTMAX = KTMAX
+(  309) ELSE
+(  310)   R%NTMAX = R%NSMAX
+(  311) ENDIF
+(  312) 
+(  313) IF(PRESENT(PWEIGHT)) THEN
+(  314)   D%LWEIGHTED_DISTR = .TRUE.
+(  315)   IF( D%LWEIGHTED_DISTR .AND. .NOT.D%LSPLIT )THEN
+(  316)     CALL ABORT_TRANS('SETUP_TRANS: LWEIGHTED_DISTR=T AND LSPLIT=F NOT SUPPORTED')
+(  317)   ENDIF
+(  318)   IF(SIZE(PWEIGHT) /= SUM(G%NLOEN(:)) )THEN
+(  319)     CALL ABORT_TRANS('SETUP_TRANS:SIZE(PWEIGHT) /= SUM(G%NLOEN(:))')
+(  320)   ENDIF
+(  321)   IF( MINVAL(PWEIGHT(:)) < 0.0_JPRBT )THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 7
+
+(  322)     CALL ABORT_TRANS('SETUP_TRANS: INVALID WEIGHTS')
+(  323)   ENDIF
+(  324)   ALLOCATE(D%RWEIGHT(SIZE(PWEIGHT)))
+(  325)   D%RWEIGHT(:)=PWEIGHT(:)
+(  326) ELSE
+(  327)   D%LWEIGHTED_DISTR = .FALSE.
+(  328) ENDIF
+(  329) 
+(  330) IF(PRESENT(LDGRIDONLY)) THEN
+(  331)   D%LGRIDONLY=LDGRIDONLY
+(  332) ENDIF
+(  333) 
+(  334) IF(PRESENT(LDSPSETUPONLY)) THEN
+(  335)   LLSPSETUPONLY=LDSPSETUPONLY
+(  336) ENDIF
+(  337) 
+(  338) IF(PRESENT(LDPNMONLY)) THEN
+(  339)   D%LCPNMONLY=LDPNMONLY
+(  340) ENDIF
+(  341) 
+(  342) 
+(  343) #ifdef WITH_FFTW
+(  344) IF(PRESENT(LDUSEFFTW)) THEN
+(  345)   TW%LFFTW=LDUSEFFTW
+(  346) ENDIF
+(  347) IF( LLSPSETUPONLY .OR. D%LGRIDONLY ) THEN
+(  348)   TW%LFFTW = .FALSE.
+(  349) ENDIF
+(  350) #endif
+(  351) 
+(  352) S%LSOUTHPNM=.FALSE.
+(  353) IF(PRESENT(PSTRET)) THEN
+(  354)   IF (ABS(PSTRET-1.0_JPRBT)>100._JPRBT*EPSILON(1._JPRBT)) THEN
+(  355)     G%RSTRET=PSTRET
+(  356)     S%LSOUTHPNM=.TRUE.
+(  357)   ENDIF
+(  358) ENDIF
+(  359) 
+(  360) IF(PRESENT(CDIO_LEGPOL)) THEN
+(  361)   IF(NPROC > 1) CALL  ABORT_TRANS('SETUP_TRANS:CDIO_LEGPOL OPTIONS ONLY FOR NPROC=1 ')
+(  362)   IF(R%NSMAX > 511 ) S%LUSEFLT = .TRUE. !To save IO and memory
+(  363)   IF(TRIM(CDIO_LEGPOL) == 'readf' .OR. TRIM(CDIO_LEGPOL) == 'READF' ) THEN
+(  364)     IF(.NOT.PRESENT(CDLEGPOLFNAME)) CALL  ABORT_TRANS('SETUP_TRANS: CDLEGPOLFNAME ARGUMENT MISSING')
+(  365)     C%LREAD_LEGPOL = .TRUE.
+(  366)     C%CLEGPOLFNAME = TRIM(CDLEGPOLFNAME)
+(  367)     C%CIO_TYPE='file'
+(  368)   ELSEIF(TRIM(CDIO_LEGPOL) == 'writef' .OR. TRIM(CDIO_LEGPOL) == 'WRITEF') THEN
+(  369)     IF(.NOT.PRESENT(CDLEGPOLFNAME)) CALL  ABORT_TRANS('SETUP_TRANS: CDLEGPOLFNAME ARGUMENT MISSING')
+(  370)     C%LWRITE_LEGPOL = .TRUE.
+(  371)     C%CLEGPOLFNAME = TRIM(CDLEGPOLFNAME)
+(  372)     C%CIO_TYPE='file'
+(  373)   ELSEIF(TRIM(CDIO_LEGPOL) == 'membuf' .OR. TRIM(CDIO_LEGPOL) == 'MEMBUF') THEN
+(  374)     IF(.NOT.PRESENT(KLEGPOLPTR)) CALL  ABORT_TRANS('SETUP_TRANS: KLEGPOLPTR  ARGUMENT MISSING')
+(  375)     IF(.NOT.C_ASSOCIATED(KLEGPOLPTR))  CALL  ABORT_TRANS('SETUP_TRANS: KLEGPOLPTR NULL POINTER')
+(  376)     IF(.NOT.PRESENT(KLEGPOLPTR_LEN)) CALL  ABORT_TRANS('SETUP_TRANS: KLEGPOLPTR_LEN ARGUMENT MISSING')
+(  377)     C%LREAD_LEGPOL = .TRUE.
+(  378)     C%CIO_TYPE='mbuf'
+(  379)     CALL SHAREDMEM_CREATE( C%STORAGE,KLEGPOLPTR,KLEGPOLPTR_LEN)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 8
+
+(  380)   ELSE
+(  381)     WRITE(NERR,*) 'CDIO_LEGPOL ', TRIM(CDIO_LEGPOL)
+(  382)     CALL  ABORT_TRANS('SETUP_TRANS:CDIO_LEGPOL UNKNOWN METHOD ')
+(  383)   ENDIF
+(  384) ENDIF
+(  385) 
+(  386) IF(PRESENT(LDUSEFLT)) THEN
+(  387)   S%LUSEFLT=LDUSEFLT
+(  388) ENDIF
+(  389) IF(PRESENT(LDUSERPNM)) THEN
+(  390)   S%LUSE_BELUSOV=LDUSERPNM
+(  391) ENDIF
+(  392) IF(PRESENT(LDKEEPRPNM)) THEN
+(  393)   IF(S%LUSEFLT) THEN
+(  394)     IF(LDKEEPRPNM.AND..NOT.LDUSERPNM) THEN
+(  395)       CALL ABORT_TRANS('SETUP_TRANS: LDKEEPRPNM=true with LDUSERPNM=false')
+(  396)     ENDIF
+(  397)   ENDIF
+(  398)   S%LKEEPRPNM=LDKEEPRPNM
+(  399) ENDIF
+(  400) !     Setup resolution dependent structures
+(  401) !     -------------------------------------
+(  402) 
+(  403) ! Setup distribution independent dimensions
+(  404) CALL SETUP_DIMS
+(  405) 
+(  406) ! First part of setup of distributed environment
+(  407) CALL SUMP_TRANS_PRELEG
+(  408) 
+(  409) IF( .NOT.LLSPSETUPONLY ) THEN
+(  410) 
+(  411) ! Compute Legendre polonomial and Gaussian Latitudes and Weights
+(  412)   CALL SULEG
+(  413) 
+(  414) ! Second part of setup of distributed environment
+(  415)   CALL SUMP_TRANS
+(  416)   CALL GSTATS(1802,0)
+(  417) 
+(  418) ! Initialize Fast Fourier Transform package
+(  419)   IF (.NOT.D%LCPNMONLY) CALL SUFFT
+(  420)   CALL GSTATS(1802,1)
+(  421) ELSE
+(  422)   CALL PRE_SULEG
+(  423) ENDIF
+(  424) 
+(  425) ! Signal the current resolution is active
+(  426) LENABLED(IDEF_RESOL)=.TRUE.
+(  427) NDEF_RESOL = COUNT(LENABLED)
+(  428) 
+(  429) IF (LHOOK) CALL DR_HOOK('SETUP_TRANS',1,ZHOOK_HANDLE)
+(  430) !     ------------------------------------------------------------------
+(  431) 9 FORMAT(1X,'ARRAY ',A10,' ALLOCATED ',8I8)
+(  432) 
+(  433) IF( .NOT.D%LGRIDONLY ) THEN
+(  434) 
+(  435) !allocating arrays for the GPU:
+(  436) IF(PRESENT(KFLEV)) THEN
+(  437)   NFLEV = KFLEV
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 9
+
+(  438) !  NFLEVL = NFLEV/NPRTRV
+(  439) ELSE
+(  440)   NFLEV = ceiling(REAL(IMAXFLD)/NPRTRV)
+(  441) ENDIF
+(  442) 
+(  443) WRITE(NOUT,*) '===now going to allocate GPU arrays'
+(  444) 
+(  445) !dimensions of matrices for Legendre Transforms for RAPS ?
+(  446) !IF_OUT_LT = 5*NFLEV+2
+(  447) !IF_FS = 6*NFLEV+3
+(  448) 
+(  449) ! add additional post-processing requirements
+(  450) !IF_PP = 2*NFLEV
+(  451) IF_PP = 0
+(  452) 
+(  453) ! u/v + scalars 3d + scalars 2d
+(  454) IF_UV = NFLEV
+(  455) ! SCALARS INCLUDING DERIVATIVES
+(  456) IF_SCALARS = NFLEV + 2*NFLEV + 1 + 2 + IF_PP
+(  457) IF_OUT_LT = 4*IF_UV+3*NFLEV+3+IF_PP
+(  458) !IF_OUT_LT = 4*IF_UV+3*NFLEV+3
+(  459) !8*KF_UV+2*KF_SCALARS
+(  460) !ILEI2 = 8*KF_UV + 2*KF_SCALARS + 2*KF_SCDERS
+(  461) IF_FS_INV=8*IF_UV+2*IF_SCALARS
+(  462) 
+(  463) ! fields in Fourier space for inv trans the same
+(  464) !IF_FS=4*IF_UV+1*NFLEV+2
+(  465) IF_FS=4*IF_UV+1*NFLEV+2
+(  466) ! for derivatives u/v add
+(  467) !IF_FS=IFS_FS+2*(2*NFLEV)
+(  468) ! for each 3d scalar derivative add
+(  469) IF_FS=IF_FS+2*NFLEV ! temperature
+(  470) ! for each 2d scalar derivative add
+(  471) IF_FS=IF_FS+2 ! sfc pressure
+(  472) IF_FS=IF_FS+IF_PP
+(  473) 
+(  474) ! u/v + scalars for direct transforms
+(  475) ! plus postprocessing buffer
+(  476) !ippnum=NFLEV
+(  477) IF_FS_DIR=2*(2*IF_UV+NFLEV+2+IF_PP)
+(  478) 
+(  479) ! fields in Fourier space for dir trans
+(  480) !IF_FS = 2*IF_UV + IF_SCALARS
+(  481) ! plus add 2*scalar_derivatives + add vorg/divg + 2*IF_UV for u/v zonal derivatives
+(  482) 
+(  483) write(nout,*)'setup_trans: if_uv=',if_uv,' if_out_lt=',if_out_lt,' if_fs_dir=',if_fs_dir,'if_fs_inv= ',if_fs_inv
+(  484) IF(MOD(IF_FS,2)==1) IF_FS = IF_FS + 1
+(  485) 
+(  486) !leading and trailing dimensions of A for symmetric and antisymmetric cases
+(  487) ! (same for ltinv and ltdir)
+(  488) LDZAA=R%NDGNH
+(  489) LDZAS=R%NDGNH
+(  490) TDZAA=(R%NTMAX+2)/2
+(  491) TDZAS=(R%NTMAX+3)/2
+(  492) 
+(  493) !similarly for B (ltinv)
+(  494) ILDZBA=(R%NSMAX+2)/2
+(  495) ILDZBS=(R%NSMAX+3)/2
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 10
+
+(  496) ITDZBA=IF_FS_INV
+(  497) ITDZBS=IF_FS_INV
+(  498) 
+(  499) !similarly for C (ltinv)
+(  500) ILDZCA=R%NDGNH
+(  501) ILDZCS=R%NDGNH
+(  502) ITDZCA=IF_FS_INV
+(  503) ITDZCS=IF_FS_INV
+(  504) 
+(  505) !similarly for B (ltdir)
+(  506) DLDZBA=R%NDGNH
+(  507) DLDZBS=R%NDGNH
+(  508) DTDZBA=IF_FS_DIR
+(  509) DTDZBS=IF_FS_DIR
+(  510) 
+(  511) !similarly for C (ltdir)
+(  512) DLDZCA=(R%NTMAX+2)/2
+(  513) DLDZCS=(R%NTMAX+3)/2
+(  514) DTDZCA=IF_FS_DIR
+(  515) DTDZCS=IF_FS_DIR
+(  516) 
+(  517) !allocate matrices for matrix multiplications
+(  518) ALLOCATE(IZBA(IF_FS_INV,TDZAA,D%NUMP))
+(  519) ALLOCATE(IZBS(IF_FS_INV,TDZAS,D%NUMP))
+(  520) ALLOCATE(ZAA(R%NDGNH,TDZAA,D%NUMP))
+(  521) ALLOCATE(ZAS(R%NDGNH,TDZAS,D%NUMP))
+(  522) ! transpose of C (for better memory access patterns)
+(  523) ALLOCATE(IZCAT(IF_FS_INV,R%NDGNH,D%NUMP))
+(  524) ALLOCATE(IZCST(IF_FS_INV,R%NDGNH,D%NUMP))
+(  525) 
+(  526) ALLOCATE(DZBAT(IF_FS_DIR,R%NDGNH,D%NUMP))
+(  527) ALLOCATE(DZBST(IF_FS_DIR,R%NDGNH,D%NUMP))
+(  528) ! transpose of C (for better memory access patterns)
+(  529) ALLOCATE(DZCAT(IF_FS_DIR,TDZAA,D%NUMP))
+(  530) ALLOCATE(DZCST(IF_FS_DIR,TDZAS,D%NUMP))
+(  531) 
+(  532) !$ACC ENTER DATA CREATE(ZAA,ZAS,IZBA,IZBS,IZCAT,IZCST,DZBAT,DZBST,DZCAT,DZCST) &
+(  533) !$ACC& COPYIN(F,F%RN,F%RLAPIN,S,S%FA,S%ITHRESHOLD,S%LUSEFLT,D,D%NUMP,D%MYMS,R,R%NDGNH,R%NSMAX,G,G%NDGLU) &
+(  534) !$ACC& copyin(D%NPNTGTB0,D%NPNTGTB1,D%NSTAGT0B,D%NSTAGT1B,D%NSTAGTF,G%NMEN,D%NPROCM,D%NPTRLS,G,G%NLOEN,D%MSTABF)
+(  535) 
+(  536) ! Initialize A arrays
+(  537) 
+(  538) izba = 0._JPRBT
+(  539) !$acc update device(izba)
+(  540) izbs = 0._JPRBT
+(  541) !$acc update device(izbs)
+(  542) dzbat = 0._JPRBT
+(  543) !$acc update device(dzbat)
+(  544) dzbst = 0._JPRBT
+(  545) !$acc update device(dzbst)
+(  546) 
+(  547) DO JMLOC=1,D%NUMP
+(  548)   !$ACC enter data copyin(S%FA(JMLOC)%RPNMA,S%FA(JMLOC)%RPNMS)
+(  549) ENDDO
+(  550) 
+(  551) ! zero arrays
+(  552) !$ACC PARALLEL LOOP
+(  553) DO JMLOC=1,D%NUMP
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 11
+
+(  554)   !$ACC loop
+(  555)   DO JK=1,TDZAA
+(  556)     !$ACC loop
+(  557)     DO J=1,LDZAA
+(  558)       ZAA(J,JK,JMLOC)=0._JPRBT
+(  559)     ENDDO
+(  560)   ENDDO
+(  561) ENDDO
+(  562) 
+(  563) !$ACC PARALLEL LOOP
+(  564) DO JMLOC=1,D%NUMP
+(  565)   !$ACC loop
+(  566)   DO JK=1,TDZAS
+(  567)     !$ACC LOOP
+(  568)     DO J=1,LDZAS
+(  569)       ZAS(J,JK,JMLOC)=0._JPRBT
+(  570)     ENDDO
+(  571)   ENDDO
+(  572) ENDDO
+(  573) 
+(  574) !$ACC KERNELS
+(  575) DO JMLOC=1,D%NUMP
+(  576)   KM = D%MYMS(JMLOC)   
+(  577)   KDGLU = MIN(R%NDGNH,G%NDGLU(KM))
+(  578)    
+(  579)   ILA = (R%NSMAX-KM+2)/2
+(  580)   DO JK=1,KDGLU
+(  581)     DO J=1,ILA
+(  582)       ZAA(JK,J,JMLOC)=S%FA(JMLOC)%RPNMA(JK,J)
+(  583)     ENDDO
+(  584)   ENDDO
+(  585) ENDDO
+(  586) !$ACC END KERNELS 
+(  587) 
+(  588)   
+(  589) !$ACC KERNELS
+(  590) DO JMLOC=1,D%NUMP
+(  591)   KM = D%MYMS(JMLOC)
+(  592)   KDGLU = MIN(R%NDGNH,G%NDGLU(KM))
+(  593) 
+(  594)   ILS = (R%NSMAX-KM+3)/2
+(  595)   DO JK=1,KDGLU
+(  596)     DO J=1,ILS
+(  597)       ZAS(JK,J,JMLOC)=S%FA(JMLOC)%RPNMS(JK,J)
+(  598)     ENDDO
+(  599)   ENDDO
+(  600) ENDDO
+(  601) !$ACC END KERNELS 
+(  602)   
+(  603) IF_FOUBUF=MAX(IF_OUT_LT,IF_FS)
+(  604) ALLOCATE(FOUBUF_IN(MAX(1,D%NLENGT0B*2*IF_FOUBUF)))
+(  605) ALLOCATE(FOUBUF(MAX(1,D%NLENGT0B*2*IF_FOUBUF)))
+(  606) !$ACC enter data create(FOUBUF_IN,FOUBUF)
+(  607) 
+(  608) ALLOCATE(ZGTF(2*IF_FS,D%NLENGTF))
+(  609) !$ACC enter data create(ZGTF)
+(  610) 
+(  611) ALLOCATE(ZIA(IF_FS_INV,R%NLEI1,D%NUMP))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 12
+
+(  612) ALLOCATE(ZEPSNM(d%nump,0:R%NTMAX+2))
+(  613) ALLOCATE(ZSOA1(2*IF_OUT_LT,R%NLEI3,D%NUMP))
+(  614) ALLOCATE(ZAOA1(2*IF_OUT_LT,R%NLEI3,D%NUMP))
+(  615) ALLOCATE(ISTAN(D%NUMP,R%NDGNH))
+(  616) ALLOCATE(ISTAS(D%NUMP,R%NDGNH))
+(  617) ALLOCATE(ZSIA(IF_FS_INV,R%NDGNH,D%NUMP))
+(  618) ALLOCATE(ZAIA(IF_FS_INV,R%NDGNH,D%NUMP))
+(  619) ALLOCATE(ZOA1(4*IF_FS_DIR,R%NLED4,D%NUMP))
+(  620) ALLOCATE(ZOA2(MAX(4*IF_UV,1),R%NLED4,D%NUMP))
+(  621) !$ACC enter data create(ZIA,ZEPSNM,ZSOA1,ZAOA1,ISTAN,ISTAS,ZSIA,ZAIA,ZOA1,ZOA2)
+(  622) 
+(  623) zgtf = 0._JPRBT
+(  624) !$acc update device(zgtf)
+(  625) zia = 0._JPRBT
+(  626) !$acc update device(zia)
+(  627) zsia = 0._JPRBT
+(  628) !$acc update device(zsia)
+(  629) zaia = 0._JPRBT
+(  630) !$acc update device(zaia)
+(  631) zoa1 = 0._JPRBT
+(  632) !$acc update device(zoa1)
+(  633) zoa2 = 0._JPRBT
+(  634) !$acc update device(zoa2)
+(  635) zaoa1 = 0._JPRBT
+(  636) !$acc update device(zaoa1)
+(  637) zsoa1 = 0._JPRBT
+(  638) !$acc update device(zsoa1)
+(  639) 
+(  640) ! add arrays for GPNORM1
+(  641) ALLOCATE(ZAVE(IF_FS,R%NDGL))
+(  642) ALLOCATE(ZMINGL(IF_FS,R%NDGL))
+(  643) ALLOCATE(ZMAXGL(IF_FS,R%NDGL))
+(  644) ALLOCATE(ZMINGPN(IF_FS))
+(  645) ALLOCATE(ZMAXGPN(IF_FS))
+(  646) !$ACC enter data create(ZAVE,ZMINGL,ZMAXGL,ZMINGPN,ZMAXGPN)
+(  647) 
+(  648) zave = 0._JPRBT
+(  649) !$acc update device(zave)
+(  650) zmingl = 0._JPRBT
+(  651) !$acc update device(zmingl)
+(  652) zmaxgl = 0._JPRBT
+(  653) !$acc update device(zmaxgl)
+(  654) zmingpn = 0._JPRBT
+(  655) !$acc update device(zmingpn)
+(  656) zmaxgpn = 0._JPRBT
+(  657) !$acc update device(zmaxgpn)
+(  658) 
+(  659) !set up flat copies of constant data
+(  660) R_NSMAX=R%NSMAX
+(  661) R_NTMAX=R%NTMAX
+(  662) R_NDGNH=R%NDGNH
+(  663) R_NDGL=R%NDGL
+(  664) R_NNOEXTZL=R%NNOEXTZL
+(  665) 
+(  666) 
+(  667) ALLOCATE(D_NSTAGT0B(SIZE(D%NSTAGT0B)))
+(  668) ALLOCATE(D_NSTAGT1B(SIZE(D%NSTAGT1B)))
+(  669) ALLOCATE(D_NPNTGTB0(0:SIZE(D%NPNTGTB0,1)-1,SIZE(D%NPNTGTB0,2)))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 13
+
+(  670) ALLOCATE(D_NPNTGTB1(SIZE(D%NPNTGTB1,1),SIZE(D%NPNTGTB1,2)))
+(  671) ALLOCATE(D_MYMS(SIZE(D%MYMS)))
+(  672) ALLOCATE(D_NPROCL(SIZE(D%NPROCL)))
+(  673) ALLOCATE(D_NASM0(0:SIZE(D%NASM0)-1))
+(  674) ALLOCATE(D_NSTAGTF(SIZE(D%NSTAGTF)))
+(  675) ALLOCATE(D_MSTABF(SIZE(D%MSTABF)))
+(  676) ALLOCATE(D_NPROCM(0:SIZE(D%NPROCM)-1))
+(  677) ALLOCATE(D_NPTRLS(SIZE(D%NPTRLS)))
+(  678) 
+(  679) ALLOCATE(G_NDGLU(0:SIZE(G%NDGLU)-1))
+(  680) ALLOCATE(G_NMEN(SIZE(G%NMEN)))
+(  681) ALLOCATE(G_NLOEN(SIZE(G%NLOEN)))
+(  682) 
+(  683) ALLOCATE(F_RW(SIZE(F%RW)))
+(  684) 
+(  685) 
+(  686) DO I=0,SIZE(G%NDGLU)-1
+(  687)    G_NDGLU(I)=G%NDGLU(I)
+(  688) end DO
+(  689) 
+(  690) G_NMEN_MAX=0
+(  691) DO I=1,SIZE(G%NMEN)
+(  692)    G_NMEN(I)=G%NMEN(I)
+(  693)    if (G_NMEN(I) .gt. G_NMEN_MAX) G_NMEN_MAX=G_NMEN(I)
+(  694) end DO
+(  695) 
+(  696) G_NLOEN_MAX=0
+(  697) DO I=1,SIZE(G%NLOEN)
+(  698)    G_NLOEN(I)=G%NLOEN(I)
+(  699)    if (G_NLOEN(I) .gt. G_NLOEN_MAX) G_NLOEN_MAX=G_NLOEN(I)
+(  700) end DO
+(  701) 
+(  702) DO I=1,SIZE(D%NSTAGT0B)
+(  703)    D_NSTAGT0B(I)=D%NSTAGT0B(I)
+(  704) END DO
+(  705) 
+(  706) DO I=1,SIZE(D%NSTAGT1B)
+(  707)    D_NSTAGT1B(I)=D%NSTAGT1B(I)
+(  708) END DO
+(  709) 
+(  710) DO I=1,SIZE(D%NPROCL)
+(  711)    D_NPROCL(I)=D%NPROCL(I)
+(  712) END DO
+(  713) 
+(  714) DO I=0,SIZE(D%NASM0)-1
+(  715)    D_NASM0(I)=D%NASM0(I)
+(  716) END DO
+(  717) 
+(  718) DO I=1,SIZE(D%NSTAGTF)
+(  719)    D_NSTAGTF(I)=D%NSTAGTF(I)
+(  720) END DO
+(  721) 
+(  722) DO I=1,SIZE(D%MSTABF)
+(  723)    D_MSTABF(I)=D%MSTABF(I)
+(  724) END DO
+(  725) 
+(  726) DO I=0,SIZE(D%NPROCM)-1
+(  727)    D_NPROCM(I)=D%NPROCM(I)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 14
+
+(  728) END DO
+(  729) 
+(  730) DO I=1,SIZE(D%NPTRLS)
+(  731)    D_NPTRLS(I)=D%NPTRLS(I)
+(  732) END DO
+(  733) 
+(  734) DO I=1,SIZE(D%NPNTGTB0,2)
+(  735)    DO J=0,SIZE(D%NPNTGTB0,1)-1
+(  736)       D_NPNTGTB0(J,I)=D%NPNTGTB0(J,I)
+(  737)    end DO
+(  738) END DO
+(  739) 
+(  740) DO I=1,SIZE(D%NPNTGTB1,2)
+(  741)    DO J=1,SIZE(D%NPNTGTB1,1)
+(  742)       D_NPNTGTB1(J,I)=D%NPNTGTB1(J,I)
+(  743)    end DO
+(  744) END DO
+(  745) 
+(  746) D_NUMP=D%NUMP
+(  747) 
+(  748) DO I=1,SIZE(D%MYMS)
+(  749)    D_MYMS(I)=D%MYMS(I)
+(  750) end DO
+(  751) 
+(  752) DO I=1,SIZE(F%RW)
+(  753)    F_RW(I)=F%RW(I)
+(  754) END DO
+(  755) 
+(  756) !$ACC enter data create(R_NSMAX,R_NTMAX,R_NDGL,R_NNOEXTZL,R_NDGNH,D_NSTAGT0B,D_NSTAGT1B,D_NPNTGTB1,D_NPROCL,D_NUMP,D_MYMS,D_
+(  757) 
+(  758) !$ACC update device(R_NSMAX,R_NTMAX,R_NDGL,R_NNOEXTZL,R_NDGNH,D_NSTAGT0B,D_NSTAGT1B,D_NPNTGTB1,D_NPROCL,D_NUMP,D_MYMS,D_NASM
+(  759) 
+(  760) WRITE(NOUT,*) '===GPU arrays successfully allocated'
+(  761) !endif INTERFACE
+(  762) 
+(  763) ENDIF
+(  764) 
+(  765) END SUBROUTINE SETUP_TRANS
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 15
+
+(    1) # 1 "setup_trans.F90"
+(    1) SUBROUTINE SETUP_TRANS(KSMAX,KDGL,KDLON,KLOEN,LDSPLIT,PSTRET,&
+(    2) &KFLEV,KTMAX,KRESOL,PWEIGHT,LDGRIDONLY,LDUSERPNM,LDKEEPRPNM,LDUSEFLT,&
+(    3) &LDSPSETUPONLY,LDPNMONLY,LDUSEFFTW,&
+(    4) &LDLL,LDSHIFTLL,CDIO_LEGPOL,CDLEGPOLFNAME,KLEGPOLPTR,KLEGPOLPTR_LEN)
+(    5) # 6 "setup_trans.F90"
+(    6) !**** *SETUP_TRANS* - Setup transform package for specific resolution
+(    7) # 8 "setup_trans.F90"
+(    8) !     Purpose.
+(    9) !     --------
+(   10) !     To setup for making spectral transforms. Each call to this routine
+(   11) !     creates a new resolution up to a maximum of NMAX_RESOL set up in
+(   12) !     SETUP_TRANS0. You need to call SETUP_TRANS0 before this routine can
+(   13) !     be called.
+(   14) # 15 "setup_trans.F90"
+(   15) !**   Interface.
+(   16) !     ----------
+(   17) !     CALL SETUP_TRANS(...)
+(   18) # 19 "setup_trans.F90"
+(   19) !     Explicit arguments : KLOEN,LDSPLIT are optional arguments
+(   20) !     --------------------
+(   21) !     KSMAX - spectral truncation required
+(   22) !     KDGL  - number of Gaussian latitudes
+(   23) !     KDLON - number of points on each Gaussian latitude [2*KDGL]
+(   24) !     KLOEN(:) - number of points on each Gaussian latitude [2*KDGL]
+(   25) !     LDSPLIT - true if split latitudes in grid-point space [false]
+(   26) !     KTMAX - truncation order for tendencies?
+(   27) !     KRESOL - the resolution identifier
+(   28) !     PWEIGHT - the weight per grid-point (for a weighted distribution)
+(   29) !     LDGRIDONLY - true if only grid space is required
+(   30) # 31 "setup_trans.F90"
+(   31) !     KSMAX,KDGL,KTMAX and KLOEN are GLOBAL variables desribing the resolution
+(   32) !     in spectral and grid-point space
+(   33) # 34 "setup_trans.F90"
+(   34) !     LDSPLIT describe the distribution among processors of grid-point data and
+(   35) !     has no relevance if you are using a single processor
+(   36) # 37 "setup_trans.F90"
+(   37) !     PSTRET     - stretching factor - for the case the Legendre polynomials are
+(   38) !                  computed on the stretched sphere - works with LSOUTHPNM
+(   39) !     LDUSEFLT   - use Fast Legandre Transform (Butterfly algorithm)
+(   40) !     LDUSERPNM  - Use Belusov algorithm to compute legendre pol. (else new alg.)
+(   41) !     LDKEEPRPNM - Keep Legendre Polynomials (only applicable when using
+(   42) !                  FLT, otherwise always kept)
+(   43) !     LDPNMONLY  - Compute the Legendre polynomials only, not the FFTs.
+(   44) !     LDUSEFFTW    - Use FFTW for FFTs
+(   45) !     LDLL                 - Setup second set of input/output latitudes
+(   46) !                                 the number of input/output latitudes to transform is equal KDGL
+(   47) !                                 or KDGL+2 in the case that includes poles + equator
+(   48) !                                 the number of input/output longitudes to transform is 2*KDGL
+(   49) !     LDSHIFTLL       - Shift output lon/lat data by 0.5*dx and 0.5*dy
+(   50) !     CDIO_LEGPOL  - IO option on Legendre polinomials :  N.B. Only works for NPROC=1
+(   51) !                    Options:
+(   52) !                    'READF' -  read Leg.Pol. from file CDLEGPOLFNAME
+(   53) !                    'WRITEF' - write Leg.Pol. to file CDLEGPOLFNAME
+(   54) !                    'MEMBUF' - Leg. Pol provided in shared memory segment pointed to by KLEGPOLPTR of
+(   55) !                               length KLEGPOLPTR_LEN
+(   56) !     CDLEGPOLFNAME - file name for Leg.Pol. IO
+(   57) !     KLEGPOLPTR    - pointer to Legendre polynomials memory segment
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 16
+
+(   58) !     KLEGPOLPTR_LEN  - length of  Legendre polynomials memory segment
+(   59) # 60 "setup_trans.F90"
+(   60) !     Method.
+(   61) !     -------
+(   62) # 63 "setup_trans.F90"
+(   63) !     Externals.  SET_RESOL   - set resolution
+(   64) !     ----------  SETUP_DIMS  - setup distribution independent dimensions
+(   65) !                 SUMP_TRANS_PRELEG - first part of setup of distr. environment
+(   66) !                 SULEG - Compute Legandre polonomial and Gaussian
+(   67) !                         Latitudes and Weights
+(   68) !                 SUMP_TRANS - Second part of setup of distributed environment
+(   69) !                 SUFFT - setup for FFT
+(   70) !                 SHAREDMEM_CREATE - create memory buffer for Leg.pol.
+(   71) # 72 "setup_trans.F90"
+(   72) !     Author.
+(   73) !     -------
+(   74) !        Mats Hamrud *ECMWF*
+(   75) # 76 "setup_trans.F90"
+(   76) !     Modifications.
+(   77) !     --------------
+(   78) !        Original : 00-03-03
+(   79) !        Daan Degrauwe : Mar 2012 E'-zone dimensions
+(   80) !        R. El Khatib 09-Aug-2012 %LAM in GEOM_TYPE
+(   81) !        R. El Khatib 14-Jun-2013 PSTRET, LDPNMONLY, LENABLED
+(   82) !        G. Mozdzynski : Oct 2014 Support f
+(   83) !        N. Wedi       : Apr 2015 Support dual set of lat/lon
+(   84) !        G. Mozdzynski : Jun 2015 Support alternative FFTs to FFTW
+(   85) !        M.Hamrud/W.Deconinck : July 2015 IO options for Legenndre polynomials
+(   86) !        R. El Khatib 07-Mar-2016 Better flexibility for Legendre polynomials computation in stretched mode
+(   87) !     ------------------------------------------------------------------
+(   88) # 89 "setup_trans.F90"
+(   89) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB ,  JPRD
+(   90) USE, INTRINSIC :: ISO_C_BINDING, ONLY:  C_PTR, C_INT,C_ASSOCIATED,C_SIZE_T
+(   91) # 92 "setup_trans.F90"
+(   92) !ifndef INTERFACE
+(   93) # 94 "setup_trans.F90"
+(   94) USE TPM_GEN         ,ONLY : NOUT, MSETUP0, NCUR_RESOL, NDEF_RESOL, &
+(   95)      &                      NMAX_RESOL, NPRINTLEV, LENABLED, NERR
+(   96) USE TPM_DIM         ,ONLY : R, DIM_RESOL, R_NSMAX,R_NTMAX, R_NDGNH, R_NDGL, R_NNOEXTZL
+(   97) USE TPM_DISTR       ,ONLY : D, DISTR_RESOL,NPROC,nprtrv, D_NUMP,D_MYMS,D_NSTAGT0B,D_NSTAGT1B,D_NPROCL,D_NPNTGTB1, D_NASM0, &
+(   98) & D_NSTAGTF,D_MSTABF,D_NPNTGTB0,D_NPROCM,D_NPTRLS,mysetv,mysetw
+(   99) USE TPM_GEOMETRY    ,ONLY : G, GEOM_RESOL, G_NDGLU, G_NMEN, G_NMEN_MAX,G_NLOEN, G_NLOEN_MAX
+(  100) USE TPM_FIELDS      ,ONLY : FIELDS_RESOL, F,F_RW, ZIA,ZEPSNM,ZSOA1,ZAOA1,ISTAN,ISTAS,ZSIA,ZAIA,ZOA1,ZOA2, &
+(  101) & ZAA,ZAS,LDZAA,LDZAS,TDZAA,TDZAS,&
+(  102) & IZBA,IZBS,ILDZBA,ILDZBS,ITDZBA,ITDZBS,&
+(  103) & IZCA,IZCS,IZCAT,IZCST,ILDZCA,ILDZCS,ITDZCA,ITDZCS,&
+(  104) & DZBAT,DZBST,DLDZBA,DLDZBS,DTDZBA,DTDZBS,&
+(  105) & DZCAT,DZCST,DLDZCA,DLDZCS,DTDZCA,DTDZCS
+(  106) USE TPM_FFT         ,ONLY : T, FFT_RESOL, TB, FFTB_RESOL
+(  107) # 110 "setup_trans.F90"
+(  110) USE TPM_FFTC        ,ONLY : TC, FFTC_RESOL
+(  111) USE TPM_FLT
+(  112) USE TPM_TRANS       ,ONLY : FOUBUF_IN, FOUBUF, ZGTF, ZAVE, ZMINGL, ZMAXGL, ZMINGPN, ZMAXGPN
+(  113) USE TPM_CTL
+(  114) # 115 "setup_trans.F90"
+(  115) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(  116) USE SETUP_DIMS_MOD  ,ONLY : SETUP_DIMS
+(  117) USE SUMP_TRANS_MOD  ,ONLY : SUMP_TRANS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 17
+
+(  118) USE SUMP_TRANS_PRELEG_MOD ,ONLY : SUMP_TRANS_PRELEG
+(  119) USE SULEG_MOD       ,ONLY : SULEG
+(  120) USE PRE_SULEG_MOD   ,ONLY : PRE_SULEG
+(  121) USE SUFFT_MOD       ,ONLY : SUFFT
+(  122) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(  123) USE SHAREDMEM_MOD    ,ONLY : SHAREDMEM_CREATE
+(  124) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(  125) # 126 "setup_trans.F90"
+(  126) use openacc
+(  127) # 129 "setup_trans.F90"
+(  129) !endif INTERFACE
+(  130) # 131 "setup_trans.F90"
+(  131) IMPLICIT NONE
+(  132) # 133 "setup_trans.F90"
+(  133) ! Dummy arguments
+(  134) # 135 "setup_trans.F90"
+(  135) INTEGER(KIND=JPIM) ,INTENT(IN) :: KSMAX,KDGL
+(  136) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KDLON
+(  137) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KLOEN(:)
+(  138) LOGICAL   ,OPTIONAL,INTENT(IN) :: LDSPLIT
+(  139) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KTMAX
+(  140) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT):: KRESOL
+(  141) REAL(KIND=JPRB)    ,OPTIONAL,INTENT(IN) :: PWEIGHT(:)
+(  142) REAL(KIND=JPRB)    ,OPTIONAL,INTENT(IN) :: PSTRET
+(  143) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KFLEV
+(  144) LOGICAL   ,OPTIONAL,INTENT(IN):: LDGRIDONLY
+(  145) LOGICAL   ,OPTIONAL,INTENT(IN):: LDUSEFLT
+(  146) LOGICAL   ,OPTIONAL,INTENT(IN):: LDUSERPNM
+(  147) LOGICAL   ,OPTIONAL,INTENT(IN):: LDKEEPRPNM
+(  148) LOGICAL   ,OPTIONAL,INTENT(IN):: LDSPSETUPONLY
+(  149) LOGICAL   ,OPTIONAL,INTENT(IN):: LDPNMONLY
+(  150) LOGICAL   ,OPTIONAL,INTENT(IN):: LDUSEFFTW
+(  151) LOGICAL   ,OPTIONAL,INTENT(IN):: LDLL
+(  152) LOGICAL   ,OPTIONAL,INTENT(IN):: LDSHIFTLL
+(  153) CHARACTER(LEN=*),OPTIONAL,INTENT(IN):: CDIO_LEGPOL
+(  154) CHARACTER(LEN=*),OPTIONAL,INTENT(IN):: CDLEGPOLFNAME
+(  155) TYPE(C_PTR) ,OPTIONAL,INTENT(IN) :: KLEGPOLPTR
+(  156) INTEGER(C_SIZE_T) ,OPTIONAL,INTENT(IN) :: KLEGPOLPTR_LEN
+(  157) # 158 "setup_trans.F90"
+(  158) !ifndef INTERFACE
+(  159) # 160 "setup_trans.F90"
+(  160) ! Local variables
+(  161) INTEGER(KIND=JPIM),PARAMETER :: IMAXFLD=240
+(  162) INTEGER(KIND=JPIM) :: JGL,JRES,IDEF_RESOL
+(  163) INTEGER(KIND=JPIM) :: NFLEV, NFLEVL, JMLOC, KM, ILA, ILS, KMLOC, KDGLU, JK, i, J, IF_FS, IF_OUT_LT, IF_UV, IF_SCALARS
+(  164) INTEGER(KIND=JPIM) :: IF_FS_INV, IF_FS_DIR, ippnum, IF_PP, IF_FOUBUF
+(  165) # 166 "setup_trans.F90"
+(  166) LOGICAL :: LLP1,LLP2, LLSPSETUPONLY
+(  167) REAL(KIND=JPRD)    :: ZTIME0,ZTIME1,ZTIME2
+(  168) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  169) # 170 "setup_trans.F90"
+(  170) # 1 ".D[17]/user_clock.h"
+(    1) INTERFACE
+(    2) SUBROUTINE USER_CLOCK(PELAPSED_TIME,PELAPSED_TIME_SINCE,PVECTOR_CP,PTOTAL_CP)
+(    3) # 4 ".D[17]/user_clock.h"
+(    4) !**** *USER_CLOCK* - interface to system dependent timer routines
+(    5) # 6 ".D[17]/user_clock.h"
+(    6) !     Purpose.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 18
+
+(    7) !     --------
+(    8) !        Returns elapsed and CP from the start of execution.
+(    9) !        Elapsed time is made relative to the first call to USER_CLOCK.
+(   10) # 11 ".D[17]/user_clock.h"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        ZTIME=USER_CLOCK(PELAPSED_TIME,PELAPSED_TIME_SINCE,
+(   14) !                         PVECTOR_CP,PTOTAL_CP)
+(   15) # 16 ".D[17]/user_clock.h"
+(   16) !        Explicit arguments: (All are optional arguments)
+(   17) !                           PELAPSED_TIME=wall clock time (seconds)
+(   18) !                           PELAPSED_TIME_SINCE=wall clock time (seconds)
+(   19) !                             change from input value of this parameter
+(   20) !                           PVECTOR_CP=CP vector time  (seconds)
+(   21) !                           PTOTAL_CP=total CP time   (seconds)
+(   22) # 23 ".D[17]/user_clock.h"
+(   23) !     Author.
+(   24) !     -------
+(   25) !        D.Dent      *ECMWF*
+(   26) # 27 ".D[17]/user_clock.h"
+(   27) !     External References:
+(   28) !     -------------------
+(   29) # 30 ".D[17]/user_clock.h"
+(   30) !        TIMEF,CPTIME
+(   31) # 32 ".D[17]/user_clock.h"
+(   32) !     Modifications.
+(   33) !     --------------
+(   34) !        Original  : 97-09-25
+(   35) !      F. Vana  05-Mar-2015  Support for single precision
+(   36) !     ----------------------------------------------------------
+(   37) # 39 ".D[17]/user_clock.h"
+(   39) USE PARKIND1  ,ONLY : JPRD, JPIM
+(   40) # 41 ".D[17]/user_clock.h"
+(   41) IMPLICIT NONE
+(   42) # 43 ".D[17]/user_clock.h"
+(   43) REAL(KIND=JPRD),INTENT(OUT) :: PELAPSED_TIME,PVECTOR_CP,PTOTAL_CP
+(   44) REAL(KIND=JPRD),INTENT(INOUT) :: PELAPSED_TIME_SINCE
+(   45) OPTIONAL            PELAPSED_TIME,PELAPSED_TIME_SINCE
+(   46) OPTIONAL            PVECTOR_CP,PTOTAL_CP
+(   47) REAL(KIND=JPRD)      :: ZVECTOR_CP,ZTOTAL_CP,ZWALL
+(   48) REAL(KIND=JPRD),EXTERNAL :: TIMEF
+(   49) # 51 ".D[17]/user_clock.h"
+(   51) END SUBROUTINE USER_CLOCK
+(   52) END INTERFACE
+(   53) # 171 "setup_trans.F90"
+(  171) # 171 "setup_trans.F90"
+(  171) !     ------------------------------------------------------------------
+(  172) # 173 "setup_trans.F90"
+(  173) IF (LHOOK) CALL DR_HOOK('SETUP_TRANS',0,ZHOOK_HANDLE)
+(  174) # 175 "setup_trans.F90"
+(  175) IF(MSETUP0 == 0) THEN
+(  176)   CALL ABORT_TRANS('SETUP_TRANS: SETUP_TRANS0 HAS TO BE CALLED BEFORE SETUP_TRANS')
+(  177) ENDIF
+(  178) LLP1 = NPRINTLEV>0
+(  179) LLP2 = NPRINTLEV>1
+(  180) IF(LLP1) WRITE(NOUT,*) '=== ENTER ROUTINE SETUP_TRANS ==='
+(  181) # 182 "setup_trans.F90"
+(  182) ! Allocate resolution dependent structures
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 19
+
+(  183) IF(.NOT. ALLOCATED(DIM_RESOL)) THEN
+(  184)   IDEF_RESOL = 1
+(  185)   ALLOCATE(DIM_RESOL(NMAX_RESOL))
+(  186)   ALLOCATE(FIELDS_RESOL(NMAX_RESOL))
+(  187)   ALLOCATE(GEOM_RESOL(NMAX_RESOL))
+(  188)   ALLOCATE(DISTR_RESOL(NMAX_RESOL))
+(  189)   ALLOCATE(FFT_RESOL(NMAX_RESOL))
+(  190)   ALLOCATE(FFTB_RESOL(NMAX_RESOL))
+(  191) # 194 "setup_trans.F90"
+(  194)   ALLOCATE(FFTC_RESOL(NMAX_RESOL))
+(  195)   ALLOCATE(FLT_RESOL(NMAX_RESOL))
+(  196)   ALLOCATE(CTL_RESOL(NMAX_RESOL))
+(  197)   GEOM_RESOL(:)%LAM=.FALSE.
+(  198)   ALLOCATE(LENABLED(NMAX_RESOL))
+(  199)   LENABLED(:)=.FALSE.
+(  200) ELSE
+(  201)   IDEF_RESOL = NMAX_RESOL+1
+(  202)   DO JRES=1,NMAX_RESOL
+(  203)     IF(.NOT.LENABLED(JRES)) THEN
+(  204)       IDEF_RESOL = JRES
+(  205)       EXIT
+(  206)     ENDIF
+(  207)   ENDDO
+(  208)   IF(IDEF_RESOL > NMAX_RESOL) THEN
+(  209)     CALL ABORT_TRANS('SETUP_TRANS:IDEF_RESOL > NMAX_RESOL')
+(  210)   ENDIF
+(  211) ENDIF
+(  212) # 213 "setup_trans.F90"
+(  213) IF (PRESENT(KRESOL)) THEN
+(  214)   KRESOL=IDEF_RESOL
+(  215) ENDIF
+(  216) # 217 "setup_trans.F90"
+(  217) ! Point at structures due to be initialized
+(  218) CALL SET_RESOL(IDEF_RESOL,LDSETUP=.TRUE.)
+(  219) # 220 "setup_trans.F90"
+(  220) IF(LLP1) WRITE(NOUT,*) '=== DEFINING RESOLUTION ',NCUR_RESOL
+(  221) # 224 "setup_trans.F90"
+(  224) ! Defaults for optional arguments
+(  225) # 227 "setup_trans.F90"
+(  227) G%LREDUCED_GRID = .FALSE.
+(  228) G%RSTRET=1.0_JPRBT
+(  229) D%LGRIDONLY = .FALSE.
+(  230) D%LSPLIT = .FALSE.
+(  231) D%LCPNMONLY=.FALSE.
+(  232) S%LUSE_BELUSOV=.TRUE. ! use Belusov algorithm to compute RPNM array instead of per m
+(  233) S%LKEEPRPNM=.FALSE. ! Keep Legendre polonomials (RPNM)
+(  234) S%LUSEFLT=.FALSE. ! Use fast legendre transforms
+(  235) # 238 "setup_trans.F90"
+(  238) LLSPSETUPONLY = .FALSE. ! Only create distributed spectral setup
+(  239) S%LDLL = .FALSE. ! use mapping to/from second set of latitudes
+(  240) S%LSHIFTLL = .FALSE. ! shift output lat-lon by 0.5dx, 0.5dy
+(  241) C%LREAD_LEGPOL = .FALSE.
+(  242) C%LWRITE_LEGPOL = .FALSE.
+(  243) # 245 "setup_trans.F90"
+(  245) ! NON-OPTIONAL ARGUMENTS
+(  246) R%NSMAX = KSMAX
+(  247) R%NDGL  = KDGL
+(  248) ! E'-defaults
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 20
+
+(  249) R%NNOEXTZL=0
+(  250) R%NNOEXTZG=0
+(  251) # 252 "setup_trans.F90"
+(  252) ! IMPLICIT argument :
+(  253) G%LAM = .FALSE.
+(  254) # 255 "setup_trans.F90"
+(  255) IF(PRESENT(KDLON)) THEN
+(  256)   R%NDLON = KDLON
+(  257) ELSE
+(  258)   R%NDLON = 2*R%NDGL
+(  259) ENDIF
+(  260) # 261 "setup_trans.F90"
+(  261) IF(PRESENT(LDLL)) THEN
+(  262)   S%LDLL=LDLL
+(  263)   IF( LDLL ) THEN
+(  264)     S%NDLON=R%NDLON
+(  265)     ! account for pole + equator
+(  266)     R%NDGL=R%NDGL+2
+(  267)     IF(PRESENT(LDSHIFTLL)) THEN
+(  268)       S%LSHIFTLL = LDSHIFTLL
+(  269)       ! geophysical (shifted) lat-lon without pole and equator
+(  270)       IF(S%LSHIFTLL) R%NDGL=R%NDGL-2
+(  271)     ENDIF
+(  272)     S%NDGL=R%NDGL
+(  273)   ENDIF
+(  274) ENDIF
+(  275) # 276 "setup_trans.F90"
+(  276) IF (R%NDGL <= 0 .OR. MOD(R%NDGL,2) /= 0) THEN
+(  277)   CALL ABORT_TRANS ('SETUP_TRANS: KDGL IS NOT A POSITIVE, EVEN NUMBER')
+(  278) ENDIF
+(  279) # 280 "setup_trans.F90"
+(  280) ! Optional arguments
+(  281) # 282 "setup_trans.F90"
+(  282) ALLOCATE(G%NLOEN(R%NDGL))
+(  283) IF(LLP2)WRITE(NOUT,9) 'NLOEN   ',SIZE(G%NLOEN   ),SHAPE(G%NLOEN   )
+(  284) IF(PRESENT(KLOEN)) THEN
+(  285)   IF( MINVAL(KLOEN(:)) <= 0 )THEN
+(  286)      CALL ABORT_TRANS ('SETUP_TRANS: KLOEN INVALID (ONE or MORE POINTS <= 0)')
+(  287)   ENDIF
+(  288)   R%NDLON=MAXVAL(KLOEN(:))
+(  289)   DO JGL=1,R%NDGL
+(  290)     IF(KLOEN(JGL) /= R%NDLON) THEN
+(  291)       G%LREDUCED_GRID = .TRUE.
+(  292)       EXIT
+(  293)     ENDIF
+(  294)   ENDDO
+(  295) ENDIF
+(  296) # 297 "setup_trans.F90"
+(  297) IF (G%LREDUCED_GRID) THEN
+(  298)   G%NLOEN(:) = KLOEN(1:R%NDGL)
+(  299) ELSE
+(  300)   G%NLOEN(:) = R%NDLON
+(  301) ENDIF
+(  302) # 303 "setup_trans.F90"
+(  303) IF(PRESENT(LDSPLIT)) THEN
+(  304)   D%LSPLIT = LDSPLIT
+(  305) ENDIF
+(  306) # 307 "setup_trans.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 21
+
+(  307) IF(PRESENT(KTMAX)) THEN
+(  308)   R%NTMAX = KTMAX
+(  309) ELSE
+(  310)   R%NTMAX = R%NSMAX
+(  311) ENDIF
+(  312) # 313 "setup_trans.F90"
+(  313) IF(PRESENT(PWEIGHT)) THEN
+(  314)   D%LWEIGHTED_DISTR = .TRUE.
+(  315)   IF( D%LWEIGHTED_DISTR .AND. .NOT.D%LSPLIT )THEN
+(  316)     CALL ABORT_TRANS('SETUP_TRANS: LWEIGHTED_DISTR=T AND LSPLIT=F NOT SUPPORTED')
+(  317)   ENDIF
+(  318)   IF(SIZE(PWEIGHT) /= SUM(G%NLOEN(:)) )THEN
+(  319)     CALL ABORT_TRANS('SETUP_TRANS:SIZE(PWEIGHT) /= SUM(G%NLOEN(:))')
+(  320)   ENDIF
+(  321)   IF( MINVAL(PWEIGHT(:)) < 0.0_JPRBT )THEN
+(  322)     CALL ABORT_TRANS('SETUP_TRANS: INVALID WEIGHTS')
+(  323)   ENDIF
+(  324)   ALLOCATE(D%RWEIGHT(SIZE(PWEIGHT)))
+(  325)   D%RWEIGHT(:)=PWEIGHT(:)
+(  326) ELSE
+(  327)   D%LWEIGHTED_DISTR = .FALSE.
+(  328) ENDIF
+(  329) # 330 "setup_trans.F90"
+(  330) IF(PRESENT(LDGRIDONLY)) THEN
+(  331)   D%LGRIDONLY=LDGRIDONLY
+(  332) ENDIF
+(  333) # 334 "setup_trans.F90"
+(  334) IF(PRESENT(LDSPSETUPONLY)) THEN
+(  335)   LLSPSETUPONLY=LDSPSETUPONLY
+(  336) ENDIF
+(  337) # 338 "setup_trans.F90"
+(  338) IF(PRESENT(LDPNMONLY)) THEN
+(  339)   D%LCPNMONLY=LDPNMONLY
+(  340) ENDIF
+(  341) # 352 "setup_trans.F90"
+(  352) S%LSOUTHPNM=.FALSE.
+(  353) IF(PRESENT(PSTRET)) THEN
+(  354)   IF (ABS(PSTRET-1.0_JPRBT)>100._JPRBT*EPSILON(1._JPRBT)) THEN
+(  355)     G%RSTRET=PSTRET
+(  356)     S%LSOUTHPNM=.TRUE.
+(  357)   ENDIF
+(  358) ENDIF
+(  359) # 360 "setup_trans.F90"
+(  360) IF(PRESENT(CDIO_LEGPOL)) THEN
+(  361)   IF(NPROC > 1) CALL  ABORT_TRANS('SETUP_TRANS:CDIO_LEGPOL OPTIONS ONLY FOR NPROC=1 ')
+(  362)   IF(R%NSMAX > 511 ) S%LUSEFLT = .TRUE. !To save IO and memory
+(  363)   IF(TRIM(CDIO_LEGPOL) == 'readf' .OR. TRIM(CDIO_LEGPOL) == 'READF' ) THEN
+(  364)     IF(.NOT.PRESENT(CDLEGPOLFNAME)) CALL  ABORT_TRANS('SETUP_TRANS: CDLEGPOLFNAME ARGUMENT MISSING')
+(  365)     C%LREAD_LEGPOL = .TRUE.
+(  366)     C%CLEGPOLFNAME = TRIM(CDLEGPOLFNAME)
+(  367)     C%CIO_TYPE='file'
+(  368)   ELSEIF(TRIM(CDIO_LEGPOL) == 'writef' .OR. TRIM(CDIO_LEGPOL) == 'WRITEF') THEN
+(  369)     IF(.NOT.PRESENT(CDLEGPOLFNAME)) CALL  ABORT_TRANS('SETUP_TRANS: CDLEGPOLFNAME ARGUMENT MISSING')
+(  370)     C%LWRITE_LEGPOL = .TRUE.
+(  371)     C%CLEGPOLFNAME = TRIM(CDLEGPOLFNAME)
+(  372)     C%CIO_TYPE='file'
+(  373)   ELSEIF(TRIM(CDIO_LEGPOL) == 'membuf' .OR. TRIM(CDIO_LEGPOL) == 'MEMBUF') THEN
+(  374)     IF(.NOT.PRESENT(KLEGPOLPTR)) CALL  ABORT_TRANS('SETUP_TRANS: KLEGPOLPTR  ARGUMENT MISSING')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 22
+
+(  375)     IF(.NOT.C_ASSOCIATED(KLEGPOLPTR))  CALL  ABORT_TRANS('SETUP_TRANS: KLEGPOLPTR NULL POINTER')
+(  376)     IF(.NOT.PRESENT(KLEGPOLPTR_LEN)) CALL  ABORT_TRANS('SETUP_TRANS: KLEGPOLPTR_LEN ARGUMENT MISSING')
+(  377)     C%LREAD_LEGPOL = .TRUE.
+(  378)     C%CIO_TYPE='mbuf'
+(  379)     CALL SHAREDMEM_CREATE( C%STORAGE,KLEGPOLPTR,KLEGPOLPTR_LEN)
+(  380)   ELSE
+(  381)     WRITE(NERR,*) 'CDIO_LEGPOL ', TRIM(CDIO_LEGPOL)
+(  382)     CALL  ABORT_TRANS('SETUP_TRANS:CDIO_LEGPOL UNKNOWN METHOD ')
+(  383)   ENDIF
+(  384) ENDIF
+(  385) # 386 "setup_trans.F90"
+(  386) IF(PRESENT(LDUSEFLT)) THEN
+(  387)   S%LUSEFLT=LDUSEFLT
+(  388) ENDIF
+(  389) IF(PRESENT(LDUSERPNM)) THEN
+(  390)   S%LUSE_BELUSOV=LDUSERPNM
+(  391) ENDIF
+(  392) IF(PRESENT(LDKEEPRPNM)) THEN
+(  393)   IF(S%LUSEFLT) THEN
+(  394)     IF(LDKEEPRPNM.AND..NOT.LDUSERPNM) THEN
+(  395)       CALL ABORT_TRANS('SETUP_TRANS: LDKEEPRPNM=true with LDUSERPNM=false')
+(  396)     ENDIF
+(  397)   ENDIF
+(  398)   S%LKEEPRPNM=LDKEEPRPNM
+(  399) ENDIF
+(  400) !     Setup resolution dependent structures
+(  401) !     -------------------------------------
+(  402) # 403 "setup_trans.F90"
+(  403) ! Setup distribution independent dimensions
+(  404) CALL SETUP_DIMS
+(  405) # 406 "setup_trans.F90"
+(  406) ! First part of setup of distributed environment
+(  407) CALL SUMP_TRANS_PRELEG
+(  408) # 409 "setup_trans.F90"
+(  409) IF( .NOT.LLSPSETUPONLY ) THEN
+(  410) # 411 "setup_trans.F90"
+(  411) ! Compute Legendre polonomial and Gaussian Latitudes and Weights
+(  412)   CALL SULEG
+(  413) # 414 "setup_trans.F90"
+(  414) ! Second part of setup of distributed environment
+(  415)   CALL SUMP_TRANS
+(  416)   CALL GSTATS(1802,0)
+(  417) # 418 "setup_trans.F90"
+(  418) ! Initialize Fast Fourier Transform package
+(  419)   IF (.NOT.D%LCPNMONLY) CALL SUFFT
+(  420)   CALL GSTATS(1802,1)
+(  421) ELSE
+(  422)   CALL PRE_SULEG
+(  423) ENDIF
+(  424) # 425 "setup_trans.F90"
+(  425) ! Signal the current resolution is active
+(  426) LENABLED(IDEF_RESOL)=.TRUE.
+(  427) NDEF_RESOL = COUNT(LENABLED)
+(  428) # 429 "setup_trans.F90"
+(  429) IF (LHOOK) CALL DR_HOOK('SETUP_TRANS',1,ZHOOK_HANDLE)
+(  430) !     ------------------------------------------------------------------
+(  431) 9 FORMAT(1X,'ARRAY ',A10,' ALLOCATED ',8I8)
+(  432) # 433 "setup_trans.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 23
+
+(  433) IF( .NOT.D%LGRIDONLY ) THEN
+(  434) # 435 "setup_trans.F90"
+(  435) !allocating arrays for the GPU:
+(  436) IF(PRESENT(KFLEV)) THEN
+(  437)   NFLEV = KFLEV
+(  438) !  NFLEVL = NFLEV/NPRTRV
+(  439) ELSE
+(  440)   NFLEV = ceiling(REAL(IMAXFLD)/NPRTRV)
+(  441) ENDIF
+(  442) # 443 "setup_trans.F90"
+(  443) WRITE(NOUT,*) '===now going to allocate GPU arrays'
+(  444) # 445 "setup_trans.F90"
+(  445) !dimensions of matrices for Legendre Transforms for RAPS ?
+(  446) !IF_OUT_LT = 5*NFLEV+2
+(  447) !IF_FS = 6*NFLEV+3
+(  448) # 449 "setup_trans.F90"
+(  449) ! add additional post-processing requirements
+(  450) !IF_PP = 2*NFLEV
+(  451) IF_PP = 0
+(  452) # 453 "setup_trans.F90"
+(  453) ! u/v + scalars 3d + scalars 2d
+(  454) IF_UV = NFLEV
+(  455) ! SCALARS INCLUDING DERIVATIVES
+(  456) IF_SCALARS = NFLEV + 2*NFLEV + 1 + 2 + IF_PP
+(  457) IF_OUT_LT = 4*IF_UV+3*NFLEV+3+IF_PP
+(  458) !IF_OUT_LT = 4*IF_UV+3*NFLEV+3
+(  459) !8*KF_UV+2*KF_SCALARS
+(  460) !ILEI2 = 8*KF_UV + 2*KF_SCALARS + 2*KF_SCDERS
+(  461) IF_FS_INV=8*IF_UV+2*IF_SCALARS
+(  462) # 463 "setup_trans.F90"
+(  463) ! fields in Fourier space for inv trans the same
+(  464) !IF_FS=4*IF_UV+1*NFLEV+2
+(  465) IF_FS=4*IF_UV+1*NFLEV+2
+(  466) ! for derivatives u/v add
+(  467) !IF_FS=IFS_FS+2*(2*NFLEV)
+(  468) ! for each 3d scalar derivative add
+(  469) IF_FS=IF_FS+2*NFLEV ! temperature
+(  470) ! for each 2d scalar derivative add
+(  471) IF_FS=IF_FS+2 ! sfc pressure
+(  472) IF_FS=IF_FS+IF_PP
+(  473) # 474 "setup_trans.F90"
+(  474) ! u/v + scalars for direct transforms
+(  475) ! plus postprocessing buffer
+(  476) !ippnum=NFLEV
+(  477) IF_FS_DIR=2*(2*IF_UV+NFLEV+2+IF_PP)
+(  478) # 479 "setup_trans.F90"
+(  479) ! fields in Fourier space for dir trans
+(  480) !IF_FS = 2*IF_UV + IF_SCALARS
+(  481) ! plus add 2*scalar_derivatives + add vorg/divg + 2*IF_UV for u/v zonal derivatives
+(  482) # 483 "setup_trans.F90"
+(  483) write(nout,*)'setup_trans: if_uv=',if_uv,' if_out_lt=',if_out_lt,' if_fs_dir=',if_fs_dir,'if_fs_inv= ',if_fs_inv
+(  484) IF(MOD(IF_FS,2)==1) IF_FS = IF_FS + 1
+(  485) # 486 "setup_trans.F90"
+(  486) !leading and trailing dimensions of A for symmetric and antisymmetric cases
+(  487) ! (same for ltinv and ltdir)
+(  488) LDZAA=R%NDGNH
+(  489) LDZAS=R%NDGNH
+(  490) TDZAA=(R%NTMAX+2)/2
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 24
+
+(  491) TDZAS=(R%NTMAX+3)/2
+(  492) # 493 "setup_trans.F90"
+(  493) !similarly for B (ltinv)
+(  494) ILDZBA=(R%NSMAX+2)/2
+(  495) ILDZBS=(R%NSMAX+3)/2
+(  496) ITDZBA=IF_FS_INV
+(  497) ITDZBS=IF_FS_INV
+(  498) # 499 "setup_trans.F90"
+(  499) !similarly for C (ltinv)
+(  500) ILDZCA=R%NDGNH
+(  501) ILDZCS=R%NDGNH
+(  502) ITDZCA=IF_FS_INV
+(  503) ITDZCS=IF_FS_INV
+(  504) # 505 "setup_trans.F90"
+(  505) !similarly for B (ltdir)
+(  506) DLDZBA=R%NDGNH
+(  507) DLDZBS=R%NDGNH
+(  508) DTDZBA=IF_FS_DIR
+(  509) DTDZBS=IF_FS_DIR
+(  510) # 511 "setup_trans.F90"
+(  511) !similarly for C (ltdir)
+(  512) DLDZCA=(R%NTMAX+2)/2
+(  513) DLDZCS=(R%NTMAX+3)/2
+(  514) DTDZCA=IF_FS_DIR
+(  515) DTDZCS=IF_FS_DIR
+(  516) # 517 "setup_trans.F90"
+(  517) !allocate matrices for matrix multiplications
+(  518) ALLOCATE(IZBA(IF_FS_INV,TDZAA,D%NUMP))
+(  519) ALLOCATE(IZBS(IF_FS_INV,TDZAS,D%NUMP))
+(  520) ALLOCATE(ZAA(R%NDGNH,TDZAA,D%NUMP))
+(  521) ALLOCATE(ZAS(R%NDGNH,TDZAS,D%NUMP))
+(  522) ! transpose of C (for better memory access patterns)
+(  523) ALLOCATE(IZCAT(IF_FS_INV,R%NDGNH,D%NUMP))
+(  524) ALLOCATE(IZCST(IF_FS_INV,R%NDGNH,D%NUMP))
+(  525) # 526 "setup_trans.F90"
+(  526) ALLOCATE(DZBAT(IF_FS_DIR,R%NDGNH,D%NUMP))
+(  527) ALLOCATE(DZBST(IF_FS_DIR,R%NDGNH,D%NUMP))
+(  528) ! transpose of C (for better memory access patterns)
+(  529) ALLOCATE(DZCAT(IF_FS_DIR,TDZAA,D%NUMP))
+(  530) ALLOCATE(DZCST(IF_FS_DIR,TDZAS,D%NUMP))
+(  531) # 532 "setup_trans.F90"
+(  533) !$ACC& COPYIN(F,F%RN,F%RLAPIN,S,S%FA,S%ITHRESHOLD,S%LUSEFLT,D,D%NUMP,D%MYMS,R,R%NDGNH,R%NSMAX,G,G%NDGLU) &
+(  534) !$ACC& copyin(D%NPNTGTB0,D%NPNTGTB1,D%NSTAGT0B,D%NSTAGT1B,D%NSTAGTF,G%NMEN,D%NPROCM,D%NPTRLS,G,G%NLOEN,D%MSTABF)
+(  535) # 536 "setup_trans.F90"
+(  536) ! Initialize A arrays
+(  537) # 538 "setup_trans.F90"
+(  538) izba = 0._JPRBT
+(  539) !$acc update device(izba)
+(  540) izbs = 0._JPRBT
+(  541) !$acc update device(izbs)
+(  542) dzbat = 0._JPRBT
+(  543) !$acc update device(dzbat)
+(  544) dzbst = 0._JPRBT
+(  545) !$acc update device(dzbst)
+(  546) # 547 "setup_trans.F90"
+(  547) DO JMLOC=1,D%NUMP
+(  548)   !$ACC enter data copyin(S%FA(JMLOC)%RPNMA,S%FA(JMLOC)%RPNMS)
+(  549) ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 25
+
+(  550) # 551 "setup_trans.F90"
+(  551) ! zero arrays
+(  552) !$ACC PARALLEL LOOP
+(  553) DO JMLOC=1,D%NUMP
+(  554)   !$ACC loop
+(  555)   DO JK=1,TDZAA
+(  556)     !$ACC loop
+(  557)     DO J=1,LDZAA
+(  558)       ZAA(J,JK,JMLOC)=0._JPRBT
+(  559)     ENDDO
+(  560)   ENDDO
+(  561) ENDDO
+(  562) # 563 "setup_trans.F90"
+(  563) !$ACC PARALLEL LOOP
+(  564) DO JMLOC=1,D%NUMP
+(  565)   !$ACC loop
+(  566)   DO JK=1,TDZAS
+(  567)     !$ACC LOOP
+(  568)     DO J=1,LDZAS
+(  569)       ZAS(J,JK,JMLOC)=0._JPRBT
+(  570)     ENDDO
+(  571)   ENDDO
+(  572) ENDDO
+(  573) # 574 "setup_trans.F90"
+(  574) !$ACC KERNELS
+(  575) DO JMLOC=1,D%NUMP
+(  576)   KM = D%MYMS(JMLOC)   
+(  577)   KDGLU = MIN(R%NDGNH,G%NDGLU(KM))
+(  578)    
+(  579)   ILA = (R%NSMAX-KM+2)/2
+(  580)   DO JK=1,KDGLU
+(  581)     DO J=1,ILA
+(  582)       ZAA(JK,J,JMLOC)=S%FA(JMLOC)%RPNMA(JK,J)
+(  583)     ENDDO
+(  584)   ENDDO
+(  585) ENDDO
+(  586) !$ACC END KERNELS 
+(  587) # 588 "setup_trans.F90"
+(  588)   
+(  589) !$ACC KERNELS
+(  590) DO JMLOC=1,D%NUMP
+(  591)   KM = D%MYMS(JMLOC)
+(  592)   KDGLU = MIN(R%NDGNH,G%NDGLU(KM))
+(  593) # 594 "setup_trans.F90"
+(  594)   ILS = (R%NSMAX-KM+3)/2
+(  595)   DO JK=1,KDGLU
+(  596)     DO J=1,ILS
+(  597)       ZAS(JK,J,JMLOC)=S%FA(JMLOC)%RPNMS(JK,J)
+(  598)     ENDDO
+(  599)   ENDDO
+(  600) ENDDO
+(  601) !$ACC END KERNELS 
+(  602)   
+(  603) IF_FOUBUF=MAX(IF_OUT_LT,IF_FS)
+(  604) ALLOCATE(FOUBUF_IN(MAX(1,D%NLENGT0B*2*IF_FOUBUF)))
+(  605) ALLOCATE(FOUBUF(MAX(1,D%NLENGT0B*2*IF_FOUBUF)))
+(  606) !$ACC enter data create(FOUBUF_IN,FOUBUF)
+(  607) # 608 "setup_trans.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 26
+
+(  608) ALLOCATE(ZGTF(2*IF_FS,D%NLENGTF))
+(  609) !$ACC enter data create(ZGTF)
+(  610) # 611 "setup_trans.F90"
+(  611) ALLOCATE(ZIA(IF_FS_INV,R%NLEI1,D%NUMP))
+(  612) ALLOCATE(ZEPSNM(d%nump,0:R%NTMAX+2))
+(  613) ALLOCATE(ZSOA1(2*IF_OUT_LT,R%NLEI3,D%NUMP))
+(  614) ALLOCATE(ZAOA1(2*IF_OUT_LT,R%NLEI3,D%NUMP))
+(  615) ALLOCATE(ISTAN(D%NUMP,R%NDGNH))
+(  616) ALLOCATE(ISTAS(D%NUMP,R%NDGNH))
+(  617) ALLOCATE(ZSIA(IF_FS_INV,R%NDGNH,D%NUMP))
+(  618) ALLOCATE(ZAIA(IF_FS_INV,R%NDGNH,D%NUMP))
+(  619) ALLOCATE(ZOA1(4*IF_FS_DIR,R%NLED4,D%NUMP))
+(  620) ALLOCATE(ZOA2(MAX(4*IF_UV,1),R%NLED4,D%NUMP))
+(  621) !$ACC enter data create(ZIA,ZEPSNM,ZSOA1,ZAOA1,ISTAN,ISTAS,ZSIA,ZAIA,ZOA1,ZOA2)
+(  622) # 623 "setup_trans.F90"
+(  623) zgtf = 0._JPRBT
+(  624) !$acc update device(zgtf)
+(  625) zia = 0._JPRBT
+(  626) !$acc update device(zia)
+(  627) zsia = 0._JPRBT
+(  628) !$acc update device(zsia)
+(  629) zaia = 0._JPRBT
+(  630) !$acc update device(zaia)
+(  631) zoa1 = 0._JPRBT
+(  632) !$acc update device(zoa1)
+(  633) zoa2 = 0._JPRBT
+(  634) !$acc update device(zoa2)
+(  635) zaoa1 = 0._JPRBT
+(  636) !$acc update device(zaoa1)
+(  637) zsoa1 = 0._JPRBT
+(  638) !$acc update device(zsoa1)
+(  639) # 640 "setup_trans.F90"
+(  640) ! add arrays for GPNORM1
+(  641) ALLOCATE(ZAVE(IF_FS,R%NDGL))
+(  642) ALLOCATE(ZMINGL(IF_FS,R%NDGL))
+(  643) ALLOCATE(ZMAXGL(IF_FS,R%NDGL))
+(  644) ALLOCATE(ZMINGPN(IF_FS))
+(  645) ALLOCATE(ZMAXGPN(IF_FS))
+(  646) !$ACC enter data create(ZAVE,ZMINGL,ZMAXGL,ZMINGPN,ZMAXGPN)
+(  647) # 648 "setup_trans.F90"
+(  648) zave = 0._JPRBT
+(  649) !$acc update device(zave)
+(  650) zmingl = 0._JPRBT
+(  651) !$acc update device(zmingl)
+(  652) zmaxgl = 0._JPRBT
+(  653) !$acc update device(zmaxgl)
+(  654) zmingpn = 0._JPRBT
+(  655) !$acc update device(zmingpn)
+(  656) zmaxgpn = 0._JPRBT
+(  657) !$acc update device(zmaxgpn)
+(  658) # 659 "setup_trans.F90"
+(  659) !set up flat copies of constant data
+(  660) R_NSMAX=R%NSMAX
+(  661) R_NTMAX=R%NTMAX
+(  662) R_NDGNH=R%NDGNH
+(  663) R_NDGL=R%NDGL
+(  664) R_NNOEXTZL=R%NNOEXTZL
+(  665) # 667 "setup_trans.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 27
+
+(  667) ALLOCATE(D_NSTAGT0B(SIZE(D%NSTAGT0B)))
+(  668) ALLOCATE(D_NSTAGT1B(SIZE(D%NSTAGT1B)))
+(  669) ALLOCATE(D_NPNTGTB0(0:SIZE(D%NPNTGTB0,1)-1,SIZE(D%NPNTGTB0,2)))
+(  670) ALLOCATE(D_NPNTGTB1(SIZE(D%NPNTGTB1,1),SIZE(D%NPNTGTB1,2)))
+(  671) ALLOCATE(D_MYMS(SIZE(D%MYMS)))
+(  672) ALLOCATE(D_NPROCL(SIZE(D%NPROCL)))
+(  673) ALLOCATE(D_NASM0(0:SIZE(D%NASM0)-1))
+(  674) ALLOCATE(D_NSTAGTF(SIZE(D%NSTAGTF)))
+(  675) ALLOCATE(D_MSTABF(SIZE(D%MSTABF)))
+(  676) ALLOCATE(D_NPROCM(0:SIZE(D%NPROCM)-1))
+(  677) ALLOCATE(D_NPTRLS(SIZE(D%NPTRLS)))
+(  678) # 679 "setup_trans.F90"
+(  679) ALLOCATE(G_NDGLU(0:SIZE(G%NDGLU)-1))
+(  680) ALLOCATE(G_NMEN(SIZE(G%NMEN)))
+(  681) ALLOCATE(G_NLOEN(SIZE(G%NLOEN)))
+(  682) # 683 "setup_trans.F90"
+(  683) ALLOCATE(F_RW(SIZE(F%RW)))
+(  684) # 686 "setup_trans.F90"
+(  686) DO I=0,SIZE(G%NDGLU)-1
+(  687)    G_NDGLU(I)=G%NDGLU(I)
+(  688) end DO
+(  689) # 690 "setup_trans.F90"
+(  690) G_NMEN_MAX=0
+(  691) DO I=1,SIZE(G%NMEN)
+(  692)    G_NMEN(I)=G%NMEN(I)
+(  693)    if (G_NMEN(I) .gt. G_NMEN_MAX) G_NMEN_MAX=G_NMEN(I)
+(  694) end DO
+(  695) # 696 "setup_trans.F90"
+(  696) G_NLOEN_MAX=0
+(  697) DO I=1,SIZE(G%NLOEN)
+(  698)    G_NLOEN(I)=G%NLOEN(I)
+(  699)    if (G_NLOEN(I) .gt. G_NLOEN_MAX) G_NLOEN_MAX=G_NLOEN(I)
+(  700) end DO
+(  701) # 702 "setup_trans.F90"
+(  702) DO I=1,SIZE(D%NSTAGT0B)
+(  703)    D_NSTAGT0B(I)=D%NSTAGT0B(I)
+(  704) END DO
+(  705) # 706 "setup_trans.F90"
+(  706) DO I=1,SIZE(D%NSTAGT1B)
+(  707)    D_NSTAGT1B(I)=D%NSTAGT1B(I)
+(  708) END DO
+(  709) # 710 "setup_trans.F90"
+(  710) DO I=1,SIZE(D%NPROCL)
+(  711)    D_NPROCL(I)=D%NPROCL(I)
+(  712) END DO
+(  713) # 714 "setup_trans.F90"
+(  714) DO I=0,SIZE(D%NASM0)-1
+(  715)    D_NASM0(I)=D%NASM0(I)
+(  716) END DO
+(  717) # 718 "setup_trans.F90"
+(  718) DO I=1,SIZE(D%NSTAGTF)
+(  719)    D_NSTAGTF(I)=D%NSTAGTF(I)
+(  720) END DO
+(  721) # 722 "setup_trans.F90"
+(  722) DO I=1,SIZE(D%MSTABF)
+(  723)    D_MSTABF(I)=D%MSTABF(I)
+(  724) END DO
+(  725) # 726 "setup_trans.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 28
+
+(  726) DO I=0,SIZE(D%NPROCM)-1
+(  727)    D_NPROCM(I)=D%NPROCM(I)
+(  728) END DO
+(  729) # 730 "setup_trans.F90"
+(  730) DO I=1,SIZE(D%NPTRLS)
+(  731)    D_NPTRLS(I)=D%NPTRLS(I)
+(  732) END DO
+(  733) # 734 "setup_trans.F90"
+(  734) DO I=1,SIZE(D%NPNTGTB0,2)
+(  735)    DO J=0,SIZE(D%NPNTGTB0,1)-1
+(  736)       D_NPNTGTB0(J,I)=D%NPNTGTB0(J,I)
+(  737)    end DO
+(  738) END DO
+(  739) # 740 "setup_trans.F90"
+(  740) DO I=1,SIZE(D%NPNTGTB1,2)
+(  741)    DO J=1,SIZE(D%NPNTGTB1,1)
+(  742)       D_NPNTGTB1(J,I)=D%NPNTGTB1(J,I)
+(  743)    end DO
+(  744) END DO
+(  745) # 746 "setup_trans.F90"
+(  746) D_NUMP=D%NUMP
+(  747) # 748 "setup_trans.F90"
+(  748) DO I=1,SIZE(D%MYMS)
+(  749)    D_MYMS(I)=D%MYMS(I)
+(  750) end DO
+(  751) # 752 "setup_trans.F90"
+(  752) DO I=1,SIZE(F%RW)
+(  753)    F_RW(I)=F%RW(I)
+(  754) END DO
+(  755) # 756 "setup_trans.F90"
+(  756) !$ACC enter data create(R_NSMAX,R_NTMAX,R_NDGL,R_NNOEXTZL,R_NDGNH,D_NSTAGT0B,D_NSTAGT1B,D_NPNTGTB1,D_NPROCL,D_NUMP,D_MYMS,D_NASM0,D_NSTAGTF,D_MSTABF,D_NPNTGTB0,D_NPROCM,D_NPTRLS,G_NDGLU,G_NMEN,G_NMEN_MAX,G_NLOEN,G_NLOEN_MAX,F_RW)
+(  757) # 758 "setup_trans.F90"
+(  758) !$ACC update device(R_NSMAX,R_NTMAX,R_NDGL,R_NNOEXTZL,R_NDGNH,D_NSTAGT0B,D_NSTAGT1B,D_NPNTGTB1,D_NPROCL,D_NUMP,D_MYMS,D_NASM0,D_NSTAGTF,D_MSTABF,D_NPNTGTB0,D_NPROCM,D_NPTRLS,G_NDGLU,G_NMEN,G_NMEN_MAX,G_NLOEN,G_NLOEN_MAX,F_RW)
+(  759) # 760 "setup_trans.F90"
+(  760) WRITE(NOUT,*) '===GPU arrays successfully allocated'
+(  761) !endif INTERFACE
+(  762) # 763 "setup_trans.F90"
+(  763) ENDIF
+(  764) # 765 "setup_trans.F90"
+(  765) END SUBROUTINE SETUP_TRANS

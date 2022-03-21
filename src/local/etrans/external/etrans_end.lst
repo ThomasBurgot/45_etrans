@@ -1,0 +1,433 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:49      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: etrans_end.F90
+
+(    1) SUBROUTINE ETRANS_END(CDMODE)
+(    2) 
+(    3) !**** *ETRANS_END* - Terminate transform package
+(    4) 
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !     Terminate transform package. Release all allocated arrays.
+(    8) 
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL ETRANS_END
+(   12) 
+(   13) !     Explicit arguments : None
+(   14) !     --------------------
+(   15) 
+(   16) !     Method.
+(   17) !     -------
+(   18) 
+(   19) !     Externals.  None
+(   20) !     ----------
+(   21) 
+(   22) !     Author.
+(   23) !     -------
+(   24) !        Mats Hamrud *ECMWF*
+(   25) 
+(   26) !     Modifications.
+(   27) !     --------------
+(   28) !        Original : 00-03-03
+(   29) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   30) !        A.Nmiri       15-Nov-2007 Phasing with TFL 32R3
+(   31) !        A.Bogatchev   16-Sep-2010 Phasing cy37 after G.Radnoti
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:49      page 2
+
+(   32) !        R. El Khatib 02-Mar-2012 Support for mixed multi-resolutions
+(   33) !        R. El Khatib 09-Jul-2013 LENABLED
+(   34) !        R. El Khatib 01-Set-2015 Support for FFTW
+(   35) !     ------------------------------------------------------------------
+(   36) 
+(   37) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   38) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   39) 
+(   40) !ifndef INTERFACE
+(   41) 
+(   42) USE TPM_GEN         ,ONLY : MSETUP0, NCUR_RESOL, NDEF_RESOL, NMAX_RESOL, LENABLED
+(   43) USE TPM_DIM         ,ONLY : R, DIM_RESOL
+(   44) USE TPM_DISTR       ,ONLY : D, DISTR_RESOL, NPRCIDS
+(   45) USE TPM_GEOMETRY    ,ONLY : G, GEOM_RESOL
+(   46) USE TPM_FIELDS      ,ONLY : F, FIELDS_RESOL
+(   47) USE TPM_FFT         ,ONLY : T, FFT_RESOL, TB, FFTB_RESOL
+(   48) #ifdef WITH_FFTW
+(   49) USE TPM_FFTW        ,ONLY : TW, FFTW_RESOL
+(   50) #endif
+(   51) USE TPM_FLT         ,ONLY : S, FLT_RESOL
+(   52) USE TPM_TRANS       ,ONLY : FOUBUF, FOUBUF_IN
+(   53) USE TPMALD_DIM      ,ONLY : RALD, ALDDIM_RESOL
+(   54) USE TPMALD_DISTR    ,ONLY : DALD, ALDDISTR_RESOL
+(   55) USE TPMALD_FFT      ,ONLY : TALD, ALDFFT_RESOL
+(   56) USE TPMALD_FIELDS   ,ONLY : FALD, ALDFIELDS_RESOL
+(   57) USE TPMALD_GEO      ,ONLY : GALD, ALDGEO_RESOL
+(   58) 
+(   59) USE ESET_RESOL_MOD  ,ONLY : ESET_RESOL
+(   60) USE EQ_REGIONS_MOD  ,ONLY : N_REGIONS
+(   61) USE EDEALLOC_RESOL_MOD   ,ONLY : EDEALLOC_RESOL
+(   62) 
+(   63) IMPLICIT NONE
+(   64) 
+(   65) CHARACTER*5, OPTIONAL,  INTENT(IN) :: CDMODE
+(   66) ! Local variables
+(   67) CHARACTER*5 :: CLMODE
+(   68) INTEGER(KIND=JPIM) :: JRES
+(   69) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   70) !     ------------------------------------------------------------------
+(   71) 
+(   72) IF (LHOOK) CALL DR_HOOK('ETRANS_END',0,ZHOOK_HANDLE)
+(   73) CLMODE='FINAL'
+(   74) IF (PRESENT(CDMODE)) CLMODE=CDMODE
+(   75) IF (CLMODE == 'FINAL') THEN
+(   76)  DO JRES=1,NDEF_RESOL
+(   77)    CALL EDEALLOC_RESOL(JRES)
+(   78)  ENDDO
+(   79)  NULLIFY(R)
+(   80)  IF (ALLOCATED(DIM_RESOL)) DEALLOCATE(DIM_RESOL)
+(   81)  NULLIFY(RALD)
+(   82)  IF (ALLOCATED(ALDDIM_RESOL)) DEALLOCATE(ALDDIM_RESOL)
+(   83) !EQ_REGIONS
+(   84)  IF (ASSOCIATED(N_REGIONS)) THEN
+(   85)    DEALLOCATE(N_REGIONS)
+(   86)    NULLIFY (N_REGIONS)
+(   87)  ENDIF
+(   88) !TPM_DISTR
+(   89)  NULLIFY(D)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:49      page 3
+
+(   90)  IF (ALLOCATED(DISTR_RESOL)) DEALLOCATE(DISTR_RESOL)
+(   91)  NULLIFY(DALD)
+(   92)  IF (ALLOCATED(ALDDISTR_RESOL)) DEALLOCATE(ALDDISTR_RESOL)
+(   93) !TPM_FFT
+(   94)  NULLIFY(T)
+(   95)  IF (ALLOCATED(FFT_RESOL)) DEALLOCATE(FFT_RESOL)
+(   96)  NULLIFY(TB)
+(   97)  IF( ALLOCATED(FFTB_RESOL) ) DEALLOCATE(FFTB_RESOL) 
+(   98) #ifdef WITH_FFTW
+(   99)  !TPM_FFTW
+(  100)  NULLIFY(TW)
+(  101)  DEALLOCATE(FFTW_RESOL)
+(  102) #endif
+(  103) !TPM_FLT
+(  104)  NULLIFY(S)
+(  105)  IF (ALLOCATED(FLT_RESOL)) DEALLOCATE(FLT_RESOL)
+(  106)  NULLIFY(TALD)
+(  107)  IF (ALLOCATED(ALDFFT_RESOL)) DEALLOCATE(ALDFFT_RESOL)
+(  108) 
+(  109) !TPM_FIELDS
+(  110)  NULLIFY(F)
+(  111)  IF (ALLOCATED(FIELDS_RESOL)) DEALLOCATE(FIELDS_RESOL)
+(  112)  NULLIFY(FALD)
+(  113)  IF (ALLOCATED(ALDFIELDS_RESOL)) DEALLOCATE(ALDFIELDS_RESOL)
+(  114) 
+(  115) !TPM_GEOMETRY
+(  116)  NULLIFY(G)
+(  117)  IF(ALLOCATED(GEOM_RESOL)) DEALLOCATE(GEOM_RESOL)
+(  118)  NULLIFY(GALD)
+(  119)  IF(ALLOCATED(ALDGEO_RESOL)) DEALLOCATE(ALDGEO_RESOL)
+(  120) !TPM_TRANS
+(  121)  IF(ALLOCATED(FOUBUF_IN)) THEN
+(  122) !$acc exit data delete (FOUBUF_IN)
+(  123)    DEALLOCATE(FOUBUF_IN)
+(  124)  ENDIF
+(  125)  IF(ALLOCATED(FOUBUF)) THEN
+(  126) !$acc exit data delete (FOUBUF)
+(  127)    DEALLOCATE(FOUBUF)
+(  128)  ENDIF
+(  129) 
+(  130)  IF (ALLOCATED(LENABLED)) DEALLOCATE(LENABLED)
+(  131)  MSETUP0 = 0
+(  132)  NMAX_RESOL = 0
+(  133)  NCUR_RESOL = 0
+(  134)  NDEF_RESOL = 0
+(  135) ENDIF
+(  136) 
+(  137) IF (CLMODE == 'FINAL' .OR. CLMODE == 'INTER') THEN
+(  138)   !EQ_REGIONS
+(  139)   IF (ASSOCIATED(N_REGIONS)) THEN
+(  140)     DEALLOCATE(N_REGIONS)
+(  141)     NULLIFY (N_REGIONS)
+(  142)   ENDIF
+(  143)  !TPM_DISTR
+(  144)   IF (ALLOCATED(NPRCIDS)) DEALLOCATE(NPRCIDS)
+(  145) ENDIF
+(  146) IF (LHOOK) CALL DR_HOOK('ETRANS_END',1,ZHOOK_HANDLE)
+(  147) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:49      page 4
+
+(  148) !     ------------------------------------------------------------------
+(  149) 
+(  150) !endif INTERFACE
+(  151) 
+(  152) END SUBROUTINE ETRANS_END
+(  153) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:49      page 5
+
+(    1) # 1 "etrans_end.F90"
+(    1) SUBROUTINE ETRANS_END(CDMODE)
+(    2) # 3 "etrans_end.F90"
+(    3) !**** *ETRANS_END* - Terminate transform package
+(    4) # 5 "etrans_end.F90"
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !     Terminate transform package. Release all allocated arrays.
+(    8) # 9 "etrans_end.F90"
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL ETRANS_END
+(   12) # 13 "etrans_end.F90"
+(   13) !     Explicit arguments : None
+(   14) !     --------------------
+(   15) # 16 "etrans_end.F90"
+(   16) !     Method.
+(   17) !     -------
+(   18) # 19 "etrans_end.F90"
+(   19) !     Externals.  None
+(   20) !     ----------
+(   21) # 22 "etrans_end.F90"
+(   22) !     Author.
+(   23) !     -------
+(   24) !        Mats Hamrud *ECMWF*
+(   25) # 26 "etrans_end.F90"
+(   26) !     Modifications.
+(   27) !     --------------
+(   28) !        Original : 00-03-03
+(   29) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   30) !        A.Nmiri       15-Nov-2007 Phasing with TFL 32R3
+(   31) !        A.Bogatchev   16-Sep-2010 Phasing cy37 after G.Radnoti
+(   32) !        R. El Khatib 02-Mar-2012 Support for mixed multi-resolutions
+(   33) !        R. El Khatib 09-Jul-2013 LENABLED
+(   34) !        R. El Khatib 01-Set-2015 Support for FFTW
+(   35) !     ------------------------------------------------------------------
+(   36) # 37 "etrans_end.F90"
+(   37) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   38) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   39) # 40 "etrans_end.F90"
+(   40) !ifndef INTERFACE
+(   41) # 42 "etrans_end.F90"
+(   42) USE TPM_GEN         ,ONLY : MSETUP0, NCUR_RESOL, NDEF_RESOL, NMAX_RESOL, LENABLED
+(   43) USE TPM_DIM         ,ONLY : R, DIM_RESOL
+(   44) USE TPM_DISTR       ,ONLY : D, DISTR_RESOL, NPRCIDS
+(   45) USE TPM_GEOMETRY    ,ONLY : G, GEOM_RESOL
+(   46) USE TPM_FIELDS      ,ONLY : F, FIELDS_RESOL
+(   47) USE TPM_FFT         ,ONLY : T, FFT_RESOL, TB, FFTB_RESOL
+(   48) # 51 "etrans_end.F90"
+(   51) USE TPM_FLT         ,ONLY : S, FLT_RESOL
+(   52) USE TPM_TRANS       ,ONLY : FOUBUF, FOUBUF_IN
+(   53) USE TPMALD_DIM      ,ONLY : RALD, ALDDIM_RESOL
+(   54) USE TPMALD_DISTR    ,ONLY : DALD, ALDDISTR_RESOL
+(   55) USE TPMALD_FFT      ,ONLY : TALD, ALDFFT_RESOL
+(   56) USE TPMALD_FIELDS   ,ONLY : FALD, ALDFIELDS_RESOL
+(   57) USE TPMALD_GEO      ,ONLY : GALD, ALDGEO_RESOL
+(   58) # 59 "etrans_end.F90"
+(   59) USE ESET_RESOL_MOD  ,ONLY : ESET_RESOL
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:49      page 6
+
+(   60) USE EQ_REGIONS_MOD  ,ONLY : N_REGIONS
+(   61) USE EDEALLOC_RESOL_MOD   ,ONLY : EDEALLOC_RESOL
+(   62) # 63 "etrans_end.F90"
+(   63) IMPLICIT NONE
+(   64) # 65 "etrans_end.F90"
+(   65) CHARACTER*5, OPTIONAL,  INTENT(IN) :: CDMODE
+(   66) ! Local variables
+(   67) CHARACTER*5 :: CLMODE
+(   68) INTEGER(KIND=JPIM) :: JRES
+(   69) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   70) !     ------------------------------------------------------------------
+(   71) # 72 "etrans_end.F90"
+(   72) IF (LHOOK) CALL DR_HOOK('ETRANS_END',0,ZHOOK_HANDLE)
+(   73) CLMODE='FINAL'
+(   74) IF (PRESENT(CDMODE)) CLMODE=CDMODE
+(   75) IF (CLMODE == 'FINAL') THEN
+(   76)  DO JRES=1,NDEF_RESOL
+(   77)    CALL EDEALLOC_RESOL(JRES)
+(   78)  ENDDO
+(   79)  NULLIFY(R)
+(   80)  IF (ALLOCATED(DIM_RESOL)) DEALLOCATE(DIM_RESOL)
+(   81)  NULLIFY(RALD)
+(   82)  IF (ALLOCATED(ALDDIM_RESOL)) DEALLOCATE(ALDDIM_RESOL)
+(   83) !EQ_REGIONS
+(   84)  IF (ASSOCIATED(N_REGIONS)) THEN
+(   85)    DEALLOCATE(N_REGIONS)
+(   86)    NULLIFY (N_REGIONS)
+(   87)  ENDIF
+(   88) !TPM_DISTR
+(   89)  NULLIFY(D)
+(   90)  IF (ALLOCATED(DISTR_RESOL)) DEALLOCATE(DISTR_RESOL)
+(   91)  NULLIFY(DALD)
+(   92)  IF (ALLOCATED(ALDDISTR_RESOL)) DEALLOCATE(ALDDISTR_RESOL)
+(   93) !TPM_FFT
+(   94)  NULLIFY(T)
+(   95)  IF (ALLOCATED(FFT_RESOL)) DEALLOCATE(FFT_RESOL)
+(   96)  NULLIFY(TB)
+(   97)  IF( ALLOCATED(FFTB_RESOL) ) DEALLOCATE(FFTB_RESOL) 
+(   98) # 103 "etrans_end.F90"
+(  103) !TPM_FLT
+(  104)  NULLIFY(S)
+(  105)  IF (ALLOCATED(FLT_RESOL)) DEALLOCATE(FLT_RESOL)
+(  106)  NULLIFY(TALD)
+(  107)  IF (ALLOCATED(ALDFFT_RESOL)) DEALLOCATE(ALDFFT_RESOL)
+(  108) # 109 "etrans_end.F90"
+(  109) !TPM_FIELDS
+(  110)  NULLIFY(F)
+(  111)  IF (ALLOCATED(FIELDS_RESOL)) DEALLOCATE(FIELDS_RESOL)
+(  112)  NULLIFY(FALD)
+(  113)  IF (ALLOCATED(ALDFIELDS_RESOL)) DEALLOCATE(ALDFIELDS_RESOL)
+(  114) # 115 "etrans_end.F90"
+(  115) !TPM_GEOMETRY
+(  116)  NULLIFY(G)
+(  117)  IF(ALLOCATED(GEOM_RESOL)) DEALLOCATE(GEOM_RESOL)
+(  118)  NULLIFY(GALD)
+(  119)  IF(ALLOCATED(ALDGEO_RESOL)) DEALLOCATE(ALDGEO_RESOL)
+(  120) !TPM_TRANS
+(  121)  IF(ALLOCATED(FOUBUF_IN)) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:49      page 7
+
+(  122) !$acc exit data delete (FOUBUF_IN)
+(  123)    DEALLOCATE(FOUBUF_IN)
+(  124)  ENDIF
+(  125)  IF(ALLOCATED(FOUBUF)) THEN
+(  126) !$acc exit data delete (FOUBUF)
+(  127)    DEALLOCATE(FOUBUF)
+(  128)  ENDIF
+(  129) # 130 "etrans_end.F90"
+(  130)  IF (ALLOCATED(LENABLED)) DEALLOCATE(LENABLED)
+(  131)  MSETUP0 = 0
+(  132)  NMAX_RESOL = 0
+(  133)  NCUR_RESOL = 0
+(  134)  NDEF_RESOL = 0
+(  135) ENDIF
+(  136) # 137 "etrans_end.F90"
+(  137) IF (CLMODE == 'FINAL' .OR. CLMODE == 'INTER') THEN
+(  138)   !EQ_REGIONS
+(  139)   IF (ASSOCIATED(N_REGIONS)) THEN
+(  140)     DEALLOCATE(N_REGIONS)
+(  141)     NULLIFY (N_REGIONS)
+(  142)   ENDIF
+(  143)  !TPM_DISTR
+(  144)   IF (ALLOCATED(NPRCIDS)) DEALLOCATE(NPRCIDS)
+(  145) ENDIF
+(  146) IF (LHOOK) CALL DR_HOOK('ETRANS_END',1,ZHOOK_HANDLE)
+(  147) # 148 "etrans_end.F90"
+(  148) !     ------------------------------------------------------------------
+(  149) # 150 "etrans_end.F90"
+(  150) !endif INTERFACE
+(  151) # 152 "etrans_end.F90"
+(  152) END SUBROUTINE ETRANS_END

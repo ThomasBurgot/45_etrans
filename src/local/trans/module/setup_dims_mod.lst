@@ -1,0 +1,179 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:45      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: setup_dims_mod.F90
+
+(    1) MODULE SETUP_DIMS_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SETUP_DIMS
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    6) 
+(    7) USE TPM_DIM         ,ONLY : R
+(    8) USE TPM_FLT         ,ONLY : S
+(    9) !
+(   10) 
+(   11) IMPLICIT NONE
+(   12) 
+(   13) INTEGER(KIND=JPIM) :: JM,JN,ISPOLEG
+(   14) 
+(   15) !     ------------------------------------------------------------------
+(   16) 
+(   17) ISPOLEG = 0
+(   18) DO JM=0,R%NSMAX
+(   19)   DO JN=JM,R%NTMAX+1
+(   20)     ISPOLEG = ISPOLEG+1
+(   21)   ENDDO
+(   22) ENDDO
+(   23) R%NSPOLEG = ISPOLEG
+(   24) 
+(   25) R%NSPEC_G = (R%NSMAX+1)*(R%NSMAX+2)/2
+(   26) R%NSPEC2_G = R%NSPEC_G*2
+(   27) 
+(   28) R%NDGNH = (R%NDGL+1)/2
+(   29) 
+(   30) R%NLEI1 = R%NSMAX+4+MOD(R%NSMAX+4+1,2)
+(   31) R%NLEI3 = R%NDGNH+MOD(R%NDGNH+2,2)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:45      page 2
+
+(   32) IF (S%LSOUTHPNM) R%NLEI3=2*R%NLEI3 
+(   33) 
+(   34) R%NLED3 = R%NTMAX+2+MOD(R%NTMAX+3,2)
+(   35) R%NLED4 = R%NTMAX+3+MOD(R%NTMAX+4,2)
+(   36) 
+(   37) !     ------------------------------------------------------------------
+(   38) 
+(   39) END SUBROUTINE SETUP_DIMS
+(   40) END MODULE SETUP_DIMS_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:45      page 3
+
+(    1) # 1 "setup_dims_mod.F90"
+(    1) MODULE SETUP_DIMS_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SETUP_DIMS
+(    4) # 5 "setup_dims_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    6) # 7 "setup_dims_mod.F90"
+(    7) USE TPM_DIM         ,ONLY : R
+(    8) USE TPM_FLT         ,ONLY : S
+(    9) !
+(   10) # 11 "setup_dims_mod.F90"
+(   11) IMPLICIT NONE
+(   12) # 13 "setup_dims_mod.F90"
+(   13) INTEGER(KIND=JPIM) :: JM,JN,ISPOLEG
+(   14) # 15 "setup_dims_mod.F90"
+(   15) !     ------------------------------------------------------------------
+(   16) # 17 "setup_dims_mod.F90"
+(   17) ISPOLEG = 0
+(   18) DO JM=0,R%NSMAX
+(   19)   DO JN=JM,R%NTMAX+1
+(   20)     ISPOLEG = ISPOLEG+1
+(   21)   ENDDO
+(   22) ENDDO
+(   23) R%NSPOLEG = ISPOLEG
+(   24) # 25 "setup_dims_mod.F90"
+(   25) R%NSPEC_G = (R%NSMAX+1)*(R%NSMAX+2)/2
+(   26) R%NSPEC2_G = R%NSPEC_G*2
+(   27) # 28 "setup_dims_mod.F90"
+(   28) R%NDGNH = (R%NDGL+1)/2
+(   29) # 30 "setup_dims_mod.F90"
+(   30) R%NLEI1 = R%NSMAX+4+MOD(R%NSMAX+4+1,2)
+(   31) R%NLEI3 = R%NDGNH+MOD(R%NDGNH+2,2)
+(   32) IF (S%LSOUTHPNM) R%NLEI3=2*R%NLEI3 
+(   33) # 34 "setup_dims_mod.F90"
+(   34) R%NLED3 = R%NTMAX+2+MOD(R%NTMAX+3,2)
+(   35) R%NLED4 = R%NTMAX+3+MOD(R%NTMAX+4,2)
+(   36) # 37 "setup_dims_mod.F90"
+(   37) !     ------------------------------------------------------------------
+(   38) # 39 "setup_dims_mod.F90"
+(   39) END SUBROUTINE SETUP_DIMS
+(   40) END MODULE SETUP_DIMS_MOD

@@ -1,0 +1,772 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:42      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: read_legpol_mod.F90
+
+(    1) MODULE READ_LEGPOL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE READ_LEGPOL
+(    4) USE PARKIND1  ,ONLY : JPIM, JPRBT ,JPRD
+(    5) USE TPM_GEN
+(    6) USE TPM_DISTR
+(    7) USE TPM_DIM
+(    8) USE TPM_GEOMETRY
+(    9) USE TPM_FLT
+(   10) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   11) USE TPM_CTL
+(   12) USE BYTES_IO_MOD
+(   13) USE BUTTERFLY_ALG_MOD
+(   14) USE SHAREDMEM_MOD
+(   15) 
+(   16) !**** *READ_LEGPOL * - read in Leg.Pol. and assocciated arrays from file or memory segment
+(   17) 
+(   18) !     Purpose.
+(   19) !     --------
+(   20) !           
+(   21) 
+(   22) !**   Interface.
+(   23) !     ----------
+(   24) !        *CALL* *READ_LEGPOL*
+(   25) 
+(   26) !        Explicit arguments : None
+(   27) !        --------------------
+(   28) 
+(   29) !        Implicit arguments :
+(   30) !        --------------------
+(   31) !            
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:42      page 2
+
+(   32) 
+(   33) !     Method.
+(   34) !     -------
+(   35) !        See documentation
+(   36) 
+(   37) !     Externals.
+(   38) !     ----------
+(   39) 
+(   40) !     Reference.
+(   41) !     ----------
+(   42) !        ECMWF Research Department documentation of the IFS
+(   43) !     
+(   44) 
+(   45) !     -------
+(   46) !        Mats Hamrud and Willem Deconinck  *ECMWF*
+(   47) 
+(   48) !     Modifications.
+(   49) !     --------------
+(   50) !        Original : July 2015
+(   51) 
+(   52) IMPLICIT NONE
+(   53) 
+(   54) INTEGER(KIND=JPIM),PARAMETER :: JPIBUFL=4
+(   55) INTEGER(KIND=JPIM) :: IRBYTES,IIBYTES,JMLOC,IPRTRV,IMLOC,IM,ILA,ILS
+(   56) INTEGER(KIND=JPIM) :: IDGLU,ISIZE,IBYTES,IRET,IFILE,JSETV,IDUM,JGL,II,IDGLU2
+(   57) INTEGER(KIND=JPIM),POINTER :: IBUF(:)
+(   58) REAL(KIND=JPRBT) ,ALLOCATABLE :: ZBUF(:)
+(   59) INTEGER(KIND=JPIM) ,POINTER :: IBUFA(:)
+(   60) REAL(KIND=JPRD)    :: ZTIME0,ZTIME1,ZTIME2
+(   61) TYPE(CLONE) :: YLCLONE
+(   62) CHARACTER(LEN=8) :: CLABEL
+(   63) CHARACTER(LEN=16) :: CLABEL_16
+(   64) #include "user_clock.h"
+(   65) 
+(   66) !     ------------------------------------------------------------------
+(   67) 
+(   68) IRBYTES = 8
+(   69) IIBYTES = 4
+(   70) IDUM = 3141
+(   71) 
+(   72) IF(C%CIO_TYPE == 'file') THEN
+(   73)   CALL BYTES_IO_OPEN(IFILE,C%CLEGPOLFNAME,'R')
+(   74)   ALLOCATE(IBUF(JPIBUFL))
+(   75) ELSE
+(   76)   NULLIFY(IBUF)
+(   77) ENDIF
+(   78) IF(C%CIO_TYPE == 'file') THEN
+(   79)   CALL BYTES_IO_READ(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(   80) ELSE
+(   81)   CALL SHAREDMEM_ASSOCIATE(C%STORAGE,JPIBUFL,IBUF,ADVANCE=.TRUE.)
+(   82) ENDIF
+(   83) CLABEL = TRANSFER(IBUF(1:2),CLABEL)
+(   84) IF( S%LUSEFLT .AND. CLABEL /= 'LEGPOLBF') THEN
+(   85)   WRITE(NERR,*) S%LUSEFLT,CLABEL
+(   86)   CALL ABORT_TRANS('READ_LEGPOL:WRONG LABEL')
+(   87) ELSEIF(.NOT. S%LUSEFLT .AND. CLABEL /= 'LEGPOL  ') THEN
+(   88)   WRITE(NERR,*) S%LUSEFLT,CLABEL
+(   89)   CALL ABORT_TRANS('READ_LEGPOL:WRONG LABEL')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:42      page 3
+
+(   90) ENDIF
+(   91) IF(IBUF(3) /= R%NSMAX) CALL ABORT_TRANS('READ_LEGPOL:WRONG SPECTRAL TRUNCATION')
+(   92) IF(IBUF(4) /= R%NDGNH) CALL ABORT_TRANS('READ_LEGPOL:WRONG NO OF GAUSSIAN LATITUDES')
+(   93) IF(C%CIO_TYPE == 'file') THEN
+(   94)   ALLOCATE(IBUFA(2*R%NDGNH))
+(   95)   CALL BYTES_IO_READ(IFILE,IBUFA,2*R%NDGNH*IIBYTES,IRET)
+(   96) ELSE
+(   97)   CALL SHAREDMEM_ASSOCIATE(C%STORAGE,2*R%NDGNH,IBUFA,ADVANCE=.TRUE.)
+(   98) ENDIF
+(   99) II = 0
+(  100) DO JGL=1,R%NDGNH
+(  101)   II = II+1
+(  102)   IF(IBUFA(II) /= G%NLOEN(JGL)) THEN
+(  103)     WRITE(NERR,*) 'WRONG NUMBER OF LONGITUDE POINTS ', JGL,G%NLOEN(JGL),IBUFA(II)
+(  104)     CALL ABORT_TRANS('READ_LEGPOL:WRONG NLOEN')
+(  105)   ENDIF
+(  106)   II=II+1
+(  107)   IF(IBUFA(II) /= G%NMEN(JGL)) THEN
+(  108)     WRITE(NERR,*) 'WRONG CUT-OFF WAVE NUMBER ', JGL,G%NMEN(JGL),IBUFA(II)
+(  109)     CALL ABORT_TRANS('READ_LEGPOL:WRONG NMEN')
+(  110)   ENDIF
+(  111) ENDDO
+(  112) IF(C%CIO_TYPE == 'file') THEN
+(  113)   DEALLOCATE(IBUFA)
+(  114) ENDIF
+(  115) 
+(  116) DO JMLOC=1,D%NUMP,NPRTRV  ! +++++++++++++++++++++ JMLOC LOOP ++++++++++
+(  117)   IPRTRV=MIN(NPRTRV,D%NUMP-JMLOC+1)
+(  118)   DO JSETV=1,IPRTRV
+(  119)     IMLOC=JMLOC+JSETV-1
+(  120)     IM = D%MYMS(IMLOC)
+(  121)     ILA = (R%NSMAX-IM+2)/2
+(  122)     ILS = (R%NSMAX-IM+3)/2
+(  123)     IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  124) ! Anti-symmetric
+(  125)     IF( S%LUSEFLT .AND. ILA > S%ITHRESHOLD) THEN
+(  126)       IF(C%CIO_TYPE == 'file') THEN
+(  127)         CALL BYTES_IO_READ(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  128)       ELSE
+(  129)         CALL SHAREDMEM_ASSOCIATE(C%STORAGE,JPIBUFL,IBUF,ADVANCE=.TRUE.)
+(  130)       ENDIF
+(  131)       IF(IBUF(1) /= IDGLU .OR. IBUF(2) /= ILA ) THEN
+(  132)         WRITE(NERR,*) 'READ_LEGPOL ERROR ', IBUF,IDGLU,ILA
+(  133)         CALL ABORT_TRANS('READ_LEGPOL:WRONG MATRIX SIZE')
+(  134)       ENDIF
+(  135) 
+(  136)       ISIZE = IBUF(3)
+(  137)       IF(C%CIO_TYPE == 'file') THEN
+(  138)         ALLOCATE(YLCLONE%COMMSBUF(ISIZE))
+(  139)         IBYTES = ISIZE*IRBYTES
+(  140)         CALL BYTES_IO_READ(IFILE,YLCLONE%COMMSBUF,IBYTES,IRET)
+(  141)         CALL UNPACK_BUTTERFLY_STRUCT(S%FA(IMLOC)%YBUT_STRUCT_A,YLCLONE)
+(  142)         DEALLOCATE(YLCLONE%COMMSBUF)
+(  143)       ELSE
+(  144)         CALL UNPACK_BUTTERFLY_STRUCT(S%FA(IMLOC)%YBUT_STRUCT_A,YDMEMBUF=C%STORAGE)
+(  145)       ENDIF
+(  146)     ELSE
+(  147)       IF(C%CIO_TYPE == 'file') THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:42      page 4
+
+(  148)         ISIZE = IDGLU*ILA
+(  149)         ALLOCATE(ZBUF(ISIZE))
+(  150)         IBYTES = ISIZE*IRBYTES
+(  151)         CALL BYTES_IO_READ(IFILE,ZBUF,IBYTES,IRET)
+(  152)         IF(IRET < JPBYTES_IO_SUCCESS ) THEN
+(  153)           WRITE(NERR,*) 'BYTES_IO_READ ',IFILE,' ',IBYTES,' FAILED',IRET
+(  154)           CALL ABORT_TRANS('READ_LEGPOL:BYTES_IO_READ FAILED')
+(  155)         ENDIF
+(  156)         ALLOCATE(S%FA(IMLOC)%RPNMA(IDGLU,ILA))
+(  157)         S%FA(IMLOC)%RPNMA(:,:) = RESHAPE(ZBUF,(/IDGLU,ILA/))
+(  158)         DEALLOCATE(ZBUF)
+(  159)       ELSE
+(  160)         CALL SHAREDMEM_ASSOCIATE(C%STORAGE,IDGLU,ILA,S%FA(IMLOC)%RPNMA,ADVANCE=.TRUE.)
+(  161)       ENDIF
+(  162)     ENDIF
+(  163) ! Symmetric
+(  164)     IF( S%LUSEFLT .AND. ILS > S%ITHRESHOLD) THEN
+(  165)       IF(C%CIO_TYPE == 'file') THEN
+(  166)         CALL BYTES_IO_READ(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  167)       ELSE
+(  168)         CALL SHAREDMEM_ASSOCIATE(C%STORAGE,JPIBUFL,IBUF,ADVANCE=.TRUE.)
+(  169)       ENDIF
+(  170)       IF(IBUF(1) /= IDGLU .OR. IBUF(2) /= ILS ) THEN
+(  171)         WRITE(NERR,*) 'READ_LEGPOL ERROR ', IBUF,IDGLU,ILA
+(  172)         CALL ABORT_TRANS('READ_LEGPOL:WRONG MATRIX ZIZE')
+(  173)       ENDIF
+(  174)       ISIZE = IBUF(3)
+(  175)       IF(C%CIO_TYPE == 'file') THEN
+(  176)         ALLOCATE(YLCLONE%COMMSBUF(ISIZE))
+(  177)         IBYTES = ISIZE*IRBYTES
+(  178)         CALL BYTES_IO_READ(IFILE,YLCLONE%COMMSBUF,IBYTES,IRET)
+(  179)         CALL UNPACK_BUTTERFLY_STRUCT(S%FA(IMLOC)%YBUT_STRUCT_S,YLCLONE)
+(  180)         DEALLOCATE(YLCLONE%COMMSBUF)
+(  181)       ELSE
+(  182)         CALL UNPACK_BUTTERFLY_STRUCT(S%FA(IMLOC)%YBUT_STRUCT_S,YDMEMBUF=C%STORAGE)
+(  183)       ENDIF
+(  184)     ELSE
+(  185)       IF(C%CIO_TYPE == 'file') THEN
+(  186)         ISIZE = IDGLU*ILS
+(  187)         IBYTES = ISIZE*IRBYTES
+(  188)         ALLOCATE(ZBUF(ISIZE))
+(  189)         CALL BYTES_IO_READ(IFILE,ZBUF,IBYTES,IRET)
+(  190)         IF(IRET < JPBYTES_IO_SUCCESS ) THEN
+(  191)           WRITE(NERR,*) 'BYTES_IO_READ ',IFILE,' ',IBYTES,' FAILED',IRET
+(  192)           CALL ABORT_TRANS('READ_LEGPOL:BYTES_IO_READ FAILED')
+(  193)         ENDIF
+(  194)         ALLOCATE(S%FA(IMLOC)%RPNMS(IDGLU,ILS))
+(  195)         S%FA(IMLOC)%RPNMS(:,:) = RESHAPE(ZBUF,(/IDGLU,ILS/))
+(  196)         DEALLOCATE(ZBUF)
+(  197)       ELSE
+(  198)         CALL SHAREDMEM_ASSOCIATE(C%STORAGE,IDGLU,ILS,S%FA(IMLOC)%RPNMS,ADVANCE=.TRUE.)
+(  199)       ENDIF
+(  200)     ENDIF
+(  201)   ENDDO
+(  202) ENDDO
+(  203) 
+(  204) ! Lat-lon grid
+(  205) IF(S%LDLL) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:42      page 5
+
+(  206)   IF(C%CIO_TYPE == 'file') THEN
+(  207)     CALL BYTES_IO_READ(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  208)   ELSE
+(  209)     CALL SHAREDMEM_ASSOCIATE(C%STORAGE,JPIBUFL,IBUF,ADVANCE=.TRUE.)
+(  210)   ENDIF
+(  211)   CLABEL_16 = TRANSFER(IBUF,CLABEL_16)
+(  212)   IF(CLABEL_16 /= 'LATLON---BEG-BEG')CALL ABORT_TRANS('READ_LEGPOL:WRONG LAT/LON LABEL')
+(  213) 
+(  214)    DO JMLOC=1,D%NUMP
+(  215)     IM = D%MYMS(JMLOC)
+(  216)     ILA = (R%NSMAX-IM+2)/2
+(  217)     ILS = (R%NSMAX-IM+3)/2
+(  218)     IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  219)     IDGLU2 = S%NDGNHD
+(  220) 
+(  221)     IF(C%CIO_TYPE == 'file') THEN
+(  222)       CALL BYTES_IO_READ(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  223)     ELSE
+(  224)       CALL SHAREDMEM_ASSOCIATE(C%STORAGE,JPIBUFL,IBUF,ADVANCE=.TRUE.)
+(  225)     ENDIF
+(  226)     IF(IBUF(1) /= IM .OR. IBUF(2) /= IDGLU  .OR. IBUF(3) /= IDGLU2 ) THEN
+(  227)       WRITE(NERR,*) 'READ_LEGPOL ERROR ', IBUF,IM,IDGLU,IDGLU2
+(  228)       CALL ABORT_TRANS('READ_LEGPOL:WRONG LAT-LON MATRIX SIZE')
+(  229)     ENDIF
+(  230) 
+(  231)     IF(C%CIO_TYPE == 'file') THEN
+(  232) 
+(  233)       ISIZE = 2*IDGLU*2
+(  234)       IBYTES = ISIZE*IRBYTES
+(  235)       ALLOCATE(ZBUF(ISIZE))
+(  236)       CALL BYTES_IO_READ(IFILE,ZBUF,IBYTES,IRET)
+(  237)       IF(IRET < JPBYTES_IO_SUCCESS ) THEN
+(  238)         WRITE(NERR,*) 'BYTES_IO_READ ',IFILE,' ',IBYTES,' FAILED',IRET
+(  239)         CALL ABORT_TRANS('READ_LEGPOL:BYTES_IO_READ FAILED')
+(  240)       ENDIF
+(  241)       ALLOCATE(S%FA(JMLOC)%RPNMWI(2*IDGLU,2))
+(  242)       S%FA(JMLOC)%RPNMWI(:,:) = RESHAPE(ZBUF,(/2*IDGLU,2/))
+(  243)       DEALLOCATE(ZBUF)
+(  244) 
+(  245)       ISIZE = 2*IDGLU2*2
+(  246)       IBYTES = ISIZE*IRBYTES
+(  247)       ALLOCATE(ZBUF(ISIZE))
+(  248)       CALL BYTES_IO_READ(IFILE,ZBUF,IBYTES,IRET)
+(  249)       IF(IRET < JPBYTES_IO_SUCCESS ) THEN
+(  250)         WRITE(NERR,*) 'BYTES_IO_READ ',IFILE,' ',IBYTES,' FAILED',IRET
+(  251)         CALL ABORT_TRANS('READ_LEGPOL:BYTES_IO_READ FAILED')
+(  252)       ENDIF
+(  253)       ALLOCATE(S%FA(JMLOC)%RPNMWO(2*IDGLU2,2))
+(  254)       S%FA(JMLOC)%RPNMWO(:,:) = RESHAPE(ZBUF,(/2*IDGLU2,2/))
+(  255)       DEALLOCATE(ZBUF)
+(  256) 
+(  257)     ELSE
+(  258)       CALL SHAREDMEM_ASSOCIATE(C%STORAGE,2*IDGLU,2,S%FA(JMLOC)%RPNMWI,ADVANCE=.TRUE.)
+(  259)       CALL SHAREDMEM_ASSOCIATE(C%STORAGE,2*IDGLU2,2,S%FA(JMLOC)%RPNMWO,ADVANCE=.TRUE.)
+(  260)     ENDIF
+(  261)   ENDDO
+(  262) ENDIF
+(  263) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:42      page 6
+
+(  264) IF(C%CIO_TYPE == 'file') THEN
+(  265)   CALL BYTES_IO_READ(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  266) ELSE
+(  267)   CALL SHAREDMEM_ASSOCIATE(C%STORAGE,JPIBUFL,IBUF,ADVANCE=.TRUE.)
+(  268) ENDIF
+(  269) CLABEL_16 = TRANSFER(IBUF,CLABEL_16)
+(  270) IF(CLABEL_16 /= 'LEGPOL---EOF-EOF')CALL ABORT_TRANS('READ_LEGPOL:WRONG END LABEL')
+(  271) IF(C%CIO_TYPE == 'file') THEN
+(  272)   CALL BYTES_IO_CLOSE(IFILE)
+(  273)   DEALLOCATE(IBUF)
+(  274) ENDIF
+(  275) 
+(  276) END SUBROUTINE READ_LEGPOL
+(  277) END MODULE READ_LEGPOL_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:42      page 7
+
+(    1) # 1 "read_legpol_mod.F90"
+(    1) MODULE READ_LEGPOL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE READ_LEGPOL
+(    4) USE PARKIND1  ,ONLY : JPIM, JPRBT ,JPRD
+(    5) USE TPM_GEN
+(    6) USE TPM_DISTR
+(    7) USE TPM_DIM
+(    8) USE TPM_GEOMETRY
+(    9) USE TPM_FLT
+(   10) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   11) USE TPM_CTL
+(   12) USE BYTES_IO_MOD
+(   13) USE BUTTERFLY_ALG_MOD
+(   14) USE SHAREDMEM_MOD
+(   15) # 16 "read_legpol_mod.F90"
+(   16) !**** *READ_LEGPOL * - read in Leg.Pol. and assocciated arrays from file or memory segment
+(   17) # 18 "read_legpol_mod.F90"
+(   18) !     Purpose.
+(   19) !     --------
+(   20) !           
+(   21) # 22 "read_legpol_mod.F90"
+(   22) !**   Interface.
+(   23) !     ----------
+(   24) !        *CALL* *READ_LEGPOL*
+(   25) # 26 "read_legpol_mod.F90"
+(   26) !        Explicit arguments : None
+(   27) !        --------------------
+(   28) # 29 "read_legpol_mod.F90"
+(   29) !        Implicit arguments :
+(   30) !        --------------------
+(   31) !            
+(   32) # 33 "read_legpol_mod.F90"
+(   33) !     Method.
+(   34) !     -------
+(   35) !        See documentation
+(   36) # 37 "read_legpol_mod.F90"
+(   37) !     Externals.
+(   38) !     ----------
+(   39) # 40 "read_legpol_mod.F90"
+(   40) !     Reference.
+(   41) !     ----------
+(   42) !        ECMWF Research Department documentation of the IFS
+(   43) !     
+(   44) # 45 "read_legpol_mod.F90"
+(   45) !     -------
+(   46) !        Mats Hamrud and Willem Deconinck  *ECMWF*
+(   47) # 48 "read_legpol_mod.F90"
+(   48) !     Modifications.
+(   49) !     --------------
+(   50) !        Original : July 2015
+(   51) # 52 "read_legpol_mod.F90"
+(   52) IMPLICIT NONE
+(   53) # 54 "read_legpol_mod.F90"
+(   54) INTEGER(KIND=JPIM),PARAMETER :: JPIBUFL=4
+(   55) INTEGER(KIND=JPIM) :: IRBYTES,IIBYTES,JMLOC,IPRTRV,IMLOC,IM,ILA,ILS
+(   56) INTEGER(KIND=JPIM) :: IDGLU,ISIZE,IBYTES,IRET,IFILE,JSETV,IDUM,JGL,II,IDGLU2
+(   57) INTEGER(KIND=JPIM),POINTER :: IBUF(:)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:42      page 8
+
+(   58) REAL(KIND=JPRBT) ,ALLOCATABLE :: ZBUF(:)
+(   59) INTEGER(KIND=JPIM) ,POINTER :: IBUFA(:)
+(   60) REAL(KIND=JPRD)    :: ZTIME0,ZTIME1,ZTIME2
+(   61) TYPE(CLONE) :: YLCLONE
+(   62) CHARACTER(LEN=8) :: CLABEL
+(   63) CHARACTER(LEN=16) :: CLABEL_16
+(   64) # 64 "read_legpol_mod.F90"
+(   64) # 1 ".D[17]/user_clock.h"
+(    1) INTERFACE
+(    2) SUBROUTINE USER_CLOCK(PELAPSED_TIME,PELAPSED_TIME_SINCE,PVECTOR_CP,PTOTAL_CP)
+(    3) # 4 ".D[17]/user_clock.h"
+(    4) !**** *USER_CLOCK* - interface to system dependent timer routines
+(    5) # 6 ".D[17]/user_clock.h"
+(    6) !     Purpose.
+(    7) !     --------
+(    8) !        Returns elapsed and CP from the start of execution.
+(    9) !        Elapsed time is made relative to the first call to USER_CLOCK.
+(   10) # 11 ".D[17]/user_clock.h"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        ZTIME=USER_CLOCK(PELAPSED_TIME,PELAPSED_TIME_SINCE,
+(   14) !                         PVECTOR_CP,PTOTAL_CP)
+(   15) # 16 ".D[17]/user_clock.h"
+(   16) !        Explicit arguments: (All are optional arguments)
+(   17) !                           PELAPSED_TIME=wall clock time (seconds)
+(   18) !                           PELAPSED_TIME_SINCE=wall clock time (seconds)
+(   19) !                             change from input value of this parameter
+(   20) !                           PVECTOR_CP=CP vector time  (seconds)
+(   21) !                           PTOTAL_CP=total CP time   (seconds)
+(   22) # 23 ".D[17]/user_clock.h"
+(   23) !     Author.
+(   24) !     -------
+(   25) !        D.Dent      *ECMWF*
+(   26) # 27 ".D[17]/user_clock.h"
+(   27) !     External References:
+(   28) !     -------------------
+(   29) # 30 ".D[17]/user_clock.h"
+(   30) !        TIMEF,CPTIME
+(   31) # 32 ".D[17]/user_clock.h"
+(   32) !     Modifications.
+(   33) !     --------------
+(   34) !        Original  : 97-09-25
+(   35) !      F. Vana  05-Mar-2015  Support for single precision
+(   36) !     ----------------------------------------------------------
+(   37) # 39 ".D[17]/user_clock.h"
+(   39) USE PARKIND1  ,ONLY : JPRD, JPIM
+(   40) # 41 ".D[17]/user_clock.h"
+(   41) IMPLICIT NONE
+(   42) # 43 ".D[17]/user_clock.h"
+(   43) REAL(KIND=JPRD),INTENT(OUT) :: PELAPSED_TIME,PVECTOR_CP,PTOTAL_CP
+(   44) REAL(KIND=JPRD),INTENT(INOUT) :: PELAPSED_TIME_SINCE
+(   45) OPTIONAL            PELAPSED_TIME,PELAPSED_TIME_SINCE
+(   46) OPTIONAL            PVECTOR_CP,PTOTAL_CP
+(   47) REAL(KIND=JPRD)      :: ZVECTOR_CP,ZTOTAL_CP,ZWALL
+(   48) REAL(KIND=JPRD),EXTERNAL :: TIMEF
+(   49) # 51 ".D[17]/user_clock.h"
+(   51) END SUBROUTINE USER_CLOCK
+(   52) END INTERFACE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:42      page 9
+
+(   53) # 65 "read_legpol_mod.F90"
+(   65) # 66 "read_legpol_mod.F90"
+(   66) !     ------------------------------------------------------------------
+(   67) # 68 "read_legpol_mod.F90"
+(   68) IRBYTES = 8
+(   69) IIBYTES = 4
+(   70) IDUM = 3141
+(   71) # 72 "read_legpol_mod.F90"
+(   72) IF(C%CIO_TYPE == 'file') THEN
+(   73)   CALL BYTES_IO_OPEN(IFILE,C%CLEGPOLFNAME,'R')
+(   74)   ALLOCATE(IBUF(JPIBUFL))
+(   75) ELSE
+(   76)   NULLIFY(IBUF)
+(   77) ENDIF
+(   78) IF(C%CIO_TYPE == 'file') THEN
+(   79)   CALL BYTES_IO_READ(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(   80) ELSE
+(   81)   CALL SHAREDMEM_ASSOCIATE(C%STORAGE,JPIBUFL,IBUF,ADVANCE=.TRUE.)
+(   82) ENDIF
+(   83) CLABEL = TRANSFER(IBUF(1:2),CLABEL)
+(   84) IF( S%LUSEFLT .AND. CLABEL /= 'LEGPOLBF') THEN
+(   85)   WRITE(NERR,*) S%LUSEFLT,CLABEL
+(   86)   CALL ABORT_TRANS('READ_LEGPOL:WRONG LABEL')
+(   87) ELSEIF(.NOT. S%LUSEFLT .AND. CLABEL /= 'LEGPOL  ') THEN
+(   88)   WRITE(NERR,*) S%LUSEFLT,CLABEL
+(   89)   CALL ABORT_TRANS('READ_LEGPOL:WRONG LABEL')
+(   90) ENDIF
+(   91) IF(IBUF(3) /= R%NSMAX) CALL ABORT_TRANS('READ_LEGPOL:WRONG SPECTRAL TRUNCATION')
+(   92) IF(IBUF(4) /= R%NDGNH) CALL ABORT_TRANS('READ_LEGPOL:WRONG NO OF GAUSSIAN LATITUDES')
+(   93) IF(C%CIO_TYPE == 'file') THEN
+(   94)   ALLOCATE(IBUFA(2*R%NDGNH))
+(   95)   CALL BYTES_IO_READ(IFILE,IBUFA,2*R%NDGNH*IIBYTES,IRET)
+(   96) ELSE
+(   97)   CALL SHAREDMEM_ASSOCIATE(C%STORAGE,2*R%NDGNH,IBUFA,ADVANCE=.TRUE.)
+(   98) ENDIF
+(   99) II = 0
+(  100) DO JGL=1,R%NDGNH
+(  101)   II = II+1
+(  102)   IF(IBUFA(II) /= G%NLOEN(JGL)) THEN
+(  103)     WRITE(NERR,*) 'WRONG NUMBER OF LONGITUDE POINTS ', JGL,G%NLOEN(JGL),IBUFA(II)
+(  104)     CALL ABORT_TRANS('READ_LEGPOL:WRONG NLOEN')
+(  105)   ENDIF
+(  106)   II=II+1
+(  107)   IF(IBUFA(II) /= G%NMEN(JGL)) THEN
+(  108)     WRITE(NERR,*) 'WRONG CUT-OFF WAVE NUMBER ', JGL,G%NMEN(JGL),IBUFA(II)
+(  109)     CALL ABORT_TRANS('READ_LEGPOL:WRONG NMEN')
+(  110)   ENDIF
+(  111) ENDDO
+(  112) IF(C%CIO_TYPE == 'file') THEN
+(  113)   DEALLOCATE(IBUFA)
+(  114) ENDIF
+(  115) # 116 "read_legpol_mod.F90"
+(  116) DO JMLOC=1,D%NUMP,NPRTRV  ! +++++++++++++++++++++ JMLOC LOOP ++++++++++
+(  117)   IPRTRV=MIN(NPRTRV,D%NUMP-JMLOC+1)
+(  118)   DO JSETV=1,IPRTRV
+(  119)     IMLOC=JMLOC+JSETV-1
+(  120)     IM = D%MYMS(IMLOC)
+(  121)     ILA = (R%NSMAX-IM+2)/2
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:42      page 10
+
+(  122)     ILS = (R%NSMAX-IM+3)/2
+(  123)     IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  124) ! Anti-symmetric
+(  125)     IF( S%LUSEFLT .AND. ILA > S%ITHRESHOLD) THEN
+(  126)       IF(C%CIO_TYPE == 'file') THEN
+(  127)         CALL BYTES_IO_READ(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  128)       ELSE
+(  129)         CALL SHAREDMEM_ASSOCIATE(C%STORAGE,JPIBUFL,IBUF,ADVANCE=.TRUE.)
+(  130)       ENDIF
+(  131)       IF(IBUF(1) /= IDGLU .OR. IBUF(2) /= ILA ) THEN
+(  132)         WRITE(NERR,*) 'READ_LEGPOL ERROR ', IBUF,IDGLU,ILA
+(  133)         CALL ABORT_TRANS('READ_LEGPOL:WRONG MATRIX SIZE')
+(  134)       ENDIF
+(  135) # 136 "read_legpol_mod.F90"
+(  136)       ISIZE = IBUF(3)
+(  137)       IF(C%CIO_TYPE == 'file') THEN
+(  138)         ALLOCATE(YLCLONE%COMMSBUF(ISIZE))
+(  139)         IBYTES = ISIZE*IRBYTES
+(  140)         CALL BYTES_IO_READ(IFILE,YLCLONE%COMMSBUF,IBYTES,IRET)
+(  141)         CALL UNPACK_BUTTERFLY_STRUCT(S%FA(IMLOC)%YBUT_STRUCT_A,YLCLONE)
+(  142)         DEALLOCATE(YLCLONE%COMMSBUF)
+(  143)       ELSE
+(  144)         CALL UNPACK_BUTTERFLY_STRUCT(S%FA(IMLOC)%YBUT_STRUCT_A,YDMEMBUF=C%STORAGE)
+(  145)       ENDIF
+(  146)     ELSE
+(  147)       IF(C%CIO_TYPE == 'file') THEN
+(  148)         ISIZE = IDGLU*ILA
+(  149)         ALLOCATE(ZBUF(ISIZE))
+(  150)         IBYTES = ISIZE*IRBYTES
+(  151)         CALL BYTES_IO_READ(IFILE,ZBUF,IBYTES,IRET)
+(  152)         IF(IRET < JPBYTES_IO_SUCCESS ) THEN
+(  153)           WRITE(NERR,*) 'BYTES_IO_READ ',IFILE,' ',IBYTES,' FAILED',IRET
+(  154)           CALL ABORT_TRANS('READ_LEGPOL:BYTES_IO_READ FAILED')
+(  155)         ENDIF
+(  156)         ALLOCATE(S%FA(IMLOC)%RPNMA(IDGLU,ILA))
+(  157)         S%FA(IMLOC)%RPNMA(:,:) = RESHAPE(ZBUF,(/IDGLU,ILA/))
+(  158)         DEALLOCATE(ZBUF)
+(  159)       ELSE
+(  160)         CALL SHAREDMEM_ASSOCIATE(C%STORAGE,IDGLU,ILA,S%FA(IMLOC)%RPNMA,ADVANCE=.TRUE.)
+(  161)       ENDIF
+(  162)     ENDIF
+(  163) ! Symmetric
+(  164)     IF( S%LUSEFLT .AND. ILS > S%ITHRESHOLD) THEN
+(  165)       IF(C%CIO_TYPE == 'file') THEN
+(  166)         CALL BYTES_IO_READ(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  167)       ELSE
+(  168)         CALL SHAREDMEM_ASSOCIATE(C%STORAGE,JPIBUFL,IBUF,ADVANCE=.TRUE.)
+(  169)       ENDIF
+(  170)       IF(IBUF(1) /= IDGLU .OR. IBUF(2) /= ILS ) THEN
+(  171)         WRITE(NERR,*) 'READ_LEGPOL ERROR ', IBUF,IDGLU,ILA
+(  172)         CALL ABORT_TRANS('READ_LEGPOL:WRONG MATRIX ZIZE')
+(  173)       ENDIF
+(  174)       ISIZE = IBUF(3)
+(  175)       IF(C%CIO_TYPE == 'file') THEN
+(  176)         ALLOCATE(YLCLONE%COMMSBUF(ISIZE))
+(  177)         IBYTES = ISIZE*IRBYTES
+(  178)         CALL BYTES_IO_READ(IFILE,YLCLONE%COMMSBUF,IBYTES,IRET)
+(  179)         CALL UNPACK_BUTTERFLY_STRUCT(S%FA(IMLOC)%YBUT_STRUCT_S,YLCLONE)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:42      page 11
+
+(  180)         DEALLOCATE(YLCLONE%COMMSBUF)
+(  181)       ELSE
+(  182)         CALL UNPACK_BUTTERFLY_STRUCT(S%FA(IMLOC)%YBUT_STRUCT_S,YDMEMBUF=C%STORAGE)
+(  183)       ENDIF
+(  184)     ELSE
+(  185)       IF(C%CIO_TYPE == 'file') THEN
+(  186)         ISIZE = IDGLU*ILS
+(  187)         IBYTES = ISIZE*IRBYTES
+(  188)         ALLOCATE(ZBUF(ISIZE))
+(  189)         CALL BYTES_IO_READ(IFILE,ZBUF,IBYTES,IRET)
+(  190)         IF(IRET < JPBYTES_IO_SUCCESS ) THEN
+(  191)           WRITE(NERR,*) 'BYTES_IO_READ ',IFILE,' ',IBYTES,' FAILED',IRET
+(  192)           CALL ABORT_TRANS('READ_LEGPOL:BYTES_IO_READ FAILED')
+(  193)         ENDIF
+(  194)         ALLOCATE(S%FA(IMLOC)%RPNMS(IDGLU,ILS))
+(  195)         S%FA(IMLOC)%RPNMS(:,:) = RESHAPE(ZBUF,(/IDGLU,ILS/))
+(  196)         DEALLOCATE(ZBUF)
+(  197)       ELSE
+(  198)         CALL SHAREDMEM_ASSOCIATE(C%STORAGE,IDGLU,ILS,S%FA(IMLOC)%RPNMS,ADVANCE=.TRUE.)
+(  199)       ENDIF
+(  200)     ENDIF
+(  201)   ENDDO
+(  202) ENDDO
+(  203) # 204 "read_legpol_mod.F90"
+(  204) ! Lat-lon grid
+(  205) IF(S%LDLL) THEN
+(  206)   IF(C%CIO_TYPE == 'file') THEN
+(  207)     CALL BYTES_IO_READ(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  208)   ELSE
+(  209)     CALL SHAREDMEM_ASSOCIATE(C%STORAGE,JPIBUFL,IBUF,ADVANCE=.TRUE.)
+(  210)   ENDIF
+(  211)   CLABEL_16 = TRANSFER(IBUF,CLABEL_16)
+(  212)   IF(CLABEL_16 /= 'LATLON---BEG-BEG')CALL ABORT_TRANS('READ_LEGPOL:WRONG LAT/LON LABEL')
+(  213) # 214 "read_legpol_mod.F90"
+(  214)    DO JMLOC=1,D%NUMP
+(  215)     IM = D%MYMS(JMLOC)
+(  216)     ILA = (R%NSMAX-IM+2)/2
+(  217)     ILS = (R%NSMAX-IM+3)/2
+(  218)     IDGLU = MIN(R%NDGNH,G%NDGLU(IM))
+(  219)     IDGLU2 = S%NDGNHD
+(  220) # 221 "read_legpol_mod.F90"
+(  221)     IF(C%CIO_TYPE == 'file') THEN
+(  222)       CALL BYTES_IO_READ(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  223)     ELSE
+(  224)       CALL SHAREDMEM_ASSOCIATE(C%STORAGE,JPIBUFL,IBUF,ADVANCE=.TRUE.)
+(  225)     ENDIF
+(  226)     IF(IBUF(1) /= IM .OR. IBUF(2) /= IDGLU  .OR. IBUF(3) /= IDGLU2 ) THEN
+(  227)       WRITE(NERR,*) 'READ_LEGPOL ERROR ', IBUF,IM,IDGLU,IDGLU2
+(  228)       CALL ABORT_TRANS('READ_LEGPOL:WRONG LAT-LON MATRIX SIZE')
+(  229)     ENDIF
+(  230) # 231 "read_legpol_mod.F90"
+(  231)     IF(C%CIO_TYPE == 'file') THEN
+(  232) # 233 "read_legpol_mod.F90"
+(  233)       ISIZE = 2*IDGLU*2
+(  234)       IBYTES = ISIZE*IRBYTES
+(  235)       ALLOCATE(ZBUF(ISIZE))
+(  236)       CALL BYTES_IO_READ(IFILE,ZBUF,IBYTES,IRET)
+(  237)       IF(IRET < JPBYTES_IO_SUCCESS ) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:42      page 12
+
+(  238)         WRITE(NERR,*) 'BYTES_IO_READ ',IFILE,' ',IBYTES,' FAILED',IRET
+(  239)         CALL ABORT_TRANS('READ_LEGPOL:BYTES_IO_READ FAILED')
+(  240)       ENDIF
+(  241)       ALLOCATE(S%FA(JMLOC)%RPNMWI(2*IDGLU,2))
+(  242)       S%FA(JMLOC)%RPNMWI(:,:) = RESHAPE(ZBUF,(/2*IDGLU,2/))
+(  243)       DEALLOCATE(ZBUF)
+(  244) # 245 "read_legpol_mod.F90"
+(  245)       ISIZE = 2*IDGLU2*2
+(  246)       IBYTES = ISIZE*IRBYTES
+(  247)       ALLOCATE(ZBUF(ISIZE))
+(  248)       CALL BYTES_IO_READ(IFILE,ZBUF,IBYTES,IRET)
+(  249)       IF(IRET < JPBYTES_IO_SUCCESS ) THEN
+(  250)         WRITE(NERR,*) 'BYTES_IO_READ ',IFILE,' ',IBYTES,' FAILED',IRET
+(  251)         CALL ABORT_TRANS('READ_LEGPOL:BYTES_IO_READ FAILED')
+(  252)       ENDIF
+(  253)       ALLOCATE(S%FA(JMLOC)%RPNMWO(2*IDGLU2,2))
+(  254)       S%FA(JMLOC)%RPNMWO(:,:) = RESHAPE(ZBUF,(/2*IDGLU2,2/))
+(  255)       DEALLOCATE(ZBUF)
+(  256) # 257 "read_legpol_mod.F90"
+(  257)     ELSE
+(  258)       CALL SHAREDMEM_ASSOCIATE(C%STORAGE,2*IDGLU,2,S%FA(JMLOC)%RPNMWI,ADVANCE=.TRUE.)
+(  259)       CALL SHAREDMEM_ASSOCIATE(C%STORAGE,2*IDGLU2,2,S%FA(JMLOC)%RPNMWO,ADVANCE=.TRUE.)
+(  260)     ENDIF
+(  261)   ENDDO
+(  262) ENDIF
+(  263) # 264 "read_legpol_mod.F90"
+(  264) IF(C%CIO_TYPE == 'file') THEN
+(  265)   CALL BYTES_IO_READ(IFILE,IBUF,JPIBUFL*IIBYTES,IRET)
+(  266) ELSE
+(  267)   CALL SHAREDMEM_ASSOCIATE(C%STORAGE,JPIBUFL,IBUF,ADVANCE=.TRUE.)
+(  268) ENDIF
+(  269) CLABEL_16 = TRANSFER(IBUF,CLABEL_16)
+(  270) IF(CLABEL_16 /= 'LEGPOL---EOF-EOF')CALL ABORT_TRANS('READ_LEGPOL:WRONG END LABEL')
+(  271) IF(C%CIO_TYPE == 'file') THEN
+(  272)   CALL BYTES_IO_CLOSE(IFILE)
+(  273)   DEALLOCATE(IBUF)
+(  274) ENDIF
+(  275) # 276 "read_legpol_mod.F90"
+(  276) END SUBROUTINE READ_LEGPOL
+(  277) END MODULE READ_LEGPOL_MOD

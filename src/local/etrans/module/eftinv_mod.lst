@@ -1,0 +1,226 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:07      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eftinv_mod.F90
+
+(    1) MODULE EFTINV_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EFTINV(PREEL,KFIELDS)
+(    4) 
+(    5) !**** *FTINV - Inverse Fourier transform
+(    6) 
+(    7) !     Purpose. Routine for Fourier to Grid-point transform
+(    8) !     --------
+(    9) 
+(   10) !**   Interface.
+(   11) !     ----------
+(   12) !        CALL FTINV(..)
+(   13) 
+(   14) !        Explicit arguments :  PREEL   - Fourier/grid-point array
+(   15) !        --------------------  KFIELDS - number of fields
+(   16) 
+(   17) !     Method.
+(   18) !     -------
+(   19) 
+(   20) !     Externals.  FFT992 - FFT routine
+(   21) !     ----------
+(   22) !
+(   23) 
+(   24) !     Author.
+(   25) !     -------
+(   26) !        Mats Hamrud *ECMWF*
+(   27) 
+(   28) !     Modifications.
+(   29) !     --------------
+(   30) !        Original : 00-03-03
+(   31) !        G. Radnoti 01-04-24 : 2D model (NLOEN=1)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:07      page 2
+
+(   32) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   33) !        G. Mozdzynski (Oct 2014): support for FFTW transforms
+(   34) !        G. Mozdzynski (Jun 2015): Support alternative FFTs to FFTW
+(   35) !     ------------------------------------------------------------------
+(   36) 
+(   37) USE PARKIND1  ,ONLY : JPIM, JPRBT, JPRB
+(   38) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   39) 
+(   40) USE TPM_DISTR       ,ONLY : D, MYSETW,  MYPROC, NPROC
+(   41) USE TPM_GEOMETRY    ,ONLY : G
+(   42) use tpm_gen, only: nout
+(   43) USE TPM_FFT         ,ONLY : T, TB
+(   44) USE BLUESTEIN_MOD   ,ONLY : BLUESTEIN_FFT
+(   45) #ifdef WITH_FFTW
+(   46) USE TPM_FFTW        ,ONLY : TW, EXEC_FFTW
+(   47) #endif
+(   48) USE TPM_FFTC        ,ONLY : CREATE_PLAN_FFT, destroy_plan_fft
+(   49) USE TPM_DIM         ,ONLY : R
+(   50) USE CUDA_DEVICE_MOD
+(   51) 
+(   52) IMPLICIT NONE
+(   53) 
+(   54) INTEGER (KIND=JPIM), INTENT(IN)    :: KFIELDS
+(   55) REAL (KIND=JPRBT),   INTENT(INOUT) :: PREEL(:,:)
+(   56) 
+(   57) INTEGER(KIND=JPIM) :: IRLEN, ICLEN
+(   58) INTEGER(KIND=JPIM) :: IPLAN_C2R
+(   59) integer :: istat
+(   60) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   61) 
+(   62) !     ------------------------------------------------------------------
+(   63) 
+(   64) IF (LHOOK) CALL DR_HOOK('EFTINV_MOD:EFTINV',0,ZHOOK_HANDLE)
+(   65) 
+(   66) IRLEN=R%NDLON+R%NNOEXTZG
+(   67) ICLEN=D%NLENGTF/D%NDGL_FS
+(   68) 
+(   69) CALL CREATE_PLAN_FFT (IPLAN_C2R, +1, KN=IRLEN, KLOT=KFIELDS*D%NDGL_FS, &
+(   70)                     & KISTRIDE=1, KIDIST=ICLEN/2, KOSTRIDE=1, KODIST=ICLEN)
+(   71) !$acc host_data use_device(PREEL)
+(   72) CALL EXECUTE_PLAN_FFTC (IPLAN_C2R, +1, PREEL (1, 1))
+(   73) !$acc end host_data
+(   74) 
+(   75) istat = cuda_Synchronize()
+(   76) 
+(   77) IF (LHOOK) CALL DR_HOOK('EFTINV_MOD:EFTINV',1,ZHOOK_HANDLE)
+(   78) !     ------------------------------------------------------------------
+(   79) 
+(   80) END SUBROUTINE EFTINV
+(   81) END MODULE EFTINV_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:07      page 3
+
+(    1) # 1 "eftinv_mod.F90"
+(    1) MODULE EFTINV_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EFTINV(PREEL,KFIELDS)
+(    4) # 5 "eftinv_mod.F90"
+(    5) !**** *FTINV - Inverse Fourier transform
+(    6) # 7 "eftinv_mod.F90"
+(    7) !     Purpose. Routine for Fourier to Grid-point transform
+(    8) !     --------
+(    9) # 10 "eftinv_mod.F90"
+(   10) !**   Interface.
+(   11) !     ----------
+(   12) !        CALL FTINV(..)
+(   13) # 14 "eftinv_mod.F90"
+(   14) !        Explicit arguments :  PREEL   - Fourier/grid-point array
+(   15) !        --------------------  KFIELDS - number of fields
+(   16) # 17 "eftinv_mod.F90"
+(   17) !     Method.
+(   18) !     -------
+(   19) # 20 "eftinv_mod.F90"
+(   20) !     Externals.  FFT992 - FFT routine
+(   21) !     ----------
+(   22) !
+(   23) # 24 "eftinv_mod.F90"
+(   24) !     Author.
+(   25) !     -------
+(   26) !        Mats Hamrud *ECMWF*
+(   27) # 28 "eftinv_mod.F90"
+(   28) !     Modifications.
+(   29) !     --------------
+(   30) !        Original : 00-03-03
+(   31) !        G. Radnoti 01-04-24 : 2D model (NLOEN=1)
+(   32) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   33) !        G. Mozdzynski (Oct 2014): support for FFTW transforms
+(   34) !        G. Mozdzynski (Jun 2015): Support alternative FFTs to FFTW
+(   35) !     ------------------------------------------------------------------
+(   36) # 37 "eftinv_mod.F90"
+(   37) USE PARKIND1  ,ONLY : JPIM, JPRBT, JPRB
+(   38) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   39) # 40 "eftinv_mod.F90"
+(   40) USE TPM_DISTR       ,ONLY : D, MYSETW,  MYPROC, NPROC
+(   41) USE TPM_GEOMETRY    ,ONLY : G
+(   42) use tpm_gen, only: nout
+(   43) USE TPM_FFT         ,ONLY : T, TB
+(   44) USE BLUESTEIN_MOD   ,ONLY : BLUESTEIN_FFT
+(   45) # 48 "eftinv_mod.F90"
+(   48) USE TPM_FFTC        ,ONLY : CREATE_PLAN_FFT, destroy_plan_fft
+(   49) USE TPM_DIM         ,ONLY : R
+(   50) USE CUDA_DEVICE_MOD
+(   51) # 52 "eftinv_mod.F90"
+(   52) IMPLICIT NONE
+(   53) # 54 "eftinv_mod.F90"
+(   54) INTEGER (KIND=JPIM), INTENT(IN)    :: KFIELDS
+(   55) REAL (KIND=JPRBT),   INTENT(INOUT) :: PREEL(:,:)
+(   56) # 57 "eftinv_mod.F90"
+(   57) INTEGER(KIND=JPIM) :: IRLEN, ICLEN
+(   58) INTEGER(KIND=JPIM) :: IPLAN_C2R
+(   59) integer :: istat
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:07      page 4
+
+(   60) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   61) # 62 "eftinv_mod.F90"
+(   62) !     ------------------------------------------------------------------
+(   63) # 64 "eftinv_mod.F90"
+(   64) IF (LHOOK) CALL DR_HOOK('EFTINV_MOD:EFTINV',0,ZHOOK_HANDLE)
+(   65) # 66 "eftinv_mod.F90"
+(   66) IRLEN=R%NDLON+R%NNOEXTZG
+(   67) ICLEN=D%NLENGTF/D%NDGL_FS
+(   68) # 69 "eftinv_mod.F90"
+(   69) CALL CREATE_PLAN_FFT (IPLAN_C2R, +1, KN=IRLEN, KLOT=KFIELDS*D%NDGL_FS, &
+(   70)                     & KISTRIDE=1, KIDIST=ICLEN/2, KOSTRIDE=1, KODIST=ICLEN)
+(   71) !$acc host_data use_device(PREEL)
+(   72) CALL EXECUTE_PLAN_FFTC (IPLAN_C2R, +1, PREEL (1, 1))
+(   73) !$acc end host_data
+(   74) # 75 "eftinv_mod.F90"
+(   75) istat = cuda_Synchronize()
+(   76) # 77 "eftinv_mod.F90"
+(   77) IF (LHOOK) CALL DR_HOOK('EFTINV_MOD:EFTINV',1,ZHOOK_HANDLE)
+(   78) !     ------------------------------------------------------------------
+(   79) # 80 "eftinv_mod.F90"
+(   80) END SUBROUTINE EFTINV
+(   81) END MODULE EFTINV_MOD

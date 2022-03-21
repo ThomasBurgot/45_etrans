@@ -1,0 +1,438 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:05      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: evdtuvad_mod.F90
+
+(    1) MODULE EVDTUVAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EVDTUVAD(KM,KMLOC,KFIELD,KFLDPTR,PVOR,PDIV,PU,PV,PSPMEANU,PSPMEANV)
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) 
+(    8) !USE TPM_DIM
+(    9) !USE TPM_FIELDS
+(   10) USE TPM_DISTR       ,ONLY : D, NPRCIDS, NPRTRW, MYSETV, MYSETW, MYPROC, NPROC
+(   11) 
+(   12) USE TPMALD_FIELDS   ,ONLY : FALD
+(   13) USE TPMALD_GEO      ,ONLY : GALD
+(   14) USE TPMALD_DISTR    ,ONLY : DALD
+(   15) 
+(   16) !**** *EVDTUVAD* - Compute U,V in  spectral space
+(   17) 
+(   18) !     Purpose.
+(   19) !     --------
+(   20) !        In Laplace space compute the the winds
+(   21) !        from vorticity and divergence.
+(   22) 
+(   23) !**   Interface.
+(   24) !     ----------
+(   25) !        CALL EVDTUVAD(...)
+(   26) 
+(   27) !        Explicit arguments :  KM -zonal wavenumber (input-c)
+(   28) !        --------------------  KFIELD - number of fields (input-c)
+(   29) !                              KFLDPTR - fields pointers
+(   30) !                              PEPSNM - REPSNM for wavenumber KM (input-c)
+(   31) !                              PVOR(NLEI1,2*KFIELD) - vorticity (input)
+(   32) !                              PDIV(NLEI1,2*KFIELD) - divergence (input)
+(   33) !                              PU(NLEI1,2*KFIELD)   - u wind (output)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:05      page 2
+
+(   34) !                              PV(NLEI1,2*KFIELD)   - v wind (output)
+(   35) !        Organisation within NLEI1:
+(   36) !        NLEI1 = NSMAX+4+mod(NSMAX+4+1,2)
+(   37) !                        overdimensioning
+(   38) !        1        : n=NSMAX+2
+(   39) !        2        : n=NSMAX+1
+(   40) !        3        : n=NSMAX
+(   41) !        .        :
+(   42) !        .        :
+(   43) !        NSMAX+3  : n=0
+(   44) !        NSMAX+4  : n=-1
+(   45) 
+(   46) !        Implicit arguments :  Eigenvalues of inverse Laplace operator
+(   47) !        --------------------  from YOMLAP
+(   48) 
+(   49) !     Method.
+(   50) !     -------
+(   51) 
+(   52) !     Externals.   None.
+(   53) !     ----------
+(   54) 
+(   55) !     Reference.
+(   56) !     ----------
+(   57) !        ECMWF Research Department documentation of the IFS
+(   58) !        Temperton, 1991, MWR 119 p1303
+(   59) 
+(   60) !     Author.
+(   61) !     -------
+(   62) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   63) 
+(   64) !     Modifications.
+(   65) !     --------------
+(   66) !        Original : 00-02-01 From VDTUVAD in IFS CY22R1
+(   67) !        01-08-27 : R. El Khatib Fix for NPROMATR /= 0
+(   68) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   69) !        01-Dec-2004   A. Deckmyn    Fix mean wind for NPRTRW > 1
+(   70) !        N. Lopes & R. El Khatib 15-Jun-2012 Scalability enhancement +
+(   71) !        thread-safety
+(   72) !     ------------------------------------------------------------------
+(   73) 
+(   74) IMPLICIT NONE
+(   75) 
+(   76) INTEGER(KIND=JPIM), INTENT(IN)    :: KM, KFIELD, KMLOC
+(   77) REAL(KIND=JPRB),    INTENT(INOUT) :: PVOR(:,:),PDIV(:,:)
+(   78) REAL(KIND=JPRB),    INTENT(INOUT) :: PU  (:,:),PV  (:,:)
+(   79) 
+(   80) INTEGER(KIND=JPIM), OPTIONAL, INTENT(IN)  :: KFLDPTR(:)
+(   81) REAL(KIND=JPRB),    OPTIONAL, INTENT(OUT) :: PSPMEANU(:),PSPMEANV(:)
+(   82) 
+(   83) INTEGER(KIND=JPIM) :: II, IJ, IR, J, JN, IFLD
+(   84) 
+(   85) INTEGER(KIND=JPIM) :: IN
+(   86) INTEGER(KIND=JPIM) :: ISND, JA, ITAG, ILEN
+(   87) 
+(   88) REAL(KIND=JPRB) :: ZSPU(2*KFIELD)
+(   89) REAL(KIND=JPRB) :: ZKM
+(   90) REAL(KIND=JPRB) :: ZIN
+(   91) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:05      page 3
+
+(   92) 
+(   93) !     ------------------------------------------------------------------
+(   94) 
+(   95) IF (LHOOK) CALL DR_HOOK('EVDTUVAD_MOD:EVDTUVAD',0,ZHOOK_HANDLE)
+(   96) 
+(   97) IF (KM == 0) THEN
+(   98)   IF (PRESENT(KFLDPTR)) THEN
+(   99)     DO J = 1, KFIELD
+(  100)       IR = 2*J-1
+(  101)       IFLD=KFLDPTR(J)
+(  102)       PSPMEANU(IFLD)=PU(1,IR)
+(  103)       PSPMEANV(IFLD)=PV(1,IR)
+(  104)     ENDDO
+(  105)   ELSE
+(  106)     DO J = 1, KFIELD
+(  107)       IR = 2*J-1
+(  108)       PSPMEANU(J)=PU(1,IR)
+(  109)       PSPMEANV(J)=PV(1,IR)
+(  110)     ENDDO
+(  111)   ENDIF
+(  112) ENDIF
+(  113) 
+(  114) ZKM=REAL(KM,JPRB)*GALD%EXWN
+(  115) DO J=1,KFIELD
+(  116)   IR = 2*J-1
+(  117)   II = IR+1
+(  118)   DO JN=1,DALD%NCPL2M(KM)
+(  119)     IJ=(JN-1)/2
+(  120)     PDIV(JN,II)=PDIV(JN,II)-ZKM*FALD%RLEPINM(DALD%NPME(KM)+IJ)*PU(JN,IR)
+(  121)     PU(JN,IR)=-FALD%RLEPINM(DALD%NPME(KM)+IJ)*PU(JN,IR)
+(  122) 
+(  123)     PDIV(JN,IR)=PDIV(JN,IR)+ZKM*FALD%RLEPINM(DALD%NPME(KM)+IJ)*PU(JN,II)
+(  124)     PU(JN,II)=-FALD%RLEPINM(DALD%NPME(KM)+IJ)*PU(JN,II)
+(  125) 
+(  126)     PVOR(JN,II)=PVOR(JN,II)-ZKM*FALD%RLEPINM(DALD%NPME(KM)+IJ)*PV(JN,IR)
+(  127)     PV(JN,IR)=FALD%RLEPINM(DALD%NPME(KM)+IJ)*PV(JN,IR)
+(  128) 
+(  129)     PVOR(JN,IR)=PVOR(JN,IR)+ZKM*FALD%RLEPINM(DALD%NPME(KM)+IJ)*PV(JN,II)
+(  130)     PV(JN,II)=FALD%RLEPINM(DALD%NPME(KM)+IJ)*PV(JN,II)
+(  131) 
+(  132)   ENDDO
+(  133) ENDDO
+(  134) 
+(  135) DO J=1,2*KFIELD
+(  136)   DO JN=1,DALD%NCPL2M(KM),2
+(  137)     IN = (JN-1)/2
+(  138)     ZIN = REAL(IN,JPRB)*GALD%EYWN
+(  139)     PVOR(JN+1,J) = PVOR(JN+1,J)-ZIN*PU(JN  ,J)
+(  140)     PVOR(JN  ,J) = PVOR(JN  ,J)+ZIN*PU(JN+1,J)
+(  141)     PDIV(JN+1,J) = PDIV(JN+1,J)-ZIN*PV(JN  ,J)
+(  142)     PDIV(JN  ,J) = PDIV(JN  ,J)+ZIN*PV(JN+1,J)
+(  143)   ENDDO
+(  144) ENDDO
+(  145) 
+(  146) IF (LHOOK) CALL DR_HOOK('EVDTUVAD_MOD:EVDTUVAD',1,ZHOOK_HANDLE)
+(  147) 
+(  148) !     ------------------------------------------------------------------
+(  149) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:05      page 4
+
+(  150) END SUBROUTINE EVDTUVAD
+(  151) END MODULE EVDTUVAD_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:05      page 5
+
+(    1) # 1 "evdtuvad_mod.F90"
+(    1) MODULE EVDTUVAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EVDTUVAD(KM,KMLOC,KFIELD,KFLDPTR,PVOR,PDIV,PU,PV,PSPMEANU,PSPMEANV)
+(    4) # 5 "evdtuvad_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) # 8 "evdtuvad_mod.F90"
+(    8) !USE TPM_DIM
+(    9) !USE TPM_FIELDS
+(   10) USE TPM_DISTR       ,ONLY : D, NPRCIDS, NPRTRW, MYSETV, MYSETW, MYPROC, NPROC
+(   11) # 12 "evdtuvad_mod.F90"
+(   12) USE TPMALD_FIELDS   ,ONLY : FALD
+(   13) USE TPMALD_GEO      ,ONLY : GALD
+(   14) USE TPMALD_DISTR    ,ONLY : DALD
+(   15) # 16 "evdtuvad_mod.F90"
+(   16) !**** *EVDTUVAD* - Compute U,V in  spectral space
+(   17) # 18 "evdtuvad_mod.F90"
+(   18) !     Purpose.
+(   19) !     --------
+(   20) !        In Laplace space compute the the winds
+(   21) !        from vorticity and divergence.
+(   22) # 23 "evdtuvad_mod.F90"
+(   23) !**   Interface.
+(   24) !     ----------
+(   25) !        CALL EVDTUVAD(...)
+(   26) # 27 "evdtuvad_mod.F90"
+(   27) !        Explicit arguments :  KM -zonal wavenumber (input-c)
+(   28) !        --------------------  KFIELD - number of fields (input-c)
+(   29) !                              KFLDPTR - fields pointers
+(   30) !                              PEPSNM - REPSNM for wavenumber KM (input-c)
+(   31) !                              PVOR(NLEI1,2*KFIELD) - vorticity (input)
+(   32) !                              PDIV(NLEI1,2*KFIELD) - divergence (input)
+(   33) !                              PU(NLEI1,2*KFIELD)   - u wind (output)
+(   34) !                              PV(NLEI1,2*KFIELD)   - v wind (output)
+(   35) !        Organisation within NLEI1:
+(   36) !        NLEI1 = NSMAX+4+mod(NSMAX+4+1,2)
+(   37) !                        overdimensioning
+(   38) !        1        : n=NSMAX+2
+(   39) !        2        : n=NSMAX+1
+(   40) !        3        : n=NSMAX
+(   41) !        .        :
+(   42) !        .        :
+(   43) !        NSMAX+3  : n=0
+(   44) !        NSMAX+4  : n=-1
+(   45) # 46 "evdtuvad_mod.F90"
+(   46) !        Implicit arguments :  Eigenvalues of inverse Laplace operator
+(   47) !        --------------------  from YOMLAP
+(   48) # 49 "evdtuvad_mod.F90"
+(   49) !     Method.
+(   50) !     -------
+(   51) # 52 "evdtuvad_mod.F90"
+(   52) !     Externals.   None.
+(   53) !     ----------
+(   54) # 55 "evdtuvad_mod.F90"
+(   55) !     Reference.
+(   56) !     ----------
+(   57) !        ECMWF Research Department documentation of the IFS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:05      page 6
+
+(   58) !        Temperton, 1991, MWR 119 p1303
+(   59) # 60 "evdtuvad_mod.F90"
+(   60) !     Author.
+(   61) !     -------
+(   62) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   63) # 64 "evdtuvad_mod.F90"
+(   64) !     Modifications.
+(   65) !     --------------
+(   66) !        Original : 00-02-01 From VDTUVAD in IFS CY22R1
+(   67) !        01-08-27 : R. El Khatib Fix for NPROMATR /= 0
+(   68) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   69) !        01-Dec-2004   A. Deckmyn    Fix mean wind for NPRTRW > 1
+(   70) !        N. Lopes & R. El Khatib 15-Jun-2012 Scalability enhancement +
+(   71) !        thread-safety
+(   72) !     ------------------------------------------------------------------
+(   73) # 74 "evdtuvad_mod.F90"
+(   74) IMPLICIT NONE
+(   75) # 76 "evdtuvad_mod.F90"
+(   76) INTEGER(KIND=JPIM), INTENT(IN)    :: KM, KFIELD, KMLOC
+(   77) REAL(KIND=JPRB),    INTENT(INOUT) :: PVOR(:,:),PDIV(:,:)
+(   78) REAL(KIND=JPRB),    INTENT(INOUT) :: PU  (:,:),PV  (:,:)
+(   79) # 80 "evdtuvad_mod.F90"
+(   80) INTEGER(KIND=JPIM), OPTIONAL, INTENT(IN)  :: KFLDPTR(:)
+(   81) REAL(KIND=JPRB),    OPTIONAL, INTENT(OUT) :: PSPMEANU(:),PSPMEANV(:)
+(   82) # 83 "evdtuvad_mod.F90"
+(   83) INTEGER(KIND=JPIM) :: II, IJ, IR, J, JN, IFLD
+(   84) # 85 "evdtuvad_mod.F90"
+(   85) INTEGER(KIND=JPIM) :: IN
+(   86) INTEGER(KIND=JPIM) :: ISND, JA, ITAG, ILEN
+(   87) # 88 "evdtuvad_mod.F90"
+(   88) REAL(KIND=JPRB) :: ZSPU(2*KFIELD)
+(   89) REAL(KIND=JPRB) :: ZKM
+(   90) REAL(KIND=JPRB) :: ZIN
+(   91) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   92) # 93 "evdtuvad_mod.F90"
+(   93) !     ------------------------------------------------------------------
+(   94) # 95 "evdtuvad_mod.F90"
+(   95) IF (LHOOK) CALL DR_HOOK('EVDTUVAD_MOD:EVDTUVAD',0,ZHOOK_HANDLE)
+(   96) # 97 "evdtuvad_mod.F90"
+(   97) IF (KM == 0) THEN
+(   98)   IF (PRESENT(KFLDPTR)) THEN
+(   99)     DO J = 1, KFIELD
+(  100)       IR = 2*J-1
+(  101)       IFLD=KFLDPTR(J)
+(  102)       PSPMEANU(IFLD)=PU(1,IR)
+(  103)       PSPMEANV(IFLD)=PV(1,IR)
+(  104)     ENDDO
+(  105)   ELSE
+(  106)     DO J = 1, KFIELD
+(  107)       IR = 2*J-1
+(  108)       PSPMEANU(J)=PU(1,IR)
+(  109)       PSPMEANV(J)=PV(1,IR)
+(  110)     ENDDO
+(  111)   ENDIF
+(  112) ENDIF
+(  113) # 114 "evdtuvad_mod.F90"
+(  114) ZKM=REAL(KM,JPRB)*GALD%EXWN
+(  115) DO J=1,KFIELD
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:05      page 7
+
+(  116)   IR = 2*J-1
+(  117)   II = IR+1
+(  118)   DO JN=1,DALD%NCPL2M(KM)
+(  119)     IJ=(JN-1)/2
+(  120)     PDIV(JN,II)=PDIV(JN,II)-ZKM*FALD%RLEPINM(DALD%NPME(KM)+IJ)*PU(JN,IR)
+(  121)     PU(JN,IR)=-FALD%RLEPINM(DALD%NPME(KM)+IJ)*PU(JN,IR)
+(  122) # 123 "evdtuvad_mod.F90"
+(  123)     PDIV(JN,IR)=PDIV(JN,IR)+ZKM*FALD%RLEPINM(DALD%NPME(KM)+IJ)*PU(JN,II)
+(  124)     PU(JN,II)=-FALD%RLEPINM(DALD%NPME(KM)+IJ)*PU(JN,II)
+(  125) # 126 "evdtuvad_mod.F90"
+(  126)     PVOR(JN,II)=PVOR(JN,II)-ZKM*FALD%RLEPINM(DALD%NPME(KM)+IJ)*PV(JN,IR)
+(  127)     PV(JN,IR)=FALD%RLEPINM(DALD%NPME(KM)+IJ)*PV(JN,IR)
+(  128) # 129 "evdtuvad_mod.F90"
+(  129)     PVOR(JN,IR)=PVOR(JN,IR)+ZKM*FALD%RLEPINM(DALD%NPME(KM)+IJ)*PV(JN,II)
+(  130)     PV(JN,II)=FALD%RLEPINM(DALD%NPME(KM)+IJ)*PV(JN,II)
+(  131) # 132 "evdtuvad_mod.F90"
+(  132)   ENDDO
+(  133) ENDDO
+(  134) # 135 "evdtuvad_mod.F90"
+(  135) DO J=1,2*KFIELD
+(  136)   DO JN=1,DALD%NCPL2M(KM),2
+(  137)     IN = (JN-1)/2
+(  138)     ZIN = REAL(IN,JPRB)*GALD%EYWN
+(  139)     PVOR(JN+1,J) = PVOR(JN+1,J)-ZIN*PU(JN  ,J)
+(  140)     PVOR(JN  ,J) = PVOR(JN  ,J)+ZIN*PU(JN+1,J)
+(  141)     PDIV(JN+1,J) = PDIV(JN+1,J)-ZIN*PV(JN  ,J)
+(  142)     PDIV(JN  ,J) = PDIV(JN  ,J)+ZIN*PV(JN+1,J)
+(  143)   ENDDO
+(  144) ENDDO
+(  145) # 146 "evdtuvad_mod.F90"
+(  146) IF (LHOOK) CALL DR_HOOK('EVDTUVAD_MOD:EVDTUVAD',1,ZHOOK_HANDLE)
+(  147) # 148 "evdtuvad_mod.F90"
+(  148) !     ------------------------------------------------------------------
+(  149) # 150 "evdtuvad_mod.F90"
+(  150) END SUBROUTINE EVDTUVAD
+(  151) END MODULE EVDTUVAD_MOD

@@ -1,0 +1,458 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:31      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: esmoothe_mod.F90
+
+(    1) MODULE ESMOOTHE_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ESMOOTHE(KDLUN,KDLON,KDGUN,KDGL,KDLUX,KDGUX,KSTART,&
+(    4)  & KDLSM,KDGSA,KDGEN,KNUBI,PWORK,LDBIX,LDBIY)  
+(    5) 
+(    6) !   purpose  :
+(    7) !   --------
+(    8) !     To smooth the fields over the extension zone.
+(    9) 
+(   10) !*    *CALL* *ESMOOTHE*(...)
+(   11) 
+(   12) !      externals :
+(   13) !      ----------
+(   14) !             None
+(   15) 
+(   16) !      explicit arguments :
+(   17) !      ------------------
+(   18) !     KDLUN : lower bound for the x (or longitude) dimension
+(   19) !             of the gridpoint array
+(   20) !     KDLON : upper bound for the x (or longitude) dimension
+(   21) !             of the gridpoint array on C U I U E
+(   22) !     KDGUN : lower bound for the y (or latitude) dimension
+(   23) !             of the gridpoint array
+(   24) !     KDGL : upper bound for the y (or latitude) dimension
+(   25) !             of the gridpoint array on C U I U E
+(   26) !     KDLUX : upper bound for the x (or longitude) dimension
+(   27) !             of  C U I.
+(   28) !     KDGUX : upper bound for the y (or latitude) dimension
+(   29) !             of  C U I.
+(   30) !     KDLSM  : dimension in x direction of g-p array
+(   31) !     KDGSA  : first dimension index in y of g-p array
+(   32) !     KDGEN  : last dimension index in y of g-p array
+(   33) !     KSTART :  first dimension index in x of g-p array
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:31      page 2
+
+(   34) !     KDLSM  :  last dimension index in x of g-p array
+(   35) !     KNUBI  : number of levels to biperiodicise
+(   36) 
+(   37) !     PWORK : gridpoint array on C U I U E.
+(   38) 
+(   39) !     LDBIX  : .TRUE.: biperiodicise in x direction (and vice versa)
+(   40) !     LDBIY  : .TRUE.: biperiodicise in y direction (and vice versa)
+(   41) 
+(   42) !      references :
+(   43) !      ----------
+(   44) 
+(   45) !      author :
+(   46) !      ------
+(   47) !       Michal Batka and Radmila Bubnova ( B & B )
+(   48) 
+(   49) !      modifications :
+(   50) !      -------------
+(   51) !      R. El Khatib 03-05-05 Optimizations
+(   52) !      --------------------------------------------------------------
+(   53) 
+(   54) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   55) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   56) 
+(   57) !      --------------------------------------------------------------
+(   58) 
+(   59) IMPLICIT NONE
+(   60) 
+(   61) INTEGER(KIND=JPIM),INTENT(IN)    :: KSTART 
+(   62) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLSM 
+(   63) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGSA 
+(   64) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGEN 
+(   65) INTEGER(KIND=JPIM),INTENT(IN)    :: KNUBI 
+(   66) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLUN 
+(   67) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLON 
+(   68) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGUN 
+(   69) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGL 
+(   70) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLUX 
+(   71) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGUX 
+(   72) REAL(KIND=JPRB)   ,INTENT(INOUT) :: PWORK(KSTART:KDLSM,KNUBI,KDGSA:KDGEN) 
+(   73) LOGICAL           ,INTENT(IN)    :: LDBIX 
+(   74) LOGICAL           ,INTENT(IN)    :: LDBIY 
+(   75) 
+(   76) !      --------------------------------------------------------------
+(   77) 
+(   78) REAL(KIND=JPRB) :: ZPRAC(KDLUN-1:KDLON+1,KDGUN-1:KDGL+1)
+(   79) INTEGER(KIND=JPIM) :: IEND, IENX1, IENX2, IENY1, IENY2, JFL, JLAT, JLL, JLON
+(   80) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   81) 
+(   82) !      --------------------------------------------------------------
+(   83) IF (LHOOK) CALL DR_HOOK('ESMOOTHE',0,ZHOOK_HANDLE)
+(   84) !      --------------------------------------------------------------
+(   85) 
+(   86) !*         1. Calculation.
+(   87) !             ------------
+(   88) 
+(   89) IEND = MAX(KDLON-KDLUX,KDGL-KDGUX)
+(   90) IEND = (IEND+1)/2
+(   91) IENX1= KDLON
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:31      page 3
+
+(   92) IENX2= KDGL
+(   93) IENY1= KDGL
+(   94) IENY2= KDLON
+(   95) IF(LDBIX.AND.(.NOT.LDBIY)) THEN
+(   96)   IENX2 = KDGUX
+(   97)   IENY1 = KDGUX
+(   98) ELSEIF((.NOT.LDBIX).AND.LDBIY) THEN
+(   99)   IENX1 = KDLUX
+(  100)   IENY2 = KDLUX
+(  101) ELSEIF((.NOT.LDBIX).AND.(.NOT.LDBIY)) THEN
+(  102)   IF (LHOOK) CALL DR_HOOK('ESMOOTHE',1,ZHOOK_HANDLE)
+(  103)   RETURN
+(  104) ENDIF
+(  105) 
+(  106) DO JFL = 1, KNUBI
+(  107) 
+(  108)   DO JLL = 1, IEND
+(  109) 
+(  110)     DO JLON = KDLUX,KDLON
+(  111)       DO JLAT = KDGUN,KDGL
+(  112)         ZPRAC(JLON,JLAT) = PWORK(JLON,JFL,JLAT)
+(  113)       ENDDO
+(  114)     ENDDO
+(  115) 
+(  116)     DO JLON = KDLUX,KDLON
+(  117)       ZPRAC(JLON,KDGUN-1) = PWORK(JLON,JFL,KDGL)
+(  118)       ZPRAC(JLON,KDGL +1) = PWORK(JLON,JFL,KDGUN)
+(  119)     ENDDO
+(  120)     DO JLAT = KDGUN,KDGL
+(  121)       ZPRAC(KDLON+1,JLAT) = PWORK(KDLUN,JFL,JLAT)
+(  122)     ENDDO
+(  123)     ZPRAC(KDLON+1,KDGUN-1) = PWORK(KDLUN,JFL,KDGL)
+(  124)     ZPRAC(KDLON+1,KDGL +1) = PWORK(KDLUN,JFL,KDGUN)
+(  125) 
+(  126)     DO JLON = KDLUX + JLL,IENX1 - JLL + 1
+(  127)       DO JLAT = KDGUN, IENX2  
+(  128)         PWORK(JLON,JFL,JLAT)=(4._JPRB*ZPRAC(JLON,JLAT)+2.0_JPRB*(ZPRAC(JLON+&
+(  129)          & 1,JLAT)+&
+(  130)          & ZPRAC(JLON-1,JLAT) + ZPRAC(JLON,JLAT+1) +&
+(  131)          & ZPRAC(JLON,JLAT-1)) + ZPRAC(JLON+1,JLAT+1) +&
+(  132)          & ZPRAC(JLON-1,JLAT+1) + ZPRAC(JLON+1,JLAT-1)+&
+(  133)          & ZPRAC(JLON-1,JLAT-1))/16._JPRB  
+(  134)       ENDDO
+(  135)     ENDDO
+(  136) 
+(  137)     DO JLAT = KDGUX,KDGL
+(  138)       DO JLON = KDLUN,KDLON
+(  139)         ZPRAC(JLON,JLAT) = PWORK(JLON,JFL,JLAT)
+(  140)       ENDDO
+(  141)     ENDDO
+(  142) 
+(  143)     DO JLAT = KDGUX,KDGL
+(  144)       ZPRAC(KDLUN-1,JLAT) = PWORK(KDLON,JFL,JLAT)
+(  145)       ZPRAC(KDLON+1,JLAT) = PWORK(KDLUN,JFL,JLAT)
+(  146)     ENDDO
+(  147)     DO JLON = KDLUN,KDLON
+(  148)       ZPRAC(JLON,KDGL +1) = PWORK(JLON,JFL,KDGUN)
+(  149)     ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:31      page 4
+
+(  150)     ZPRAC(KDLUN-1,KDGL +1) = PWORK(KDLON,JFL,KDGUN)
+(  151)     ZPRAC(KDLON+1,KDGL +1) = PWORK(KDLUN,JFL,KDGUN)
+(  152) 
+(  153)     DO JLAT = KDGUX + JLL, IENY1 - JLL + 1
+(  154)       DO JLON = KDLUN,IENY2
+(  155)         PWORK(JLON,JFL,JLAT)=(4._JPRB*ZPRAC(JLON,JLAT)+2.0_JPRB*(ZPRAC(JLON+&
+(  156)          & 1,JLAT)+&
+(  157)          & ZPRAC(JLON-1,JLAT) + ZPRAC(JLON,JLAT+1) +&
+(  158)          & ZPRAC(JLON,JLAT-1)) + ZPRAC(JLON+1,JLAT+1) +&
+(  159)          & ZPRAC(JLON-1,JLAT+1) + ZPRAC(JLON+1,JLAT-1)+&
+(  160)          & ZPRAC(JLON-1,JLAT-1))/16._JPRB  
+(  161)       ENDDO
+(  162)     ENDDO
+(  163) 
+(  164)   ENDDO
+(  165) 
+(  166) ENDDO
+(  167) 
+(  168) !      --------------------------------------------------------------
+(  169) IF (LHOOK) CALL DR_HOOK('ESMOOTHE',1,ZHOOK_HANDLE)
+(  170) END SUBROUTINE ESMOOTHE
+(  171) END MODULE ESMOOTHE_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:31      page 5
+
+(    1) # 1 "esmoothe_mod.F90"
+(    1) MODULE ESMOOTHE_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ESMOOTHE(KDLUN,KDLON,KDGUN,KDGL,KDLUX,KDGUX,KSTART,&
+(    4)  & KDLSM,KDGSA,KDGEN,KNUBI,PWORK,LDBIX,LDBIY)  
+(    5) # 6 "esmoothe_mod.F90"
+(    6) !   purpose  :
+(    7) !   --------
+(    8) !     To smooth the fields over the extension zone.
+(    9) # 10 "esmoothe_mod.F90"
+(   10) !*    *CALL* *ESMOOTHE*(...)
+(   11) # 12 "esmoothe_mod.F90"
+(   12) !      externals :
+(   13) !      ----------
+(   14) !             None
+(   15) # 16 "esmoothe_mod.F90"
+(   16) !      explicit arguments :
+(   17) !      ------------------
+(   18) !     KDLUN : lower bound for the x (or longitude) dimension
+(   19) !             of the gridpoint array
+(   20) !     KDLON : upper bound for the x (or longitude) dimension
+(   21) !             of the gridpoint array on C U I U E
+(   22) !     KDGUN : lower bound for the y (or latitude) dimension
+(   23) !             of the gridpoint array
+(   24) !     KDGL : upper bound for the y (or latitude) dimension
+(   25) !             of the gridpoint array on C U I U E
+(   26) !     KDLUX : upper bound for the x (or longitude) dimension
+(   27) !             of  C U I.
+(   28) !     KDGUX : upper bound for the y (or latitude) dimension
+(   29) !             of  C U I.
+(   30) !     KDLSM  : dimension in x direction of g-p array
+(   31) !     KDGSA  : first dimension index in y of g-p array
+(   32) !     KDGEN  : last dimension index in y of g-p array
+(   33) !     KSTART :  first dimension index in x of g-p array
+(   34) !     KDLSM  :  last dimension index in x of g-p array
+(   35) !     KNUBI  : number of levels to biperiodicise
+(   36) # 37 "esmoothe_mod.F90"
+(   37) !     PWORK : gridpoint array on C U I U E.
+(   38) # 39 "esmoothe_mod.F90"
+(   39) !     LDBIX  : .TRUE.: biperiodicise in x direction (and vice versa)
+(   40) !     LDBIY  : .TRUE.: biperiodicise in y direction (and vice versa)
+(   41) # 42 "esmoothe_mod.F90"
+(   42) !      references :
+(   43) !      ----------
+(   44) # 45 "esmoothe_mod.F90"
+(   45) !      author :
+(   46) !      ------
+(   47) !       Michal Batka and Radmila Bubnova ( B & B )
+(   48) # 49 "esmoothe_mod.F90"
+(   49) !      modifications :
+(   50) !      -------------
+(   51) !      R. El Khatib 03-05-05 Optimizations
+(   52) !      --------------------------------------------------------------
+(   53) # 54 "esmoothe_mod.F90"
+(   54) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   55) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   56) # 57 "esmoothe_mod.F90"
+(   57) !      --------------------------------------------------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:31      page 6
+
+(   58) # 59 "esmoothe_mod.F90"
+(   59) IMPLICIT NONE
+(   60) # 61 "esmoothe_mod.F90"
+(   61) INTEGER(KIND=JPIM),INTENT(IN)    :: KSTART 
+(   62) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLSM 
+(   63) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGSA 
+(   64) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGEN 
+(   65) INTEGER(KIND=JPIM),INTENT(IN)    :: KNUBI 
+(   66) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLUN 
+(   67) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLON 
+(   68) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGUN 
+(   69) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGL 
+(   70) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLUX 
+(   71) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGUX 
+(   72) REAL(KIND=JPRB)   ,INTENT(INOUT) :: PWORK(KSTART:KDLSM,KNUBI,KDGSA:KDGEN) 
+(   73) LOGICAL           ,INTENT(IN)    :: LDBIX 
+(   74) LOGICAL           ,INTENT(IN)    :: LDBIY 
+(   75) # 76 "esmoothe_mod.F90"
+(   76) !      --------------------------------------------------------------
+(   77) # 78 "esmoothe_mod.F90"
+(   78) REAL(KIND=JPRB) :: ZPRAC(KDLUN-1:KDLON+1,KDGUN-1:KDGL+1)
+(   79) INTEGER(KIND=JPIM) :: IEND, IENX1, IENX2, IENY1, IENY2, JFL, JLAT, JLL, JLON
+(   80) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   81) # 82 "esmoothe_mod.F90"
+(   82) !      --------------------------------------------------------------
+(   83) IF (LHOOK) CALL DR_HOOK('ESMOOTHE',0,ZHOOK_HANDLE)
+(   84) !      --------------------------------------------------------------
+(   85) # 86 "esmoothe_mod.F90"
+(   86) !*         1. Calculation.
+(   87) !             ------------
+(   88) # 89 "esmoothe_mod.F90"
+(   89) IEND = MAX(KDLON-KDLUX,KDGL-KDGUX)
+(   90) IEND = (IEND+1)/2
+(   91) IENX1= KDLON
+(   92) IENX2= KDGL
+(   93) IENY1= KDGL
+(   94) IENY2= KDLON
+(   95) IF(LDBIX.AND.(.NOT.LDBIY)) THEN
+(   96)   IENX2 = KDGUX
+(   97)   IENY1 = KDGUX
+(   98) ELSEIF((.NOT.LDBIX).AND.LDBIY) THEN
+(   99)   IENX1 = KDLUX
+(  100)   IENY2 = KDLUX
+(  101) ELSEIF((.NOT.LDBIX).AND.(.NOT.LDBIY)) THEN
+(  102)   IF (LHOOK) CALL DR_HOOK('ESMOOTHE',1,ZHOOK_HANDLE)
+(  103)   RETURN
+(  104) ENDIF
+(  105) # 106 "esmoothe_mod.F90"
+(  106) DO JFL = 1, KNUBI
+(  107) # 108 "esmoothe_mod.F90"
+(  108)   DO JLL = 1, IEND
+(  109) # 110 "esmoothe_mod.F90"
+(  110)     DO JLON = KDLUX,KDLON
+(  111)       DO JLAT = KDGUN,KDGL
+(  112)         ZPRAC(JLON,JLAT) = PWORK(JLON,JFL,JLAT)
+(  113)       ENDDO
+(  114)     ENDDO
+(  115) # 116 "esmoothe_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:31      page 7
+
+(  116)     DO JLON = KDLUX,KDLON
+(  117)       ZPRAC(JLON,KDGUN-1) = PWORK(JLON,JFL,KDGL)
+(  118)       ZPRAC(JLON,KDGL +1) = PWORK(JLON,JFL,KDGUN)
+(  119)     ENDDO
+(  120)     DO JLAT = KDGUN,KDGL
+(  121)       ZPRAC(KDLON+1,JLAT) = PWORK(KDLUN,JFL,JLAT)
+(  122)     ENDDO
+(  123)     ZPRAC(KDLON+1,KDGUN-1) = PWORK(KDLUN,JFL,KDGL)
+(  124)     ZPRAC(KDLON+1,KDGL +1) = PWORK(KDLUN,JFL,KDGUN)
+(  125) # 126 "esmoothe_mod.F90"
+(  126)     DO JLON = KDLUX + JLL,IENX1 - JLL + 1
+(  127)       DO JLAT = KDGUN, IENX2  
+(  128)         PWORK(JLON,JFL,JLAT)=(4._JPRB*ZPRAC(JLON,JLAT)+2.0_JPRB*(ZPRAC(JLON+&
+(  129)          & 1,JLAT)+&
+(  130)          & ZPRAC(JLON-1,JLAT) + ZPRAC(JLON,JLAT+1) +&
+(  131)          & ZPRAC(JLON,JLAT-1)) + ZPRAC(JLON+1,JLAT+1) +&
+(  132)          & ZPRAC(JLON-1,JLAT+1) + ZPRAC(JLON+1,JLAT-1)+&
+(  133)          & ZPRAC(JLON-1,JLAT-1))/16._JPRB  
+(  134)       ENDDO
+(  135)     ENDDO
+(  136) # 137 "esmoothe_mod.F90"
+(  137)     DO JLAT = KDGUX,KDGL
+(  138)       DO JLON = KDLUN,KDLON
+(  139)         ZPRAC(JLON,JLAT) = PWORK(JLON,JFL,JLAT)
+(  140)       ENDDO
+(  141)     ENDDO
+(  142) # 143 "esmoothe_mod.F90"
+(  143)     DO JLAT = KDGUX,KDGL
+(  144)       ZPRAC(KDLUN-1,JLAT) = PWORK(KDLON,JFL,JLAT)
+(  145)       ZPRAC(KDLON+1,JLAT) = PWORK(KDLUN,JFL,JLAT)
+(  146)     ENDDO
+(  147)     DO JLON = KDLUN,KDLON
+(  148)       ZPRAC(JLON,KDGL +1) = PWORK(JLON,JFL,KDGUN)
+(  149)     ENDDO
+(  150)     ZPRAC(KDLUN-1,KDGL +1) = PWORK(KDLON,JFL,KDGUN)
+(  151)     ZPRAC(KDLON+1,KDGL +1) = PWORK(KDLUN,JFL,KDGUN)
+(  152) # 153 "esmoothe_mod.F90"
+(  153)     DO JLAT = KDGUX + JLL, IENY1 - JLL + 1
+(  154)       DO JLON = KDLUN,IENY2
+(  155)         PWORK(JLON,JFL,JLAT)=(4._JPRB*ZPRAC(JLON,JLAT)+2.0_JPRB*(ZPRAC(JLON+&
+(  156)          & 1,JLAT)+&
+(  157)          & ZPRAC(JLON-1,JLAT) + ZPRAC(JLON,JLAT+1) +&
+(  158)          & ZPRAC(JLON,JLAT-1)) + ZPRAC(JLON+1,JLAT+1) +&
+(  159)          & ZPRAC(JLON-1,JLAT+1) + ZPRAC(JLON+1,JLAT-1)+&
+(  160)          & ZPRAC(JLON-1,JLAT-1))/16._JPRB  
+(  161)       ENDDO
+(  162)     ENDDO
+(  163) # 164 "esmoothe_mod.F90"
+(  164)   ENDDO
+(  165) # 166 "esmoothe_mod.F90"
+(  166) ENDDO
+(  167) # 168 "esmoothe_mod.F90"
+(  168) !      --------------------------------------------------------------
+(  169) IF (LHOOK) CALL DR_HOOK('ESMOOTHE',1,ZHOOK_HANDLE)
+(  170) END SUBROUTINE ESMOOTHE
+(  171) END MODULE ESMOOTHE_MOD

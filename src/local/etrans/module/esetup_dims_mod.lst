@@ -1,0 +1,185 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:07      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: esetup_dims_mod.F90
+
+(    1) MODULE ESETUP_DIMS_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ESETUP_DIMS
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) 
+(    8) USE TPM_DIM         ,ONLY : R
+(    9) USE TPMALD_DIM      ,ONLY : RALD
+(   10) !
+(   11) 
+(   12) IMPLICIT NONE
+(   13) 
+(   14) INTEGER(KIND=JPIM) :: JM,JN,ISPOLEG
+(   15) INTEGER(KIND=JPIM) :: ISMAX(0:R%NSMAX),ISNAX(0:RALD%NMSMAX)
+(   16) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   17) !     ------------------------------------------------------------------
+(   18) 
+(   19) IF (LHOOK) CALL DR_HOOK('ESETUP_DIMS_MOD:ESETUP_DIMS',0,ZHOOK_HANDLE)
+(   20) ISPOLEG = 0
+(   21) DO JM=0,R%NSMAX
+(   22)   DO JN=JM,R%NTMAX+1
+(   23)     ISPOLEG = ISPOLEG+1
+(   24)   ENDDO
+(   25) ENDDO
+(   26) R%NSPOLEG = ISPOLEG
+(   27) CALL ELLIPS(R%NSMAX,RALD%NMSMAX,ISNAX,ISMAX)
+(   28) R%NSPEC_G=0
+(   29) DO JM=0,RALD%NMSMAX
+(   30)   R%NSPEC_G=R%NSPEC_G+2*(ISNAX(JM)+1)
+(   31) ENDDO
+(   32) R%NSPEC2_G = R%NSPEC_G*2
+(   33) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:07      page 2
+
+(   34) R%NDGNH = (R%NDGL+1)/2
+(   35) 
+(   36) R%NLEI1 = R%NSMAX+4+MOD(R%NSMAX+4+1,2)
+(   37) R%NLEI3 = R%NDGNH+MOD(R%NDGNH+2,2)
+(   38) 
+(   39) R%NLED3 = R%NTMAX+2+MOD(R%NTMAX+3,2)
+(   40) R%NLED4 = R%NTMAX+3+MOD(R%NTMAX+4,2)
+(   41) IF (LHOOK) CALL DR_HOOK('ESETUP_DIMS_MOD:ESETUP_DIMS',1,ZHOOK_HANDLE)
+(   42) 
+(   43) !     ------------------------------------------------------------------
+(   44) 
+(   45) END SUBROUTINE ESETUP_DIMS
+(   46) END MODULE ESETUP_DIMS_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:07      page 3
+
+(    1) # 1 "esetup_dims_mod.F90"
+(    1) MODULE ESETUP_DIMS_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ESETUP_DIMS
+(    4) # 5 "esetup_dims_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) # 8 "esetup_dims_mod.F90"
+(    8) USE TPM_DIM         ,ONLY : R
+(    9) USE TPMALD_DIM      ,ONLY : RALD
+(   10) !
+(   11) # 12 "esetup_dims_mod.F90"
+(   12) IMPLICIT NONE
+(   13) # 14 "esetup_dims_mod.F90"
+(   14) INTEGER(KIND=JPIM) :: JM,JN,ISPOLEG
+(   15) INTEGER(KIND=JPIM) :: ISMAX(0:R%NSMAX),ISNAX(0:RALD%NMSMAX)
+(   16) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   17) !     ------------------------------------------------------------------
+(   18) # 19 "esetup_dims_mod.F90"
+(   19) IF (LHOOK) CALL DR_HOOK('ESETUP_DIMS_MOD:ESETUP_DIMS',0,ZHOOK_HANDLE)
+(   20) ISPOLEG = 0
+(   21) DO JM=0,R%NSMAX
+(   22)   DO JN=JM,R%NTMAX+1
+(   23)     ISPOLEG = ISPOLEG+1
+(   24)   ENDDO
+(   25) ENDDO
+(   26) R%NSPOLEG = ISPOLEG
+(   27) CALL ELLIPS(R%NSMAX,RALD%NMSMAX,ISNAX,ISMAX)
+(   28) R%NSPEC_G=0
+(   29) DO JM=0,RALD%NMSMAX
+(   30)   R%NSPEC_G=R%NSPEC_G+2*(ISNAX(JM)+1)
+(   31) ENDDO
+(   32) R%NSPEC2_G = R%NSPEC_G*2
+(   33) # 34 "esetup_dims_mod.F90"
+(   34) R%NDGNH = (R%NDGL+1)/2
+(   35) # 36 "esetup_dims_mod.F90"
+(   36) R%NLEI1 = R%NSMAX+4+MOD(R%NSMAX+4+1,2)
+(   37) R%NLEI3 = R%NDGNH+MOD(R%NDGNH+2,2)
+(   38) # 39 "esetup_dims_mod.F90"
+(   39) R%NLED3 = R%NTMAX+2+MOD(R%NTMAX+3,2)
+(   40) R%NLED4 = R%NTMAX+3+MOD(R%NTMAX+4,2)
+(   41) IF (LHOOK) CALL DR_HOOK('ESETUP_DIMS_MOD:ESETUP_DIMS',1,ZHOOK_HANDLE)
+(   42) # 43 "esetup_dims_mod.F90"
+(   43) !     ------------------------------------------------------------------
+(   44) # 45 "esetup_dims_mod.F90"
+(   45) END SUBROUTINE ESETUP_DIMS
+(   46) END MODULE ESETUP_DIMS_MOD

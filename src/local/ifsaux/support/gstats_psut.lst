@@ -1,0 +1,241 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:35      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: gstats_psut.F90
+
+(    1) SUBROUTINE GSTATS_PSUT
+(    2) 
+(    3) ! MEASURE PARALLELL START UP TIME
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPRD, JPIM     ,JPRB
+(    6) 
+(    7) USE YOMGSTATS
+(    8) USE YOMMPI   , ONLY : MREALT
+(    9) USE MPL_MODULE
+(   10) 
+(   11) 
+(   12) IMPLICIT NONE
+(   13) 
+(   14) INTEGER(KIND=JPIM) :: ITAG,ILSEND,ILBUF,JROC,IRECV,ISEND
+(   15) REAL(KIND=JPRD) :: ZTBUF(2),ZCLOCK,ZCLOCKB
+(   16) 
+(   17) #include "user_clock.h"
+(   18) 
+(   19) IF(NPROC_STATS > 1) THEN
+(   20)   CALL USER_CLOCK(PELAPSED_TIME=ZCLOCKB)
+(   21)   CALL MPL_BARRIER
+(   22)   CALL USER_CLOCK(PELAPSED_TIME=ZCLOCK)
+(   23)   ITAG = JPTAGSTAT
+(   24)   IF (MYPROC_STATS /= 1) THEN
+(   25)     ZTBUF(1) = ZCLOCKB
+(   26)     ZTBUF(2) = ZCLOCK
+(   27)     ILSEND = 2
+(   28)     ISEND = 1
+(   29)     CALL MPL_SEND(ZTBUF(1:ILSEND),KDEST=NPRCIDS_STATS(ISEND), &
+(   30)      & KTAG=ITAG,CDSTRING='SUSTATS:')
+(   31)   ELSE
+(   32)     ILBUF = 2
+(   33)     ALLOCATE(TIME_START(NPROC_STATS))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:35      page 2
+
+(   34)     TIME_START(1) = ZCLOCKB - TIMELCALL(0)
+(   35)     DO JROC=2,NPROC_STATS
+(   36)       IRECV = JROC
+(   37)       CALL MPL_RECV(ZTBUF(1:ILBUF),KSOURCE=NPRCIDS_STATS(IRECV), &
+(   38)        & KTAG=ITAG,CDSTRING='SUSTATS:')
+(   39)       TIME_START(JROC) = ZTBUF(1) - TIMELCALL(0) -(ZTBUF(2)-ZCLOCK)
+(   40)     ENDDO
+(   41)   ENDIF
+(   42) ENDIF
+(   43) 
+(   44) END SUBROUTINE GSTATS_PSUT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:35      page 3
+
+(    1) # 1 "gstats_psut.F90"
+(    1) SUBROUTINE GSTATS_PSUT
+(    2) # 3 "gstats_psut.F90"
+(    3) ! MEASURE PARALLELL START UP TIME
+(    4) # 5 "gstats_psut.F90"
+(    5) USE PARKIND1  ,ONLY : JPRD, JPIM     ,JPRB
+(    6) # 7 "gstats_psut.F90"
+(    7) USE YOMGSTATS
+(    8) USE YOMMPI   , ONLY : MREALT
+(    9) USE MPL_MODULE
+(   10) # 12 "gstats_psut.F90"
+(   12) IMPLICIT NONE
+(   13) # 14 "gstats_psut.F90"
+(   14) INTEGER(KIND=JPIM) :: ITAG,ILSEND,ILBUF,JROC,IRECV,ISEND
+(   15) REAL(KIND=JPRD) :: ZTBUF(2),ZCLOCK,ZCLOCKB
+(   16) # 17 "gstats_psut.F90"
+(   17) # 1 ".D[15]/user_clock.h"
+(    1) INTERFACE
+(    2) SUBROUTINE USER_CLOCK(PELAPSED_TIME,PELAPSED_TIME_SINCE,PVECTOR_CP,PTOTAL_CP)
+(    3) # 4 ".D[15]/user_clock.h"
+(    4) !**** *USER_CLOCK* - interface to system dependent timer routines
+(    5) # 6 ".D[15]/user_clock.h"
+(    6) !     Purpose.
+(    7) !     --------
+(    8) !        Returns elapsed and CP from the start of execution.
+(    9) !        Elapsed time is made relative to the first call to USER_CLOCK.
+(   10) # 11 ".D[15]/user_clock.h"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        ZTIME=USER_CLOCK(PELAPSED_TIME,PELAPSED_TIME_SINCE,
+(   14) !                         PVECTOR_CP,PTOTAL_CP)
+(   15) # 16 ".D[15]/user_clock.h"
+(   16) !        Explicit arguments: (All are optional arguments)
+(   17) !                           PELAPSED_TIME=wall clock time (seconds)
+(   18) !                           PELAPSED_TIME_SINCE=wall clock time (seconds)
+(   19) !                             change from input value of this parameter
+(   20) !                           PVECTOR_CP=CP vector time  (seconds)
+(   21) !                           PTOTAL_CP=total CP time   (seconds)
+(   22) # 23 ".D[15]/user_clock.h"
+(   23) !     Author.
+(   24) !     -------
+(   25) !        D.Dent      *ECMWF*
+(   26) # 27 ".D[15]/user_clock.h"
+(   27) !     External References:
+(   28) !     -------------------
+(   29) # 30 ".D[15]/user_clock.h"
+(   30) !        TIMEF,CPTIME
+(   31) # 32 ".D[15]/user_clock.h"
+(   32) !     Modifications.
+(   33) !     --------------
+(   34) !        Original  : 97-09-25
+(   35) !      F. Vana  05-Mar-2015  Support for single precision
+(   36) !     ----------------------------------------------------------
+(   37) # 39 ".D[15]/user_clock.h"
+(   39) USE PARKIND1  ,ONLY : JPRD, JPIM
+(   40) # 41 ".D[15]/user_clock.h"
+(   41) IMPLICIT NONE
+(   42) # 43 ".D[15]/user_clock.h"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:35      page 4
+
+(   43) REAL(KIND=JPRD),INTENT(OUT) :: PELAPSED_TIME,PVECTOR_CP,PTOTAL_CP
+(   44) REAL(KIND=JPRD),INTENT(INOUT) :: PELAPSED_TIME_SINCE
+(   45) OPTIONAL            PELAPSED_TIME,PELAPSED_TIME_SINCE
+(   46) OPTIONAL            PVECTOR_CP,PTOTAL_CP
+(   47) REAL(KIND=JPRD)      :: ZVECTOR_CP,ZTOTAL_CP,ZWALL
+(   48) REAL(KIND=JPRD),EXTERNAL :: TIMEF
+(   49) # 51 ".D[15]/user_clock.h"
+(   51) END SUBROUTINE USER_CLOCK
+(   52) END INTERFACE
+(   53) # 18 "gstats_psut.F90"
+(   18) # 19 "gstats_psut.F90"
+(   19) IF(NPROC_STATS > 1) THEN
+(   20)   CALL USER_CLOCK(PELAPSED_TIME=ZCLOCKB)
+(   21)   CALL MPL_BARRIER
+(   22)   CALL USER_CLOCK(PELAPSED_TIME=ZCLOCK)
+(   23)   ITAG = JPTAGSTAT
+(   24)   IF (MYPROC_STATS /= 1) THEN
+(   25)     ZTBUF(1) = ZCLOCKB
+(   26)     ZTBUF(2) = ZCLOCK
+(   27)     ILSEND = 2
+(   28)     ISEND = 1
+(   29)     CALL MPL_SEND(ZTBUF(1:ILSEND),KDEST=NPRCIDS_STATS(ISEND), &
+(   30)      & KTAG=ITAG,CDSTRING='SUSTATS:')
+(   31)   ELSE
+(   32)     ILBUF = 2
+(   33)     ALLOCATE(TIME_START(NPROC_STATS))
+(   34)     TIME_START(1) = ZCLOCKB - TIMELCALL(0)
+(   35)     DO JROC=2,NPROC_STATS
+(   36)       IRECV = JROC
+(   37)       CALL MPL_RECV(ZTBUF(1:ILBUF),KSOURCE=NPRCIDS_STATS(IRECV), &
+(   38)        & KTAG=ITAG,CDSTRING='SUSTATS:')
+(   39)       TIME_START(JROC) = ZTBUF(1) - TIMELCALL(0) -(ZTBUF(2)-ZCLOCK)
+(   40)     ENDDO
+(   41)   ENDIF
+(   42) ENDIF
+(   43) # 44 "gstats_psut.F90"
+(   44) END SUBROUTINE GSTATS_PSUT

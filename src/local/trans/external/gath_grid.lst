@@ -1,0 +1,349 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:58      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: gath_grid.F90
+
+(    1) SUBROUTINE GATH_GRID(PGPG,KPROMA,KFGATHG,KTO,KRESOL,PGP)
+(    2) 
+(    3) !**** *GATH_GRID* - Gather global gridpoint array from processors
+(    4) 
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !        Interface routine for gathering gripoint array
+(    8) 
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL GATH_GRID(...)
+(   12) 
+(   13) !     Explicit arguments :
+(   14) !     --------------------
+(   15) !     PGPG(:,:)   - Global gridpoint array
+(   16) !     KFGATHG     - Global number of fields to be gathered
+(   17) !     KPROMA      - blocking factor for gridpoint input
+(   18) !     KTO(:)      - Processor responsible for gathering each field
+(   19) !     KRESOL      - resolution tag  which is required ,default is the
+(   20) !                   first defined resulution (input)
+(   21) !     PGP(:,:,:)  - Local spectral array
+(   22) !
+(   23) !     Method.
+(   24) !     -------
+(   25) 
+(   26) !     Externals.  SET_RESOL   - set resolution
+(   27) !     ----------  GATH_GRID_CTL -  control routine
+(   28) 
+(   29) !     Author.
+(   30) !     -------
+(   31) !        Mats Hamrud *ECMWF*
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:58      page 2
+
+(   32) 
+(   33) !     Modifications.
+(   34) !     --------------
+(   35) !        Original : 00-03-03
+(   36) 
+(   37) !     ------------------------------------------------------------------
+(   38) 
+(   39) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   40) 
+(   41) !ifndef INTERFACE
+(   42) 
+(   43) USE TPM_GEN         ,ONLY : NERR, NOUT
+(   44) !USE TPM_DIM
+(   45) USE TPM_DISTR       ,ONLY : D, MYPROC, NPROC
+(   46) 
+(   47) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(   48) USE GATH_GRID_CTL_MOD ,ONLY : GATH_GRID_CTL
+(   49) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   50) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   51) 
+(   52) !endif INTERFACE
+(   53) 
+(   54) IMPLICIT NONE
+(   55) 
+(   56) ! Declaration of arguments
+(   57) 
+(   58) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PGPG(:,:)
+(   59) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KPROMA
+(   60) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFGATHG
+(   61) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KTO(:)
+(   62) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   63) REAL(KIND=JPRB)             , INTENT(IN)  :: PGP(:,:,:)
+(   64) 
+(   65) !ifndef INTERFACE
+(   66) 
+(   67) INTEGER(KIND=JPIM) :: IFRECV,J,IUBOUND(3),IPROMA,IGPBLKS
+(   68) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   69) 
+(   70) !     ------------------------------------------------------------------
+(   71) 
+(   72) IF (LHOOK) CALL DR_HOOK('GATH_GRID',0,ZHOOK_HANDLE)
+(   73) ! Set current resolution
+(   74) CALL SET_RESOL(KRESOL)
+(   75) 
+(   76) IPROMA = D%NGPTOT
+(   77) IF(PRESENT(KPROMA)) THEN
+(   78)   IPROMA = KPROMA
+(   79) ENDIF
+(   80) IGPBLKS = (D%NGPTOT-1)/IPROMA+1
+(   81) 
+(   82) 
+(   83) IF(UBOUND(KTO,1) < KFGATHG) THEN
+(   84)  CALL ABORT_TRANS('GATH_GRID: KTO TOO SHORT!')
+(   85) ENDIF
+(   86)  
+(   87) IFRECV = 0
+(   88) DO J=1,KFGATHG
+(   89)   IF(KTO(J) < 1 .OR. KTO(J) > NPROC) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:58      page 3
+
+(   90)     WRITE(NERR,*) 'GATH_GRID:ILLEGAL KTO VALUE',KTO(J),J
+(   91)     CALL ABORT_TRANS('GATH_GRID:ILLEGAL KTO VALUE')
+(   92)   ENDIF
+(   93)   IF(KTO(J) == MYPROC) IFRECV = IFRECV+1
+(   94) ENDDO
+(   95) 
+(   96) IUBOUND=UBOUND(PGP)
+(   97) IF(IUBOUND(1) < IPROMA) THEN
+(   98)   WRITE(NOUT,*)'GATH_GRID:FIRST DIM. OF PGP TOO SMALL ',IUBOUND(1),IPROMA
+(   99)   CALL ABORT_TRANS('GATH_GRID:FIRST DIMENSION OF PGP TOO SMALL ')
+(  100) ENDIF
+(  101) IF(IUBOUND(2) < KFGATHG) THEN
+(  102)   WRITE(NOUT,*)'GATH_GRID:SEC. DIM. OF PGP TOO SMALL ',IUBOUND(2),KFGATHG
+(  103)   CALL ABORT_TRANS('GATH_GRID:SECOND DIMENSION OF PGP TOO SMALL ')
+(  104) ENDIF
+(  105) IF(IUBOUND(3) < IGPBLKS) THEN
+(  106)   WRITE(NOUT,*)'GATH_GRID:THIRD DIM. OF PGP TOO SMALL ',IUBOUND(3),IGPBLKS
+(  107)   CALL ABORT_TRANS('GATH_GRID:THIRD DIMENSION OF PGP TOO SMALL ')
+(  108) ENDIF
+(  109) 
+(  110) IF(IFRECV > 0) THEN
+(  111)   IF(.NOT.PRESENT(PGPG)) THEN
+(  112)     CALL ABORT_TRANS('GATH_GRID:PGPG MISSING')
+(  113)   ENDIF
+(  114)   IF(UBOUND(PGPG,1) < D%NGPTOTG) THEN
+(  115)     CALL ABORT_TRANS('GATH_GRID:FIRST DIMENSION OF PGPG TOO SMALL')
+(  116)   ENDIF
+(  117)  IF(UBOUND(PGPG,2) < IFRECV) THEN
+(  118)     CALL ABORT_TRANS('GATH_GRID:SECOND DIMENSION OF PGPG TOO SMALL')
+(  119)   ENDIF
+(  120) ENDIF
+(  121) 
+(  122) CALL GATH_GRID_CTL(PGPG,KFGATHG,IPROMA,KTO,PGP)
+(  123) 
+(  124) IF (LHOOK) CALL DR_HOOK('GATH_GRID',1,ZHOOK_HANDLE)
+(  125) !endif INTERFACE
+(  126) 
+(  127) !     ------------------------------------------------------------------
+(  128) 
+(  129) END SUBROUTINE GATH_GRID
+(  130) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:58      page 4
+
+(    1) # 1 "gath_grid.F90"
+(    1) SUBROUTINE GATH_GRID(PGPG,KPROMA,KFGATHG,KTO,KRESOL,PGP)
+(    2) # 3 "gath_grid.F90"
+(    3) !**** *GATH_GRID* - Gather global gridpoint array from processors
+(    4) # 5 "gath_grid.F90"
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !        Interface routine for gathering gripoint array
+(    8) # 9 "gath_grid.F90"
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL GATH_GRID(...)
+(   12) # 13 "gath_grid.F90"
+(   13) !     Explicit arguments :
+(   14) !     --------------------
+(   15) !     PGPG(:,:)   - Global gridpoint array
+(   16) !     KFGATHG     - Global number of fields to be gathered
+(   17) !     KPROMA      - blocking factor for gridpoint input
+(   18) !     KTO(:)      - Processor responsible for gathering each field
+(   19) !     KRESOL      - resolution tag  which is required ,default is the
+(   20) !                   first defined resulution (input)
+(   21) !     PGP(:,:,:)  - Local spectral array
+(   22) !
+(   23) !     Method.
+(   24) !     -------
+(   25) # 26 "gath_grid.F90"
+(   26) !     Externals.  SET_RESOL   - set resolution
+(   27) !     ----------  GATH_GRID_CTL -  control routine
+(   28) # 29 "gath_grid.F90"
+(   29) !     Author.
+(   30) !     -------
+(   31) !        Mats Hamrud *ECMWF*
+(   32) # 33 "gath_grid.F90"
+(   33) !     Modifications.
+(   34) !     --------------
+(   35) !        Original : 00-03-03
+(   36) # 37 "gath_grid.F90"
+(   37) !     ------------------------------------------------------------------
+(   38) # 39 "gath_grid.F90"
+(   39) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   40) # 41 "gath_grid.F90"
+(   41) !ifndef INTERFACE
+(   42) # 43 "gath_grid.F90"
+(   43) USE TPM_GEN         ,ONLY : NERR, NOUT
+(   44) !USE TPM_DIM
+(   45) USE TPM_DISTR       ,ONLY : D, MYPROC, NPROC
+(   46) # 47 "gath_grid.F90"
+(   47) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(   48) USE GATH_GRID_CTL_MOD ,ONLY : GATH_GRID_CTL
+(   49) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   50) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   51) # 52 "gath_grid.F90"
+(   52) !endif INTERFACE
+(   53) # 54 "gath_grid.F90"
+(   54) IMPLICIT NONE
+(   55) # 56 "gath_grid.F90"
+(   56) ! Declaration of arguments
+(   57) # 58 "gath_grid.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:58      page 5
+
+(   58) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PGPG(:,:)
+(   59) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KPROMA
+(   60) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFGATHG
+(   61) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KTO(:)
+(   62) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   63) REAL(KIND=JPRB)             , INTENT(IN)  :: PGP(:,:,:)
+(   64) # 65 "gath_grid.F90"
+(   65) !ifndef INTERFACE
+(   66) # 67 "gath_grid.F90"
+(   67) INTEGER(KIND=JPIM) :: IFRECV,J,IUBOUND(3),IPROMA,IGPBLKS
+(   68) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   69) # 70 "gath_grid.F90"
+(   70) !     ------------------------------------------------------------------
+(   71) # 72 "gath_grid.F90"
+(   72) IF (LHOOK) CALL DR_HOOK('GATH_GRID',0,ZHOOK_HANDLE)
+(   73) ! Set current resolution
+(   74) CALL SET_RESOL(KRESOL)
+(   75) # 76 "gath_grid.F90"
+(   76) IPROMA = D%NGPTOT
+(   77) IF(PRESENT(KPROMA)) THEN
+(   78)   IPROMA = KPROMA
+(   79) ENDIF
+(   80) IGPBLKS = (D%NGPTOT-1)/IPROMA+1
+(   81) # 83 "gath_grid.F90"
+(   83) IF(UBOUND(KTO,1) < KFGATHG) THEN
+(   84)  CALL ABORT_TRANS('GATH_GRID: KTO TOO SHORT!')
+(   85) ENDIF
+(   86)  
+(   87) IFRECV = 0
+(   88) DO J=1,KFGATHG
+(   89)   IF(KTO(J) < 1 .OR. KTO(J) > NPROC) THEN
+(   90)     WRITE(NERR,*) 'GATH_GRID:ILLEGAL KTO VALUE',KTO(J),J
+(   91)     CALL ABORT_TRANS('GATH_GRID:ILLEGAL KTO VALUE')
+(   92)   ENDIF
+(   93)   IF(KTO(J) == MYPROC) IFRECV = IFRECV+1
+(   94) ENDDO
+(   95) # 96 "gath_grid.F90"
+(   96) IUBOUND=UBOUND(PGP)
+(   97) IF(IUBOUND(1) < IPROMA) THEN
+(   98)   WRITE(NOUT,*)'GATH_GRID:FIRST DIM. OF PGP TOO SMALL ',IUBOUND(1),IPROMA
+(   99)   CALL ABORT_TRANS('GATH_GRID:FIRST DIMENSION OF PGP TOO SMALL ')
+(  100) ENDIF
+(  101) IF(IUBOUND(2) < KFGATHG) THEN
+(  102)   WRITE(NOUT,*)'GATH_GRID:SEC. DIM. OF PGP TOO SMALL ',IUBOUND(2),KFGATHG
+(  103)   CALL ABORT_TRANS('GATH_GRID:SECOND DIMENSION OF PGP TOO SMALL ')
+(  104) ENDIF
+(  105) IF(IUBOUND(3) < IGPBLKS) THEN
+(  106)   WRITE(NOUT,*)'GATH_GRID:THIRD DIM. OF PGP TOO SMALL ',IUBOUND(3),IGPBLKS
+(  107)   CALL ABORT_TRANS('GATH_GRID:THIRD DIMENSION OF PGP TOO SMALL ')
+(  108) ENDIF
+(  109) # 110 "gath_grid.F90"
+(  110) IF(IFRECV > 0) THEN
+(  111)   IF(.NOT.PRESENT(PGPG)) THEN
+(  112)     CALL ABORT_TRANS('GATH_GRID:PGPG MISSING')
+(  113)   ENDIF
+(  114)   IF(UBOUND(PGPG,1) < D%NGPTOTG) THEN
+(  115)     CALL ABORT_TRANS('GATH_GRID:FIRST DIMENSION OF PGPG TOO SMALL')
+(  116)   ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:58      page 6
+
+(  117)  IF(UBOUND(PGPG,2) < IFRECV) THEN
+(  118)     CALL ABORT_TRANS('GATH_GRID:SECOND DIMENSION OF PGPG TOO SMALL')
+(  119)   ENDIF
+(  120) ENDIF
+(  121) # 122 "gath_grid.F90"
+(  122) CALL GATH_GRID_CTL(PGPG,KFGATHG,IPROMA,KTO,PGP)
+(  123) # 124 "gath_grid.F90"
+(  124) IF (LHOOK) CALL DR_HOOK('GATH_GRID',1,ZHOOK_HANDLE)
+(  125) !endif INTERFACE
+(  126) # 127 "gath_grid.F90"
+(  127) !     ------------------------------------------------------------------
+(  128) # 129 "gath_grid.F90"
+(  129) END SUBROUTINE GATH_GRID

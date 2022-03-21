@@ -1,0 +1,454 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:26      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: cdmap_mod.F90
+
+(    1) MODULE CDMAP_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE CDMAP(KM,KMLOC,KSL,KSLO,PEPSNM, KDIR, KDGNH, KDGNHD,&
+(    4) & KFIELDS, PCOEFA, PCOEFS)
+(    5) 
+(    6) USE PARKIND1  ,ONLY : JPIM     ,JPRBT, JPRB
+(    7) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    8) USE TPM_FLT
+(    9) USE TPM_GEOMETRY
+(   10) USE TPM_DISTR       ,ONLY : D
+(   11) USE TPM_TRANS       ,ONLY : FOUBUF_IN, FOUBUF
+(   12) USE SEEFMM_MIX
+(   13) 
+(   14) !**** *CDMAP* - REMAP ROOTS
+(   15) !
+(   16) !     Purpose.
+(   17) !     --------
+(   18) ! remap from one set of roots to another using Christoffel-Darboux formula, see Chien + Alpert, 1997.
+(   19) 
+(   20) !**   Interface.
+(   21) !     ----------
+(   22) !        *CALL* *CDMAP(...)
+(   23) 
+(   24) !        Explicit arguments :
+(   25) !        --------------------
+(   26) !          KM        - zonal wavenumber
+(   27) !          KMLOC     - local zonal wavenumber
+(   28) !
+(   29) !     Method.
+(   30) !     -------
+(   31) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:26      page 2
+
+(   32) !     Externals.
+(   33) !     ----------
+(   34) 
+(   35) !     Reference.
+(   36) !     ----------
+(   37) !      Chien + Alpert, 1997.
+(   38) 
+(   39) !     Author.
+(   40) !     -------
+(   41) !        Nils Wedi  *ECMWF*
+(   42) 
+(   43) !     Modifications.
+(   44) !     --------------
+(   45) !        Original : 14-05-14 
+(   46) !     ------------------------------------------------------------------
+(   47) 
+(   48) IMPLICIT NONE
+(   49) 
+(   50) 
+(   51) INTEGER(KIND=JPIM), INTENT(IN) :: KM
+(   52) INTEGER(KIND=JPIM), INTENT(IN) :: KMLOC
+(   53) INTEGER(KIND=JPIM), INTENT(IN) :: KSL
+(   54) INTEGER(KIND=JPIM), INTENT(IN) :: KSLO
+(   55) REAL(KIND=JPRBT), INTENT(IN) :: PEPSNM
+(   56) INTEGER(KIND=JPIM), INTENT(IN) :: KDIR ! direction of map
+(   57) INTEGER(KIND=JPIM), INTENT(IN) :: KDGNH
+(   58) INTEGER(KIND=JPIM), INTENT(IN) :: KDGNHD
+(   59) INTEGER(KIND=JPIM), INTENT(IN) :: KFIELDS
+(   60) REAL(KIND=JPRBT), INTENT(INOUT) :: PCOEFA(:,:)
+(   61) REAL(KIND=JPRBT), INTENT(INOUT) :: PCOEFS(:,:)
+(   62) 
+(   63) INTEGER(KIND=JPIM) :: JGL, IGL, JF
+(   64) REAL(KIND=JPRBT), ALLOCATABLE :: ZALL(:,:), ZQX(:,:)
+(   65) REAL(KIND=JPRBT), ALLOCATABLE :: ZALL1(:,:), ZQY(:,:)
+(   66) INTEGER(KIND=JPIM) :: ISTN(KDGNH), ISTS(KDGNH)
+(   67) 
+(   68) INTEGER(KIND=JPIM) :: IGLS, IPROC, IPROCS, IEND, IENDO
+(   69) 
+(   70) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   71) 
+(   72) !     ------------------------------------------------------------------
+(   73) 
+(   74) !*       1.       PERFORM LEGENDRE TRANFORM.
+(   75) !                 --------------------------
+(   76) 
+(   77) IF (LHOOK) CALL DR_HOOK('CDMAP_MOD',0,ZHOOK_HANDLE)
+(   78) 
+(   79) IF( KDIR == -1 ) THEN
+(   80)   ! inverse map from internal (gg) roots to post-processing roots
+(   81) 
+(   82)   IENDO = 2*KDGNHD -  KSLO + 1
+(   83)   IEND = 2*KDGNH -  KSL + 1
+(   84) 
+(   85)   !!!!! fourier buffer setup in output latitudes, may not work if different from input !!!!
+(   86)   DO IGL=KSLO, KDGNHD
+(   87)     IPROC = D%NPROCL(IGL)
+(   88)     ISTN(IGL) = (D%NSTAGT0B(IPROC) + D%NPNTGTB1(KMLOC,IGL))*KFIELDS
+(   89)     IGLS = 2*KDGNH+1-IGL
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:26      page 3
+
+(   90)     IPROCS = D%NPROCL(IGLS)
+(   91)     ISTS(IGL) = (D%NSTAGT0B(IPROCS) + D%NPNTGTB1(KMLOC,IGLS))*KFIELDS
+(   92)   ENDDO
+(   93) 
+(   94)   ALLOCATE(ZALL(KFIELDS, 2*KDGNHD))
+(   95)   ALLOCATE(ZALL1(KFIELDS, 2*KDGNHD))
+(   96)   ALLOCATE(ZQX(KFIELDS, 2*KDGNH))
+(   97)   ALLOCATE(ZQY(KFIELDS, 2*KDGNH))
+(   98)   ZQX(:,1:KSL) = 0._JPRBT
+(   99)   ZQX(:,IEND:2*KDGNH) = 0._JPRBT
+(  100)   ZQY(:,1:KSL) = 0._JPRBT
+(  101)   ZQY(:,IEND:2*KDGNH) = 0._JPRBT
+(  102)   DO JGL=KSL, IEND
+(  103)     ZQX(1:KFIELDS,JGL)=S%FA(KMLOC)%RPNMWI(JGL-KSL+1,1)*PCOEFA(1:KFIELDS,JGL)
+(  104)     ZQY(1:KFIELDS,JGL)=S%FA(KMLOC)%RPNMWI(JGL-KSL+1,2)*PCOEFA(1:KFIELDS,JGL)
+(  105)   ENDDO
+(  106)   CALL SEEFMM_MULM(S%FMM_INTI,KFIELDS,1_JPIM,.TRUE.,ZQX,ZALL1)
+(  107)   CALL SEEFMM_MULM(S%FMM_INTI,KFIELDS,1_JPIM,.TRUE.,ZQY,ZALL)
+(  108)   DEALLOCATE(ZQX)
+(  109)   DEALLOCATE(ZQY)
+(  110)   ! minus sign comes from FMM ?!
+(  111)   ! fill buffer
+(  112)   DO IGL=KSLO,KDGNHD
+(  113)     IGLS = 2*KDGNHD+1-IGL
+(  114)     DO JF=1,KFIELDS
+(  115)       FOUBUF_IN(ISTN(IGL)+JF) = S%FA(KMLOC)%RPNMWO(IGL-KSLO+1,1)*ZALL1(JF,IGL) & 
+(  116)        & - S%FA(KMLOC)%RPNMWO(IGL-KSLO+1,2)*ZALL(JF,IGL)
+(  117)       FOUBUF_IN(ISTS(IGL)+JF) = S%FA(KMLOC)%RPNMWO(IGLS-KSLO+1,1)*ZALL1(JF,IGLS) & 
+(  118)        & - S%FA(KMLOC)%RPNMWO(IGLS-KSLO+1,2)*ZALL(JF,IGLS)
+(  119)     ENDDO
+(  120)   ENDDO
+(  121)   DEALLOCATE(ZALL1)
+(  122)   DEALLOCATE(ZALL)
+(  123) 
+(  124) ELSE
+(  125) ! direct map from post-processing/input field roots to internal (gg) roots
+(  126) ! this assumes essentially a nearest neighbour interpolation in latitude
+(  127) ! a more accurate approach may be 
+(  128) ! a local gridpoint interpolation of the input field to the target latitudes prior to the transforms
+(  129) 
+(  130)   IENDO = 2*KDGNHD -  KSLO + 1
+(  131)   IEND   = 2*KDGNH -  KSL + 1
+(  132) 
+(  133)   !!!!! fourier buffer setup in input data latitudes, may not work if different from output !!!!
+(  134)   DO JGL=KSLO, KDGNHD
+(  135)     IPROC = D%NPROCL(JGL)
+(  136)     ISTN(JGL) = (D%NSTAGT1B(IPROC) + D%NPNTGTB1(KMLOC,JGL))*KFIELDS
+(  137)     IGLS = 2*KDGNHD+1-JGL
+(  138)     IPROCS = D%NPROCL(IGLS)
+(  139)     ISTS(JGL) = (D%NSTAGT1B(IPROCS) + D%NPNTGTB1(KMLOC,IGLS))*KFIELDS
+(  140)   ENDDO
+(  141) 
+(  142)   ALLOCATE( ZQX( KFIELDS, 2*KDGNHD))
+(  143)   ZQX(:,1:KSLO) = 0._JPRBT
+(  144)   ZQX(:,IENDO:2*KDGNHD) = 0._JPRBT
+(  145)   DO JGL=KSLO, KDGNHD
+(  146)     IGLS = 2*KDGNHD+1-JGL
+(  147)     DO JF=1,KFIELDS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:26      page 4
+
+(  148)       ZQX(JF,JGL)=FOUBUF(ISTN(JGL)+JF)
+(  149)       ZQX(JF,IGLS)=FOUBUF(ISTS(JGL)+JF)
+(  150)     ENDDO
+(  151)   ENDDO
+(  152) 
+(  153)   ! split into symmetric / antisymmetric
+(  154)   DO IGL=KSL,KDGNH
+(  155)     IGLS = 2*KDGNH+1-IGL
+(  156)     PCOEFS(1:KFIELDS,IGL) = ZQX(1:KFIELDS,IGL) + ZQX(1:KFIELDS,IGLS)
+(  157)     PCOEFA(1:KFIELDS,IGL) = ZQX(1:KFIELDS,IGL) - ZQX(1:KFIELDS,IGLS)
+(  158)   ENDDO
+(  159) 
+(  160)   DEALLOCATE(ZQX)
+(  161)   
+(  162) ENDIF
+(  163) 
+(  164) IF (LHOOK) CALL DR_HOOK('CDMAP_MOD',1,ZHOOK_HANDLE)
+(  165) !     ------------------------------------------------------------------
+(  166) 
+(  167) END SUBROUTINE CDMAP
+(  168) END MODULE CDMAP_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:26      page 5
+
+(    1) # 1 "cdmap_mod.F90"
+(    1) MODULE CDMAP_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE CDMAP(KM,KMLOC,KSL,KSLO,PEPSNM, KDIR, KDGNH, KDGNHD,&
+(    4) & KFIELDS, PCOEFA, PCOEFS)
+(    5) # 6 "cdmap_mod.F90"
+(    6) USE PARKIND1  ,ONLY : JPIM     ,JPRBT, JPRB
+(    7) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    8) USE TPM_FLT
+(    9) USE TPM_GEOMETRY
+(   10) USE TPM_DISTR       ,ONLY : D
+(   11) USE TPM_TRANS       ,ONLY : FOUBUF_IN, FOUBUF
+(   12) USE SEEFMM_MIX
+(   13) # 14 "cdmap_mod.F90"
+(   14) !**** *CDMAP* - REMAP ROOTS
+(   15) !
+(   16) !     Purpose.
+(   17) !     --------
+(   18) ! remap from one set of roots to another using Christoffel-Darboux formula, see Chien + Alpert, 1997.
+(   19) # 20 "cdmap_mod.F90"
+(   20) !**   Interface.
+(   21) !     ----------
+(   22) !        *CALL* *CDMAP(...)
+(   23) # 24 "cdmap_mod.F90"
+(   24) !        Explicit arguments :
+(   25) !        --------------------
+(   26) !          KM        - zonal wavenumber
+(   27) !          KMLOC     - local zonal wavenumber
+(   28) !
+(   29) !     Method.
+(   30) !     -------
+(   31) # 32 "cdmap_mod.F90"
+(   32) !     Externals.
+(   33) !     ----------
+(   34) # 35 "cdmap_mod.F90"
+(   35) !     Reference.
+(   36) !     ----------
+(   37) !      Chien + Alpert, 1997.
+(   38) # 39 "cdmap_mod.F90"
+(   39) !     Author.
+(   40) !     -------
+(   41) !        Nils Wedi  *ECMWF*
+(   42) # 43 "cdmap_mod.F90"
+(   43) !     Modifications.
+(   44) !     --------------
+(   45) !        Original : 14-05-14 
+(   46) !     ------------------------------------------------------------------
+(   47) # 48 "cdmap_mod.F90"
+(   48) IMPLICIT NONE
+(   49) # 51 "cdmap_mod.F90"
+(   51) INTEGER(KIND=JPIM), INTENT(IN) :: KM
+(   52) INTEGER(KIND=JPIM), INTENT(IN) :: KMLOC
+(   53) INTEGER(KIND=JPIM), INTENT(IN) :: KSL
+(   54) INTEGER(KIND=JPIM), INTENT(IN) :: KSLO
+(   55) REAL(KIND=JPRBT), INTENT(IN) :: PEPSNM
+(   56) INTEGER(KIND=JPIM), INTENT(IN) :: KDIR ! direction of map
+(   57) INTEGER(KIND=JPIM), INTENT(IN) :: KDGNH
+(   58) INTEGER(KIND=JPIM), INTENT(IN) :: KDGNHD
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:26      page 6
+
+(   59) INTEGER(KIND=JPIM), INTENT(IN) :: KFIELDS
+(   60) REAL(KIND=JPRBT), INTENT(INOUT) :: PCOEFA(:,:)
+(   61) REAL(KIND=JPRBT), INTENT(INOUT) :: PCOEFS(:,:)
+(   62) # 63 "cdmap_mod.F90"
+(   63) INTEGER(KIND=JPIM) :: JGL, IGL, JF
+(   64) REAL(KIND=JPRBT), ALLOCATABLE :: ZALL(:,:), ZQX(:,:)
+(   65) REAL(KIND=JPRBT), ALLOCATABLE :: ZALL1(:,:), ZQY(:,:)
+(   66) INTEGER(KIND=JPIM) :: ISTN(KDGNH), ISTS(KDGNH)
+(   67) # 68 "cdmap_mod.F90"
+(   68) INTEGER(KIND=JPIM) :: IGLS, IPROC, IPROCS, IEND, IENDO
+(   69) # 70 "cdmap_mod.F90"
+(   70) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   71) # 72 "cdmap_mod.F90"
+(   72) !     ------------------------------------------------------------------
+(   73) # 74 "cdmap_mod.F90"
+(   74) !*       1.       PERFORM LEGENDRE TRANFORM.
+(   75) !                 --------------------------
+(   76) # 77 "cdmap_mod.F90"
+(   77) IF (LHOOK) CALL DR_HOOK('CDMAP_MOD',0,ZHOOK_HANDLE)
+(   78) # 79 "cdmap_mod.F90"
+(   79) IF( KDIR == -1 ) THEN
+(   80)   ! inverse map from internal (gg) roots to post-processing roots
+(   81) # 82 "cdmap_mod.F90"
+(   82)   IENDO = 2*KDGNHD -  KSLO + 1
+(   83)   IEND = 2*KDGNH -  KSL + 1
+(   84) # 85 "cdmap_mod.F90"
+(   85)   !!!!! fourier buffer setup in output latitudes, may not work if different from input !!!!
+(   86)   DO IGL=KSLO, KDGNHD
+(   87)     IPROC = D%NPROCL(IGL)
+(   88)     ISTN(IGL) = (D%NSTAGT0B(IPROC) + D%NPNTGTB1(KMLOC,IGL))*KFIELDS
+(   89)     IGLS = 2*KDGNH+1-IGL
+(   90)     IPROCS = D%NPROCL(IGLS)
+(   91)     ISTS(IGL) = (D%NSTAGT0B(IPROCS) + D%NPNTGTB1(KMLOC,IGLS))*KFIELDS
+(   92)   ENDDO
+(   93) # 94 "cdmap_mod.F90"
+(   94)   ALLOCATE(ZALL(KFIELDS, 2*KDGNHD))
+(   95)   ALLOCATE(ZALL1(KFIELDS, 2*KDGNHD))
+(   96)   ALLOCATE(ZQX(KFIELDS, 2*KDGNH))
+(   97)   ALLOCATE(ZQY(KFIELDS, 2*KDGNH))
+(   98)   ZQX(:,1:KSL) = 0._JPRBT
+(   99)   ZQX(:,IEND:2*KDGNH) = 0._JPRBT
+(  100)   ZQY(:,1:KSL) = 0._JPRBT
+(  101)   ZQY(:,IEND:2*KDGNH) = 0._JPRBT
+(  102)   DO JGL=KSL, IEND
+(  103)     ZQX(1:KFIELDS,JGL)=S%FA(KMLOC)%RPNMWI(JGL-KSL+1,1)*PCOEFA(1:KFIELDS,JGL)
+(  104)     ZQY(1:KFIELDS,JGL)=S%FA(KMLOC)%RPNMWI(JGL-KSL+1,2)*PCOEFA(1:KFIELDS,JGL)
+(  105)   ENDDO
+(  106)   CALL SEEFMM_MULM(S%FMM_INTI,KFIELDS,1_JPIM,.TRUE.,ZQX,ZALL1)
+(  107)   CALL SEEFMM_MULM(S%FMM_INTI,KFIELDS,1_JPIM,.TRUE.,ZQY,ZALL)
+(  108)   DEALLOCATE(ZQX)
+(  109)   DEALLOCATE(ZQY)
+(  110)   ! minus sign comes from FMM ?!
+(  111)   ! fill buffer
+(  112)   DO IGL=KSLO,KDGNHD
+(  113)     IGLS = 2*KDGNHD+1-IGL
+(  114)     DO JF=1,KFIELDS
+(  115)       FOUBUF_IN(ISTN(IGL)+JF) = S%FA(KMLOC)%RPNMWO(IGL-KSLO+1,1)*ZALL1(JF,IGL) & 
+(  116)        & - S%FA(KMLOC)%RPNMWO(IGL-KSLO+1,2)*ZALL(JF,IGL)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:26      page 7
+
+(  117)       FOUBUF_IN(ISTS(IGL)+JF) = S%FA(KMLOC)%RPNMWO(IGLS-KSLO+1,1)*ZALL1(JF,IGLS) & 
+(  118)        & - S%FA(KMLOC)%RPNMWO(IGLS-KSLO+1,2)*ZALL(JF,IGLS)
+(  119)     ENDDO
+(  120)   ENDDO
+(  121)   DEALLOCATE(ZALL1)
+(  122)   DEALLOCATE(ZALL)
+(  123) # 124 "cdmap_mod.F90"
+(  124) ELSE
+(  125) ! direct map from post-processing/input field roots to internal (gg) roots
+(  126) ! this assumes essentially a nearest neighbour interpolation in latitude
+(  127) ! a more accurate approach may be 
+(  128) ! a local gridpoint interpolation of the input field to the target latitudes prior to the transforms
+(  129) # 130 "cdmap_mod.F90"
+(  130)   IENDO = 2*KDGNHD -  KSLO + 1
+(  131)   IEND   = 2*KDGNH -  KSL + 1
+(  132) # 133 "cdmap_mod.F90"
+(  133)   !!!!! fourier buffer setup in input data latitudes, may not work if different from output !!!!
+(  134)   DO JGL=KSLO, KDGNHD
+(  135)     IPROC = D%NPROCL(JGL)
+(  136)     ISTN(JGL) = (D%NSTAGT1B(IPROC) + D%NPNTGTB1(KMLOC,JGL))*KFIELDS
+(  137)     IGLS = 2*KDGNHD+1-JGL
+(  138)     IPROCS = D%NPROCL(IGLS)
+(  139)     ISTS(JGL) = (D%NSTAGT1B(IPROCS) + D%NPNTGTB1(KMLOC,IGLS))*KFIELDS
+(  140)   ENDDO
+(  141) # 142 "cdmap_mod.F90"
+(  142)   ALLOCATE( ZQX( KFIELDS, 2*KDGNHD))
+(  143)   ZQX(:,1:KSLO) = 0._JPRBT
+(  144)   ZQX(:,IENDO:2*KDGNHD) = 0._JPRBT
+(  145)   DO JGL=KSLO, KDGNHD
+(  146)     IGLS = 2*KDGNHD+1-JGL
+(  147)     DO JF=1,KFIELDS
+(  148)       ZQX(JF,JGL)=FOUBUF(ISTN(JGL)+JF)
+(  149)       ZQX(JF,IGLS)=FOUBUF(ISTS(JGL)+JF)
+(  150)     ENDDO
+(  151)   ENDDO
+(  152) # 153 "cdmap_mod.F90"
+(  153)   ! split into symmetric / antisymmetric
+(  154)   DO IGL=KSL,KDGNH
+(  155)     IGLS = 2*KDGNH+1-IGL
+(  156)     PCOEFS(1:KFIELDS,IGL) = ZQX(1:KFIELDS,IGL) + ZQX(1:KFIELDS,IGLS)
+(  157)     PCOEFA(1:KFIELDS,IGL) = ZQX(1:KFIELDS,IGL) - ZQX(1:KFIELDS,IGLS)
+(  158)   ENDDO
+(  159) # 160 "cdmap_mod.F90"
+(  160)   DEALLOCATE(ZQX)
+(  161)   
+(  162) ENDIF
+(  163) # 164 "cdmap_mod.F90"
+(  164) IF (LHOOK) CALL DR_HOOK('CDMAP_MOD',1,ZHOOK_HANDLE)
+(  165) !     ------------------------------------------------------------------
+(  166) # 167 "cdmap_mod.F90"
+(  167) END SUBROUTINE CDMAP
+(  168) END MODULE CDMAP_MOD

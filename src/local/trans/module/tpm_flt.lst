@@ -1,0 +1,194 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:01      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: tpm_flt.F90
+
+(    1) MODULE TPM_FLT
+(    2) 
+(    3) USE PARKIND1  ,ONLY : JPIM     ,JPRBT, JPRD
+(    4) USE BUTTERFLY_ALG_MOD,ONLY : BUTTERFLY_STRUCT
+(    5) USE SEEFMM_MIX
+(    6) IMPLICIT NONE
+(    7) 
+(    8) SAVE
+(    9) 
+(   10) 
+(   11) TYPE FLT_TYPE
+(   12) INTEGER(KIND=JPIM) :: NSPOLEGL
+(   13) INTEGER(KIND=JPIM) :: NDGNH
+(   14) INTEGER(KIND=JPIM) :: INS2
+(   15) INTEGER(KIND=JPIM) :: INA2
+(   16) REAL(KIND=JPRBT) ,POINTER :: RPNMS(:,:) ! Legendre polynomials
+(   17) REAL(KIND=JPRBT) ,POINTER :: RPNMA(:,:) ! Legendre polynomials
+(   18) REAL(KIND=JPRD) ,POINTER :: RPNMDS(:,:) ! Legendre polynomials
+(   19) REAL(KIND=JPRD) ,POINTER :: RPNMDA(:,:) ! Legendre polynomials
+(   20) REAL(KIND=JPRBT) :: RCS
+(   21) REAL(KIND=JPRBT) :: RCA
+(   22) !REAL(KIND=JPRBT) ,POINTER :: RPNMCDO(:,:) ! Legendre polynomials for C-D formula at orig roots
+(   23) !REAL(KIND=JPRBT) ,POINTER :: RPNMCDD(:,:) ! Legendre polynomials for C-D formula at dual roots
+(   24) REAL(KIND=JPRBT) ,POINTER :: RPNMWI(:,:) ! special weights
+(   25) REAL(KIND=JPRBT) ,POINTER :: RPNMWO(:,:) ! special weights
+(   26) INTEGER(KIND=JPIM) :: ISLD ! starting latitude dual
+(   27) 
+(   28) ! Butterfly
+(   29) 
+(   30) INTEGER(KIND=JPIM) :: MAXCOLS
+(   31) TYPE(BUTTERFLY_STRUCT) :: YBUT_STRUCT_S,YBUT_STRUCT_A
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:01      page 2
+
+(   32) 
+(   33) END TYPE FLT_TYPE
+(   34) 
+(   35) TYPE FLT_TYPE_WRAP
+(   36) TYPE(FLT_TYPE),ALLOCATABLE :: FA(:)
+(   37) LOGICAL :: LDLL
+(   38) LOGICAL :: LSHIFTLL
+(   39) LOGICAL :: LUSEFLT
+(   40) LOGICAL :: LUSE_BELUSOV
+(   41) LOGICAL :: LKEEPRPNM
+(   42) LOGICAL :: LSOUTHPNM ! .TRUE. to compute Legendre polynomials on southern hemisphere
+(   43) INTEGER(KIND=JPIM) :: IMLOC
+(   44) INTEGER(KIND=JPIM) :: ITHRESHOLD
+(   45) INTEGER(KIND=JPIM) :: NDGNHD ! dual set dimension
+(   46) INTEGER(KIND=JPIM) :: NDLON  ! dual number of longitudes
+(   47) INTEGER(KIND=JPIM) :: NDGL   ! dual number of latitudes
+(   48) LOGICAL :: LSYM
+(   49) TYPE(FMM_TYPE),POINTER :: FMM_INTI ! FMM interpolation
+(   50) 
+(   51) END TYPE FLT_TYPE_WRAP
+(   52) 
+(   53) TYPE(FLT_TYPE_WRAP),ALLOCATABLE,TARGET :: FLT_RESOL(:)
+(   54) TYPE(FLT_TYPE_WRAP),POINTER     :: S
+(   55) 
+(   56) 
+(   57) END MODULE TPM_FLT
+(   58) 
+(   59) 
+(   60) 
+(   61) 
+(   62) 
+(   63) 
+(   64) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:01      page 3
+
+(    1) # 1 "tpm_flt.F90"
+(    1) MODULE TPM_FLT
+(    2) # 3 "tpm_flt.F90"
+(    3) USE PARKIND1  ,ONLY : JPIM     ,JPRBT, JPRD
+(    4) USE BUTTERFLY_ALG_MOD,ONLY : BUTTERFLY_STRUCT
+(    5) USE SEEFMM_MIX
+(    6) IMPLICIT NONE
+(    7) # 8 "tpm_flt.F90"
+(    8) SAVE
+(    9) # 11 "tpm_flt.F90"
+(   11) TYPE FLT_TYPE
+(   12) INTEGER(KIND=JPIM) :: NSPOLEGL
+(   13) INTEGER(KIND=JPIM) :: NDGNH
+(   14) INTEGER(KIND=JPIM) :: INS2
+(   15) INTEGER(KIND=JPIM) :: INA2
+(   16) REAL(KIND=JPRBT) ,POINTER :: RPNMS(:,:) ! Legendre polynomials
+(   17) REAL(KIND=JPRBT) ,POINTER :: RPNMA(:,:) ! Legendre polynomials
+(   18) REAL(KIND=JPRD) ,POINTER :: RPNMDS(:,:) ! Legendre polynomials
+(   19) REAL(KIND=JPRD) ,POINTER :: RPNMDA(:,:) ! Legendre polynomials
+(   20) REAL(KIND=JPRBT) :: RCS
+(   21) REAL(KIND=JPRBT) :: RCA
+(   22) !REAL(KIND=JPRBT) ,POINTER :: RPNMCDO(:,:) ! Legendre polynomials for C-D formula at orig roots
+(   23) !REAL(KIND=JPRBT) ,POINTER :: RPNMCDD(:,:) ! Legendre polynomials for C-D formula at dual roots
+(   24) REAL(KIND=JPRBT) ,POINTER :: RPNMWI(:,:) ! special weights
+(   25) REAL(KIND=JPRBT) ,POINTER :: RPNMWO(:,:) ! special weights
+(   26) INTEGER(KIND=JPIM) :: ISLD ! starting latitude dual
+(   27) # 28 "tpm_flt.F90"
+(   28) ! Butterfly
+(   29) # 30 "tpm_flt.F90"
+(   30) INTEGER(KIND=JPIM) :: MAXCOLS
+(   31) TYPE(BUTTERFLY_STRUCT) :: YBUT_STRUCT_S,YBUT_STRUCT_A
+(   32) # 33 "tpm_flt.F90"
+(   33) END TYPE FLT_TYPE
+(   34) # 35 "tpm_flt.F90"
+(   35) TYPE FLT_TYPE_WRAP
+(   36) TYPE(FLT_TYPE),ALLOCATABLE :: FA(:)
+(   37) LOGICAL :: LDLL
+(   38) LOGICAL :: LSHIFTLL
+(   39) LOGICAL :: LUSEFLT
+(   40) LOGICAL :: LUSE_BELUSOV
+(   41) LOGICAL :: LKEEPRPNM
+(   42) LOGICAL :: LSOUTHPNM ! .TRUE. to compute Legendre polynomials on southern hemisphere
+(   43) INTEGER(KIND=JPIM) :: IMLOC
+(   44) INTEGER(KIND=JPIM) :: ITHRESHOLD
+(   45) INTEGER(KIND=JPIM) :: NDGNHD ! dual set dimension
+(   46) INTEGER(KIND=JPIM) :: NDLON  ! dual number of longitudes
+(   47) INTEGER(KIND=JPIM) :: NDGL   ! dual number of latitudes
+(   48) LOGICAL :: LSYM
+(   49) TYPE(FMM_TYPE),POINTER :: FMM_INTI ! FMM interpolation
+(   50) # 51 "tpm_flt.F90"
+(   51) END TYPE FLT_TYPE_WRAP
+(   52) # 53 "tpm_flt.F90"
+(   53) TYPE(FLT_TYPE_WRAP),ALLOCATABLE,TARGET :: FLT_RESOL(:)
+(   54) TYPE(FLT_TYPE_WRAP),POINTER     :: S
+(   55) # 57 "tpm_flt.F90"
+(   57) END MODULE TPM_FLT

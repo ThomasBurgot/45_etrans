@@ -1,0 +1,349 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:11      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: asre1b_mod.F90
+
+(    1) MODULE ASRE1B_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ASRE1B(KFIELD,PAOA,PSOA,ISTAN,ISTAS)
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    6) 
+(    7) USE TPM_DIM         ,ONLY : R, R_NDGNH, R_NDGL
+(    8) USE TPM_TRANS       ,ONLY : FOUBUF_IN
+(    9) USE TPM_GEOMETRY    ,ONLY : G, G_NDGLU
+(   10) USE TPM_DISTR       ,ONLY : D,D_NUMP,D_MYMS,D_NSTAGT0B,D_NSTAGT1B,D_NPROCL,D_NPNTGTB1
+(   11) use tpm_gen, only: nout
+(   12) 
+(   13) !**** *ASRE1B* - Recombine antisymmetric and symmetric parts
+(   14) 
+(   15) !     Purpose.
+(   16) !     --------
+(   17) !        To recombine the antisymmetric and symmetric parts of the
+(   18) !        Fourier arrays and update the correct parts of the state
+(   19) !        variables.
+(   20) 
+(   21) !**   Interface.
+(   22) !     ----------
+(   23) !        *CALL* *ASRE1B(..)
+(   24) 
+(   25) !        Explicit arguments :
+(   26) !        -------------------   KFIELD - number of fields (input-c)
+(   27) !                              KM - zonal wavenumber(input-c)
+(   28) !                              KMLOC - local version of KM (input-c)
+(   29) !                              PAOA - antisymmetric part of Fourier
+(   30) !                              fields for zonal wavenumber KM (input)
+(   31) !                              PSOA - symmetric part of Fourier
+(   32) !                              fields for zonal wavenumber KM (input)
+(   33) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:11      page 2
+
+(   34) !        Implicit arguments :  FOUBUF_IN - output buffer (output)
+(   35) !        --------------------
+(   36) 
+(   37) !     Method.
+(   38) !     -------
+(   39) 
+(   40) !     Externals.   None.
+(   41) !     ----------
+(   42) 
+(   43) !     Reference.
+(   44) !     ----------
+(   45) !        ECMWF Research Department documentation of the IFS
+(   46) 
+(   47) !     Author.
+(   48) !     -------
+(   49) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   50) 
+(   51) !     Modifications.
+(   52) !     --------------
+(   53) !        Original : 00-02-01 From ASRE1B in IFS CY22R1
+(   54) 
+(   55) !     ------------------------------------------------------------------
+(   56) 
+(   57) 
+(   58) IMPLICIT NONE
+(   59) 
+(   60) INTEGER(KIND=JPIM), INTENT(IN) :: KFIELD
+(   61) INTEGER(KIND=JPIM) :: KM,KMLOC
+(   62) REAL(KIND=JPRBT), INTENT(IN)    :: PSOA(:,:,:)
+(   63) REAL(KIND=JPRBT), INTENT(IN)    :: PAOA(:,:,:)
+(   64) INTEGER(KIND=JPIM), INTENT(OUT) :: ISTAN(:,:)
+(   65) INTEGER(KIND=JPIM), INTENT(OUT) :: ISTAS(:,:)
+(   66) 
+(   67) !     LOCAL INTEGERS
+(   68) INTEGER(KIND=JPIM) :: ISL, IGLS, JFLD, JGL ,IPROC, IPROCS, IDGNH
+(   69) 
+(   70) !     ------------------------------------------------------------------
+(   71) 
+(   72) !$ACC data &
+(   73) !$ACC COPYIN(D,R,G) &
+(   74) !$ACC COPYIN(D%NPROCL,D%NPNTGTB1,D%NSTAGT0B,R%NDGL,R%NDGNH,D%NUMP,D%MYMS,G%NDGLU) &
+(   75) !$ACC present(PSOA,PAOA) &
+(   76) !$ACC present(FOUBUF_IN) &
+(   77) !$ACC COPY(D_NPROCL,D_NPNTGTB1,D_NSTAGT0B,R_NDGL,R_NDGNH,D_NUMP,D_MYMS,G_NDGLU) &
+(   78) !$ACC present(ISTAN,ISTAS)
+(   79)  
+(   80) !*       1.    RECOMBINATION  OF SYMMETRIC AND ANTSYMMETRIC PARTS.
+(   81) !              ---------------------------------------------------
+(   82) !loop over wavenumber
+(   83) !$ACC PARALLEL LOOP collapse(2) PRIVATE(IPROC,IGLS,IPROCS,KM,ISL)
+(   84) DO JGL=1,R_NDGNH
+(   85)   DO KMLOC=1,D_NUMP
+(   86)      
+(   87)      KM = D_MYMS(KMLOC)
+(   88)      
+(   89)      ISL = MAX(R_NDGNH-G_NDGLU(KM)+1,1)
+(   90)      
+(   91)      if (JGL .ge. ISL) then
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:11      page 3
+
+(   92)         IPROC = D_NPROCL(JGL)
+(   93)         ISTAN(KMLOC,JGL) = (D_NSTAGT0B(IPROC) + D_NPNTGTB1(KMLOC,JGL))*2*KFIELD
+(   94)         IGLS = R_NDGL+1-JGL
+(   95)         IPROCS = D_NPROCL(IGLS)
+(   96)         ISTAS(KMLOC,JGL) = (D_NSTAGT0B(IPROCS) + D_NPNTGTB1(KMLOC,IGLS))*2*KFIELD
+(   97)      end if
+(   98)      
+(   99)   ENDDO
+(  100)   
+(  101) END DO
+(  102) 
+(  103) !loop over wavenumber
+(  104) !$ACC PARALLEL LOOP collapse(3) PRIVATE(KM,ISL)
+(  105) DO KMLOC=1,D_NUMP
+(  106)   DO JGL=1, R_NDGNH
+(  107)      DO JFLD=1,2*KFIELD
+(  108)         
+(  109)         KM = D_MYMS(KMLOC)
+(  110)         
+(  111)         ISL = MAX(R_NDGNH-G_NDGLU(KM)+1,1)
+(  112)         
+(  113)         if (JGL .ge. ISL) then
+(  114)            FOUBUF_IN(ISTAN(KMLOC,JGL)+JFLD) = PAOA(JFLD,JGL,KMLOC)+PSOA(JFLD,JGL,KMLOC)
+(  115)            FOUBUF_IN(ISTAS(KMLOC,JGL)+JFLD) = PSOA(JFLD,JGL,KMLOC)-PAOA(JFLD,JGL,KMLOC)
+(  116)        end if
+(  117)      ENDDO
+(  118)    ENDDO
+(  119) 
+(  120) !end loop over wavenumber
+(  121) END DO
+(  122) 
+(  123) !$ACC end data
+(  124) 
+(  125) !write(301,*) 'asre1b ...', KFIELD,KM, ISTAN(KMLOC,1), ISTAS(KMLOC,1)
+(  126) !call flush(301)
+(  127) !     ------------------------------------------------------------------
+(  128) 
+(  129) END SUBROUTINE ASRE1B
+(  130) END MODULE ASRE1B_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:11      page 4
+
+(    1) # 1 "asre1b_mod.F90"
+(    1) MODULE ASRE1B_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ASRE1B(KFIELD,PAOA,PSOA,ISTAN,ISTAS)
+(    4) # 5 "asre1b_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    6) # 7 "asre1b_mod.F90"
+(    7) USE TPM_DIM         ,ONLY : R, R_NDGNH, R_NDGL
+(    8) USE TPM_TRANS       ,ONLY : FOUBUF_IN
+(    9) USE TPM_GEOMETRY    ,ONLY : G, G_NDGLU
+(   10) USE TPM_DISTR       ,ONLY : D,D_NUMP,D_MYMS,D_NSTAGT0B,D_NSTAGT1B,D_NPROCL,D_NPNTGTB1
+(   11) use tpm_gen, only: nout
+(   12) # 13 "asre1b_mod.F90"
+(   13) !**** *ASRE1B* - Recombine antisymmetric and symmetric parts
+(   14) # 15 "asre1b_mod.F90"
+(   15) !     Purpose.
+(   16) !     --------
+(   17) !        To recombine the antisymmetric and symmetric parts of the
+(   18) !        Fourier arrays and update the correct parts of the state
+(   19) !        variables.
+(   20) # 21 "asre1b_mod.F90"
+(   21) !**   Interface.
+(   22) !     ----------
+(   23) !        *CALL* *ASRE1B(..)
+(   24) # 25 "asre1b_mod.F90"
+(   25) !        Explicit arguments :
+(   26) !        -------------------   KFIELD - number of fields (input-c)
+(   27) !                              KM - zonal wavenumber(input-c)
+(   28) !                              KMLOC - local version of KM (input-c)
+(   29) !                              PAOA - antisymmetric part of Fourier
+(   30) !                              fields for zonal wavenumber KM (input)
+(   31) !                              PSOA - symmetric part of Fourier
+(   32) !                              fields for zonal wavenumber KM (input)
+(   33) # 34 "asre1b_mod.F90"
+(   34) !        Implicit arguments :  FOUBUF_IN - output buffer (output)
+(   35) !        --------------------
+(   36) # 37 "asre1b_mod.F90"
+(   37) !     Method.
+(   38) !     -------
+(   39) # 40 "asre1b_mod.F90"
+(   40) !     Externals.   None.
+(   41) !     ----------
+(   42) # 43 "asre1b_mod.F90"
+(   43) !     Reference.
+(   44) !     ----------
+(   45) !        ECMWF Research Department documentation of the IFS
+(   46) # 47 "asre1b_mod.F90"
+(   47) !     Author.
+(   48) !     -------
+(   49) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   50) # 51 "asre1b_mod.F90"
+(   51) !     Modifications.
+(   52) !     --------------
+(   53) !        Original : 00-02-01 From ASRE1B in IFS CY22R1
+(   54) # 55 "asre1b_mod.F90"
+(   55) !     ------------------------------------------------------------------
+(   56) # 58 "asre1b_mod.F90"
+(   58) IMPLICIT NONE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:11      page 5
+
+(   59) # 60 "asre1b_mod.F90"
+(   60) INTEGER(KIND=JPIM), INTENT(IN) :: KFIELD
+(   61) INTEGER(KIND=JPIM) :: KM,KMLOC
+(   62) REAL(KIND=JPRBT), INTENT(IN)    :: PSOA(:,:,:)
+(   63) REAL(KIND=JPRBT), INTENT(IN)    :: PAOA(:,:,:)
+(   64) INTEGER(KIND=JPIM), INTENT(OUT) :: ISTAN(:,:)
+(   65) INTEGER(KIND=JPIM), INTENT(OUT) :: ISTAS(:,:)
+(   66) # 67 "asre1b_mod.F90"
+(   67) !     LOCAL INTEGERS
+(   68) INTEGER(KIND=JPIM) :: ISL, IGLS, JFLD, JGL ,IPROC, IPROCS, IDGNH
+(   69) # 70 "asre1b_mod.F90"
+(   70) !     ------------------------------------------------------------------
+(   71) # 72 "asre1b_mod.F90"
+(   73) !$ACC COPYIN(D,R,G) &
+(   74) !$ACC COPYIN(D%NPROCL,D%NPNTGTB1,D%NSTAGT0B,R%NDGL,R%NDGNH,D%NUMP,D%MYMS,G%NDGLU) &
+(   75) !$ACC present(PSOA,PAOA) &
+(   76) !$ACC present(FOUBUF_IN) &
+(   77) !$ACC COPY(D_NPROCL,D_NPNTGTB1,D_NSTAGT0B,R_NDGL,R_NDGNH,D_NUMP,D_MYMS,G_NDGLU) &
+(   78) !$ACC present(ISTAN,ISTAS)
+(   79)  
+(   80) !*       1.    RECOMBINATION  OF SYMMETRIC AND ANTSYMMETRIC PARTS.
+(   81) !              ---------------------------------------------------
+(   82) !loop over wavenumber
+(   83) !$ACC PARALLEL LOOP collapse(2) PRIVATE(IPROC,IGLS,IPROCS,KM,ISL)
+(   84) DO JGL=1,R_NDGNH
+(   85)   DO KMLOC=1,D_NUMP
+(   86)      
+(   87)      KM = D_MYMS(KMLOC)
+(   88)      
+(   89)      ISL = MAX(R_NDGNH-G_NDGLU(KM)+1,1)
+(   90)      
+(   91)      if (JGL .ge. ISL) then
+(   92)         IPROC = D_NPROCL(JGL)
+(   93)         ISTAN(KMLOC,JGL) = (D_NSTAGT0B(IPROC) + D_NPNTGTB1(KMLOC,JGL))*2*KFIELD
+(   94)         IGLS = R_NDGL+1-JGL
+(   95)         IPROCS = D_NPROCL(IGLS)
+(   96)         ISTAS(KMLOC,JGL) = (D_NSTAGT0B(IPROCS) + D_NPNTGTB1(KMLOC,IGLS))*2*KFIELD
+(   97)      end if
+(   98)      
+(   99)   ENDDO
+(  100)   
+(  101) END DO
+(  102) # 103 "asre1b_mod.F90"
+(  103) !loop over wavenumber
+(  104) !$ACC PARALLEL LOOP collapse(3) PRIVATE(KM,ISL)
+(  105) DO KMLOC=1,D_NUMP
+(  106)   DO JGL=1, R_NDGNH
+(  107)      DO JFLD=1,2*KFIELD
+(  108)         
+(  109)         KM = D_MYMS(KMLOC)
+(  110)         
+(  111)         ISL = MAX(R_NDGNH-G_NDGLU(KM)+1,1)
+(  112)         
+(  113)         if (JGL .ge. ISL) then
+(  114)            FOUBUF_IN(ISTAN(KMLOC,JGL)+JFLD) = PAOA(JFLD,JGL,KMLOC)+PSOA(JFLD,JGL,KMLOC)
+(  115)            FOUBUF_IN(ISTAS(KMLOC,JGL)+JFLD) = PSOA(JFLD,JGL,KMLOC)-PAOA(JFLD,JGL,KMLOC)
+(  116)        end if
+(  117)      ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:11      page 6
+
+(  118)    ENDDO
+(  119) # 120 "asre1b_mod.F90"
+(  120) !end loop over wavenumber
+(  121) END DO
+(  122) # 123 "asre1b_mod.F90"
+(  123) !$ACC end data
+(  124) # 125 "asre1b_mod.F90"
+(  125) !write(301,*) 'asre1b ...', KFIELD,KM, ISTAN(KMLOC,1), ISTAS(KMLOC,1)
+(  126) !call flush(301)
+(  127) !     ------------------------------------------------------------------
+(  128) # 129 "asre1b_mod.F90"
+(  129) END SUBROUTINE ASRE1B
+(  130) END MODULE ASRE1B_MOD

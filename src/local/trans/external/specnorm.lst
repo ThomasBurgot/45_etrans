@@ -1,0 +1,352 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:57      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: specnorm.F90
+
+(    1) SUBROUTINE SPECNORM(PSPEC,KVSET,KMASTER,KRESOL,PMET,PNORM)
+(    2) 
+(    3) !**** *SPECNORM* - Compute global spectral norms
+(    4) 
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !        Interface routine for computing spectral norms
+(    8) 
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL SPECNORM(...)
+(   12) 
+(   13) !     Explicit arguments : All arguments optional
+(   14) !     --------------------
+(   15) !     PSPEC(:,:)  - Spectral array
+(   16) !     KVSET(:)    - "B-Set" for each field
+(   17) !     KMASTER     - processor to recieve norms
+(   18) !     KRESOL      - resolution tag  which is required ,default is the
+(   19) !                   first defined resulution (input)
+(   20) !     PMET(:)     - metric
+(   21) !     PNORM(:)    - Norms (output for processor KMASTER)
+(   22) !
+(   23) !     Method.
+(   24) !     -------
+(   25) 
+(   26) !     Externals.  SET_RESOL - set resolution
+(   27) !     ----------  SPNORM_CTL - control routine
+(   28) 
+(   29) !     Author.
+(   30) !     -------
+(   31) !        Mats Hamrud *ECMWF*
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:57      page 2
+
+(   32) 
+(   33) !     Modifications.
+(   34) !     --------------
+(   35) !        Original : 00-03-03
+(   36) 
+(   37) !     ------------------------------------------------------------------
+(   38) 
+(   39) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   40) 
+(   41) !ifndef INTERFACE
+(   42) 
+(   43) USE TPM_GEN         ,ONLY : NERR
+(   44) !USE TPM_DIM
+(   45) USE TPM_DISTR       ,ONLY : D, NPRTRV, MYSETV, MYPROC
+(   46) 
+(   47) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(   48) USE SPNORM_CTL_MOD  ,ONLY : SPNORM_CTL
+(   49) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   50) 
+(   51) !endif INTERFACE
+(   52) 
+(   53) IMPLICIT NONE
+(   54) 
+(   55) ! Declaration of arguments
+(   56) 
+(   57) 
+(   58) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPEC(:,:)
+(   59) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSET(:)
+(   60) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KMASTER
+(   61) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PMET(:)
+(   62) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PNORM(:)
+(   63) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   64) !ifndef INTERFACE
+(   65) 
+(   66) INTEGER(KIND=JPIM) :: IMASTER,IFLD,IFLD_G,J
+(   67) 
+(   68) !     ------------------------------------------------------------------
+(   69) 
+(   70) ! Set current resolution
+(   71) CALL SET_RESOL(KRESOL)
+(   72) 
+(   73) ! Set defaults
+(   74) IMASTER = 1
+(   75) IFLD    = 0
+(   76) 
+(   77) 
+(   78) IF(PRESENT(KMASTER)) THEN
+(   79)   IMASTER = KMASTER
+(   80) ENDIF
+(   81) 
+(   82) IF(PRESENT(KVSET)) THEN
+(   83)   IFLD_G = UBOUND(KVSET,1)
+(   84)   DO J=1,IFLD_G
+(   85)     IF(KVSET(J) > NPRTRV) THEN
+(   86)       WRITE(NERR,*) 'SPECNORM:KVSET(J) > NPRTRV ',J,KVSET(J),NPRTRV
+(   87)       CALL ABORT_TRANS('SPECNORM:KVSET TOO LONG OR CONTAINS VALUES OUTSIDE RANGE')
+(   88)     ENDIF
+(   89)     IF(KVSET(J) == MYSETV) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:57      page 3
+
+(   90)       IFLD = IFLD+1
+(   91)     ENDIF
+(   92)   ENDDO
+(   93) ELSE
+(   94)   IF(PRESENT(PSPEC)) THEN
+(   95)     IFLD = UBOUND(PSPEC,1)
+(   96)   ENDIF
+(   97)   IFLD_G = IFLD
+(   98) ENDIF
+(   99) 
+(  100) IF(NPRTRV >1) THEN
+(  101)   IF(IFLD > 0 .AND. .NOT. PRESENT(KVSET)) THEN
+(  102)     WRITE(NERR,*)'NPRTRV >1 AND IFLD > 0 AND NOT PRESENT(KVSET)',&
+(  103)                  &NPRTRV,IFLD
+(  104)     CALL ABORT_TRANS('SPECNORM: SPECIFY VERTICAL SPECTRAL DISTRIBUTION!')
+(  105)   ENDIF
+(  106) ENDIF
+(  107) IF(MYPROC == IMASTER) THEN
+(  108)   IF(.NOT. PRESENT(PNORM)) THEN
+(  109)     CALL ABORT_TRANS('SPECNORM: PNORM NOT PRESENT')
+(  110)   ENDIF
+(  111)   IF(UBOUND(PNORM,1) < IFLD_G) THEN
+(  112)     CALL ABORT_TRANS('SPECNORM: PNORM TOO SMALL')
+(  113)   ENDIF
+(  114) ENDIF
+(  115) IF(IFLD > 0 ) THEN
+(  116)   IF(.NOT. PRESENT(PSPEC)) THEN
+(  117)     CALL ABORT_TRANS('SPECNORM: PSPEC NOT PRESENT')
+(  118)   ENDIF
+(  119)   IF(UBOUND(PSPEC,1) < IFLD) THEN
+(  120)     CALL ABORT_TRANS('SPECNORM: FIRST DIMENSION OF PSPEC TOO SMALL')
+(  121)   ENDIF
+(  122)   IF(UBOUND(PSPEC,2) < D%NSPEC2) THEN
+(  123)     CALL ABORT_TRANS('SPECNORM: FIRST DIMENSION OF PSPEC TOO SMALL')
+(  124)   ENDIF
+(  125) ENDIF
+(  126) 
+(  127) CALL SPNORM_CTL(PSPEC,IFLD,IFLD_G,KVSET,IMASTER,PMET,PNORM)
+(  128) 
+(  129) !endif INTERFACE
+(  130) 
+(  131) !     ------------------------------------------------------------------
+(  132) 
+(  133) END SUBROUTINE SPECNORM
+(  134) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:57      page 4
+
+(    1) # 1 "specnorm.F90"
+(    1) SUBROUTINE SPECNORM(PSPEC,KVSET,KMASTER,KRESOL,PMET,PNORM)
+(    2) # 3 "specnorm.F90"
+(    3) !**** *SPECNORM* - Compute global spectral norms
+(    4) # 5 "specnorm.F90"
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !        Interface routine for computing spectral norms
+(    8) # 9 "specnorm.F90"
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL SPECNORM(...)
+(   12) # 13 "specnorm.F90"
+(   13) !     Explicit arguments : All arguments optional
+(   14) !     --------------------
+(   15) !     PSPEC(:,:)  - Spectral array
+(   16) !     KVSET(:)    - "B-Set" for each field
+(   17) !     KMASTER     - processor to recieve norms
+(   18) !     KRESOL      - resolution tag  which is required ,default is the
+(   19) !                   first defined resulution (input)
+(   20) !     PMET(:)     - metric
+(   21) !     PNORM(:)    - Norms (output for processor KMASTER)
+(   22) !
+(   23) !     Method.
+(   24) !     -------
+(   25) # 26 "specnorm.F90"
+(   26) !     Externals.  SET_RESOL - set resolution
+(   27) !     ----------  SPNORM_CTL - control routine
+(   28) # 29 "specnorm.F90"
+(   29) !     Author.
+(   30) !     -------
+(   31) !        Mats Hamrud *ECMWF*
+(   32) # 33 "specnorm.F90"
+(   33) !     Modifications.
+(   34) !     --------------
+(   35) !        Original : 00-03-03
+(   36) # 37 "specnorm.F90"
+(   37) !     ------------------------------------------------------------------
+(   38) # 39 "specnorm.F90"
+(   39) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   40) # 41 "specnorm.F90"
+(   41) !ifndef INTERFACE
+(   42) # 43 "specnorm.F90"
+(   43) USE TPM_GEN         ,ONLY : NERR
+(   44) !USE TPM_DIM
+(   45) USE TPM_DISTR       ,ONLY : D, NPRTRV, MYSETV, MYPROC
+(   46) # 47 "specnorm.F90"
+(   47) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(   48) USE SPNORM_CTL_MOD  ,ONLY : SPNORM_CTL
+(   49) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   50) # 51 "specnorm.F90"
+(   51) !endif INTERFACE
+(   52) # 53 "specnorm.F90"
+(   53) IMPLICIT NONE
+(   54) # 55 "specnorm.F90"
+(   55) ! Declaration of arguments
+(   56) # 58 "specnorm.F90"
+(   58) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPEC(:,:)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:57      page 5
+
+(   59) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSET(:)
+(   60) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KMASTER
+(   61) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PMET(:)
+(   62) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PNORM(:)
+(   63) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   64) !ifndef INTERFACE
+(   65) # 66 "specnorm.F90"
+(   66) INTEGER(KIND=JPIM) :: IMASTER,IFLD,IFLD_G,J
+(   67) # 68 "specnorm.F90"
+(   68) !     ------------------------------------------------------------------
+(   69) # 70 "specnorm.F90"
+(   70) ! Set current resolution
+(   71) CALL SET_RESOL(KRESOL)
+(   72) # 73 "specnorm.F90"
+(   73) ! Set defaults
+(   74) IMASTER = 1
+(   75) IFLD    = 0
+(   76) # 78 "specnorm.F90"
+(   78) IF(PRESENT(KMASTER)) THEN
+(   79)   IMASTER = KMASTER
+(   80) ENDIF
+(   81) # 82 "specnorm.F90"
+(   82) IF(PRESENT(KVSET)) THEN
+(   83)   IFLD_G = UBOUND(KVSET,1)
+(   84)   DO J=1,IFLD_G
+(   85)     IF(KVSET(J) > NPRTRV) THEN
+(   86)       WRITE(NERR,*) 'SPECNORM:KVSET(J) > NPRTRV ',J,KVSET(J),NPRTRV
+(   87)       CALL ABORT_TRANS('SPECNORM:KVSET TOO LONG OR CONTAINS VALUES OUTSIDE RANGE')
+(   88)     ENDIF
+(   89)     IF(KVSET(J) == MYSETV) THEN
+(   90)       IFLD = IFLD+1
+(   91)     ENDIF
+(   92)   ENDDO
+(   93) ELSE
+(   94)   IF(PRESENT(PSPEC)) THEN
+(   95)     IFLD = UBOUND(PSPEC,1)
+(   96)   ENDIF
+(   97)   IFLD_G = IFLD
+(   98) ENDIF
+(   99) # 100 "specnorm.F90"
+(  100) IF(NPRTRV >1) THEN
+(  101)   IF(IFLD > 0 .AND. .NOT. PRESENT(KVSET)) THEN
+(  102)     WRITE(NERR,*)'NPRTRV >1 AND IFLD > 0 AND NOT PRESENT(KVSET)',&
+(  103)                  &NPRTRV,IFLD
+(  104)     CALL ABORT_TRANS('SPECNORM: SPECIFY VERTICAL SPECTRAL DISTRIBUTION!')
+(  105)   ENDIF
+(  106) ENDIF
+(  107) IF(MYPROC == IMASTER) THEN
+(  108)   IF(.NOT. PRESENT(PNORM)) THEN
+(  109)     CALL ABORT_TRANS('SPECNORM: PNORM NOT PRESENT')
+(  110)   ENDIF
+(  111)   IF(UBOUND(PNORM,1) < IFLD_G) THEN
+(  112)     CALL ABORT_TRANS('SPECNORM: PNORM TOO SMALL')
+(  113)   ENDIF
+(  114) ENDIF
+(  115) IF(IFLD > 0 ) THEN
+(  116)   IF(.NOT. PRESENT(PSPEC)) THEN
+(  117)     CALL ABORT_TRANS('SPECNORM: PSPEC NOT PRESENT')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:57      page 6
+
+(  118)   ENDIF
+(  119)   IF(UBOUND(PSPEC,1) < IFLD) THEN
+(  120)     CALL ABORT_TRANS('SPECNORM: FIRST DIMENSION OF PSPEC TOO SMALL')
+(  121)   ENDIF
+(  122)   IF(UBOUND(PSPEC,2) < D%NSPEC2) THEN
+(  123)     CALL ABORT_TRANS('SPECNORM: FIRST DIMENSION OF PSPEC TOO SMALL')
+(  124)   ENDIF
+(  125) ENDIF
+(  126) # 127 "specnorm.F90"
+(  127) CALL SPNORM_CTL(PSPEC,IFLD,IFLD_G,KVSET,IMASTER,PMET,PNORM)
+(  128) # 129 "specnorm.F90"
+(  129) !endif INTERFACE
+(  130) # 131 "specnorm.F90"
+(  131) !     ------------------------------------------------------------------
+(  132) # 133 "specnorm.F90"
+(  133) END SUBROUTINE SPECNORM

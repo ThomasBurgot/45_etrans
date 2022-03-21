@@ -1,0 +1,485 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:59      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: dist_spec.F90
+
+(    1) SUBROUTINE DIST_SPEC(PSPECG,KFDISTG,KFROM,KVSET,KRESOL,PSPEC,&
+(    2)  & LDIM1_IS_FLD,KSMAX,KSORT)
+(    3) 
+(    4) !**** *DIST_SPEC* - Distribute global spectral array among processors
+(    5) 
+(    6) !     Purpose.
+(    7) !     --------
+(    8) !        Interface routine for distributing spectral array
+(    9) 
+(   10) !**   Interface.
+(   11) !     ----------
+(   12) !     CALL DIST__SPEC(...)
+(   13) 
+(   14) !     Explicit arguments :
+(   15) !     --------------------
+(   16) !     PSPECG(:,:) - Global spectral array
+(   17) !     KFDISTG     - Global number of fields to be distributed
+(   18) !     KFROM(:)    - Processor resposible for distributing each field
+(   19) !     KVSET(:)    - "B-Set" for each field
+(   20) !     KRESOL      - resolution tag  which is required ,default is the
+(   21) !                   first defined resulution (input)
+(   22) !     PSPEC(:,:)  - Local spectral array
+(   23) !     KSORT (:)   - Re-order fields on output
+(   24) !
+(   25) !     Method.
+(   26) !     -------
+(   27) 
+(   28) !     Externals.  SET_RESOL   - set resolution
+(   29) !     ----------  DIST_SPEC_CONTROL - control routine
+(   30) 
+(   31) !     Author.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:59      page 2
+
+(   32) !     -------
+(   33) !        Mats Hamrud *ECMWF*
+(   34) 
+(   35) !     Modifications.
+(   36) !     --------------
+(   37) !        Original : 00-03-03
+(   38) !    P.Marguinaud : 10-10-14 Add KSORT
+(   39) 
+(   40) !     ------------------------------------------------------------------
+(   41) 
+(   42) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   43) 
+(   44) !ifndef INTERFACE
+(   45) 
+(   46) USE TPM_GEN         ,ONLY : NERR
+(   47) USE TPM_DIM         ,ONLY : R
+(   48) USE TPM_DISTR       ,ONLY : D, NPRTRV, NPRTRW, MYSETV, MYSETW, MYPROC, NPROC
+(   49) 
+(   50) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(   51) USE DIST_SPEC_CONTROL_MOD ,ONLY : DIST_SPEC_CONTROL
+(   52) USE SUWAVEDI_MOD    ,ONLY : SUWAVEDI
+(   53) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   54) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   55) 
+(   56) !endif INTERFACE
+(   57) 
+(   58) IMPLICIT NONE
+(   59) 
+(   60) ! Declaration of arguments
+(   61) 
+(   62) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPECG(:,:)
+(   63) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFDISTG
+(   64) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFROM(:)
+(   65) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSET(:)
+(   66) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   67) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPEC(:,:)
+(   68) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDIM1_IS_FLD
+(   69) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KSMAX
+(   70) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KSORT (:)
+(   71) 
+(   72) !ifndef INTERFACE
+(   73) 
+(   74) INTEGER(KIND=JPIM) :: IVSET(KFDISTG)
+(   75) INTEGER(KIND=JPIM) :: IFSEND,IFRECV,J,IFLD,ICOEFF
+(   76) INTEGER(KIND=JPIM) :: ISMAX, ISPEC2, ISPEC2_G
+(   77) INTEGER(KIND=JPIM) :: IPOSSP(NPRTRW+1)
+(   78) INTEGER(KIND=JPIM),ALLOCATABLE :: IDIM0G(:)
+(   79) LOGICAL :: LLDIM1_IS_FLD
+(   80) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   81) 
+(   82) !     ------------------------------------------------------------------
+(   83) 
+(   84) IF (LHOOK) CALL DR_HOOK('DIST_SPEC',0,ZHOOK_HANDLE)
+(   85) ! Set current resolution
+(   86) CALL SET_RESOL(KRESOL)
+(   87) 
+(   88) LLDIM1_IS_FLD = .TRUE.
+(   89) IF(PRESENT(LDIM1_IS_FLD)) LLDIM1_IS_FLD = LDIM1_IS_FLD
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:59      page 3
+
+(   90) 
+(   91) IF(LLDIM1_IS_FLD) THEN
+(   92)   IFLD = 1
+(   93)   ICOEFF = 2
+(   94) ELSE
+(   95)   IFLD = 2
+(   96)   ICOEFF = 1
+(   97) ENDIF
+(   98) IF(UBOUND(KFROM,1) < KFDISTG) THEN
+(   99)  CALL ABORT_TRANS('DIST_SPEC: KFROM TOO SHORT!')
+(  100) ENDIF
+(  101) 
+(  102) ISMAX = R%NSMAX
+(  103) IF(PRESENT(KSMAX)) ISMAX = KSMAX
+(  104) ALLOCATE(IDIM0G(0:ISMAX))
+(  105) IF(ISMAX /= R%NSMAX) THEN
+(  106)   CALL SUWAVEDI(ISMAX,ISMAX,NPRTRW,MYSETW,KPOSSP=IPOSSP,KSPEC2=ISPEC2,&
+(  107)    & KDIM0G=IDIM0G)
+(  108)   ISPEC2_G = (ISMAX+1)*(ISMAX+2)
+(  109) ELSE
+(  110)   ISPEC2    = D%NSPEC2
+(  111)   ISPEC2_G  = R%NSPEC2_G
+(  112)   IPOSSP(:) = D%NPOSSP(:)
+(  113)   IDIM0G(:) = D%NDIM0G(:)
+(  114) ENDIF
+(  115) IFSEND = 0
+(  116) IFRECV = 0
+(  117) 
+(  118) DO J=1,KFDISTG
+(  119)   IF(KFROM(J) < 1 .OR. KFROM(J) > NPROC) THEN
+(  120)     WRITE(NERR,*) 'DIST_SPEC:ILLEGAL KFROM VALUE',KFROM(J),J
+(  121)     CALL ABORT_TRANS('DIST_SPEC:ILLEGAL KFROM VALUE')
+(  122)   ENDIF
+(  123)   IF(KFROM(J) == MYPROC) IFSEND = IFSEND+1
+(  124) ENDDO
+(  125) 
+(  126) IF(IFSEND > 0) THEN
+(  127)   IF(.NOT.PRESENT(PSPECG)) THEN
+(  128)     CALL ABORT_TRANS('DIST_SPEC:PSPECG MISSING')
+(  129)   ENDIF
+(  130)   IF(UBOUND(PSPECG,IFLD) < IFSEND) THEN
+(  131)     WRITE(NERR,*) 'DIST_SPEC: ',IFLD, UBOUND(PSPECG,IFLD), IFSEND
+(  132)     CALL ABORT_TRANS('DIST_SPEC:FIELD DIMENSION OF PSPECG TOO SMALL')
+(  133)   ENDIF
+(  134)  IF(UBOUND(PSPECG,ICOEFF) < ISPEC2_G) THEN
+(  135)     WRITE(NERR,*) 'DIST_SPEC: ',ICOEFF, UBOUND(PSPECG,ICOEFF), ISPEC2_G
+(  136)     CALL ABORT_TRANS('DIST_SPEC:COEFF DIMENSION OF PSPECG TOO SMALL')
+(  137)   ENDIF
+(  138) ENDIF
+(  139) 
+(  140) IF(PRESENT(KVSET)) THEN
+(  141)   IF(UBOUND(KVSET,1) < KFDISTG) THEN
+(  142)     CALL ABORT_TRANS('DIST_SPEC: KVSET TOO SHORT!')
+(  143)   ENDIF
+(  144)   DO J=1,KFDISTG
+(  145)     IF(KVSET(J) > NPRTRV .OR. KVSET(J) < 1) THEN
+(  146)       WRITE(NERR,*) 'DIST_SPEC:KVSET(J) > NPRTRV ',J,KVSET(J),NPRTRV
+(  147)       CALL ABORT_TRANS('DIST_SPEC:KVSET CONTAINS VALUES OUTSIDE RANGE')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:59      page 4
+
+(  148)     ENDIF
+(  149)     IF(KVSET(J) == MYSETV) THEN
+(  150)       IFRECV = IFRECV+1
+(  151)     ENDIF
+(  152)   ENDDO
+(  153)   IVSET(:) = KVSET(1:KFDISTG)
+(  154) ELSE
+(  155)   IFRECV   = KFDISTG
+(  156)   IVSET(:) = MYSETV
+(  157) ENDIF
+(  158) 
+(  159) IF(IFRECV > 0 ) THEN
+(  160)   IF(.NOT.PRESENT(PSPEC)) THEN
+(  161)     CALL ABORT_TRANS('DIST_SPEC: FIELDS TO RECEIVE AND PSPEC NOT PRESENT')
+(  162)   ENDIF
+(  163)   IF(UBOUND(PSPEC,IFLD) < IFRECV) THEN
+(  164)     CALL ABORT_TRANS('DIST_SPEC: FIELD DIMENSION OF PSPEC TOO SMALL')
+(  165)   ENDIF
+(  166)   IF(UBOUND(PSPEC,ICOEFF) < ISPEC2 ) THEN
+(  167)     CALL ABORT_TRANS('DIST_SPEC: COEFF DIMENSION OF PSPEC TOO SMALL')
+(  168)   ENDIF
+(  169) ENDIF
+(  170) 
+(  171) IF (PRESENT (KSORT)) THEN
+(  172)   IF (.NOT. PRESENT (PSPEC)) THEN
+(  173)     CALL ABORT_TRANS('DIST_SPEC: KSORT REQUIRES PSPEC')
+(  174)   ENDIF
+(  175)   IF (UBOUND (KSORT, 1) /= UBOUND (PSPEC, IFLD)) THEN
+(  176)     CALL ABORT_TRANS('DIST_SPEC: DIMENSION MISMATCH KSORT, PSPEC')
+(  177)   ENDIF
+(  178) ENDIF
+(  179) 
+(  180) CALL DIST_SPEC_CONTROL(PSPECG,KFDISTG,KFROM,IVSET,PSPEC,LLDIM1_IS_FLD,&
+(  181)  & ISMAX,ISPEC2,ISPEC2_G,IPOSSP,IDIM0G,KSORT)
+(  182) 
+(  183) DEALLOCATE(IDIM0G)
+(  184) 
+(  185) IF (LHOOK) CALL DR_HOOK('DIST_SPEC',1,ZHOOK_HANDLE)
+(  186) !endif INTERFACE
+(  187) 
+(  188) !     ------------------------------------------------------------------
+(  189) 
+(  190) END SUBROUTINE DIST_SPEC
+(  191) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:59      page 5
+
+(    1) # 1 "dist_spec.F90"
+(    1) SUBROUTINE DIST_SPEC(PSPECG,KFDISTG,KFROM,KVSET,KRESOL,PSPEC,&
+(    2)  & LDIM1_IS_FLD,KSMAX,KSORT)
+(    3) # 4 "dist_spec.F90"
+(    4) !**** *DIST_SPEC* - Distribute global spectral array among processors
+(    5) # 6 "dist_spec.F90"
+(    6) !     Purpose.
+(    7) !     --------
+(    8) !        Interface routine for distributing spectral array
+(    9) # 10 "dist_spec.F90"
+(   10) !**   Interface.
+(   11) !     ----------
+(   12) !     CALL DIST__SPEC(...)
+(   13) # 14 "dist_spec.F90"
+(   14) !     Explicit arguments :
+(   15) !     --------------------
+(   16) !     PSPECG(:,:) - Global spectral array
+(   17) !     KFDISTG     - Global number of fields to be distributed
+(   18) !     KFROM(:)    - Processor resposible for distributing each field
+(   19) !     KVSET(:)    - "B-Set" for each field
+(   20) !     KRESOL      - resolution tag  which is required ,default is the
+(   21) !                   first defined resulution (input)
+(   22) !     PSPEC(:,:)  - Local spectral array
+(   23) !     KSORT (:)   - Re-order fields on output
+(   24) !
+(   25) !     Method.
+(   26) !     -------
+(   27) # 28 "dist_spec.F90"
+(   28) !     Externals.  SET_RESOL   - set resolution
+(   29) !     ----------  DIST_SPEC_CONTROL - control routine
+(   30) # 31 "dist_spec.F90"
+(   31) !     Author.
+(   32) !     -------
+(   33) !        Mats Hamrud *ECMWF*
+(   34) # 35 "dist_spec.F90"
+(   35) !     Modifications.
+(   36) !     --------------
+(   37) !        Original : 00-03-03
+(   38) !    P.Marguinaud : 10-10-14 Add KSORT
+(   39) # 40 "dist_spec.F90"
+(   40) !     ------------------------------------------------------------------
+(   41) # 42 "dist_spec.F90"
+(   42) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   43) # 44 "dist_spec.F90"
+(   44) !ifndef INTERFACE
+(   45) # 46 "dist_spec.F90"
+(   46) USE TPM_GEN         ,ONLY : NERR
+(   47) USE TPM_DIM         ,ONLY : R
+(   48) USE TPM_DISTR       ,ONLY : D, NPRTRV, NPRTRW, MYSETV, MYSETW, MYPROC, NPROC
+(   49) # 50 "dist_spec.F90"
+(   50) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(   51) USE DIST_SPEC_CONTROL_MOD ,ONLY : DIST_SPEC_CONTROL
+(   52) USE SUWAVEDI_MOD    ,ONLY : SUWAVEDI
+(   53) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   54) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   55) # 56 "dist_spec.F90"
+(   56) !endif INTERFACE
+(   57) # 58 "dist_spec.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:59      page 6
+
+(   58) IMPLICIT NONE
+(   59) # 60 "dist_spec.F90"
+(   60) ! Declaration of arguments
+(   61) # 62 "dist_spec.F90"
+(   62) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPECG(:,:)
+(   63) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFDISTG
+(   64) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFROM(:)
+(   65) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSET(:)
+(   66) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   67) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPEC(:,:)
+(   68) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDIM1_IS_FLD
+(   69) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KSMAX
+(   70) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KSORT (:)
+(   71) # 72 "dist_spec.F90"
+(   72) !ifndef INTERFACE
+(   73) # 74 "dist_spec.F90"
+(   74) INTEGER(KIND=JPIM) :: IVSET(KFDISTG)
+(   75) INTEGER(KIND=JPIM) :: IFSEND,IFRECV,J,IFLD,ICOEFF
+(   76) INTEGER(KIND=JPIM) :: ISMAX, ISPEC2, ISPEC2_G
+(   77) INTEGER(KIND=JPIM) :: IPOSSP(NPRTRW+1)
+(   78) INTEGER(KIND=JPIM),ALLOCATABLE :: IDIM0G(:)
+(   79) LOGICAL :: LLDIM1_IS_FLD
+(   80) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   81) # 82 "dist_spec.F90"
+(   82) !     ------------------------------------------------------------------
+(   83) # 84 "dist_spec.F90"
+(   84) IF (LHOOK) CALL DR_HOOK('DIST_SPEC',0,ZHOOK_HANDLE)
+(   85) ! Set current resolution
+(   86) CALL SET_RESOL(KRESOL)
+(   87) # 88 "dist_spec.F90"
+(   88) LLDIM1_IS_FLD = .TRUE.
+(   89) IF(PRESENT(LDIM1_IS_FLD)) LLDIM1_IS_FLD = LDIM1_IS_FLD
+(   90) # 91 "dist_spec.F90"
+(   91) IF(LLDIM1_IS_FLD) THEN
+(   92)   IFLD = 1
+(   93)   ICOEFF = 2
+(   94) ELSE
+(   95)   IFLD = 2
+(   96)   ICOEFF = 1
+(   97) ENDIF
+(   98) IF(UBOUND(KFROM,1) < KFDISTG) THEN
+(   99)  CALL ABORT_TRANS('DIST_SPEC: KFROM TOO SHORT!')
+(  100) ENDIF
+(  101) # 102 "dist_spec.F90"
+(  102) ISMAX = R%NSMAX
+(  103) IF(PRESENT(KSMAX)) ISMAX = KSMAX
+(  104) ALLOCATE(IDIM0G(0:ISMAX))
+(  105) IF(ISMAX /= R%NSMAX) THEN
+(  106)   CALL SUWAVEDI(ISMAX,ISMAX,NPRTRW,MYSETW,KPOSSP=IPOSSP,KSPEC2=ISPEC2,&
+(  107)    & KDIM0G=IDIM0G)
+(  108)   ISPEC2_G = (ISMAX+1)*(ISMAX+2)
+(  109) ELSE
+(  110)   ISPEC2    = D%NSPEC2
+(  111)   ISPEC2_G  = R%NSPEC2_G
+(  112)   IPOSSP(:) = D%NPOSSP(:)
+(  113)   IDIM0G(:) = D%NDIM0G(:)
+(  114) ENDIF
+(  115) IFSEND = 0
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:59      page 7
+
+(  116) IFRECV = 0
+(  117) # 118 "dist_spec.F90"
+(  118) DO J=1,KFDISTG
+(  119)   IF(KFROM(J) < 1 .OR. KFROM(J) > NPROC) THEN
+(  120)     WRITE(NERR,*) 'DIST_SPEC:ILLEGAL KFROM VALUE',KFROM(J),J
+(  121)     CALL ABORT_TRANS('DIST_SPEC:ILLEGAL KFROM VALUE')
+(  122)   ENDIF
+(  123)   IF(KFROM(J) == MYPROC) IFSEND = IFSEND+1
+(  124) ENDDO
+(  125) # 126 "dist_spec.F90"
+(  126) IF(IFSEND > 0) THEN
+(  127)   IF(.NOT.PRESENT(PSPECG)) THEN
+(  128)     CALL ABORT_TRANS('DIST_SPEC:PSPECG MISSING')
+(  129)   ENDIF
+(  130)   IF(UBOUND(PSPECG,IFLD) < IFSEND) THEN
+(  131)     WRITE(NERR,*) 'DIST_SPEC: ',IFLD, UBOUND(PSPECG,IFLD), IFSEND
+(  132)     CALL ABORT_TRANS('DIST_SPEC:FIELD DIMENSION OF PSPECG TOO SMALL')
+(  133)   ENDIF
+(  134)  IF(UBOUND(PSPECG,ICOEFF) < ISPEC2_G) THEN
+(  135)     WRITE(NERR,*) 'DIST_SPEC: ',ICOEFF, UBOUND(PSPECG,ICOEFF), ISPEC2_G
+(  136)     CALL ABORT_TRANS('DIST_SPEC:COEFF DIMENSION OF PSPECG TOO SMALL')
+(  137)   ENDIF
+(  138) ENDIF
+(  139) # 140 "dist_spec.F90"
+(  140) IF(PRESENT(KVSET)) THEN
+(  141)   IF(UBOUND(KVSET,1) < KFDISTG) THEN
+(  142)     CALL ABORT_TRANS('DIST_SPEC: KVSET TOO SHORT!')
+(  143)   ENDIF
+(  144)   DO J=1,KFDISTG
+(  145)     IF(KVSET(J) > NPRTRV .OR. KVSET(J) < 1) THEN
+(  146)       WRITE(NERR,*) 'DIST_SPEC:KVSET(J) > NPRTRV ',J,KVSET(J),NPRTRV
+(  147)       CALL ABORT_TRANS('DIST_SPEC:KVSET CONTAINS VALUES OUTSIDE RANGE')
+(  148)     ENDIF
+(  149)     IF(KVSET(J) == MYSETV) THEN
+(  150)       IFRECV = IFRECV+1
+(  151)     ENDIF
+(  152)   ENDDO
+(  153)   IVSET(:) = KVSET(1:KFDISTG)
+(  154) ELSE
+(  155)   IFRECV   = KFDISTG
+(  156)   IVSET(:) = MYSETV
+(  157) ENDIF
+(  158) # 159 "dist_spec.F90"
+(  159) IF(IFRECV > 0 ) THEN
+(  160)   IF(.NOT.PRESENT(PSPEC)) THEN
+(  161)     CALL ABORT_TRANS('DIST_SPEC: FIELDS TO RECEIVE AND PSPEC NOT PRESENT')
+(  162)   ENDIF
+(  163)   IF(UBOUND(PSPEC,IFLD) < IFRECV) THEN
+(  164)     CALL ABORT_TRANS('DIST_SPEC: FIELD DIMENSION OF PSPEC TOO SMALL')
+(  165)   ENDIF
+(  166)   IF(UBOUND(PSPEC,ICOEFF) < ISPEC2 ) THEN
+(  167)     CALL ABORT_TRANS('DIST_SPEC: COEFF DIMENSION OF PSPEC TOO SMALL')
+(  168)   ENDIF
+(  169) ENDIF
+(  170) # 171 "dist_spec.F90"
+(  171) IF (PRESENT (KSORT)) THEN
+(  172)   IF (.NOT. PRESENT (PSPEC)) THEN
+(  173)     CALL ABORT_TRANS('DIST_SPEC: KSORT REQUIRES PSPEC')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:59      page 8
+
+(  174)   ENDIF
+(  175)   IF (UBOUND (KSORT, 1) /= UBOUND (PSPEC, IFLD)) THEN
+(  176)     CALL ABORT_TRANS('DIST_SPEC: DIMENSION MISMATCH KSORT, PSPEC')
+(  177)   ENDIF
+(  178) ENDIF
+(  179) # 180 "dist_spec.F90"
+(  180) CALL DIST_SPEC_CONTROL(PSPECG,KFDISTG,KFROM,IVSET,PSPEC,LLDIM1_IS_FLD,&
+(  181)  & ISMAX,ISPEC2,ISPEC2_G,IPOSSP,IDIM0G,KSORT)
+(  182) # 183 "dist_spec.F90"
+(  183) DEALLOCATE(IDIM0G)
+(  184) # 185 "dist_spec.F90"
+(  185) IF (LHOOK) CALL DR_HOOK('DIST_SPEC',1,ZHOOK_HANDLE)
+(  186) !endif INTERFACE
+(  187) # 188 "dist_spec.F90"
+(  188) !     ------------------------------------------------------------------
+(  189) # 190 "dist_spec.F90"
+(  190) END SUBROUTINE DIST_SPEC

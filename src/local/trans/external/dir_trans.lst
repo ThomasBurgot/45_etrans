@@ -1,0 +1,1285 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: dir_trans.F90
+
+(    1) SUBROUTINE DIR_TRANS(PSPVOR,PSPDIV,PSPSCALAR,PSPSC3A,PSPSC3B,PSPSC2,&
+(    2) & LDLATLON,KPROMA,KVSETUV,KVSETSC,KRESOL,KVSETSC3A,KVSETSC3B,KVSETSC2,&
+(    3) & PGP,PGPUV,PGP3A,PGP3B,PGP2)
+(    4) 
+(    5) 
+(    6) !**** *DIR_TRANS* - Direct spectral transform (from grid-point to spectral).
+(    7) 
+(    8) !     Purpose.
+(    9) !     --------
+(   10) !        Interface routine for the direct spectral transform
+(   11) 
+(   12) !**   Interface.
+(   13) !     ----------
+(   14) !     CALL DIR_TRANS(...)
+(   15) 
+(   16) !     Explicit arguments : All arguments except from PGP are optional.
+(   17) !     --------------------
+(   18) !     PSPVOR(:,:) - spectral vorticity (output)
+(   19) !     PSPDIV(:,:) - spectral divergence (output)
+(   20) !     PSPSCALAR(:,:) - spectral scalarvalued fields (output)
+(   21) !     PSPSC3A(:,:,:) - alternative to use of PSPSCALAR, see PGP3A below (input)
+(   22) !     PSPSC3B(:,:,:) - alternative to use of PSPSCALAR, see PGP3B below (input)
+(   23) !     PSPSC2(:,:)  - alternative to use of PSPSCALAR, see PGP2 below (input)
+(   24) !     LDLATLON   - indicating if regular lat-lon is the input data
+(   25) !     KPROMA      - required blocking factor for gridpoint output
+(   26) !     KVSETUV(:)  - indicating which 'b-set' in spectral space owns a
+(   27) !                   vor/div field. Equivalant to NBSETLEV in the IFS.
+(   28) !                   The length of KVSETUV should be the GLOBAL number
+(   29) !                   of u/v fields which is the dimension of u and v releated
+(   30) !                   fields in grid-point space.
+(   31) !     KVESETSC(:) - indicating which 'b-set' in spectral space owns a
+(   32) !                   scalar field. As for KVSETUV this argument is required
+(   33) !                   if the total number of processors is greater than
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 2
+
+(   34) !                   the number of processors used for distribution in
+(   35) !                   spectral wave space.
+(   36) !     KVSETSC3A(:) - as KVESETSC for PSPSC3A (distribution on first dimension)
+(   37) !     KVSETSC3B(:) - as KVESETSC for PSPSC3B (distribution on first dimension)
+(   38) !     KVSETSC2(:) - as KVESETSC for PSPSC2 (distribution on first dimension)
+(   39) !     KRESOL   - resolution tag  which is required ,default is the
+(   40) !                first defined resulution (input)
+(   41) !     PGP(:,:,:) - gridpoint fields (input)
+(   42) !                  PGP need to  dimensioned (NPROMA,IF_GP,NGPBLKS) where
+(   43) !                  NPROMA is the blocking factor, IF_GP the total number
+(   44) !                  of output fields and NGPBLKS the number of NPROMA blocks.
+(   45) !                  The ordering of the output fields is as follows (all
+(   46) !                  parts are optional depending on the input switches):
+(   47) !
+(   48) !     u             : IF_UV_G fields (if psvor present)
+(   49) !     v             : IF_UV_G fields (if psvor present)
+(   50) !     scalar fields : IF_SCALARS_G fields (if pspscalar present)
+(   51) !
+(   52) !     Here IF_UV_G is the GLOBAL number of u/v fields as given by the length
+(   53) !     of KVSETUV (or by PSPVOR if no split in spectral 'b-set' direction
+(   54) !     IF_SCALARS_G is the GLOBAL number of scalar fields as giben by the
+(   55) !     length of KVESETSC (or by number of fields in PSPSCALAR if no spectral
+(   56) !     'b-set' split
+(   57) 
+(   58) !     As an alternative to using PGP you can also use a combination of the
+(   59) !     following arrays. The reason for introducing these alternative ways
+(   60) !     of calling DIR_TRANS is to avoid uneccessary copies where your data
+(   61) !     structures don't fit in to the 'PSPVOR,PSPDIV, PSPSCALAR, PGP' layout.
+(   62) !     The use of any of these precludes the use of PGP and vice versa.
+(   63) 
+(   64) !     PGPUV(:,:,:,:) - the 'u-v' related grid-point variables in the order
+(   65) !                      described for PGP. The second dimension of PGPUV should
+(   66) !                      be the same as the "global" first dimension of
+(   67) !                      PSPVOR,PSPDIV (in the IFS this is the number of levels)
+(   68) !                      PGPUV need to be dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   69) !                      IFLDS is the number of 'variables' (u,v)
+(   70) !     PGP3A(:,:,:,:) - grid-point array directly connected with PSPSC3A
+(   71) !                      dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   72) !                      IFLDS is the number of 'variables' (the same as in
+(   73) !                      PSPSC3A )
+(   74) !     PGP3B(:,:,:,:) - grid-point array directly connected with PSPSC3B
+(   75) !                      dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   76) !                      IFLDS is the number of 'variables' (the same as in
+(   77) !                      PSPSC3B)
+(   78) !     PGP2(:,:,:)    - grid-point array directly connected with PSPSC2
+(   79) !                      dimensioned(NPROMA,IFLDS,NGPBLKS)
+(   80) !                      IFLDS is the number of 'variables' (the same as in
+(   81) !                      PSPSC2 )
+(   82) !
+(   83) !     Method.
+(   84) !     -------
+(   85) 
+(   86) !     Externals.  SET_RESOL   - set resolution
+(   87) !     ----------  LTDIR_CTL   - control of Legendre transform
+(   88) !                 FTDIR_CTL   - control of Fourier transform
+(   89) 
+(   90) !     Author.
+(   91) !     -------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 3
+
+(   92) !        Mats Hamrud *ECMWF*
+(   93) 
+(   94) !     Modifications.
+(   95) !     --------------
+(   96) !        Original : 00-03-03
+(   97) 
+(   98) !     ------------------------------------------------------------------
+(   99) 
+(  100) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(  101) 
+(  102) !ifndef INTERFACE
+(  103) 
+(  104) USE TPM_GEN         ,ONLY : NERR, NOUT
+(  105) USE TPM_TRANS       ,ONLY : LDIVGP, LSCDERS, LUVDER, LVORGP, LATLON, &
+(  106)      &                      NF_SC2, NF_SC3A, NF_SC3B,        &
+(  107)      &                      NGPBLKS, NPROMA
+(  108) USE TPM_DISTR       ,ONLY : D, NPRTRV, MYSETV
+(  109) USE TPM_FLT, ONLY: S
+(  110) USE TPM_GEOMETRY ,ONLY : G
+(  111) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(  112) USE DIR_TRANS_CTL_MOD ,ONLY : DIR_TRANS_CTL
+(  113) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(  114) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(  115) 
+(  116) !endif INTERFACE
+(  117) 
+(  118) IMPLICIT NONE
+(  119) 
+(  120) ! Declaration of arguments
+(  121) 
+(  122) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPVOR(:,:)
+(  123) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPDIV(:,:)
+(  124) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSCALAR(:,:)
+(  125) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSC3A(:,:,:)
+(  126) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSC3B(:,:,:)
+(  127) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSC2(:,:)
+(  128) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KPROMA
+(  129) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETUV(:)
+(  130) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC(:)
+(  131) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3A(:)
+(  132) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3B(:)
+(  133) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC2(:)
+(  134) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KRESOL
+(  135) LOGICAL   ,OPTIONAL, INTENT(IN) :: LDLATLON
+(  136) 
+(  137) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGP(:,:,:)
+(  138) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGPUV(:,:,:,:)
+(  139) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGP3A(:,:,:,:)
+(  140) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGP3B(:,:,:,:)
+(  141) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGP2(:,:,:)
+(  142) 
+(  143) !ifndef INTERFACE
+(  144) 
+(  145) ! Local variables
+(  146) INTEGER(KIND=JPIM) :: IUBOUND(4),J
+(  147) INTEGER(KIND=JPIM) :: IF_UV,IF_UV_G,IF_SCALARS,IF_SCALARS_G,IF_FS,IF_GP
+(  148) INTEGER(KIND=JPIM) :: IF_SC2_G,IF_SC3A_G,IF_SC3B_G
+(  149) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 4
+
+(  150) INTEGER(KIND=JPIM) :: JMLOC
+(  151) 
+(  152) !!$ACC DATA COPY(S, S%FA) &
+(  153) !!$ACC& COPY(D,D%NPNTGTB0,D%NPNTGTB1,D%NSTAGT0B,D%NSTAGT1B,D%NSTAGTF,D%NPROCM,D%NPTRLS,D%MSTABF) &
+(  154) !!$ACC& COPY(G,G%NLOEN,G%NMEN)
+(  155) !!$ACC DATA IF(PRESENT(PGP2))  copyin(PGP2)
+(  156) !!$ACC DATA IF(PRESENT(PGPUV)) copyin(PGPUV)
+(  157) !!$ACC DATA IF(PRESENT(PGP3A)) copyin(PGP3A)
+(  158) !!$ACC DATA IF(PRESENT(PGP3B)) copyin(PGP3B)
+(  159) !!$ACC DATA IF(PRESENT(PGP))   copyin(PGP)
+(  160) 
+(  161) ! output
+(  162) !!$ACC DATA IF(PRESENT(PSPSCALAR)) copyout(PSPSCALAR)
+(  163) !!$ACC DATA IF(PRESENT(PSPVOR)) copyout(PSPVOR)
+(  164) !!$ACC DATA IF(PRESENT(PSPDIV)) copyout(PSPDIV)
+(  165) !!$ACC DATA IF(PRESENT(PSPSC3A)) copyout(PSPSC3A)
+(  166) !!$ACC DATA IF(PRESENT(PSPSC3B)) copyout(PSPSC3B)
+(  167) !!$ACC DATA IF(PRESENT(PSPSC2)) copyout(PSPSC2)
+(  168) 
+(  169) !!DO JMLOC=1,D%NUMP
+(  170) !!  !WRITE(NOUT,'("ENTER DATA COPYIN JMLOC=",I4," D%NUMP=",I4)')JMLOC,D%NUMP
+(  171) !!  !$ACC enter data copyin(S%FA(JMLOC)%RPNMA,S%FA(JMLOC)%RPNMS)
+(  172) !!ENDDO
+(  173) 
+(  174) !     ------------------------------------------------------------------
+(  175) IF (LHOOK) CALL DR_HOOK('DIR_TRANS',0,ZHOOK_HANDLE)
+(  176) CALL GSTATS(1808,0)
+(  177) ! Set current resolution
+(  178) CALL SET_RESOL(KRESOL)
+(  179) 
+(  180) ! Set defaults
+(  181) 
+(  182) IF_UV = 0
+(  183) IF_UV_G = 0
+(  184) IF_SCALARS = 0
+(  185) IF_SCALARS_G = 0
+(  186) NF_SC2 = 0
+(  187) NF_SC3A = 0
+(  188) NF_SC3B = 0
+(  189) IF_SC2_G = 0
+(  190) IF_SC3A_G = 0
+(  191) IF_SC3B_G = 0
+(  192) NPROMA = D%NGPTOT
+(  193) ! This is for use in TRGTOL which is shared with adjoint inverse transform
+(  194) LSCDERS=.FALSE.
+(  195) LVORGP=.FALSE.
+(  196) LDIVGP=.FALSE.
+(  197) LUVDER=.FALSE.
+(  198) LATLON=.FALSE.
+(  199) 
+(  200) ! Decide requirements
+(  201) 
+(  202) IF(PRESENT(KVSETUV)) THEN
+(  203)   IF_UV_G = UBOUND(KVSETUV,1)
+(  204)   DO J=1,IF_UV_G
+(  205)     IF(KVSETUV(J) > NPRTRV .OR. KVSETUV(J) < 1) THEN
+(  206)       WRITE(NERR,*) 'DIR_TRANS:KVSETUV(J) > NPRTRV ',J,KVSETUV(J),NPRTRV
+(  207)       CALL ABORT_TRANS('DIR_TRANS:KVSETUV TOO LONG OR CONTAINS VALUES OUTSIDE RANGE')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 5
+
+(  208)     ENDIF
+(  209)     IF(KVSETUV(J) == MYSETV) THEN
+(  210)       IF_UV = IF_UV+1
+(  211)     ENDIF
+(  212)   ENDDO
+(  213) ELSEIF(PRESENT(PSPVOR)) THEN
+(  214)   IF_UV = UBOUND(PSPVOR,1)
+(  215)   IF_UV_G = IF_UV
+(  216) ENDIF
+(  217) 
+(  218) IF(PRESENT(KVSETSC)) THEN
+(  219)   IF_SCALARS_G = UBOUND(KVSETSC,1)
+(  220)   DO J=1,IF_SCALARS_G
+(  221)     IF(KVSETSC(J) > NPRTRV .OR. KVSETSC(J) < 1) THEN
+(  222)       WRITE(NERR,*) 'DIR_TRANS:KVSETSC(J) > NPRTRV ',J,KVSETSC(J),NPRTRV
+(  223)       CALL ABORT_TRANS('DIR_TRANS:KVSETSC TOO LONG OR CONTAINS VALUES OUTSIDE RANGE')
+(  224)     ENDIF
+(  225)     IF(KVSETSC(J) == MYSETV) THEN
+(  226)       IF_SCALARS = IF_SCALARS+1
+(  227)     ENDIF
+(  228)   ENDDO
+(  229) ELSEIF(PRESENT(PSPSCALAR)) THEN
+(  230)   IF_SCALARS = UBOUND(PSPSCALAR,1)
+(  231)   IF_SCALARS_G = IF_SCALARS
+(  232) ENDIF
+(  233) 
+(  234) IF(PRESENT(KVSETSC2)) THEN
+(  235)   IF(.NOT.PRESENT(PSPSC2)) THEN
+(  236)     CALL ABORT_TRANS('DIR_TRANS:KVSETSC2 BUT NOT PSPSC2')
+(  237)   ENDIF
+(  238)   IF_SC2_G = UBOUND(KVSETSC2,1)
+(  239)   IF_SCALARS_G = IF_SCALARS_G+IF_SC2_G
+(  240)   DO J=1,UBOUND(KVSETSC2,1)
+(  241)     IF(KVSETSC2(J) > NPRTRV .OR. KVSETSC2(J) < 1) THEN
+(  242)       WRITE(NERR,*) 'DIR_TRANS:KVSETSC2(J) > NPRTRV ',J,KVSETSC2(J),NPRTRV
+(  243)       CALL ABORT_TRANS('DIR_TRANS:KVSETSC2 TOO LONG OR CONTAINS VALUES OUTSIDE RANGE')
+(  244)     ENDIF
+(  245)     IF(KVSETSC2(J) == MYSETV) THEN
+(  246)       IF_SCALARS = IF_SCALARS+1
+(  247)       NF_SC2 = NF_SC2+1
+(  248)     ENDIF
+(  249)   ENDDO
+(  250) ELSEIF(PRESENT(PSPSC2)) THEN
+(  251)   IF_SC2_G = UBOUND(PSPSC2,1)
+(  252)   NF_SC2   = UBOUND(PSPSC2,1)
+(  253)   IF_SCALARS = IF_SCALARS+NF_SC2
+(  254)   IF_SCALARS_G = IF_SCALARS_G +IF_SC2_G
+(  255) ENDIF
+(  256) 
+(  257) IF(PRESENT(KVSETSC3A)) THEN
+(  258)   IF(.NOT.PRESENT(PSPSC3A)) THEN
+(  259)     CALL ABORT_TRANS('DIR_TRANS:KVSETSC3A BUT NOT PSPSC3A')
+(  260)   ENDIF
+(  261)   IF_SC3A_G = UBOUND(KVSETSC3A,1)
+(  262)   IF_SCALARS_G = IF_SCALARS_G+IF_SC3A_G*UBOUND(PSPSC3A,3)
+(  263)   DO J=1,UBOUND(KVSETSC3A,1)
+(  264)     IF(KVSETSC3A(J) > NPRTRV .OR. KVSETSC3A(J) < 1) THEN
+(  265)       WRITE(NERR,*) 'DIR_TRANS:KVSETSC3A(J) > NPRTRV ',J,KVSETSC3A(J),NPRTRV
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 6
+
+(  266)       CALL ABORT_TRANS('DIR_TRANS:KVSETSC3A TOO LONG OR CONTAINS VALUES OUTSIDE RANGE')
+(  267)     ENDIF
+(  268)     IF(KVSETSC3A(J) == MYSETV) THEN
+(  269)       IF_SCALARS = IF_SCALARS+UBOUND(PSPSC3A,3)
+(  270)       NF_SC3A = NF_SC3A+1
+(  271)     ENDIF
+(  272)   ENDDO
+(  273) ELSEIF(PRESENT(PSPSC3A)) THEN
+(  274)   IF_SCALARS = IF_SCALARS+UBOUND(PSPSC3A,1)*UBOUND(PSPSC3A,3)
+(  275)   IF_SC3A_G = UBOUND(PSPSC3A,1)
+(  276)   IF_SCALARS_G = IF_SCALARS_G +IF_SC3A_G*UBOUND(PSPSC3A,3)
+(  277)   NF_SC3A = UBOUND(PSPSC3A,1)
+(  278) ENDIF
+(  279) 
+(  280) IF(PRESENT(KVSETSC3B)) THEN
+(  281)   IF(.NOT.PRESENT(PSPSC3B)) THEN
+(  282)     CALL ABORT_TRANS('DIR_TRANS:KVSETSC3B BUT NOT PSPSC3B')
+(  283)   ENDIF
+(  284)   IF_SC3B_G = UBOUND(KVSETSC3B,1)
+(  285)   IF_SCALARS_G = IF_SCALARS_G+IF_SC3B_G*UBOUND(PSPSC3B,3)
+(  286)   DO J=1,UBOUND(KVSETSC3B,1)
+(  287)     IF(KVSETSC3B(J) > NPRTRV .OR. KVSETSC3B(J) < 1) THEN
+(  288)       WRITE(NERR,*) 'DIR_TRANS:KVSETSC3B(J) > NPRTRV ',J,KVSETSC3B(J),NPRTRV
+(  289)       CALL ABORT_TRANS('DIR_TRANS:KVSETSC3B TOO LONG OR CONTAINS VALUES OUTSIDE RANGE')
+(  290)     ENDIF
+(  291)     IF(KVSETSC3B(J) == MYSETV) THEN
+(  292)       IF_SCALARS = IF_SCALARS+UBOUND(PSPSC3B,3)
+(  293)       NF_SC3B = NF_SC3B+1
+(  294)     ENDIF
+(  295)   ENDDO
+(  296) ELSEIF(PRESENT(PSPSC3B)) THEN
+(  297)   IF_SCALARS = IF_SCALARS+UBOUND(PSPSC3B,1)*UBOUND(PSPSC3B,3)
+(  298)   IF_SC3B_G = UBOUND(PSPSC3B,1)
+(  299)   IF_SCALARS_G = IF_SCALARS_G +IF_SC3B_G*UBOUND(PSPSC3B,3)
+(  300)   NF_SC3B = UBOUND(PSPSC3B,1)
+(  301) ENDIF
+(  302) 
+(  303) IF(PRESENT(KPROMA)) THEN
+(  304)   NPROMA = KPROMA
+(  305) ENDIF
+(  306) 
+(  307) IF(PRESENT(LDLATLON)) THEN
+(  308)   LATLON = LDLATLON
+(  309) ENDIF
+(  310) 
+(  311) ! Compute derived variables
+(  312) 
+(  313) 
+(  314) NGPBLKS = (D%NGPTOT-1)/NPROMA+1
+(  315) 
+(  316) IF_FS = 2*IF_UV + IF_SCALARS
+(  317) !D%IADJUST_D=0
+(  318) !IF(MOD(IF_FS,2)==1) THEN
+(  319) !  IF_FS = IF_FS + 1
+(  320) !  D%IADJUST_D=1
+(  321) !ENDIF
+(  322) 
+(  323) IF_GP = 2*IF_UV_G+IF_SCALARS_G
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 7
+
+(  324) 
+(  325) ! Consistency checks
+(  326) 
+(  327) IF (IF_UV > 0) THEN
+(  328)   IF(.NOT. PRESENT(PSPVOR) ) THEN
+(  329)     CALL ABORT_TRANS('DIR_TRANS : IF_UV > 0 BUT PSPVOR MISSING')
+(  330)   ENDIF
+(  331)   IF(UBOUND(PSPVOR,1) < IF_UV) THEN
+(  332)     WRITE(NERR,*)'DIR_TRANS : UBOUND(PSPVOR,1) < IF_UV ',UBOUND(PSPVOR,1),IF_UV
+(  333)     CALL ABORT_TRANS('DIR_TRANS : PSPVOR TOO SHORT')
+(  334)   ENDIF
+(  335)   IF(.NOT. PRESENT(PSPDIV) ) THEN
+(  336)     CALL ABORT_TRANS('DIR_TRANS : PSPVOR PRESENT BUT PSPDIV MISSING')
+(  337)   ENDIF
+(  338)   IF(UBOUND(PSPDIV,1) /= IF_UV) THEN
+(  339)     WRITE(NERR,*)'DIR_TRANS : UBOUND(PSPDIV,1) < IF_UV ',UBOUND(PSPDIV,1),IF_UV
+(  340)     CALL ABORT_TRANS('DIR_TRANS : INCONSISTENT FIRST DIM. OF PSPVOR AND PSPDIV')
+(  341)   ENDIF
+(  342) ENDIF
+(  343) 
+(  344) IF (IF_SCALARS > 0) THEN
+(  345)   IF(PRESENT(PSPSCALAR)) THEN
+(  346)     IF(UBOUND(PSPSCALAR,1) < IF_SCALARS) THEN
+(  347)       WRITE(NERR,*)'DIR_TRANS : UBOUND(PSPSCALAR,1) < IF_SCALARS) ',&
+(  348)        & UBOUND(PSPSCALAR,1),IF_SCALARS
+(  349)       CALL ABORT_TRANS('DIR_TRANS : PSPSCALAR TOO SHORT')
+(  350)     ENDIF
+(  351)     IF(PRESENT(PSPSC3A))THEN
+(  352)       CALL ABORT_TRANS('DIR_TRANS : PSPSCALAR AND PSPSC3A BOTH PRESENT')
+(  353)     ENDIF
+(  354)     IF(PRESENT(PSPSC3B))THEN
+(  355)       CALL ABORT_TRANS('DIR_TRANS : PSPSCALAR AND PSPSC3B BOTH PRESENT')
+(  356)     ENDIF
+(  357)     IF(PRESENT(PSPSC2))THEN
+(  358)       CALL ABORT_TRANS('DIR_TRANS : PSPSCALAR AND PSPSC2 BOTH PRESENT')
+(  359)     ENDIF
+(  360)   ENDIF
+(  361) ENDIF
+(  362) 
+(  363) IF(NPRTRV >1) THEN
+(  364)   IF(IF_UV > 0 .AND. .NOT. PRESENT(KVSETUV)) THEN
+(  365)     WRITE(NERR,*)'NPRTRV >1 AND IF_UV > 0 AND NOT PRESENT(KVSETUV)',&
+(  366)                  &NPRTRV,IF_UV
+(  367)     CALL ABORT_TRANS('DIR_TRANS: SPECIFY VERTICAL SPECTRAL DISTRIBUTION!')
+(  368)   ENDIF
+(  369)   IF(PRESENT(PSPSCALAR) .AND. .NOT. PRESENT(KVSETSC)) THEN
+(  370)     WRITE(NERR,*)'NPRTRV >1 AND PRESENT(PSPSCALAR) AND NOT PRESENT(KVSETSC)',&
+(  371)                  &NPRTRV
+(  372)     CALL ABORT_TRANS('DIR_TRANS: SPECIFY VERTICAL SPECTRAL DISTRIBUTION!')
+(  373)   ENDIF
+(  374)   IF(PRESENT(PSPSC2) .AND. .NOT. PRESENT(KVSETSC2)) THEN
+(  375)     WRITE(NERR,*)'NPRTRV >1 AND PRESENT(PSPSC2) AND NOT PRESENT(KVSETSC2)',&
+(  376)                  &NPRTRV
+(  377)     CALL ABORT_TRANS('DIR_TRANS: SPECIFY VERTICAL SPECTRAL DISTRIBUTION!')
+(  378)   ENDIF
+(  379)   IF(PRESENT(PSPSC3A) .AND. .NOT. PRESENT(KVSETSC3A)) THEN
+(  380)     WRITE(NERR,*)'NPRTRV >1 AND PRESENT(PSPSC3A) AND NOT PRESENT(KVSETSC3A)',&
+(  381)                  &NPRTRV
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 8
+
+(  382)     CALL ABORT_TRANS('DIR_TRANS: SPECIFY VERTICAL SPECTRAL DISTRIBUTION!')
+(  383)   ENDIF
+(  384)   IF(PRESENT(PSPSC3B) .AND. .NOT. PRESENT(KVSETSC3B)) THEN
+(  385)     WRITE(NERR,*)'NPRTRV >1 AND PRESENT(PSPSC3B) AND NOT PRESENT(KVSETSC3B)',&
+(  386)                  &NPRTRV
+(  387)     CALL ABORT_TRANS('DIR_TRANS: SPECIFY VERTICAL SPECTRAL DISTRIBUTION!')
+(  388)   ENDIF
+(  389) ENDIF
+(  390) 
+(  391) IF(PRESENT(PGP)) THEN
+(  392)   IUBOUND(1:3)=UBOUND(PGP)
+(  393)   IF(IUBOUND(1) < NPROMA) THEN
+(  394)     WRITE(NOUT,*)'DIR_TRANS:FIRST DIM. OF PGP TOO SMALL ',IUBOUND(1),NPROMA
+(  395)     CALL ABORT_TRANS('DIR_TRANS:FIRST DIMENSION OF PGP TOO SMALL ')
+(  396)   ENDIF
+(  397)   IF(IUBOUND(2) < IF_GP) THEN
+(  398)     WRITE(NOUT,*)'DIR_TRANS:SEC. DIM. OF PGP TOO SMALL ',IUBOUND(2),IF_GP
+(  399)     CALL ABORT_TRANS('DIR_TRANS:SECOND DIMENSION OF PGP TOO SMALL ')
+(  400)   ENDIF
+(  401)   IF(IUBOUND(3) < NGPBLKS) THEN
+(  402)     WRITE(NOUT,*)'DIR_TRANS:THIRD DIM. OF PGP TOO SMALL ',IUBOUND(3),NGPBLKS
+(  403)     CALL ABORT_TRANS('DIR_TRANS:THIRD DIMENSION OF PGP TOO SMALL ')
+(  404)   ENDIF
+(  405) ENDIF
+(  406) 
+(  407) IF(PRESENT(PGPUV)) THEN
+(  408)   IF(.NOT.PRESENT(PSPVOR)) THEN
+(  409)     CALL ABORT_TRANS('DIR_TRANS:PSPVOR HAS TO BE PRESENT WHEN PGPUV IS')
+(  410)   ENDIF
+(  411)   IUBOUND=UBOUND(PGPUV)
+(  412)   IF(IUBOUND(1) < NPROMA) THEN
+(  413)     WRITE(NOUT,*)'DIR_TRANS:FIRST DIM. OF PGPUV TOO SMALL ',IUBOUND(1),NPROMA
+(  414)     CALL ABORT_TRANS('DIR_TRANS:FIRST DIMENSION OF PGPUV TOO SMALL ')
+(  415)   ENDIF
+(  416)   IF(IUBOUND(2) /= IF_UV_G) THEN
+(  417)     WRITE(NOUT,*)'DIR_TRANS:SEC. DIM. OF PGPUV INCONSISTENT ',IUBOUND(2),IF_UV_G
+(  418)     CALL ABORT_TRANS('DIR_TRANS:SEC. DIMENSION OF PGPUV INCONSISTENT ')
+(  419)   ENDIF
+(  420)   IF(IUBOUND(3) < 2) THEN
+(  421)     WRITE(NOUT,*)'DIR_TRANS:THIRD DIM. OF PGPUV TOO SMALL ',IUBOUND(3),2
+(  422)     CALL ABORT_TRANS('DIR_TRANS:THIRD DIMENSION OF PGPUV TOO SMALL ')
+(  423)   ENDIF
+(  424)   IF(IUBOUND(4) < NGPBLKS) THEN
+(  425)     WRITE(NOUT,*)'DIR_TRANS:FOURTH DIM. OF PGPUV TOO SMALL ',IUBOUND(4),NGPBLKS
+(  426)     CALL ABORT_TRANS('DIR_TRANS:FOURTH DIMENSION OF PGPUV TOO SMALL ')
+(  427)   ENDIF
+(  428) ENDIF
+(  429) 
+(  430) IF(PRESENT(PGP2)) THEN
+(  431)   IF(.NOT.PRESENT(PSPSC2)) THEN
+(  432)     CALL ABORT_TRANS('DIR_TRANS:PSPSC2 HAS TO BE PRESENT WHEN PGP2 IS')
+(  433)   ENDIF
+(  434) ENDIF
+(  435) IF(IF_SC2_G > 0) THEN
+(  436)   IF(PRESENT(PGP2)) THEN
+(  437)     IUBOUND(1:3)=UBOUND(PGP2)
+(  438)     IF(IUBOUND(1) < NPROMA) THEN
+(  439)       WRITE(NOUT,*)'DIR_TRANS:FIRST DIM. OF PGP2 TOO SMALL ',IUBOUND(1),NPROMA
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 9
+
+(  440)       CALL ABORT_TRANS('DIR_TRANS:FIRST DIMENSION OF PGP2 TOO SMALL ')
+(  441)     ENDIF
+(  442)     IF(IUBOUND(2) /= IF_SC2_G) THEN
+(  443)       WRITE(NOUT,*)'DIR_TRANS:SEC. DIM. OF PGP2 INCONSISTENT ',IUBOUND(2),IF_SC2_G
+(  444)       CALL ABORT_TRANS('DIR_TRANS:SEC. DIMENSION OF PGP2 INCONSISTENT')
+(  445)     ENDIF
+(  446)     IF(IUBOUND(3) < NGPBLKS) THEN
+(  447)       WRITE(NOUT,*)'DIR_TRANS:THIRD DIM. OF PGP2 TOO SMALL ',IUBOUND(3),NGPBLKS
+(  448)       CALL ABORT_TRANS('DIR_TRANS:THIRD DIMENSION OF PGP2 TOO SMALL ')
+(  449)     ENDIF
+(  450)   ELSE
+(  451)     CALL ABORT_TRANS('DIR_TRANS:PGP2 MISSING')
+(  452)   ENDIF
+(  453) ENDIF
+(  454) 
+(  455) IF(PRESENT(PGP3A)) THEN
+(  456)   IF(.NOT.PRESENT(PSPSC3A)) THEN
+(  457)     CALL ABORT_TRANS('DIR_TRANS:PSPSC3A HAS TO BE PRESENT WHEN PGP3A IS')
+(  458)   ENDIF
+(  459) ENDIF
+(  460) IF(IF_SC3A_G > 0) THEN
+(  461)   IF(PRESENT(PGP3A)) THEN
+(  462)     IUBOUND=UBOUND(PGP3A)
+(  463)     IF(IUBOUND(1) < NPROMA) THEN
+(  464)       WRITE(NOUT,*)'DIR_TRANS:FIRST DIM. OF PGP3A TOO SMALL ',IUBOUND(1),NPROMA
+(  465)       CALL ABORT_TRANS('DIR_TRANS:FIRST DIMENSION OF PGP3A TOO SMALL ')
+(  466)     ENDIF
+(  467)     IF(IUBOUND(2) /= IF_SC3A_G) THEN
+(  468)       WRITE(NOUT,*)'DIR_TRANS:SEC DIM. OF PGP3A INCONSISTENT ',IUBOUND(2),IF_SC3A_G
+(  469)       CALL ABORT_TRANS('DIR_TRANS:SEC. DIMENSION OF PGP3A INCONSISTENT ')
+(  470)     ENDIF
+(  471)     IF(IUBOUND(3) /= UBOUND(PSPSC3A,3) ) THEN
+(  472)       WRITE(NOUT,*)'DIR_TRANS:THIRD DIM. OF PGP3A INCONSISTENT ',&
+(  473)        & IUBOUND(3),UBOUND(PSPSC3A,3)
+(  474)       CALL ABORT_TRANS('DIR_TRANS:THIRD DIMENSION OF PGP3A INCONSISTENT ')
+(  475)     ENDIF
+(  476)     IF(IUBOUND(4) < NGPBLKS) THEN
+(  477)       WRITE(NOUT,*)'DIR_TRANS:FOURTH DIM. OF PGP3A TOO SMALL ',IUBOUND(4),NGPBLKS
+(  478)       CALL ABORT_TRANS('DIR_TRANS:FOURTH DIMENSION OF PGP3A TOO SMALL ')
+(  479)     ENDIF
+(  480)   ELSE
+(  481)     CALL ABORT_TRANS('DIR_TRANS:PGP3A MISSING')
+(  482)   ENDIF
+(  483) ENDIF
+(  484) 
+(  485) IF(PRESENT(PGP3B)) THEN
+(  486)   IF(.NOT.PRESENT(PSPSC3B)) THEN
+(  487)     CALL ABORT_TRANS('DIR_TRANS:PSPSC3B HAS TO BE PRESENT WHEN PGP3B IS')
+(  488)   ENDIF
+(  489) ENDIF
+(  490) IF(IF_SC3B_G > 0) THEN
+(  491)   IF(PRESENT(PGP3B)) THEN
+(  492)     IUBOUND=UBOUND(PGP3B)
+(  493)     IF(IUBOUND(1) < NPROMA) THEN
+(  494)       WRITE(NOUT,*)'DIR_TRANS:FIRST DIM. OF PGP3B TOO SMALL ',IUBOUND(1),NPROMA
+(  495)       CALL ABORT_TRANS('DIR_TRANS:FIRST DIMENSION OF PGP3B TOO SMALL ')
+(  496)     ENDIF
+(  497)     IF(IUBOUND(2) /= IF_SC3B_G) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 10
+
+(  498)       WRITE(NOUT,*)'DIR_TRANS:SEC DIM. OF PGP3B INCONSISTENT ',IUBOUND(2),IF_SC3B_G
+(  499)       CALL ABORT_TRANS('DIR_TRANS:SEC. DIMENSION OF PGP3B INCONSISTENT ')
+(  500)     ENDIF
+(  501)     IF(IUBOUND(3) /= UBOUND(PSPSC3B,3) ) THEN
+(  502)       WRITE(NOUT,*)'DIR_TRANS:THIRD DIM. OF PGP3B INCONSISTENT ',&
+(  503)        & IUBOUND(3),UBOUND(PSPSC3B,3)
+(  504)       CALL ABORT_TRANS('DIR_TRANS:THIRD DIMENSION OF PGP3B INCONSISTENT ')
+(  505)     ENDIF
+(  506)     IF(IUBOUND(4) < NGPBLKS) THEN
+(  507)       WRITE(NOUT,*)'DIR_TRANS:FOURTH DIM. OF PGP3B TOO SMALL ',IUBOUND(4),NGPBLKS
+(  508)       CALL ABORT_TRANS('DIR_TRANS:FOURTH DIMENSION OF PGP3B TOO SMALL ')
+(  509)     ENDIF
+(  510)   ELSE
+(  511)     CALL ABORT_TRANS('DIR_TRANS:PGP3B MISSING')
+(  512)   ENDIF
+(  513) ENDIF
+(  514) CALL GSTATS(1808,1)
+(  515) 
+(  516) !     ------------------------------------------------------------------
+(  517) 
+(  518) !write(301,*) 'fields ',IF_UV_G,IF_SCALARS_G,IF_GP,IF_FS,IF_UV,IF_SCALARS
+(  519) CALL DIR_TRANS_CTL(IF_UV_G,IF_SCALARS_G,IF_GP,IF_FS,IF_UV,IF_SCALARS,&
+(  520)  & PSPVOR,PSPDIV,PSPSCALAR,KVSETUV,KVSETSC,PGP,&
+(  521)  & PSPSC3A,PSPSC3B,PSPSC2,KVSETSC3A,KVSETSC3B,KVSETSC2,PGPUV,PGP3A,PGP3B,PGP2)
+(  522) 
+(  523) 
+(  524) !!$ACC end data
+(  525) !!$ACC end data
+(  526) !!$ACC end data
+(  527) !!$ACC end data
+(  528) !!$ACC end data
+(  529) !!$ACC end data
+(  530) 
+(  531) !!$ACC exit data IF(PRESENT(PSPSCALAR)) delete(PSPSCALAR)
+(  532) !!$ACC exit data IF(PRESENT(PSPVOR))    delete(PSPVOR)
+(  533) !!$ACC exit data IF(PRESENT(PSPDIV))    delete(PSPDIV) 
+(  534) !!$ACC exit data IF(PRESENT(PSPSC3A))   delete(PSPSC3A)
+(  535) !!$ACC exit data IF(PRESENT(PSPSC3B))   delete(PSPSC3B)
+(  536) !!$ACC exit data IF(PRESENT(PSPSC2))    delete(PSPSC2) 
+(  537) 
+(  538) !!$ACC exit data IF(PRESENT(PGPUV)) delete(PGPUV)
+(  539) !!$ACC exit data IF(PRESENT(PGP3A)) delete(PGP3A)
+(  540) !!$ACC exit data IF(PRESENT(PGP3B)) delete(PGP3B)
+(  541) !!$ACC exit data IF(PRESENT(PGP2))  delete(PGP2)
+(  542) !!$ACC exit data IF(PRESENT(PGP))   delete(PGP)
+(  543) 
+(  544)  IF (LHOOK) CALL DR_HOOK('DIR_TRANS',1,ZHOOK_HANDLE)
+(  545) 
+(  546) !     ------------------------------------------------------------------
+(  547) !endif INTERFACE
+(  548) 
+(  549) END SUBROUTINE DIR_TRANS
+(  550) 
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 11
+
+(    1) # 1 "dir_trans.F90"
+(    1) SUBROUTINE DIR_TRANS(PSPVOR,PSPDIV,PSPSCALAR,PSPSC3A,PSPSC3B,PSPSC2,&
+(    2) & LDLATLON,KPROMA,KVSETUV,KVSETSC,KRESOL,KVSETSC3A,KVSETSC3B,KVSETSC2,&
+(    3) & PGP,PGPUV,PGP3A,PGP3B,PGP2)
+(    4) # 6 "dir_trans.F90"
+(    6) !**** *DIR_TRANS* - Direct spectral transform (from grid-point to spectral).
+(    7) # 8 "dir_trans.F90"
+(    8) !     Purpose.
+(    9) !     --------
+(   10) !        Interface routine for the direct spectral transform
+(   11) # 12 "dir_trans.F90"
+(   12) !**   Interface.
+(   13) !     ----------
+(   14) !     CALL DIR_TRANS(...)
+(   15) # 16 "dir_trans.F90"
+(   16) !     Explicit arguments : All arguments except from PGP are optional.
+(   17) !     --------------------
+(   18) !     PSPVOR(:,:) - spectral vorticity (output)
+(   19) !     PSPDIV(:,:) - spectral divergence (output)
+(   20) !     PSPSCALAR(:,:) - spectral scalarvalued fields (output)
+(   21) !     PSPSC3A(:,:,:) - alternative to use of PSPSCALAR, see PGP3A below (input)
+(   22) !     PSPSC3B(:,:,:) - alternative to use of PSPSCALAR, see PGP3B below (input)
+(   23) !     PSPSC2(:,:)  - alternative to use of PSPSCALAR, see PGP2 below (input)
+(   24) !     LDLATLON   - indicating if regular lat-lon is the input data
+(   25) !     KPROMA      - required blocking factor for gridpoint output
+(   26) !     KVSETUV(:)  - indicating which 'b-set' in spectral space owns a
+(   27) !                   vor/div field. Equivalant to NBSETLEV in the IFS.
+(   28) !                   The length of KVSETUV should be the GLOBAL number
+(   29) !                   of u/v fields which is the dimension of u and v releated
+(   30) !                   fields in grid-point space.
+(   31) !     KVESETSC(:) - indicating which 'b-set' in spectral space owns a
+(   32) !                   scalar field. As for KVSETUV this argument is required
+(   33) !                   if the total number of processors is greater than
+(   34) !                   the number of processors used for distribution in
+(   35) !                   spectral wave space.
+(   36) !     KVSETSC3A(:) - as KVESETSC for PSPSC3A (distribution on first dimension)
+(   37) !     KVSETSC3B(:) - as KVESETSC for PSPSC3B (distribution on first dimension)
+(   38) !     KVSETSC2(:) - as KVESETSC for PSPSC2 (distribution on first dimension)
+(   39) !     KRESOL   - resolution tag  which is required ,default is the
+(   40) !                first defined resulution (input)
+(   41) !     PGP(:,:,:) - gridpoint fields (input)
+(   42) !                  PGP need to  dimensioned (NPROMA,IF_GP,NGPBLKS) where
+(   43) !                  NPROMA is the blocking factor, IF_GP the total number
+(   44) !                  of output fields and NGPBLKS the number of NPROMA blocks.
+(   45) !                  The ordering of the output fields is as follows (all
+(   46) !                  parts are optional depending on the input switches):
+(   47) !
+(   48) !     u             : IF_UV_G fields (if psvor present)
+(   49) !     v             : IF_UV_G fields (if psvor present)
+(   50) !     scalar fields : IF_SCALARS_G fields (if pspscalar present)
+(   51) !
+(   52) !     Here IF_UV_G is the GLOBAL number of u/v fields as given by the length
+(   53) !     of KVSETUV (or by PSPVOR if no split in spectral 'b-set' direction
+(   54) !     IF_SCALARS_G is the GLOBAL number of scalar fields as giben by the
+(   55) !     length of KVESETSC (or by number of fields in PSPSCALAR if no spectral
+(   56) !     'b-set' split
+(   57) # 58 "dir_trans.F90"
+(   58) !     As an alternative to using PGP you can also use a combination of the
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 12
+
+(   59) !     following arrays. The reason for introducing these alternative ways
+(   60) !     of calling DIR_TRANS is to avoid uneccessary copies where your data
+(   61) !     structures don't fit in to the 'PSPVOR,PSPDIV, PSPSCALAR, PGP' layout.
+(   62) !     The use of any of these precludes the use of PGP and vice versa.
+(   63) # 64 "dir_trans.F90"
+(   64) !     PGPUV(:,:,:,:) - the 'u-v' related grid-point variables in the order
+(   65) !                      described for PGP. The second dimension of PGPUV should
+(   66) !                      be the same as the "global" first dimension of
+(   67) !                      PSPVOR,PSPDIV (in the IFS this is the number of levels)
+(   68) !                      PGPUV need to be dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   69) !                      IFLDS is the number of 'variables' (u,v)
+(   70) !     PGP3A(:,:,:,:) - grid-point array directly connected with PSPSC3A
+(   71) !                      dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   72) !                      IFLDS is the number of 'variables' (the same as in
+(   73) !                      PSPSC3A )
+(   74) !     PGP3B(:,:,:,:) - grid-point array directly connected with PSPSC3B
+(   75) !                      dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   76) !                      IFLDS is the number of 'variables' (the same as in
+(   77) !                      PSPSC3B)
+(   78) !     PGP2(:,:,:)    - grid-point array directly connected with PSPSC2
+(   79) !                      dimensioned(NPROMA,IFLDS,NGPBLKS)
+(   80) !                      IFLDS is the number of 'variables' (the same as in
+(   81) !                      PSPSC2 )
+(   82) !
+(   83) !     Method.
+(   84) !     -------
+(   85) # 86 "dir_trans.F90"
+(   86) !     Externals.  SET_RESOL   - set resolution
+(   87) !     ----------  LTDIR_CTL   - control of Legendre transform
+(   88) !                 FTDIR_CTL   - control of Fourier transform
+(   89) # 90 "dir_trans.F90"
+(   90) !     Author.
+(   91) !     -------
+(   92) !        Mats Hamrud *ECMWF*
+(   93) # 94 "dir_trans.F90"
+(   94) !     Modifications.
+(   95) !     --------------
+(   96) !        Original : 00-03-03
+(   97) # 98 "dir_trans.F90"
+(   98) !     ------------------------------------------------------------------
+(   99) # 100 "dir_trans.F90"
+(  100) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(  101) # 102 "dir_trans.F90"
+(  102) !ifndef INTERFACE
+(  103) # 104 "dir_trans.F90"
+(  104) USE TPM_GEN         ,ONLY : NERR, NOUT
+(  105) USE TPM_TRANS       ,ONLY : LDIVGP, LSCDERS, LUVDER, LVORGP, LATLON, &
+(  106)      &                      NF_SC2, NF_SC3A, NF_SC3B,        &
+(  107)      &                      NGPBLKS, NPROMA
+(  108) USE TPM_DISTR       ,ONLY : D, NPRTRV, MYSETV
+(  109) USE TPM_FLT, ONLY: S
+(  110) USE TPM_GEOMETRY ,ONLY : G
+(  111) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(  112) USE DIR_TRANS_CTL_MOD ,ONLY : DIR_TRANS_CTL
+(  113) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(  114) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(  115) # 116 "dir_trans.F90"
+(  116) !endif INTERFACE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 13
+
+(  117) # 118 "dir_trans.F90"
+(  118) IMPLICIT NONE
+(  119) # 120 "dir_trans.F90"
+(  120) ! Declaration of arguments
+(  121) # 122 "dir_trans.F90"
+(  122) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPVOR(:,:)
+(  123) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPDIV(:,:)
+(  124) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSCALAR(:,:)
+(  125) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSC3A(:,:,:)
+(  126) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSC3B(:,:,:)
+(  127) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSC2(:,:)
+(  128) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KPROMA
+(  129) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETUV(:)
+(  130) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC(:)
+(  131) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3A(:)
+(  132) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3B(:)
+(  133) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC2(:)
+(  134) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KRESOL
+(  135) LOGICAL   ,OPTIONAL, INTENT(IN) :: LDLATLON
+(  136) # 137 "dir_trans.F90"
+(  137) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGP(:,:,:)
+(  138) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGPUV(:,:,:,:)
+(  139) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGP3A(:,:,:,:)
+(  140) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGP3B(:,:,:,:)
+(  141) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGP2(:,:,:)
+(  142) # 143 "dir_trans.F90"
+(  143) !ifndef INTERFACE
+(  144) # 145 "dir_trans.F90"
+(  145) ! Local variables
+(  146) INTEGER(KIND=JPIM) :: IUBOUND(4),J
+(  147) INTEGER(KIND=JPIM) :: IF_UV,IF_UV_G,IF_SCALARS,IF_SCALARS_G,IF_FS,IF_GP
+(  148) INTEGER(KIND=JPIM) :: IF_SC2_G,IF_SC3A_G,IF_SC3B_G
+(  149) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  150) INTEGER(KIND=JPIM) :: JMLOC
+(  151) # 152 "dir_trans.F90"
+(  152) !!$ACC DATA COPY(S, S%FA) &
+(  153) !!$ACC& COPY(D,D%NPNTGTB0,D%NPNTGTB1,D%NSTAGT0B,D%NSTAGT1B,D%NSTAGTF,D%NPROCM,D%NPTRLS,D%MSTABF) &
+(  154) !!$ACC& COPY(G,G%NLOEN,G%NMEN)
+(  155) !!$ACC DATA IF(PRESENT(PGP2))  copyin(PGP2)
+(  156) !!$ACC DATA IF(PRESENT(PGPUV)) copyin(PGPUV)
+(  157) !!$ACC DATA IF(PRESENT(PGP3A)) copyin(PGP3A)
+(  158) !!$ACC DATA IF(PRESENT(PGP3B)) copyin(PGP3B)
+(  159) !!$ACC DATA IF(PRESENT(PGP))   copyin(PGP)
+(  160) # 161 "dir_trans.F90"
+(  161) ! output
+(  162) !!$ACC DATA IF(PRESENT(PSPSCALAR)) copyout(PSPSCALAR)
+(  163) !!$ACC DATA IF(PRESENT(PSPVOR)) copyout(PSPVOR)
+(  164) !!$ACC DATA IF(PRESENT(PSPDIV)) copyout(PSPDIV)
+(  165) !!$ACC DATA IF(PRESENT(PSPSC3A)) copyout(PSPSC3A)
+(  166) !!$ACC DATA IF(PRESENT(PSPSC3B)) copyout(PSPSC3B)
+(  167) !!$ACC DATA IF(PRESENT(PSPSC2)) copyout(PSPSC2)
+(  168) # 169 "dir_trans.F90"
+(  169) !!DO JMLOC=1,D%NUMP
+(  170) !!  !WRITE(NOUT,'("ENTER DATA COPYIN JMLOC=",I4," D%NUMP=",I4)')JMLOC,D%NUMP
+(  171) !!  !$ACC enter data copyin(S%FA(JMLOC)%RPNMA,S%FA(JMLOC)%RPNMS)
+(  172) !!ENDDO
+(  173) # 174 "dir_trans.F90"
+(  174) !     ------------------------------------------------------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 14
+
+(  175) IF (LHOOK) CALL DR_HOOK('DIR_TRANS',0,ZHOOK_HANDLE)
+(  176) CALL GSTATS(1808,0)
+(  177) ! Set current resolution
+(  178) CALL SET_RESOL(KRESOL)
+(  179) # 180 "dir_trans.F90"
+(  180) ! Set defaults
+(  181) # 182 "dir_trans.F90"
+(  182) IF_UV = 0
+(  183) IF_UV_G = 0
+(  184) IF_SCALARS = 0
+(  185) IF_SCALARS_G = 0
+(  186) NF_SC2 = 0
+(  187) NF_SC3A = 0
+(  188) NF_SC3B = 0
+(  189) IF_SC2_G = 0
+(  190) IF_SC3A_G = 0
+(  191) IF_SC3B_G = 0
+(  192) NPROMA = D%NGPTOT
+(  193) ! This is for use in TRGTOL which is shared with adjoint inverse transform
+(  194) LSCDERS=.FALSE.
+(  195) LVORGP=.FALSE.
+(  196) LDIVGP=.FALSE.
+(  197) LUVDER=.FALSE.
+(  198) LATLON=.FALSE.
+(  199) # 200 "dir_trans.F90"
+(  200) ! Decide requirements
+(  201) # 202 "dir_trans.F90"
+(  202) IF(PRESENT(KVSETUV)) THEN
+(  203)   IF_UV_G = UBOUND(KVSETUV,1)
+(  204)   DO J=1,IF_UV_G
+(  205)     IF(KVSETUV(J) > NPRTRV .OR. KVSETUV(J) < 1) THEN
+(  206)       WRITE(NERR,*) 'DIR_TRANS:KVSETUV(J) > NPRTRV ',J,KVSETUV(J),NPRTRV
+(  207)       CALL ABORT_TRANS('DIR_TRANS:KVSETUV TOO LONG OR CONTAINS VALUES OUTSIDE RANGE')
+(  208)     ENDIF
+(  209)     IF(KVSETUV(J) == MYSETV) THEN
+(  210)       IF_UV = IF_UV+1
+(  211)     ENDIF
+(  212)   ENDDO
+(  213) ELSEIF(PRESENT(PSPVOR)) THEN
+(  214)   IF_UV = UBOUND(PSPVOR,1)
+(  215)   IF_UV_G = IF_UV
+(  216) ENDIF
+(  217) # 218 "dir_trans.F90"
+(  218) IF(PRESENT(KVSETSC)) THEN
+(  219)   IF_SCALARS_G = UBOUND(KVSETSC,1)
+(  220)   DO J=1,IF_SCALARS_G
+(  221)     IF(KVSETSC(J) > NPRTRV .OR. KVSETSC(J) < 1) THEN
+(  222)       WRITE(NERR,*) 'DIR_TRANS:KVSETSC(J) > NPRTRV ',J,KVSETSC(J),NPRTRV
+(  223)       CALL ABORT_TRANS('DIR_TRANS:KVSETSC TOO LONG OR CONTAINS VALUES OUTSIDE RANGE')
+(  224)     ENDIF
+(  225)     IF(KVSETSC(J) == MYSETV) THEN
+(  226)       IF_SCALARS = IF_SCALARS+1
+(  227)     ENDIF
+(  228)   ENDDO
+(  229) ELSEIF(PRESENT(PSPSCALAR)) THEN
+(  230)   IF_SCALARS = UBOUND(PSPSCALAR,1)
+(  231)   IF_SCALARS_G = IF_SCALARS
+(  232) ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 15
+
+(  233) # 234 "dir_trans.F90"
+(  234) IF(PRESENT(KVSETSC2)) THEN
+(  235)   IF(.NOT.PRESENT(PSPSC2)) THEN
+(  236)     CALL ABORT_TRANS('DIR_TRANS:KVSETSC2 BUT NOT PSPSC2')
+(  237)   ENDIF
+(  238)   IF_SC2_G = UBOUND(KVSETSC2,1)
+(  239)   IF_SCALARS_G = IF_SCALARS_G+IF_SC2_G
+(  240)   DO J=1,UBOUND(KVSETSC2,1)
+(  241)     IF(KVSETSC2(J) > NPRTRV .OR. KVSETSC2(J) < 1) THEN
+(  242)       WRITE(NERR,*) 'DIR_TRANS:KVSETSC2(J) > NPRTRV ',J,KVSETSC2(J),NPRTRV
+(  243)       CALL ABORT_TRANS('DIR_TRANS:KVSETSC2 TOO LONG OR CONTAINS VALUES OUTSIDE RANGE')
+(  244)     ENDIF
+(  245)     IF(KVSETSC2(J) == MYSETV) THEN
+(  246)       IF_SCALARS = IF_SCALARS+1
+(  247)       NF_SC2 = NF_SC2+1
+(  248)     ENDIF
+(  249)   ENDDO
+(  250) ELSEIF(PRESENT(PSPSC2)) THEN
+(  251)   IF_SC2_G = UBOUND(PSPSC2,1)
+(  252)   NF_SC2   = UBOUND(PSPSC2,1)
+(  253)   IF_SCALARS = IF_SCALARS+NF_SC2
+(  254)   IF_SCALARS_G = IF_SCALARS_G +IF_SC2_G
+(  255) ENDIF
+(  256) # 257 "dir_trans.F90"
+(  257) IF(PRESENT(KVSETSC3A)) THEN
+(  258)   IF(.NOT.PRESENT(PSPSC3A)) THEN
+(  259)     CALL ABORT_TRANS('DIR_TRANS:KVSETSC3A BUT NOT PSPSC3A')
+(  260)   ENDIF
+(  261)   IF_SC3A_G = UBOUND(KVSETSC3A,1)
+(  262)   IF_SCALARS_G = IF_SCALARS_G+IF_SC3A_G*UBOUND(PSPSC3A,3)
+(  263)   DO J=1,UBOUND(KVSETSC3A,1)
+(  264)     IF(KVSETSC3A(J) > NPRTRV .OR. KVSETSC3A(J) < 1) THEN
+(  265)       WRITE(NERR,*) 'DIR_TRANS:KVSETSC3A(J) > NPRTRV ',J,KVSETSC3A(J),NPRTRV
+(  266)       CALL ABORT_TRANS('DIR_TRANS:KVSETSC3A TOO LONG OR CONTAINS VALUES OUTSIDE RANGE')
+(  267)     ENDIF
+(  268)     IF(KVSETSC3A(J) == MYSETV) THEN
+(  269)       IF_SCALARS = IF_SCALARS+UBOUND(PSPSC3A,3)
+(  270)       NF_SC3A = NF_SC3A+1
+(  271)     ENDIF
+(  272)   ENDDO
+(  273) ELSEIF(PRESENT(PSPSC3A)) THEN
+(  274)   IF_SCALARS = IF_SCALARS+UBOUND(PSPSC3A,1)*UBOUND(PSPSC3A,3)
+(  275)   IF_SC3A_G = UBOUND(PSPSC3A,1)
+(  276)   IF_SCALARS_G = IF_SCALARS_G +IF_SC3A_G*UBOUND(PSPSC3A,3)
+(  277)   NF_SC3A = UBOUND(PSPSC3A,1)
+(  278) ENDIF
+(  279) # 280 "dir_trans.F90"
+(  280) IF(PRESENT(KVSETSC3B)) THEN
+(  281)   IF(.NOT.PRESENT(PSPSC3B)) THEN
+(  282)     CALL ABORT_TRANS('DIR_TRANS:KVSETSC3B BUT NOT PSPSC3B')
+(  283)   ENDIF
+(  284)   IF_SC3B_G = UBOUND(KVSETSC3B,1)
+(  285)   IF_SCALARS_G = IF_SCALARS_G+IF_SC3B_G*UBOUND(PSPSC3B,3)
+(  286)   DO J=1,UBOUND(KVSETSC3B,1)
+(  287)     IF(KVSETSC3B(J) > NPRTRV .OR. KVSETSC3B(J) < 1) THEN
+(  288)       WRITE(NERR,*) 'DIR_TRANS:KVSETSC3B(J) > NPRTRV ',J,KVSETSC3B(J),NPRTRV
+(  289)       CALL ABORT_TRANS('DIR_TRANS:KVSETSC3B TOO LONG OR CONTAINS VALUES OUTSIDE RANGE')
+(  290)     ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 16
+
+(  291)     IF(KVSETSC3B(J) == MYSETV) THEN
+(  292)       IF_SCALARS = IF_SCALARS+UBOUND(PSPSC3B,3)
+(  293)       NF_SC3B = NF_SC3B+1
+(  294)     ENDIF
+(  295)   ENDDO
+(  296) ELSEIF(PRESENT(PSPSC3B)) THEN
+(  297)   IF_SCALARS = IF_SCALARS+UBOUND(PSPSC3B,1)*UBOUND(PSPSC3B,3)
+(  298)   IF_SC3B_G = UBOUND(PSPSC3B,1)
+(  299)   IF_SCALARS_G = IF_SCALARS_G +IF_SC3B_G*UBOUND(PSPSC3B,3)
+(  300)   NF_SC3B = UBOUND(PSPSC3B,1)
+(  301) ENDIF
+(  302) # 303 "dir_trans.F90"
+(  303) IF(PRESENT(KPROMA)) THEN
+(  304)   NPROMA = KPROMA
+(  305) ENDIF
+(  306) # 307 "dir_trans.F90"
+(  307) IF(PRESENT(LDLATLON)) THEN
+(  308)   LATLON = LDLATLON
+(  309) ENDIF
+(  310) # 311 "dir_trans.F90"
+(  311) ! Compute derived variables
+(  312) # 314 "dir_trans.F90"
+(  314) NGPBLKS = (D%NGPTOT-1)/NPROMA+1
+(  315) # 316 "dir_trans.F90"
+(  316) IF_FS = 2*IF_UV + IF_SCALARS
+(  317) !D%IADJUST_D=0
+(  318) !IF(MOD(IF_FS,2)==1) THEN
+(  319) !  IF_FS = IF_FS + 1
+(  320) !  D%IADJUST_D=1
+(  321) !ENDIF
+(  322) # 323 "dir_trans.F90"
+(  323) IF_GP = 2*IF_UV_G+IF_SCALARS_G
+(  324) # 325 "dir_trans.F90"
+(  325) ! Consistency checks
+(  326) # 327 "dir_trans.F90"
+(  327) IF (IF_UV > 0) THEN
+(  328)   IF(.NOT. PRESENT(PSPVOR) ) THEN
+(  329)     CALL ABORT_TRANS('DIR_TRANS : IF_UV > 0 BUT PSPVOR MISSING')
+(  330)   ENDIF
+(  331)   IF(UBOUND(PSPVOR,1) < IF_UV) THEN
+(  332)     WRITE(NERR,*)'DIR_TRANS : UBOUND(PSPVOR,1) < IF_UV ',UBOUND(PSPVOR,1),IF_UV
+(  333)     CALL ABORT_TRANS('DIR_TRANS : PSPVOR TOO SHORT')
+(  334)   ENDIF
+(  335)   IF(.NOT. PRESENT(PSPDIV) ) THEN
+(  336)     CALL ABORT_TRANS('DIR_TRANS : PSPVOR PRESENT BUT PSPDIV MISSING')
+(  337)   ENDIF
+(  338)   IF(UBOUND(PSPDIV,1) /= IF_UV) THEN
+(  339)     WRITE(NERR,*)'DIR_TRANS : UBOUND(PSPDIV,1) < IF_UV ',UBOUND(PSPDIV,1),IF_UV
+(  340)     CALL ABORT_TRANS('DIR_TRANS : INCONSISTENT FIRST DIM. OF PSPVOR AND PSPDIV')
+(  341)   ENDIF
+(  342) ENDIF
+(  343) # 344 "dir_trans.F90"
+(  344) IF (IF_SCALARS > 0) THEN
+(  345)   IF(PRESENT(PSPSCALAR)) THEN
+(  346)     IF(UBOUND(PSPSCALAR,1) < IF_SCALARS) THEN
+(  347)       WRITE(NERR,*)'DIR_TRANS : UBOUND(PSPSCALAR,1) < IF_SCALARS) ',&
+(  348)        & UBOUND(PSPSCALAR,1),IF_SCALARS
+(  349)       CALL ABORT_TRANS('DIR_TRANS : PSPSCALAR TOO SHORT')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 17
+
+(  350)     ENDIF
+(  351)     IF(PRESENT(PSPSC3A))THEN
+(  352)       CALL ABORT_TRANS('DIR_TRANS : PSPSCALAR AND PSPSC3A BOTH PRESENT')
+(  353)     ENDIF
+(  354)     IF(PRESENT(PSPSC3B))THEN
+(  355)       CALL ABORT_TRANS('DIR_TRANS : PSPSCALAR AND PSPSC3B BOTH PRESENT')
+(  356)     ENDIF
+(  357)     IF(PRESENT(PSPSC2))THEN
+(  358)       CALL ABORT_TRANS('DIR_TRANS : PSPSCALAR AND PSPSC2 BOTH PRESENT')
+(  359)     ENDIF
+(  360)   ENDIF
+(  361) ENDIF
+(  362) # 363 "dir_trans.F90"
+(  363) IF(NPRTRV >1) THEN
+(  364)   IF(IF_UV > 0 .AND. .NOT. PRESENT(KVSETUV)) THEN
+(  365)     WRITE(NERR,*)'NPRTRV >1 AND IF_UV > 0 AND NOT PRESENT(KVSETUV)',&
+(  366)                  &NPRTRV,IF_UV
+(  367)     CALL ABORT_TRANS('DIR_TRANS: SPECIFY VERTICAL SPECTRAL DISTRIBUTION!')
+(  368)   ENDIF
+(  369)   IF(PRESENT(PSPSCALAR) .AND. .NOT. PRESENT(KVSETSC)) THEN
+(  370)     WRITE(NERR,*)'NPRTRV >1 AND PRESENT(PSPSCALAR) AND NOT PRESENT(KVSETSC)',&
+(  371)                  &NPRTRV
+(  372)     CALL ABORT_TRANS('DIR_TRANS: SPECIFY VERTICAL SPECTRAL DISTRIBUTION!')
+(  373)   ENDIF
+(  374)   IF(PRESENT(PSPSC2) .AND. .NOT. PRESENT(KVSETSC2)) THEN
+(  375)     WRITE(NERR,*)'NPRTRV >1 AND PRESENT(PSPSC2) AND NOT PRESENT(KVSETSC2)',&
+(  376)                  &NPRTRV
+(  377)     CALL ABORT_TRANS('DIR_TRANS: SPECIFY VERTICAL SPECTRAL DISTRIBUTION!')
+(  378)   ENDIF
+(  379)   IF(PRESENT(PSPSC3A) .AND. .NOT. PRESENT(KVSETSC3A)) THEN
+(  380)     WRITE(NERR,*)'NPRTRV >1 AND PRESENT(PSPSC3A) AND NOT PRESENT(KVSETSC3A)',&
+(  381)                  &NPRTRV
+(  382)     CALL ABORT_TRANS('DIR_TRANS: SPECIFY VERTICAL SPECTRAL DISTRIBUTION!')
+(  383)   ENDIF
+(  384)   IF(PRESENT(PSPSC3B) .AND. .NOT. PRESENT(KVSETSC3B)) THEN
+(  385)     WRITE(NERR,*)'NPRTRV >1 AND PRESENT(PSPSC3B) AND NOT PRESENT(KVSETSC3B)',&
+(  386)                  &NPRTRV
+(  387)     CALL ABORT_TRANS('DIR_TRANS: SPECIFY VERTICAL SPECTRAL DISTRIBUTION!')
+(  388)   ENDIF
+(  389) ENDIF
+(  390) # 391 "dir_trans.F90"
+(  391) IF(PRESENT(PGP)) THEN
+(  392)   IUBOUND(1:3)=UBOUND(PGP)
+(  393)   IF(IUBOUND(1) < NPROMA) THEN
+(  394)     WRITE(NOUT,*)'DIR_TRANS:FIRST DIM. OF PGP TOO SMALL ',IUBOUND(1),NPROMA
+(  395)     CALL ABORT_TRANS('DIR_TRANS:FIRST DIMENSION OF PGP TOO SMALL ')
+(  396)   ENDIF
+(  397)   IF(IUBOUND(2) < IF_GP) THEN
+(  398)     WRITE(NOUT,*)'DIR_TRANS:SEC. DIM. OF PGP TOO SMALL ',IUBOUND(2),IF_GP
+(  399)     CALL ABORT_TRANS('DIR_TRANS:SECOND DIMENSION OF PGP TOO SMALL ')
+(  400)   ENDIF
+(  401)   IF(IUBOUND(3) < NGPBLKS) THEN
+(  402)     WRITE(NOUT,*)'DIR_TRANS:THIRD DIM. OF PGP TOO SMALL ',IUBOUND(3),NGPBLKS
+(  403)     CALL ABORT_TRANS('DIR_TRANS:THIRD DIMENSION OF PGP TOO SMALL ')
+(  404)   ENDIF
+(  405) ENDIF
+(  406) # 407 "dir_trans.F90"
+(  407) IF(PRESENT(PGPUV)) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 18
+
+(  408)   IF(.NOT.PRESENT(PSPVOR)) THEN
+(  409)     CALL ABORT_TRANS('DIR_TRANS:PSPVOR HAS TO BE PRESENT WHEN PGPUV IS')
+(  410)   ENDIF
+(  411)   IUBOUND=UBOUND(PGPUV)
+(  412)   IF(IUBOUND(1) < NPROMA) THEN
+(  413)     WRITE(NOUT,*)'DIR_TRANS:FIRST DIM. OF PGPUV TOO SMALL ',IUBOUND(1),NPROMA
+(  414)     CALL ABORT_TRANS('DIR_TRANS:FIRST DIMENSION OF PGPUV TOO SMALL ')
+(  415)   ENDIF
+(  416)   IF(IUBOUND(2) /= IF_UV_G) THEN
+(  417)     WRITE(NOUT,*)'DIR_TRANS:SEC. DIM. OF PGPUV INCONSISTENT ',IUBOUND(2),IF_UV_G
+(  418)     CALL ABORT_TRANS('DIR_TRANS:SEC. DIMENSION OF PGPUV INCONSISTENT ')
+(  419)   ENDIF
+(  420)   IF(IUBOUND(3) < 2) THEN
+(  421)     WRITE(NOUT,*)'DIR_TRANS:THIRD DIM. OF PGPUV TOO SMALL ',IUBOUND(3),2
+(  422)     CALL ABORT_TRANS('DIR_TRANS:THIRD DIMENSION OF PGPUV TOO SMALL ')
+(  423)   ENDIF
+(  424)   IF(IUBOUND(4) < NGPBLKS) THEN
+(  425)     WRITE(NOUT,*)'DIR_TRANS:FOURTH DIM. OF PGPUV TOO SMALL ',IUBOUND(4),NGPBLKS
+(  426)     CALL ABORT_TRANS('DIR_TRANS:FOURTH DIMENSION OF PGPUV TOO SMALL ')
+(  427)   ENDIF
+(  428) ENDIF
+(  429) # 430 "dir_trans.F90"
+(  430) IF(PRESENT(PGP2)) THEN
+(  431)   IF(.NOT.PRESENT(PSPSC2)) THEN
+(  432)     CALL ABORT_TRANS('DIR_TRANS:PSPSC2 HAS TO BE PRESENT WHEN PGP2 IS')
+(  433)   ENDIF
+(  434) ENDIF
+(  435) IF(IF_SC2_G > 0) THEN
+(  436)   IF(PRESENT(PGP2)) THEN
+(  437)     IUBOUND(1:3)=UBOUND(PGP2)
+(  438)     IF(IUBOUND(1) < NPROMA) THEN
+(  439)       WRITE(NOUT,*)'DIR_TRANS:FIRST DIM. OF PGP2 TOO SMALL ',IUBOUND(1),NPROMA
+(  440)       CALL ABORT_TRANS('DIR_TRANS:FIRST DIMENSION OF PGP2 TOO SMALL ')
+(  441)     ENDIF
+(  442)     IF(IUBOUND(2) /= IF_SC2_G) THEN
+(  443)       WRITE(NOUT,*)'DIR_TRANS:SEC. DIM. OF PGP2 INCONSISTENT ',IUBOUND(2),IF_SC2_G
+(  444)       CALL ABORT_TRANS('DIR_TRANS:SEC. DIMENSION OF PGP2 INCONSISTENT')
+(  445)     ENDIF
+(  446)     IF(IUBOUND(3) < NGPBLKS) THEN
+(  447)       WRITE(NOUT,*)'DIR_TRANS:THIRD DIM. OF PGP2 TOO SMALL ',IUBOUND(3),NGPBLKS
+(  448)       CALL ABORT_TRANS('DIR_TRANS:THIRD DIMENSION OF PGP2 TOO SMALL ')
+(  449)     ENDIF
+(  450)   ELSE
+(  451)     CALL ABORT_TRANS('DIR_TRANS:PGP2 MISSING')
+(  452)   ENDIF
+(  453) ENDIF
+(  454) # 455 "dir_trans.F90"
+(  455) IF(PRESENT(PGP3A)) THEN
+(  456)   IF(.NOT.PRESENT(PSPSC3A)) THEN
+(  457)     CALL ABORT_TRANS('DIR_TRANS:PSPSC3A HAS TO BE PRESENT WHEN PGP3A IS')
+(  458)   ENDIF
+(  459) ENDIF
+(  460) IF(IF_SC3A_G > 0) THEN
+(  461)   IF(PRESENT(PGP3A)) THEN
+(  462)     IUBOUND=UBOUND(PGP3A)
+(  463)     IF(IUBOUND(1) < NPROMA) THEN
+(  464)       WRITE(NOUT,*)'DIR_TRANS:FIRST DIM. OF PGP3A TOO SMALL ',IUBOUND(1),NPROMA
+(  465)       CALL ABORT_TRANS('DIR_TRANS:FIRST DIMENSION OF PGP3A TOO SMALL ')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 19
+
+(  466)     ENDIF
+(  467)     IF(IUBOUND(2) /= IF_SC3A_G) THEN
+(  468)       WRITE(NOUT,*)'DIR_TRANS:SEC DIM. OF PGP3A INCONSISTENT ',IUBOUND(2),IF_SC3A_G
+(  469)       CALL ABORT_TRANS('DIR_TRANS:SEC. DIMENSION OF PGP3A INCONSISTENT ')
+(  470)     ENDIF
+(  471)     IF(IUBOUND(3) /= UBOUND(PSPSC3A,3) ) THEN
+(  472)       WRITE(NOUT,*)'DIR_TRANS:THIRD DIM. OF PGP3A INCONSISTENT ',&
+(  473)        & IUBOUND(3),UBOUND(PSPSC3A,3)
+(  474)       CALL ABORT_TRANS('DIR_TRANS:THIRD DIMENSION OF PGP3A INCONSISTENT ')
+(  475)     ENDIF
+(  476)     IF(IUBOUND(4) < NGPBLKS) THEN
+(  477)       WRITE(NOUT,*)'DIR_TRANS:FOURTH DIM. OF PGP3A TOO SMALL ',IUBOUND(4),NGPBLKS
+(  478)       CALL ABORT_TRANS('DIR_TRANS:FOURTH DIMENSION OF PGP3A TOO SMALL ')
+(  479)     ENDIF
+(  480)   ELSE
+(  481)     CALL ABORT_TRANS('DIR_TRANS:PGP3A MISSING')
+(  482)   ENDIF
+(  483) ENDIF
+(  484) # 485 "dir_trans.F90"
+(  485) IF(PRESENT(PGP3B)) THEN
+(  486)   IF(.NOT.PRESENT(PSPSC3B)) THEN
+(  487)     CALL ABORT_TRANS('DIR_TRANS:PSPSC3B HAS TO BE PRESENT WHEN PGP3B IS')
+(  488)   ENDIF
+(  489) ENDIF
+(  490) IF(IF_SC3B_G > 0) THEN
+(  491)   IF(PRESENT(PGP3B)) THEN
+(  492)     IUBOUND=UBOUND(PGP3B)
+(  493)     IF(IUBOUND(1) < NPROMA) THEN
+(  494)       WRITE(NOUT,*)'DIR_TRANS:FIRST DIM. OF PGP3B TOO SMALL ',IUBOUND(1),NPROMA
+(  495)       CALL ABORT_TRANS('DIR_TRANS:FIRST DIMENSION OF PGP3B TOO SMALL ')
+(  496)     ENDIF
+(  497)     IF(IUBOUND(2) /= IF_SC3B_G) THEN
+(  498)       WRITE(NOUT,*)'DIR_TRANS:SEC DIM. OF PGP3B INCONSISTENT ',IUBOUND(2),IF_SC3B_G
+(  499)       CALL ABORT_TRANS('DIR_TRANS:SEC. DIMENSION OF PGP3B INCONSISTENT ')
+(  500)     ENDIF
+(  501)     IF(IUBOUND(3) /= UBOUND(PSPSC3B,3) ) THEN
+(  502)       WRITE(NOUT,*)'DIR_TRANS:THIRD DIM. OF PGP3B INCONSISTENT ',&
+(  503)        & IUBOUND(3),UBOUND(PSPSC3B,3)
+(  504)       CALL ABORT_TRANS('DIR_TRANS:THIRD DIMENSION OF PGP3B INCONSISTENT ')
+(  505)     ENDIF
+(  506)     IF(IUBOUND(4) < NGPBLKS) THEN
+(  507)       WRITE(NOUT,*)'DIR_TRANS:FOURTH DIM. OF PGP3B TOO SMALL ',IUBOUND(4),NGPBLKS
+(  508)       CALL ABORT_TRANS('DIR_TRANS:FOURTH DIMENSION OF PGP3B TOO SMALL ')
+(  509)     ENDIF
+(  510)   ELSE
+(  511)     CALL ABORT_TRANS('DIR_TRANS:PGP3B MISSING')
+(  512)   ENDIF
+(  513) ENDIF
+(  514) CALL GSTATS(1808,1)
+(  515) # 516 "dir_trans.F90"
+(  516) !     ------------------------------------------------------------------
+(  517) # 518 "dir_trans.F90"
+(  518) !write(301,*) 'fields ',IF_UV_G,IF_SCALARS_G,IF_GP,IF_FS,IF_UV,IF_SCALARS
+(  519) CALL DIR_TRANS_CTL(IF_UV_G,IF_SCALARS_G,IF_GP,IF_FS,IF_UV,IF_SCALARS,&
+(  520)  & PSPVOR,PSPDIV,PSPSCALAR,KVSETUV,KVSETSC,PGP,&
+(  521)  & PSPSC3A,PSPSC3B,PSPSC2,KVSETSC3A,KVSETSC3B,KVSETSC2,PGPUV,PGP3A,PGP3B,PGP2)
+(  522) # 524 "dir_trans.F90"
+(  524) !!$ACC end data
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:31      page 20
+
+(  525) !!$ACC end data
+(  526) !!$ACC end data
+(  527) !!$ACC end data
+(  528) !!$ACC end data
+(  529) !!$ACC end data
+(  530) # 531 "dir_trans.F90"
+(  531) !!$ACC exit data IF(PRESENT(PSPSCALAR)) delete(PSPSCALAR)
+(  532) !!$ACC exit data IF(PRESENT(PSPVOR))    delete(PSPVOR)
+(  533) !!$ACC exit data IF(PRESENT(PSPDIV))    delete(PSPDIV) 
+(  534) !!$ACC exit data IF(PRESENT(PSPSC3A))   delete(PSPSC3A)
+(  535) !!$ACC exit data IF(PRESENT(PSPSC3B))   delete(PSPSC3B)
+(  536) !!$ACC exit data IF(PRESENT(PSPSC2))    delete(PSPSC2) 
+(  537) # 538 "dir_trans.F90"
+(  538) !!$ACC exit data IF(PRESENT(PGPUV)) delete(PGPUV)
+(  539) !!$ACC exit data IF(PRESENT(PGP3A)) delete(PGP3A)
+(  540) !!$ACC exit data IF(PRESENT(PGP3B)) delete(PGP3B)
+(  541) !!$ACC exit data IF(PRESENT(PGP2))  delete(PGP2)
+(  542) !!$ACC exit data IF(PRESENT(PGP))   delete(PGP)
+(  543) # 544 "dir_trans.F90"
+(  544)  IF (LHOOK) CALL DR_HOOK('DIR_TRANS',1,ZHOOK_HANDLE)
+(  545) # 546 "dir_trans.F90"
+(  546) !     ------------------------------------------------------------------
+(  547) !endif INTERFACE
+(  548) # 549 "dir_trans.F90"
+(  549) END SUBROUTINE DIR_TRANS

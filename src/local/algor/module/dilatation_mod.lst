@@ -1,0 +1,1251 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: dilatation_mod.F90
+
+(    1) MODULE DILATATION_MOD 
+(    2) 
+(    3) USE PARKIND1  ,ONLY : JPIM     ,JPRB, JPRD
+(    4) USE PARKIND2  ,ONLY : JPRH
+(    5) USE MPL_MODULE, ONLY : MPL_SEND, MPL_RECV
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) 
+(    8) IMPLICIT NONE
+(    9) 
+(   10) PRIVATE
+(   11) PUBLIC DILAT_CALC, DILAT_DEVIATION, DILAT_CONTROL, DILAT_MAPPING
+(   12) 
+(   13) ! Dilatation package package.
+(   14) 
+(   15) ! To compute dilatation and contraction matrixes from Legendre polynomials and
+(   16) ! gaussian weights and latitudes on a streched sphere ; and control the
+(   17) ! deviation of the product of these matrixes against the identity matrix.
+(   18) 
+(   19) CONTAINS
+(   20) !================================================================================
+(   21) SUBROUTINE DILAT_MAPPING(PSTRET,PMU,PMAPP)
+(   22) 
+(   23) !**** *DILAT_MAPPING* - Compute the map factor for each latitudes
+(   24) 
+(   25) !      Purpose.
+(   26) !      --------
+(   27) !           To  compute the map factor, given the stretching
+(   28) !           factor and the sines of the standard gaussian latitudes
+(   29) 
+(   30) !**    Interface.
+(   31) !      ----------
+(   32) !         *CALL *DILAT_MAPPING*
+(   33) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 2
+
+(   34) !      Explicit arguments.
+(   35) !      -------------------
+(   36) !            PSTRET : stretching factor
+(   37) !            PMU    : sines of the gaussian latitudes
+(   38) !            PMAPP  : map factor
+(   39) 
+(   40) !      Implicit arguments.
+(   41) !      -------------------
+(   42) 
+(   43) !      Method.
+(   44) !      -------
+(   45) !         See documentation.
+(   46) 
+(   47) !      Reference.
+(   48) !      ----------
+(   49) !         Arpege note 19 (in French).
+(   50) 
+(   51) !      Externals.
+(   52) !      ---------
+(   53) 
+(   54) !      Author.
+(   55) !      -------
+(   56) !         R. El Khatib 19-Jun-2013 from Michel Rochas, DMN (Original 91-01-28).
+(   57) 
+(   58) !      Modifications.
+(   59) !      --------------
+(   60) !     ------------------------------------------------------------------
+(   61) 
+(   62) IMPLICIT NONE
+(   63) 
+(   64) REAL(KIND=JPRB), INTENT(IN)  :: PSTRET
+(   65) REAL(KIND=JPRD), INTENT(IN)  :: PMU(:)
+(   66) REAL(KIND=JPRB), INTENT(OUT) :: PMAPP(:)
+(   67) 
+(   68) INTEGER(KIND=JPIM) :: IGLS, IDGNH, JGL
+(   69) 
+(   70) REAL(KIND=JPRH) :: Z_DLSINE,Z_DLTAN
+(   71) 
+(   72) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   73) 
+(   74) !     ------------------------------------------------------------------
+(   75) 
+(   76) #include "abor1.intfb.h"
+(   77) 
+(   78) !     ------------------------------------------------------------------
+(   79) IF (LHOOK) CALL DR_HOOK('DILAT_MAPPING',0,ZHOOK_HANDLE)
+(   80) !     ------------------------------------------------------------------
+(   81) 
+(   82) IF ( (SIZE(PMU,DIM=1) /= SIZE(PMAPP,DIM=1)) ) THEN
+(   83)   CALL ABOR1('DILAT_MAPPING : SIZE MISMATCH BETWEEN PMU AND PMAPP')
+(   84) ENDIF
+(   85) 
+(   86) ! Remark : this is an inconsistent mixture of double and quadruple precision. REK
+(   87) Z_DLTAN=(1.0_JPRB-PSTRET**2)/(1.0_JPRB+PSTRET**2)
+(   88) Z_DLSINE=2.0_JPRB*PSTRET/(1.0_JPRB+PSTRET**2)
+(   89) IDGNH=(SIZE(PMU,DIM=1)+1)/2
+(   90) DO JGL=1,IDGNH
+(   91)   PMAPP(JGL)=REAL((Z_DLSINE/(1.0_JPRB+Z_DLTAN*PMU(JGL)))**2,JPRB)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 3
+
+(   92) ENDDO
+(   93) DO JGL=1,IDGNH
+(   94)   IGLS=2*IDGNH-JGL+1
+(   95)   PMAPP(IGLS)=REAL((Z_DLSINE/(1.0_JPRB-Z_DLTAN*PMU(JGL)))**2,JPRB)
+(   96) ENDDO
+(   97) 
+(   98) !     ------------------------------------------------------------------
+(   99) IF (LHOOK) CALL DR_HOOK('DILAT_MAPPING',1,ZHOOK_HANDLE)
+(  100) !     ------------------------------------------------------------------
+(  101) 
+(  102) END SUBROUTINE DILAT_MAPPING
+(  103) !====================================================================
+(  104) SUBROUTINE DILAT_CALC(KM,KNSMAX,KNSMIN,KDGNH,PNM,PW,PMAPP,PRPNM,PALFA,PBETA)  
+(  105) 
+(  106) !**** *DILAT_CALC* - Computes dilatation matrix.
+(  107) 
+(  108) !      Purpose.
+(  109) !      --------
+(  110) !               Computes dilatation matrix for schmidt transform.
+(  111) 
+(  112) !**    Interface.
+(  113) !      ----------
+(  114) !         *CALL *DILAT_CALC(...)
+(  115) 
+(  116) !      Explicit Arguments :
+(  117) !      --------------------
+(  118) !           INPUT:
+(  119) !            KM      - Zonal wave number
+(  120) !            KNSMAX  - Larger truncation
+(  121) !            KNSMIN  - smaller truncation
+(  122) !            KDGNH   - number of points on an hemisphere
+(  123) !            PNM     - Legendre polynomials small truncation
+(  124) !            PW      - Gaussian weights
+(  125) !            PMAPP   - Mapping factor
+(  126) !            PRPNM   - Legendre polynomials large truncation
+(  127) 
+(  128) !           OUTPUT:
+(  129) !            PALFA  - Contraction (0) matrix
+(  130) !            PBETA  - Dilatation  (1) matrix
+(  131) 
+(  132) !      Implicit arguments :
+(  133) !      --------------------
+(  134) 
+(  135) !      Method.
+(  136) !      -------
+(  137) !         See documentation.
+(  138) 
+(  139) !      Reference.
+(  140) !      ----------
+(  141) !         Arpege note 19 (in French).
+(  142) 
+(  143) !      Externals.
+(  144) !      ----------
+(  145) !         Calls MXMAOP.
+(  146) !         Is called by SUDIL.
+(  147) 
+(  148) !      Author.
+(  149) !      -------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 4
+
+(  150) !         Michel Rochas, DMN.
+(  151) 
+(  152) !      Modifications.
+(  153) !      --------------
+(  154) !        Original : 91-01-28.
+(  155) !        =07-08-91= Philippe Courtier. Changes Leg. polynomials mapping
+(  156) !        K. YESSAD: 93-05-11 : cleaning, comments put into English.
+(  157) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(  158) !        K. Yessad: Aug 2005 : A-level distribution of conf 911. 
+(  159) !        K. Yessad (June 2009): externalisation.
+(  160) !        R. El Khatib 20-Jun-2013 Optimization
+(  161) !        R. El Khatib 07-Mar-2016 Simplification/Optimization
+(  162) !     ------------------------------------------------------------------
+(  163) 
+(  164) IMPLICIT NONE
+(  165) 
+(  166) INTEGER(KIND=JPIM),INTENT(IN)    :: KM 
+(  167) INTEGER(KIND=JPIM),INTENT(IN)    :: KNSMAX 
+(  168) INTEGER(KIND=JPIM),INTENT(IN)    :: KNSMIN 
+(  169) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGNH 
+(  170) REAL(KIND=JPRB)   ,INTENT(IN)    :: PNM(2*KDGNH,KNSMIN-KM+1) 
+(  171) REAL(KIND=JPRB)   ,INTENT(IN)    :: PW(KDGNH) 
+(  172) REAL(KIND=JPRB)   ,INTENT(IN)    :: PMAPP(2*KDGNH) 
+(  173) REAL(KIND=JPRB)   ,INTENT(IN)    :: PRPNM(KDGNH,KNSMAX-KM+1) 
+(  174) REAL(KIND=JPRB)   ,INTENT(OUT)   :: PALFA(KNSMAX-KM+1,KNSMIN-KM+1)
+(  175) REAL(KIND=JPRB)   ,INTENT(OUT)   :: PBETA(KNSMAX-KM+1,KNSMIN-KM+1)
+(  176) 
+(  177) !     ------------------------------------------------------------------
+(  178) 
+(  179) REAL(KIND=JPRB) :: ZP(KNSMAX-KM+1)
+(  180) REAL(KIND=JPRB) :: ZPNM(KDGNH+1,KNSMIN-KM+1)
+(  181) REAL(KIND=JPRB) :: ZNOR(2*((KNSMAX-KM+1)/2)+1,KNSMIN-KM+1)
+(  182) REAL(KIND=JPRB) :: ZSUD(2*((KNSMAX-KM+1)/2)+1,KNSMIN-KM+1)
+(  183) REAL(KIND=JPRB) :: ZRPNM(2*((KNSMAX-KM+1)/2)+1,KDGNH+1)
+(  184) 
+(  185) INTEGER(KIND=JPIM) :: IGLS, IR, IR2, JGL, JN, JS, JI, II, IOFF
+(  186) INTEGER(KIND=JPIM) :: ISMAXSUR
+(  187) 
+(  188) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  189) 
+(  190) !     ------------------------------------------------------------------
+(  191) 
+(  192) #include "mxmaop.h"
+(  193) 
+(  194) !     ------------------------------------------------------------------
+(  195) IF (LHOOK) CALL DR_HOOK('DILAT_CALC',0,ZHOOK_HANDLE)
+(  196) !     ------------------------------------------------------------------
+(  197) 
+(  198) !*        0. Preparations
+(  199) !            ------------
+(  200) 
+(  201) ISMAXSUR=2*((KNSMAX-KM+1)/2)+1
+(  202) IOFF=KNSMAX+2-KM
+(  203) 
+(  204) ! Initialize a parity array
+(  205) 
+(  206) DO JS=1,KNSMAX-KM+1
+(  207)   ZP(JS)=REAL(2*MOD(JS+KNSMAX-KM,2)-1,JPRB)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 5
+
+(  208) ENDDO
+(  209) 
+(  210) !   multiplication by gaussian weights
+(  211) !   of the Legendre polynomials at high truncation
+(  212) 
+(  213) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JGL,JS)
+(  214) DO JGL=1,KDGNH
+(  215)   DO JS=1,KNSMAX-KM+1
+(  216)     ZRPNM(JS,JGL)=PRPNM(JGL,JS)*PW(JGL)
+(  217)   ENDDO
+(  218) ENDDO
+(  219) !$OMP END PARALLEL DO
+(  220) 
+(  221) !     ------------------------------------------------------------------
+(  222) 
+(  223) !*    1. Matrix ALPHA
+(  224) 
+(  225) 
+(  226) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JN,JGL)
+(  227) DO JN=1,KNSMIN-KM+1
+(  228)   DO JGL=1,KDGNH
+(  229)     ZPNM(JGL,JN)=PNM(JGL,JN)*PMAPP(JGL)
+(  230)   ENDDO
+(  231) ENDDO
+(  232) !$OMP END PARALLEL DO
+(  233) 
+(  234) CALL MXMAOP(ZRPNM,1,ISMAXSUR,ZPNM(:,:),1,KDGNH+1,ZNOR(:,:),1,ISMAXSUR,&
+(  235)  & KNSMAX-KM+1,KDGNH,KNSMIN-KM+1)
+(  236) 
+(  237) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JN,JGL)
+(  238) DO JN=1,KNSMIN-KM+1
+(  239)   DO JGL=1,KDGNH
+(  240)     ZPNM(JGL,JN)=PNM(2*KDGNH-JGL+1,JN)*PMAPP(2*KDGNH-JGL+1)
+(  241)   ENDDO
+(  242) ENDDO
+(  243) !$OMP END PARALLEL DO
+(  244) 
+(  245) CALL MXMAOP(ZRPNM,1,ISMAXSUR,ZPNM(:,:),1,KDGNH+1,ZSUD(:,:),1,ISMAXSUR,&
+(  246)  & KNSMAX-KM+1,KDGNH,KNSMIN-KM+1)
+(  247) 
+(  248) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JN,JS)
+(  249) DO JN=1,KNSMIN-KM+1
+(  250)   DO JS=1,KNSMAX-KM+1
+(  251)     PALFA(IOFF-JS,KNSMIN-KM+2-JN)=ZNOR(JS,JN)+ZP(JS)*ZSUD(JS,JN)
+(  252)   ENDDO
+(  253) ENDDO
+(  254) !$OMP END PARALLEL DO
+(  255) 
+(  256) 
+(  257) !*    2. Matrix BETA
+(  258) 
+(  259) 
+(  260) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JN,JGL)
+(  261) DO JN=1,KNSMIN-KM+1
+(  262)   DO JGL=1,KDGNH
+(  263)     ZPNM(JGL,JN)=PNM(JGL,JN)
+(  264)   ENDDO
+(  265) ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 6
+
+(  266) !$OMP END PARALLEL DO
+(  267) 
+(  268) CALL MXMAOP(ZRPNM,1,ISMAXSUR,ZPNM(:,:),1,KDGNH+1,ZNOR(:,:),1,ISMAXSUR,&
+(  269)  & KNSMAX-KM+1,KDGNH,KNSMIN-KM+1)
+(  270) 
+(  271) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JN,JGL)
+(  272) DO JN=1,KNSMIN-KM+1
+(  273)   DO JGL=1,KDGNH
+(  274)     ZPNM(JGL,JN)=PNM(2*KDGNH-JGL+1,JN)
+(  275)   ENDDO
+(  276) ENDDO
+(  277) !$OMP END PARALLEL DO
+(  278) 
+(  279) CALL MXMAOP(ZRPNM,1,ISMAXSUR,ZPNM(:,:),1,KDGNH+1,ZSUD(:,:),1,ISMAXSUR,&
+(  280)  & KNSMAX-KM+1,KDGNH,KNSMIN-KM+1)
+(  281) 
+(  282) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JN,JS)
+(  283) DO JN=1,KNSMIN-KM+1
+(  284)   DO JS=1,KNSMAX-KM+1
+(  285)     PBETA(IOFF-JS,KNSMIN-KM+2-JN)=ZNOR(JS,JN)+ZP(JS)*ZSUD(JS,JN)
+(  286)   ENDDO
+(  287) ENDDO
+(  288) !$OMP END PARALLEL DO
+(  289) 
+(  290) !     ------------------------------------------------------------------
+(  291) IF (LHOOK) CALL DR_HOOK('DILAT_CALC',1,ZHOOK_HANDLE)
+(  292) !     ------------------------------------------------------------------
+(  293) END SUBROUTINE DILAT_CALC
+(  294) !=============================================================================
+(  295) SUBROUTINE DILAT_DEVIATION(PALFA,PBETA,PMAX)
+(  296) 
+(  297) !**** *DILAT_DEVIATION* - compute the deviation of dilatation/contraction matrixes.
+(  298) 
+(  299) !      Purpose.
+(  300) !      --------
+(  301) !           Compute the deviation from identity of the product contraction o dilatation
+(  302) !           for a given wave number
+(  303) 
+(  304) !**    Interface.
+(  305) !      ----------
+(  306) !         *CALL *DILAT_DEVIATION*
+(  307) 
+(  308) !      Explicit arguments.
+(  309) !      -------------------
+(  310) !            PALFA      - Matrix Alfa (Contraction)
+(  311) !            PBETA      - Matrix Beta (Dilatation)
+(  312) !            PMAX         - deviation from identity 
+(  313) 
+(  314) !      Implicit arguments.
+(  315) !      -------------------
+(  316) 
+(  317) !      Method.
+(  318) !      -------
+(  319) !         See documentation.
+(  320) 
+(  321) !      Reference.
+(  322) !      ----------
+(  323) !         Arpege note 19 (in French).
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 7
+
+(  324) 
+(  325) !      Externals.
+(  326) !      ---------
+(  327) 
+(  328) !      Author.
+(  329) !      -------
+(  330) !         R. El Khatib 19-Jun-2013 from Michel Rochas, DMN (Original 91-01-28).
+(  331) 
+(  332) !      Modifications.
+(  333) !      --------------
+(  334) !     ------------------------------------------------------------------
+(  335) 
+(  336) IMPLICIT NONE
+(  337) 
+(  338) REAL(KIND=JPRB), INTENT(IN)  :: PALFA(:,:)
+(  339) REAL(KIND=JPRB), INTENT(IN)  :: PBETA(:,:)
+(  340) REAL(KIND=JPRB), INTENT(OUT) :: PMAX
+(  341) 
+(  342) INTEGER(KIND=JPIM) :: ID1, ID2, JN1, JN2
+(  343) 
+(  344) REAL(KIND=JPRB), ALLOCATABLE :: ZRESUL(:,:)
+(  345) 
+(  346) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  347) 
+(  348) !     ------------------------------------------------------------------
+(  349) 
+(  350) #include "mxmaop.h"
+(  351) 
+(  352) #include "abor1.intfb.h"
+(  353) 
+(  354) !     ------------------------------------------------------------------
+(  355) IF (LHOOK) CALL DR_HOOK('DILAT_DEVIATION',0,ZHOOK_HANDLE)
+(  356) !     ------------------------------------------------------------------
+(  357) 
+(  358) ID1=SIZE(PALFA,DIM=1)
+(  359) ID2=SIZE(PALFA,DIM=2)
+(  360) 
+(  361) IF ( (SIZE(PBETA,DIM=1) /= ID1) .OR. (SIZE(PBETA,DIM=2) /= ID2) ) THEN
+(  362)   CALL ABOR1('DILAT_DEVIATION : SIZES MISMATCH BETWEEN PALFA AND PBETA')
+(  363) ENDIF
+(  364) 
+(  365) PMAX=-HUGE(1._JPRB)
+(  366) ALLOCATE(ZRESUL(ID2,ID2))
+(  367) CALL MXMAOP(PBETA(:,:),ID1,1,PALFA(:,:),1,ID1,ZRESUL,1,ID2,ID2,ID1,ID2)
+(  368) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JN1)
+(  369) DO JN1=1,ID2
+(  370)   ZRESUL(JN1,JN1)=ZRESUL(JN1,JN1)-1.0_JPRB
+(  371) ENDDO
+(  372) !$OMP END PARALLEL DO
+(  373) DO JN1=1,ID2
+(  374)   DO JN2=1,ID2
+(  375)     PMAX=MAX(PMAX,ABS(ZRESUL(JN1,JN2)))
+(  376)   ENDDO
+(  377) ENDDO
+(  378) DEALLOCATE(ZRESUL)
+(  379) 
+(  380) !     ------------------------------------------------------------------
+(  381) IF (LHOOK) CALL DR_HOOK('DILAT_DEVIATION',1,ZHOOK_HANDLE)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 8
+
+(  382) !     ------------------------------------------------------------------
+(  383) 
+(  384) END SUBROUTINE DILAT_DEVIATION
+(  385) !====================================================================
+(  386) SUBROUTINE DILAT_CONTROL(KMYPROC,KOUTPROC,KWSET,KULOUT,PMAXALL)
+(  387) 
+(  388) !**** *DILAT_CONTROL* - Control the dilatation/contraction matrixes.
+(  389) 
+(  390) !      Purpose.
+(  391) !      --------
+(  392) !           Print out the deviation from identity of the product contraction o dilatation
+(  393) !           for a contiguous set of distributed  wave numbers
+(  394) 
+(  395) !**    Interface.
+(  396) !      ----------
+(  397) !         *CALL *DILAT_CONTROL*
+(  398) 
+(  399) !      Explicit arguments.
+(  400) !      -------------------
+(  401) !            KMYPROC      - Current mpi task
+(  402) !            KOUTPROC     - task in charge of writing out
+(  403) !            KWSET        - wave set for all wave numbers
+(  404) !            KULOUT       - Output logical unit number
+(  405) !            PMAXALL      - deviation from identity of all wave numbers
+(  406) 
+(  407) !      Implicit arguments.
+(  408) !      -------------------
+(  409) 
+(  410) !      Method.
+(  411) !      -------
+(  412) !         See documentation.
+(  413) 
+(  414) !      Reference.
+(  415) !      ----------
+(  416) !         Arpege note 19 (in French).
+(  417) 
+(  418) !      Externals.
+(  419) !      ---------
+(  420) 
+(  421) !      Author.
+(  422) !      -------
+(  423) !         R. El Khatib 19-Jun-2013 from Michel Rochas, DMN (Original 91-01-28).
+(  424) 
+(  425) !      Modifications.
+(  426) !      --------------
+(  427) !     ------------------------------------------------------------------
+(  428) 
+(  429) IMPLICIT NONE
+(  430) 
+(  431) INTEGER(KIND=JPIM),INTENT(IN) :: KWSET(0:)
+(  432) INTEGER(KIND=JPIM),INTENT(IN) :: KMYPROC
+(  433) INTEGER(KIND=JPIM),INTENT(IN) :: KOUTPROC
+(  434) INTEGER(KIND=JPIM),INTENT(IN) :: KULOUT
+(  435) REAL(KIND=JPRB),   INTENT(IN) :: PMAXALL(0:)
+(  436) 
+(  437) INTEGER(KIND=JPIM) :: JM
+(  438) REAL(KIND=JPRB) :: ZMAXRECV
+(  439) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 9
+
+(  440) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  441) 
+(  442) !     ------------------------------------------------------------------
+(  443) 
+(  444) #include "mxmaop.h"
+(  445) 
+(  446) #include "abor1.intfb.h"
+(  447) 
+(  448) !     ------------------------------------------------------------------
+(  449) IF (LHOOK) CALL DR_HOOK('DILAT_CONTROL',0,ZHOOK_HANDLE)
+(  450) !     ------------------------------------------------------------------
+(  451) 
+(  452) IF ( (UBOUND(PMAXALL,DIM=1) /= UBOUND(KWSET,DIM=1)) ) THEN
+(  453)   CALL ABOR1('DILAT_CONTROL : UBOUNDS MISMATCH BETWEEN PMAXALL AND KWSET')
+(  454) ENDIF
+(  455) 
+(  456) DO JM=0,UBOUND(PMAXALL,DIM=1)
+(  457)   IF (KWSET(JM) == KMYPROC) THEN
+(  458)     IF (KMYPROC == KOUTPROC) THEN
+(  459)       WRITE(KULOUT,'('' ZONAL WAVE NUMBER '',I4, &
+(  460)        & '' DEVIATION FROM IDENTITY MATRIX '',E10.3)') JM,PMAXALL(JM)
+(  461)     ELSE
+(  462)       CALL MPL_SEND(PMAXALL(JM),KDEST=KOUTPROC,KTAG=JM,CDSTRING='DILAT_CONTROL:')
+(  463)     ENDIF
+(  464)   ELSEIF(KMYPROC == KOUTPROC) THEN 
+(  465)     CALL MPL_RECV(ZMAXRECV,KSOURCE=KWSET(JM),KTAG=JM,CDSTRING='DILAT_CONTROL:')
+(  466)     WRITE(KULOUT,'('' ZONAL WAVE NUMBER '',I4, &
+(  467)      & '' DEVIATION FROM IDENTITY MATRIX '',E10.3)') JM,ZMAXRECV
+(  468)   ENDIF
+(  469) ENDDO
+(  470) 
+(  471) !     ------------------------------------------------------------------
+(  472) IF (LHOOK) CALL DR_HOOK('DILAT_CONTROL',1,ZHOOK_HANDLE)
+(  473) !     ------------------------------------------------------------------
+(  474) END SUBROUTINE DILAT_CONTROL
+(  475) !=============================================================================
+(  476) END MODULE DILATATION_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 10
+
+(    1) # 1 "dilatation_mod.F90"
+(    1) MODULE DILATATION_MOD 
+(    2) # 3 "dilatation_mod.F90"
+(    3) USE PARKIND1  ,ONLY : JPIM     ,JPRB, JPRD
+(    4) USE PARKIND2  ,ONLY : JPRH
+(    5) USE MPL_MODULE, ONLY : MPL_SEND, MPL_RECV
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) # 8 "dilatation_mod.F90"
+(    8) IMPLICIT NONE
+(    9) # 10 "dilatation_mod.F90"
+(   10) PRIVATE
+(   11) PUBLIC DILAT_CALC, DILAT_DEVIATION, DILAT_CONTROL, DILAT_MAPPING
+(   12) # 13 "dilatation_mod.F90"
+(   13) ! Dilatation package package.
+(   14) # 15 "dilatation_mod.F90"
+(   15) ! To compute dilatation and contraction matrixes from Legendre polynomials and
+(   16) ! gaussian weights and latitudes on a streched sphere ; and control the
+(   17) ! deviation of the product of these matrixes against the identity matrix.
+(   18) # 19 "dilatation_mod.F90"
+(   19) CONTAINS
+(   20) !================================================================================
+(   21) SUBROUTINE DILAT_MAPPING(PSTRET,PMU,PMAPP)
+(   22) # 23 "dilatation_mod.F90"
+(   23) !**** *DILAT_MAPPING* - Compute the map factor for each latitudes
+(   24) # 25 "dilatation_mod.F90"
+(   25) !      Purpose.
+(   26) !      --------
+(   27) !           To  compute the map factor, given the stretching
+(   28) !           factor and the sines of the standard gaussian latitudes
+(   29) # 30 "dilatation_mod.F90"
+(   30) !**    Interface.
+(   31) !      ----------
+(   32) !         *CALL *DILAT_MAPPING*
+(   33) # 34 "dilatation_mod.F90"
+(   34) !      Explicit arguments.
+(   35) !      -------------------
+(   36) !            PSTRET : stretching factor
+(   37) !            PMU    : sines of the gaussian latitudes
+(   38) !            PMAPP  : map factor
+(   39) # 40 "dilatation_mod.F90"
+(   40) !      Implicit arguments.
+(   41) !      -------------------
+(   42) # 43 "dilatation_mod.F90"
+(   43) !      Method.
+(   44) !      -------
+(   45) !         See documentation.
+(   46) # 47 "dilatation_mod.F90"
+(   47) !      Reference.
+(   48) !      ----------
+(   49) !         Arpege note 19 (in French).
+(   50) # 51 "dilatation_mod.F90"
+(   51) !      Externals.
+(   52) !      ---------
+(   53) # 54 "dilatation_mod.F90"
+(   54) !      Author.
+(   55) !      -------
+(   56) !         R. El Khatib 19-Jun-2013 from Michel Rochas, DMN (Original 91-01-28).
+(   57) # 58 "dilatation_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 11
+
+(   58) !      Modifications.
+(   59) !      --------------
+(   60) !     ------------------------------------------------------------------
+(   61) # 62 "dilatation_mod.F90"
+(   62) IMPLICIT NONE
+(   63) # 64 "dilatation_mod.F90"
+(   64) REAL(KIND=JPRB), INTENT(IN)  :: PSTRET
+(   65) REAL(KIND=JPRD), INTENT(IN)  :: PMU(:)
+(   66) REAL(KIND=JPRB), INTENT(OUT) :: PMAPP(:)
+(   67) # 68 "dilatation_mod.F90"
+(   68) INTEGER(KIND=JPIM) :: IGLS, IDGNH, JGL
+(   69) # 70 "dilatation_mod.F90"
+(   70) REAL(KIND=JPRH) :: Z_DLSINE,Z_DLTAN
+(   71) # 72 "dilatation_mod.F90"
+(   72) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   73) # 74 "dilatation_mod.F90"
+(   74) !     ------------------------------------------------------------------
+(   75) # 76 "dilatation_mod.F90"
+(   76) # 1 ".D[15]/abor1.intfb.h"
+(    1) INTERFACE
+(    2) # 3 ".D[15]/abor1.intfb.h"
+(    3) SUBROUTINE ABOR1(CDTEXT)
+(    4) CHARACTER(LEN=*), INTENT(IN) :: CDTEXT
+(    5) END SUBROUTINE ABOR1
+(    6) # 7 ".D[15]/abor1.intfb.h"
+(    7) SUBROUTINE ABOR1FL(CDFILE, KLINENUM, CDTEXT)
+(    8) USE PARKIND1  ,ONLY : JPIM
+(    9) CHARACTER(LEN=*), INTENT(IN) :: CDFILE,CDTEXT
+(   10) INTEGER(KIND=JPIM), INTENT(IN) :: KLINENUM
+(   11) END SUBROUTINE ABOR1FL
+(   12) # 13 ".D[15]/abor1.intfb.h"
+(   13) SUBROUTINE ABOR1_EXCEPTION_HANDLER()
+(   14) END SUBROUTINE ABOR1_EXCEPTION_HANDLER
+(   15) # 16 ".D[15]/abor1.intfb.h"
+(   16) END INTERFACE
+(   17) # 77 "dilatation_mod.F90"
+(   77) # 78 "dilatation_mod.F90"
+(   78) !     ------------------------------------------------------------------
+(   79) IF (LHOOK) CALL DR_HOOK('DILAT_MAPPING',0,ZHOOK_HANDLE)
+(   80) !     ------------------------------------------------------------------
+(   81) # 82 "dilatation_mod.F90"
+(   82) IF ( (SIZE(PMU,DIM=1) /= SIZE(PMAPP,DIM=1)) ) THEN
+(   83)   CALL ABOR1('DILAT_MAPPING : SIZE MISMATCH BETWEEN PMU AND PMAPP')
+(   84) ENDIF
+(   85) # 86 "dilatation_mod.F90"
+(   86) ! Remark : this is an inconsistent mixture of double and quadruple precision. REK
+(   87) Z_DLTAN=(1.0_JPRB-PSTRET**2)/(1.0_JPRB+PSTRET**2)
+(   88) Z_DLSINE=2.0_JPRB*PSTRET/(1.0_JPRB+PSTRET**2)
+(   89) IDGNH=(SIZE(PMU,DIM=1)+1)/2
+(   90) DO JGL=1,IDGNH
+(   91)   PMAPP(JGL)=REAL((Z_DLSINE/(1.0_JPRB+Z_DLTAN*PMU(JGL)))**2,JPRB)
+(   92) ENDDO
+(   93) DO JGL=1,IDGNH
+(   94)   IGLS=2*IDGNH-JGL+1
+(   95)   PMAPP(IGLS)=REAL((Z_DLSINE/(1.0_JPRB-Z_DLTAN*PMU(JGL)))**2,JPRB)
+(   96) ENDDO
+(   97) # 98 "dilatation_mod.F90"
+(   98) !     ------------------------------------------------------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 12
+
+(   99) IF (LHOOK) CALL DR_HOOK('DILAT_MAPPING',1,ZHOOK_HANDLE)
+(  100) !     ------------------------------------------------------------------
+(  101) # 102 "dilatation_mod.F90"
+(  102) END SUBROUTINE DILAT_MAPPING
+(  103) !====================================================================
+(  104) SUBROUTINE DILAT_CALC(KM,KNSMAX,KNSMIN,KDGNH,PNM,PW,PMAPP,PRPNM,PALFA,PBETA)  
+(  105) # 106 "dilatation_mod.F90"
+(  106) !**** *DILAT_CALC* - Computes dilatation matrix.
+(  107) # 108 "dilatation_mod.F90"
+(  108) !      Purpose.
+(  109) !      --------
+(  110) !               Computes dilatation matrix for schmidt transform.
+(  111) # 112 "dilatation_mod.F90"
+(  112) !**    Interface.
+(  113) !      ----------
+(  114) !         *CALL *DILAT_CALC(...)
+(  115) # 116 "dilatation_mod.F90"
+(  116) !      Explicit Arguments :
+(  117) !      --------------------
+(  118) !           INPUT:
+(  119) !            KM      - Zonal wave number
+(  120) !            KNSMAX  - Larger truncation
+(  121) !            KNSMIN  - smaller truncation
+(  122) !            KDGNH   - number of points on an hemisphere
+(  123) !            PNM     - Legendre polynomials small truncation
+(  124) !            PW      - Gaussian weights
+(  125) !            PMAPP   - Mapping factor
+(  126) !            PRPNM   - Legendre polynomials large truncation
+(  127) # 128 "dilatation_mod.F90"
+(  128) !           OUTPUT:
+(  129) !            PALFA  - Contraction (0) matrix
+(  130) !            PBETA  - Dilatation  (1) matrix
+(  131) # 132 "dilatation_mod.F90"
+(  132) !      Implicit arguments :
+(  133) !      --------------------
+(  134) # 135 "dilatation_mod.F90"
+(  135) !      Method.
+(  136) !      -------
+(  137) !         See documentation.
+(  138) # 139 "dilatation_mod.F90"
+(  139) !      Reference.
+(  140) !      ----------
+(  141) !         Arpege note 19 (in French).
+(  142) # 143 "dilatation_mod.F90"
+(  143) !      Externals.
+(  144) !      ----------
+(  145) !         Calls MXMAOP.
+(  146) !         Is called by SUDIL.
+(  147) # 148 "dilatation_mod.F90"
+(  148) !      Author.
+(  149) !      -------
+(  150) !         Michel Rochas, DMN.
+(  151) # 152 "dilatation_mod.F90"
+(  152) !      Modifications.
+(  153) !      --------------
+(  154) !        Original : 91-01-28.
+(  155) !        =07-08-91= Philippe Courtier. Changes Leg. polynomials mapping
+(  156) !        K. YESSAD: 93-05-11 : cleaning, comments put into English.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 13
+
+(  157) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(  158) !        K. Yessad: Aug 2005 : A-level distribution of conf 911. 
+(  159) !        K. Yessad (June 2009): externalisation.
+(  160) !        R. El Khatib 20-Jun-2013 Optimization
+(  161) !        R. El Khatib 07-Mar-2016 Simplification/Optimization
+(  162) !     ------------------------------------------------------------------
+(  163) # 164 "dilatation_mod.F90"
+(  164) IMPLICIT NONE
+(  165) # 166 "dilatation_mod.F90"
+(  166) INTEGER(KIND=JPIM),INTENT(IN)    :: KM 
+(  167) INTEGER(KIND=JPIM),INTENT(IN)    :: KNSMAX 
+(  168) INTEGER(KIND=JPIM),INTENT(IN)    :: KNSMIN 
+(  169) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGNH 
+(  170) REAL(KIND=JPRB)   ,INTENT(IN)    :: PNM(2*KDGNH,KNSMIN-KM+1) 
+(  171) REAL(KIND=JPRB)   ,INTENT(IN)    :: PW(KDGNH) 
+(  172) REAL(KIND=JPRB)   ,INTENT(IN)    :: PMAPP(2*KDGNH) 
+(  173) REAL(KIND=JPRB)   ,INTENT(IN)    :: PRPNM(KDGNH,KNSMAX-KM+1) 
+(  174) REAL(KIND=JPRB)   ,INTENT(OUT)   :: PALFA(KNSMAX-KM+1,KNSMIN-KM+1)
+(  175) REAL(KIND=JPRB)   ,INTENT(OUT)   :: PBETA(KNSMAX-KM+1,KNSMIN-KM+1)
+(  176) # 177 "dilatation_mod.F90"
+(  177) !     ------------------------------------------------------------------
+(  178) # 179 "dilatation_mod.F90"
+(  179) REAL(KIND=JPRB) :: ZP(KNSMAX-KM+1)
+(  180) REAL(KIND=JPRB) :: ZPNM(KDGNH+1,KNSMIN-KM+1)
+(  181) REAL(KIND=JPRB) :: ZNOR(2*((KNSMAX-KM+1)/2)+1,KNSMIN-KM+1)
+(  182) REAL(KIND=JPRB) :: ZSUD(2*((KNSMAX-KM+1)/2)+1,KNSMIN-KM+1)
+(  183) REAL(KIND=JPRB) :: ZRPNM(2*((KNSMAX-KM+1)/2)+1,KDGNH+1)
+(  184) # 185 "dilatation_mod.F90"
+(  185) INTEGER(KIND=JPIM) :: IGLS, IR, IR2, JGL, JN, JS, JI, II, IOFF
+(  186) INTEGER(KIND=JPIM) :: ISMAXSUR
+(  187) # 188 "dilatation_mod.F90"
+(  188) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  189) # 190 "dilatation_mod.F90"
+(  190) !     ------------------------------------------------------------------
+(  191) # 192 "dilatation_mod.F90"
+(  192) # 1 ".D[13]/mxmaop.h"
+(    1) INTERFACE
+(    2) SUBROUTINE MXMAOP(PA,KA,KAD,PB,KB,KBD,PC,KC,KCA,KAR,KAC,KBC)
+(    3) USE PARKIND1 ,ONLY : JPIM ,JPRB
+(    4) REAL(KIND=JPRB) ,INTENT(IN) :: PA(*)
+(    5) INTEGER(KIND=JPIM),INTENT(IN) :: KA
+(    6) INTEGER(KIND=JPIM),INTENT(IN) :: KAD
+(    7) REAL(KIND=JPRB) ,INTENT(IN) :: PB(*)
+(    8) INTEGER(KIND=JPIM),INTENT(IN) :: KB
+(    9) INTEGER(KIND=JPIM),INTENT(IN) :: KBD
+(   10) REAL(KIND=JPRB) ,INTENT(OUT) :: PC(*)
+(   11) INTEGER(KIND=JPIM),INTENT(IN) :: KC
+(   12) INTEGER(KIND=JPIM),INTENT(IN) :: KCA
+(   13) INTEGER(KIND=JPIM),INTENT(IN) :: KAR
+(   14) INTEGER(KIND=JPIM),INTENT(IN) :: KAC
+(   15) INTEGER(KIND=JPIM),INTENT(IN) :: KBC
+(   16) END SUBROUTINE MXMAOP
+(   17) END INTERFACE
+(   18) # 193 "dilatation_mod.F90"
+(  193) # 194 "dilatation_mod.F90"
+(  194) !     ------------------------------------------------------------------
+(  195) IF (LHOOK) CALL DR_HOOK('DILAT_CALC',0,ZHOOK_HANDLE)
+(  196) !     ------------------------------------------------------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 14
+
+(  197) # 198 "dilatation_mod.F90"
+(  198) !*        0. Preparations
+(  199) !            ------------
+(  200) # 201 "dilatation_mod.F90"
+(  201) ISMAXSUR=2*((KNSMAX-KM+1)/2)+1
+(  202) IOFF=KNSMAX+2-KM
+(  203) # 204 "dilatation_mod.F90"
+(  204) ! Initialize a parity array
+(  205) # 206 "dilatation_mod.F90"
+(  206) DO JS=1,KNSMAX-KM+1
+(  207)   ZP(JS)=REAL(2*MOD(JS+KNSMAX-KM,2)-1,JPRB)
+(  208) ENDDO
+(  209) # 210 "dilatation_mod.F90"
+(  210) !   multiplication by gaussian weights
+(  211) !   of the Legendre polynomials at high truncation
+(  212) # 213 "dilatation_mod.F90"
+(  213) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JGL,JS)
+(  214) DO JGL=1,KDGNH
+(  215)   DO JS=1,KNSMAX-KM+1
+(  216)     ZRPNM(JS,JGL)=PRPNM(JGL,JS)*PW(JGL)
+(  217)   ENDDO
+(  218) ENDDO
+(  219) !$OMP END PARALLEL DO
+(  220) # 221 "dilatation_mod.F90"
+(  221) !     ------------------------------------------------------------------
+(  222) # 223 "dilatation_mod.F90"
+(  223) !*    1. Matrix ALPHA
+(  224) # 226 "dilatation_mod.F90"
+(  226) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JN,JGL)
+(  227) DO JN=1,KNSMIN-KM+1
+(  228)   DO JGL=1,KDGNH
+(  229)     ZPNM(JGL,JN)=PNM(JGL,JN)*PMAPP(JGL)
+(  230)   ENDDO
+(  231) ENDDO
+(  232) !$OMP END PARALLEL DO
+(  233) # 234 "dilatation_mod.F90"
+(  234) CALL MXMAOP(ZRPNM,1,ISMAXSUR,ZPNM(:,:),1,KDGNH+1,ZNOR(:,:),1,ISMAXSUR,&
+(  235)  & KNSMAX-KM+1,KDGNH,KNSMIN-KM+1)
+(  236) # 237 "dilatation_mod.F90"
+(  237) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JN,JGL)
+(  238) DO JN=1,KNSMIN-KM+1
+(  239)   DO JGL=1,KDGNH
+(  240)     ZPNM(JGL,JN)=PNM(2*KDGNH-JGL+1,JN)*PMAPP(2*KDGNH-JGL+1)
+(  241)   ENDDO
+(  242) ENDDO
+(  243) !$OMP END PARALLEL DO
+(  244) # 245 "dilatation_mod.F90"
+(  245) CALL MXMAOP(ZRPNM,1,ISMAXSUR,ZPNM(:,:),1,KDGNH+1,ZSUD(:,:),1,ISMAXSUR,&
+(  246)  & KNSMAX-KM+1,KDGNH,KNSMIN-KM+1)
+(  247) # 248 "dilatation_mod.F90"
+(  248) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JN,JS)
+(  249) DO JN=1,KNSMIN-KM+1
+(  250)   DO JS=1,KNSMAX-KM+1
+(  251)     PALFA(IOFF-JS,KNSMIN-KM+2-JN)=ZNOR(JS,JN)+ZP(JS)*ZSUD(JS,JN)
+(  252)   ENDDO
+(  253) ENDDO
+(  254) !$OMP END PARALLEL DO
+(  255) # 257 "dilatation_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 15
+
+(  257) !*    2. Matrix BETA
+(  258) # 260 "dilatation_mod.F90"
+(  260) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JN,JGL)
+(  261) DO JN=1,KNSMIN-KM+1
+(  262)   DO JGL=1,KDGNH
+(  263)     ZPNM(JGL,JN)=PNM(JGL,JN)
+(  264)   ENDDO
+(  265) ENDDO
+(  266) !$OMP END PARALLEL DO
+(  267) # 268 "dilatation_mod.F90"
+(  268) CALL MXMAOP(ZRPNM,1,ISMAXSUR,ZPNM(:,:),1,KDGNH+1,ZNOR(:,:),1,ISMAXSUR,&
+(  269)  & KNSMAX-KM+1,KDGNH,KNSMIN-KM+1)
+(  270) # 271 "dilatation_mod.F90"
+(  271) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JN,JGL)
+(  272) DO JN=1,KNSMIN-KM+1
+(  273)   DO JGL=1,KDGNH
+(  274)     ZPNM(JGL,JN)=PNM(2*KDGNH-JGL+1,JN)
+(  275)   ENDDO
+(  276) ENDDO
+(  277) !$OMP END PARALLEL DO
+(  278) # 279 "dilatation_mod.F90"
+(  279) CALL MXMAOP(ZRPNM,1,ISMAXSUR,ZPNM(:,:),1,KDGNH+1,ZSUD(:,:),1,ISMAXSUR,&
+(  280)  & KNSMAX-KM+1,KDGNH,KNSMIN-KM+1)
+(  281) # 282 "dilatation_mod.F90"
+(  282) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JN,JS)
+(  283) DO JN=1,KNSMIN-KM+1
+(  284)   DO JS=1,KNSMAX-KM+1
+(  285)     PBETA(IOFF-JS,KNSMIN-KM+2-JN)=ZNOR(JS,JN)+ZP(JS)*ZSUD(JS,JN)
+(  286)   ENDDO
+(  287) ENDDO
+(  288) !$OMP END PARALLEL DO
+(  289) # 290 "dilatation_mod.F90"
+(  290) !     ------------------------------------------------------------------
+(  291) IF (LHOOK) CALL DR_HOOK('DILAT_CALC',1,ZHOOK_HANDLE)
+(  292) !     ------------------------------------------------------------------
+(  293) END SUBROUTINE DILAT_CALC
+(  294) !=============================================================================
+(  295) SUBROUTINE DILAT_DEVIATION(PALFA,PBETA,PMAX)
+(  296) # 297 "dilatation_mod.F90"
+(  297) !**** *DILAT_DEVIATION* - compute the deviation of dilatation/contraction matrixes.
+(  298) # 299 "dilatation_mod.F90"
+(  299) !      Purpose.
+(  300) !      --------
+(  301) !           Compute the deviation from identity of the product contraction o dilatation
+(  302) !           for a given wave number
+(  303) # 304 "dilatation_mod.F90"
+(  304) !**    Interface.
+(  305) !      ----------
+(  306) !         *CALL *DILAT_DEVIATION*
+(  307) # 308 "dilatation_mod.F90"
+(  308) !      Explicit arguments.
+(  309) !      -------------------
+(  310) !            PALFA      - Matrix Alfa (Contraction)
+(  311) !            PBETA      - Matrix Beta (Dilatation)
+(  312) !            PMAX         - deviation from identity 
+(  313) # 314 "dilatation_mod.F90"
+(  314) !      Implicit arguments.
+(  315) !      -------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 16
+
+(  316) # 317 "dilatation_mod.F90"
+(  317) !      Method.
+(  318) !      -------
+(  319) !         See documentation.
+(  320) # 321 "dilatation_mod.F90"
+(  321) !      Reference.
+(  322) !      ----------
+(  323) !         Arpege note 19 (in French).
+(  324) # 325 "dilatation_mod.F90"
+(  325) !      Externals.
+(  326) !      ---------
+(  327) # 328 "dilatation_mod.F90"
+(  328) !      Author.
+(  329) !      -------
+(  330) !         R. El Khatib 19-Jun-2013 from Michel Rochas, DMN (Original 91-01-28).
+(  331) # 332 "dilatation_mod.F90"
+(  332) !      Modifications.
+(  333) !      --------------
+(  334) !     ------------------------------------------------------------------
+(  335) # 336 "dilatation_mod.F90"
+(  336) IMPLICIT NONE
+(  337) # 338 "dilatation_mod.F90"
+(  338) REAL(KIND=JPRB), INTENT(IN)  :: PALFA(:,:)
+(  339) REAL(KIND=JPRB), INTENT(IN)  :: PBETA(:,:)
+(  340) REAL(KIND=JPRB), INTENT(OUT) :: PMAX
+(  341) # 342 "dilatation_mod.F90"
+(  342) INTEGER(KIND=JPIM) :: ID1, ID2, JN1, JN2
+(  343) # 344 "dilatation_mod.F90"
+(  344) REAL(KIND=JPRB), ALLOCATABLE :: ZRESUL(:,:)
+(  345) # 346 "dilatation_mod.F90"
+(  346) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  347) # 348 "dilatation_mod.F90"
+(  348) !     ------------------------------------------------------------------
+(  349) # 350 "dilatation_mod.F90"
+(  350) # 1 ".D[13]/mxmaop.h"
+(    1) INTERFACE
+(    2) SUBROUTINE MXMAOP(PA,KA,KAD,PB,KB,KBD,PC,KC,KCA,KAR,KAC,KBC)
+(    3) USE PARKIND1 ,ONLY : JPIM ,JPRB
+(    4) REAL(KIND=JPRB) ,INTENT(IN) :: PA(*)
+(    5) INTEGER(KIND=JPIM),INTENT(IN) :: KA
+(    6) INTEGER(KIND=JPIM),INTENT(IN) :: KAD
+(    7) REAL(KIND=JPRB) ,INTENT(IN) :: PB(*)
+(    8) INTEGER(KIND=JPIM),INTENT(IN) :: KB
+(    9) INTEGER(KIND=JPIM),INTENT(IN) :: KBD
+(   10) REAL(KIND=JPRB) ,INTENT(OUT) :: PC(*)
+(   11) INTEGER(KIND=JPIM),INTENT(IN) :: KC
+(   12) INTEGER(KIND=JPIM),INTENT(IN) :: KCA
+(   13) INTEGER(KIND=JPIM),INTENT(IN) :: KAR
+(   14) INTEGER(KIND=JPIM),INTENT(IN) :: KAC
+(   15) INTEGER(KIND=JPIM),INTENT(IN) :: KBC
+(   16) END SUBROUTINE MXMAOP
+(   17) END INTERFACE
+(   18) # 351 "dilatation_mod.F90"
+(  351) # 352 "dilatation_mod.F90"
+(  352) # 1 ".D[15]/abor1.intfb.h"
+(    1) INTERFACE
+(    2) # 3 ".D[15]/abor1.intfb.h"
+(    3) SUBROUTINE ABOR1(CDTEXT)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 17
+
+(    4) CHARACTER(LEN=*), INTENT(IN) :: CDTEXT
+(    5) END SUBROUTINE ABOR1
+(    6) # 7 ".D[15]/abor1.intfb.h"
+(    7) SUBROUTINE ABOR1FL(CDFILE, KLINENUM, CDTEXT)
+(    8) USE PARKIND1  ,ONLY : JPIM
+(    9) CHARACTER(LEN=*), INTENT(IN) :: CDFILE,CDTEXT
+(   10) INTEGER(KIND=JPIM), INTENT(IN) :: KLINENUM
+(   11) END SUBROUTINE ABOR1FL
+(   12) # 13 ".D[15]/abor1.intfb.h"
+(   13) SUBROUTINE ABOR1_EXCEPTION_HANDLER()
+(   14) END SUBROUTINE ABOR1_EXCEPTION_HANDLER
+(   15) # 16 ".D[15]/abor1.intfb.h"
+(   16) END INTERFACE
+(   17) # 353 "dilatation_mod.F90"
+(  353) # 354 "dilatation_mod.F90"
+(  354) !     ------------------------------------------------------------------
+(  355) IF (LHOOK) CALL DR_HOOK('DILAT_DEVIATION',0,ZHOOK_HANDLE)
+(  356) !     ------------------------------------------------------------------
+(  357) # 358 "dilatation_mod.F90"
+(  358) ID1=SIZE(PALFA,DIM=1)
+(  359) ID2=SIZE(PALFA,DIM=2)
+(  360) # 361 "dilatation_mod.F90"
+(  361) IF ( (SIZE(PBETA,DIM=1) /= ID1) .OR. (SIZE(PBETA,DIM=2) /= ID2) ) THEN
+(  362)   CALL ABOR1('DILAT_DEVIATION : SIZES MISMATCH BETWEEN PALFA AND PBETA')
+(  363) ENDIF
+(  364) # 365 "dilatation_mod.F90"
+(  365) PMAX=-HUGE(1._JPRB)
+(  366) ALLOCATE(ZRESUL(ID2,ID2))
+(  367) CALL MXMAOP(PBETA(:,:),ID1,1,PALFA(:,:),1,ID1,ZRESUL,1,ID2,ID2,ID1,ID2)
+(  368) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JN1)
+(  369) DO JN1=1,ID2
+(  370)   ZRESUL(JN1,JN1)=ZRESUL(JN1,JN1)-1.0_JPRB
+(  371) ENDDO
+(  372) !$OMP END PARALLEL DO
+(  373) DO JN1=1,ID2
+(  374)   DO JN2=1,ID2
+(  375)     PMAX=MAX(PMAX,ABS(ZRESUL(JN1,JN2)))
+(  376)   ENDDO
+(  377) ENDDO
+(  378) DEALLOCATE(ZRESUL)
+(  379) # 380 "dilatation_mod.F90"
+(  380) !     ------------------------------------------------------------------
+(  381) IF (LHOOK) CALL DR_HOOK('DILAT_DEVIATION',1,ZHOOK_HANDLE)
+(  382) !     ------------------------------------------------------------------
+(  383) # 384 "dilatation_mod.F90"
+(  384) END SUBROUTINE DILAT_DEVIATION
+(  385) !====================================================================
+(  386) SUBROUTINE DILAT_CONTROL(KMYPROC,KOUTPROC,KWSET,KULOUT,PMAXALL)
+(  387) # 388 "dilatation_mod.F90"
+(  388) !**** *DILAT_CONTROL* - Control the dilatation/contraction matrixes.
+(  389) # 390 "dilatation_mod.F90"
+(  390) !      Purpose.
+(  391) !      --------
+(  392) !           Print out the deviation from identity of the product contraction o dilatation
+(  393) !           for a contiguous set of distributed  wave numbers
+(  394) # 395 "dilatation_mod.F90"
+(  395) !**    Interface.
+(  396) !      ----------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 18
+
+(  397) !         *CALL *DILAT_CONTROL*
+(  398) # 399 "dilatation_mod.F90"
+(  399) !      Explicit arguments.
+(  400) !      -------------------
+(  401) !            KMYPROC      - Current mpi task
+(  402) !            KOUTPROC     - task in charge of writing out
+(  403) !            KWSET        - wave set for all wave numbers
+(  404) !            KULOUT       - Output logical unit number
+(  405) !            PMAXALL      - deviation from identity of all wave numbers
+(  406) # 407 "dilatation_mod.F90"
+(  407) !      Implicit arguments.
+(  408) !      -------------------
+(  409) # 410 "dilatation_mod.F90"
+(  410) !      Method.
+(  411) !      -------
+(  412) !         See documentation.
+(  413) # 414 "dilatation_mod.F90"
+(  414) !      Reference.
+(  415) !      ----------
+(  416) !         Arpege note 19 (in French).
+(  417) # 418 "dilatation_mod.F90"
+(  418) !      Externals.
+(  419) !      ---------
+(  420) # 421 "dilatation_mod.F90"
+(  421) !      Author.
+(  422) !      -------
+(  423) !         R. El Khatib 19-Jun-2013 from Michel Rochas, DMN (Original 91-01-28).
+(  424) # 425 "dilatation_mod.F90"
+(  425) !      Modifications.
+(  426) !      --------------
+(  427) !     ------------------------------------------------------------------
+(  428) # 429 "dilatation_mod.F90"
+(  429) IMPLICIT NONE
+(  430) # 431 "dilatation_mod.F90"
+(  431) INTEGER(KIND=JPIM),INTENT(IN) :: KWSET(0:)
+(  432) INTEGER(KIND=JPIM),INTENT(IN) :: KMYPROC
+(  433) INTEGER(KIND=JPIM),INTENT(IN) :: KOUTPROC
+(  434) INTEGER(KIND=JPIM),INTENT(IN) :: KULOUT
+(  435) REAL(KIND=JPRB),   INTENT(IN) :: PMAXALL(0:)
+(  436) # 437 "dilatation_mod.F90"
+(  437) INTEGER(KIND=JPIM) :: JM
+(  438) REAL(KIND=JPRB) :: ZMAXRECV
+(  439) # 440 "dilatation_mod.F90"
+(  440) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  441) # 442 "dilatation_mod.F90"
+(  442) !     ------------------------------------------------------------------
+(  443) # 444 "dilatation_mod.F90"
+(  444) # 1 ".D[13]/mxmaop.h"
+(    1) INTERFACE
+(    2) SUBROUTINE MXMAOP(PA,KA,KAD,PB,KB,KBD,PC,KC,KCA,KAR,KAC,KBC)
+(    3) USE PARKIND1 ,ONLY : JPIM ,JPRB
+(    4) REAL(KIND=JPRB) ,INTENT(IN) :: PA(*)
+(    5) INTEGER(KIND=JPIM),INTENT(IN) :: KA
+(    6) INTEGER(KIND=JPIM),INTENT(IN) :: KAD
+(    7) REAL(KIND=JPRB) ,INTENT(IN) :: PB(*)
+(    8) INTEGER(KIND=JPIM),INTENT(IN) :: KB
+(    9) INTEGER(KIND=JPIM),INTENT(IN) :: KBD
+(   10) REAL(KIND=JPRB) ,INTENT(OUT) :: PC(*)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:33      page 19
+
+(   11) INTEGER(KIND=JPIM),INTENT(IN) :: KC
+(   12) INTEGER(KIND=JPIM),INTENT(IN) :: KCA
+(   13) INTEGER(KIND=JPIM),INTENT(IN) :: KAR
+(   14) INTEGER(KIND=JPIM),INTENT(IN) :: KAC
+(   15) INTEGER(KIND=JPIM),INTENT(IN) :: KBC
+(   16) END SUBROUTINE MXMAOP
+(   17) END INTERFACE
+(   18) # 445 "dilatation_mod.F90"
+(  445) # 446 "dilatation_mod.F90"
+(  446) # 1 ".D[15]/abor1.intfb.h"
+(    1) INTERFACE
+(    2) # 3 ".D[15]/abor1.intfb.h"
+(    3) SUBROUTINE ABOR1(CDTEXT)
+(    4) CHARACTER(LEN=*), INTENT(IN) :: CDTEXT
+(    5) END SUBROUTINE ABOR1
+(    6) # 7 ".D[15]/abor1.intfb.h"
+(    7) SUBROUTINE ABOR1FL(CDFILE, KLINENUM, CDTEXT)
+(    8) USE PARKIND1  ,ONLY : JPIM
+(    9) CHARACTER(LEN=*), INTENT(IN) :: CDFILE,CDTEXT
+(   10) INTEGER(KIND=JPIM), INTENT(IN) :: KLINENUM
+(   11) END SUBROUTINE ABOR1FL
+(   12) # 13 ".D[15]/abor1.intfb.h"
+(   13) SUBROUTINE ABOR1_EXCEPTION_HANDLER()
+(   14) END SUBROUTINE ABOR1_EXCEPTION_HANDLER
+(   15) # 16 ".D[15]/abor1.intfb.h"
+(   16) END INTERFACE
+(   17) # 447 "dilatation_mod.F90"
+(  447) # 448 "dilatation_mod.F90"
+(  448) !     ------------------------------------------------------------------
+(  449) IF (LHOOK) CALL DR_HOOK('DILAT_CONTROL',0,ZHOOK_HANDLE)
+(  450) !     ------------------------------------------------------------------
+(  451) # 452 "dilatation_mod.F90"
+(  452) IF ( (UBOUND(PMAXALL,DIM=1) /= UBOUND(KWSET,DIM=1)) ) THEN
+(  453)   CALL ABOR1('DILAT_CONTROL : UBOUNDS MISMATCH BETWEEN PMAXALL AND KWSET')
+(  454) ENDIF
+(  455) # 456 "dilatation_mod.F90"
+(  456) DO JM=0,UBOUND(PMAXALL,DIM=1)
+(  457)   IF (KWSET(JM) == KMYPROC) THEN
+(  458)     IF (KMYPROC == KOUTPROC) THEN
+(  459)       WRITE(KULOUT,'('' ZONAL WAVE NUMBER '',I4, &
+(  460)        & '' DEVIATION FROM IDENTITY MATRIX '',E10.3)') JM,PMAXALL(JM)
+(  461)     ELSE
+(  462)       CALL MPL_SEND(PMAXALL(JM),KDEST=KOUTPROC,KTAG=JM,CDSTRING='DILAT_CONTROL:')
+(  463)     ENDIF
+(  464)   ELSEIF(KMYPROC == KOUTPROC) THEN 
+(  465)     CALL MPL_RECV(ZMAXRECV,KSOURCE=KWSET(JM),KTAG=JM,CDSTRING='DILAT_CONTROL:')
+(  466)     WRITE(KULOUT,'('' ZONAL WAVE NUMBER '',I4, &
+(  467)      & '' DEVIATION FROM IDENTITY MATRIX '',E10.3)') JM,ZMAXRECV
+(  468)   ENDIF
+(  469) ENDDO
+(  470) # 471 "dilatation_mod.F90"
+(  471) !     ------------------------------------------------------------------
+(  472) IF (LHOOK) CALL DR_HOOK('DILAT_CONTROL',1,ZHOOK_HANDLE)
+(  473) !     ------------------------------------------------------------------
+(  474) END SUBROUTINE DILAT_CONTROL
+(  475) !=============================================================================
+(  476) END MODULE DILATATION_MOD

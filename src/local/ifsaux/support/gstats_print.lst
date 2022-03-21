@@ -1,0 +1,2329 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: gstats_print.F90
+
+(    1) SUBROUTINE GSTATS_PRINT(KULOUT,PAVEAVE,KLEN)
+(    2) 
+(    3) !**** *GSTATS_PRINT* - print timing statistics
+(    4) 
+(    5) !     PURPOSE.
+(    6) !     --------
+(    7) !       To print out timings gathered by GSTATS
+(    8) 
+(    9) 
+(   10) !**   INTERFACE.
+(   11) !     ----------
+(   12) !       *CALL* *GSTATS_PRINT*
+(   13) 
+(   14) !        EXPLICIT ARGUMENTS     None
+(   15) !        --------------------
+(   16) 
+(   17) 
+(   18) !        IMPLICIT ARGUMENTS
+(   19) !        --------------------
+(   20) !        Module YOMSTATS
+(   21) 
+(   22) !     METHOD.
+(   23) !     -------
+(   24) 
+(   25) 
+(   26) !     EXTERNALS.   
+(   27) !     ----------   
+(   28) 
+(   29) !     REFERENCE.
+(   30) !     ----------
+(   31) !        ECMWF Research Department documentation of the IFS
+(   32) 
+(   33) !     AUTHOR.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 2
+
+(   34) !     -------
+(   35) !        Mats Hamrud ECMWF
+(   36) 
+(   37) !     MODIFICATIONS.
+(   38) !     --------------
+(   39) !        ORIGINAL : 98-11-15
+(   40) !        D.Salmond: 99-09-21 : Timer for SLCOMM2
+(   41) !        G.Mozdzynski 05-09-25 : fix master ncalls overwrite for nproc>1
+(   42) !        C.Larsson    8-May-2006 : Added xml file output
+(   43) !        G.Mozdzynski 16-Oct-2007 : xml file output under switch LXML_STATS
+(   44) !        P.Towers     11-May-2011 : mpl comms statistics output
+(   45) !        F. Vana  05-Mar-2015  Support for single precision
+(   46) !        G. Mozdzynski 18-Aug-2015 Avoid confusion, procs are tasks
+(   47) !     ------------------------------------------------------------------
+(   48) USE PARKIND1  ,ONLY : JPRD, JPIM
+(   49) 
+(   50) USE YOMGSTATS
+(   51) USE YOMMPI   , ONLY : MREALT
+(   52) USE MPL_MODULE
+(   53) USE MPL_STATS_MOD
+(   54) 
+(   55) IMPLICIT NONE
+(   56) 
+(   57) INTEGER(KIND=JPIM) :: KULOUT,KLEN
+(   58) REAL(KIND=JPRD) :: PAVEAVE(0:KLEN)
+(   59) CHARACTER*7  CLACTION(0:3)
+(   60) CHARACTER(LEN=JPMAXDELAYS*10) CLTEMP
+(   61) INTEGER(KIND=JPIM),PARAMETER :: JPARRAYS=8
+(   62) REAL(KIND=JPRD) :: ZREABUF(JPARRAYS*(JPMAXSTAT+1))
+(   63) REAL(KIND=JPRD) :: ZAVEAVE(0:JPMAXSTAT),ZAVEMAX(0:JPMAXSTAT),ZTIMELCALL(0:JPMAXSTAT),&
+(   64)          &ZTHISTIME(0:JPMAXSTAT),ZFRACMAX(0:JPMAXSTAT),&
+(   65)          &ZSUMMAX(0:JPMAXSTAT),ZSUMTOT(0:JPMAXSTAT)
+(   66) REAL(KIND=JPRD) :: ZT_SUM,ZT_SUM2,ZT_SUM3,ZT_SUMIO,ZT_SUM4,ZT_SUM5,ZT_SUMB
+(   67) REAL(KIND=JPRD) :: ZDELAY,ZDELAY_MAX
+(   68) 
+(   69) REAL(KIND=JPRD) :: ZMPL(NPROC_STATS)
+(   70) REAL(KIND=JPRD) :: ZBAR(NPROC_STATS)
+(   71) REAL(KIND=JPRD) :: ZGBR(NPROC_STATS)
+(   72) REAL(KIND=JPRD) :: ZGB2(NPROC_STATS)
+(   73) REAL(KIND=JPRD) :: ZOMP(NPROC_STATS)
+(   74) REAL(KIND=JPRD) :: ZIO (NPROC_STATS)
+(   75) REAL(KIND=JPRD) :: ZSER(NPROC_STATS)
+(   76) REAL(KIND=JPRD) :: ZMXD(NPROC_STATS)
+(   77) 
+(   78) INTEGER(KIND=JPIM) :: ICALLSX(0:JPMAXSTAT)
+(   79) 
+(   80) !     LOCAL INTEGER SCALARS
+(   81) INTEGER(KIND=JPIM) :: ICALLS, ILBUF, ILSEND, ILRECV, &
+(   82)              &ISEND, ITAG, JJ, JNUM, JROC, JCALL, ICALLER,IACTION
+(   83) INTEGER(KIND=JPIM) :: IMEM, INUM, JMEM
+(   84) INTEGER(KIND=JPIM) :: JDELAY, IDELAY
+(   85) INTEGER(KIND=JPIM) :: NSEND,NRECV
+(   86) 
+(   87) !     LOCAL REAL SCALARS
+(   88) REAL(KIND=JPRD) :: ZAVE, ZAVETCPU, ZAVEVCPU, ZCOMTIM, ZDETAIL,&
+(   89)           &ZFRAC, ZMAX, ZMEAN, ZSTDDEV, ZSUM, ZSUMB, &
+(   90)           &ZTOTAL, ZTOTCPU, ZTOTUNBAL, ZTOTVCPU, &
+(   91)           &ZUNBAL, ZMEANT, ZMAXT
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 3
+
+(   92) 
+(   93) REAL(KIND=JPRD)    :: SBYTES,RBYTES,SENDRATE,RECVRATE
+(   94) REAL(KIND=JPRD)    :: AVGSENDLEN,AVGRECVLEN
+(   95) REAL(KIND=JPRD)    :: MAXCOMMTIME(501:1000)
+(   96) REAL(KIND=JPRD)    :: TOTSENDBYTES(501:1000)
+(   97) REAL(KIND=JPRD)    :: TOTRECVBYTES(501:1000)
+(   98) 
+(   99) INTEGER(KIND=JPIM) :: IXMLLUN  
+(  100) 
+(  101) !     ------------------------------------------------------------------
+(  102) 
+(  103) ! write(0,*) "JPMAXSTAT,NPRNT_STATS =",JPMAXSTAT,NPRNT_STATS
+(  104) 
+(  105) ILBUF = JPARRAYS*(JPMAXSTAT+1)
+(  106) ILRECV = 500*4
+(  107) ZAVEAVE(:) = 0.0_JPRD
+(  108) ZAVEMAX(:) = 0.0_JPRD
+(  109) ZFRACMAX(:)= 0.0_JPRD
+(  110) ZSUMMAX(:)= 0.0_JPRD
+(  111) ZSUMTOT(:)= 0.0_JPRD
+(  112) 
+(  113) ! OPEN GSTATS.XML for xml statistics
+(  114) IF(LXML_STATS .AND. MYPROC_STATS==1)THEN
+(  115)   IXMLLUN=40
+(  116)   OPEN (UNIT=IXMLLUN, FILE='gstats.xml',ACTION='write')
+(  117)   WRITE(IXMLLUN,'(A)')'<?xml version="1.0" encoding="UTF-8"?>'
+(  118)   WRITE(IXMLLUN,'(A)')'<gstats '
+(  119)   WRITE(IXMLLUN,'(A)')' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"&
+(  120)   & xsi:schemaLocation="http://www.ecmwf.int/services/prepifs/gstats   ./gstats.xsd">'
+(  121) ENDIF
+(  122) 
+(  123) WRITE(KULOUT,'(A)')'===-=== START OF TIMING STATISTICS ===-==='
+(  124) IF(LSYNCSTATS.AND.NPROC_STATS>1) THEN
+(  125)   WRITE(KULOUT,'(A)')'START OF TIMINGS SYNCRONIZED'
+(  126) ENDIF
+(  127) IF(LDETAILED_STATS) THEN
+(  128)   LSTATS_COMMS=.TRUE.
+(  129)   LSTATS_OMP=.TRUE.
+(  130) ENDIF
+(  131) IF(LBARRIER_STATS2) THEN
+(  132)   DO JNUM=1,JBMAXBASE
+(  133)     IF(NBAR_PTR(JNUM) > 0) THEN
+(  134)       INUM=NBAR_PTR(JNUM)
+(  135)       CCDESC(INUM)=CCDESC(JNUM)
+(  136)       CCTYPE(INUM)='GB2'
+(  137)     ENDIF
+(  138)   ENDDO
+(  139) ENDIF
+(  140) IF (LSTATS .AND. MYPROC_STATS /= 1) THEN
+(  141)   JJ = 1
+(  142)   DO JNUM=0,JPMAXSTAT
+(  143)     ZREABUF(JJ  ) = TIMESUM(JNUM)
+(  144)     ZREABUF(JJ+1) = TIMESQSUM(JNUM)
+(  145)     ZREABUF(JJ+2) = TIMEMAX(JNUM)
+(  146)     ZREABUF(JJ+3) = TIMESUMB(JNUM)
+(  147)     ZREABUF(JJ+4) = TIMELCALL(JNUM)
+(  148)     ZREABUF(JJ+5) = NCALLS(JNUM)
+(  149)     ZREABUF(JJ+6) = TTCPUSUM(JNUM)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 4
+
+(  150)     ZREABUF(JJ+7) = TVCPUSUM(JNUM)
+(  151)     JJ = JJ+JPARRAYS
+(  152)   ENDDO
+(  153)   ILSEND = ILBUF
+(  154)   ISEND =1
+(  155)   ITAG = JPTAGSTAT
+(  156)   CALL MPL_SEND(ZREABUF(1:ILSEND),KDEST=NPRCIDS_STATS(ISEND), &
+(  157)        & KTAG=ITAG,CDSTRING='GSTATS_PRINT:')
+(  158) 
+(  159)   IF(LSTATS_MPL) THEN
+(  160)     JJ=1
+(  161)     DO JNUM=501,1000
+(  162)       ZREABUF(JJ  ) = NUMSEND(JNUM)
+(  163)       ZREABUF(JJ+1) = SENDBYTES(JNUM)
+(  164)       ZREABUF(JJ+2) = NUMRECV(JNUM)
+(  165)       ZREABUF(JJ+3) = RECVBYTES(JNUM)
+(  166)       JJ=JJ+4
+(  167)     ENDDO
+(  168) 
+(  169)     ILSEND = JJ-1
+(  170)     ITAG = JPTAGSTAT + 1
+(  171) 
+(  172)     CALL MPL_SEND(ZREABUF(1:ILSEND),KDEST=NPRCIDS_STATS(ISEND), &
+(  173)          & KTAG=ITAG,CDSTRING='GSTATS_PRINT:')
+(  174) 
+(  175)   ENDIF
+(  176) ELSEIF(LSTATS) THEN
+(  177)   IF(LSTATS_MPL) THEN
+(  178)     DO JNUM=501,1000
+(  179)       MAXCOMMTIME(JNUM)=0.0_JPRD
+(  180)       TOTSENDBYTES(JNUM)=0.0_JPRD
+(  181)       TOTRECVBYTES(JNUM)=0.0_JPRD
+(  182)     ENDDO
+(  183)   ENDIF
+(  184)   DO JROC=1,NPROC_STATS
+(  185)     IF (JROC /= 1) THEN
+(  186)       ITAG = JPTAGSTAT
+(  187)       CALL MPL_RECV(ZREABUF(1:ILBUF),KSOURCE=NPRCIDS_STATS(JROC), &
+(  188)        & KTAG=ITAG,CDSTRING='GSTATS_PRINT:')
+(  189)       JJ = 1
+(  190)       DO JNUM=0,JPMAXSTAT
+(  191)         TIMESUM(JNUM)   = ZREABUF(JJ  )
+(  192)         TIMESQSUM(JNUM) = ZREABUF(JJ+1)
+(  193)         TIMEMAX(JNUM)   = ZREABUF(JJ+2)
+(  194)         TIMESUMB(JNUM)  = ZREABUF(JJ+3)
+(  195)         TIMELCALL(JNUM) = ZREABUF(JJ+4)
+(  196)         ICALLSX(JNUM)    = NINT(ZREABUF(JJ+5))
+(  197)         TTCPUSUM(JNUM)  = ZREABUF(JJ+6)
+(  198)         TVCPUSUM(JNUM)  = ZREABUF(JJ+7)
+(  199)         JJ = JJ+JPARRAYS
+(  200)       ENDDO
+(  201) 
+(  202)       IF(LSTATS_MPL) THEN
+(  203)         ITAG = JPTAGSTAT+1
+(  204)         CALL MPL_RECV(ZREABUF(1:ILRECV),KSOURCE=NPRCIDS_STATS(JROC), &
+(  205)          & KTAG=ITAG,CDSTRING='GSTATS_PRINT:')
+(  206)         JJ = 1
+(  207)         DO JNUM=501,1000
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 5
+
+(  208)           NUMSEND(JNUM)   = NINT(ZREABUF(JJ))
+(  209)           SENDBYTES(JNUM) = ZREABUF(JJ+1)
+(  210)           NUMRECV(JNUM)   = NINT(ZREABUF(JJ+2))
+(  211)           RECVBYTES(JNUM) = ZREABUF(JJ+3)
+(  212)           JJ=JJ+4
+(  213)         ENDDO
+(  214)       ENDIF
+(  215) 
+(  216)     ELSE
+(  217)       ICALLSX(:)=NCALLS(:)
+(  218) 
+(  219)     ENDIF
+(  220)     IF (JROC == 1) THEN
+(  221)       ZTOTAL=TIMESUM(0)
+(  222)       ZTOTCPU = TTCPUSUM(0)
+(  223)       ZTOTVCPU = TVCPUSUM(0)
+(  224)     ENDIF
+(  225)     IF(.NOT. LSTATSCPU) THEN
+(  226)       TTCPUSUM(1:JPMAXSTAT) = -0.0_JPRD
+(  227)       TVCPUSUM(1:JPMAXSTAT) = -0.0_JPRD
+(  228)     ENDIF
+(  229)     ZT_SUM=0.0_JPRD
+(  230)     ZT_SUM2=0.0_JPRD
+(  231)     ZT_SUM3=0.0_JPRD
+(  232)     ZT_SUM4=0.0_JPRD
+(  233)     ZT_SUM5=0.0_JPRD
+(  234)     ZT_SUMIO=0.0_JPRD
+(  235)     ZT_SUMB=0.0_JPRD
+(  236)     IF( LDETAILED_STATS .AND. JROC <= NPRNT_STATS ) THEN
+(  237)       WRITE(KULOUT,'(A,I4)') 'TIMING STATISTICS:TASK=',JROC
+(  238)       IF(LXML_STATS)THEN
+(  239)         WRITE(IXMLLUN,'(A,I4,A)')'<timing task="',JROC,'">'
+(  240)       ENDIF
+(  241)       IF(NPROC_STATS > 1) THEN
+(  242)         WRITE(KULOUT,'(A,F6.1,A)')'STARTUP COST ',&
+(  243)          &TIME_START(JROC),' SECONDS'
+(  244)       ENDIF
+(  245)       WRITE(KULOUT,'(A)')&
+(  246)        &' NUM     ROUTINE                                     '//&
+(  247)        &'CALLS  SUM(s)   AVE(ms)   CPUAVE(ms) VAVE(ms) '//&
+(  248)        &'STDDEV(ms)  MAX(ms) '//&
+(  249)        &'SUMB(s) FRAC(%)'
+(  250)     ENDIF
+(  251)     DO JNUM=0,JPMAXSTAT
+(  252)       IF(ICALLSX(JNUM) > 1) THEN
+(  253)         ICALLS = ICALLSX(JNUM)/2
+(  254)         ZSUM = TIMESUM(JNUM)
+(  255)         ZAVE = TIMESUM(JNUM)/ICALLS*1000._JPRD
+(  256)         ZMAX = TIMEMAX(JNUM)*1000._JPRD
+(  257)         ZSUMB = TIMESUMB(JNUM)
+(  258)         ZFRAC = TIMESUM(JNUM)/ZTOTAL*100.0_JPRD
+(  259)         ZFRACMAX(JNUM)=MAX(ZFRACMAX(JNUM),ZFRAC)
+(  260)         ZSUMMAX(JNUM)=MAX(ZSUMMAX(JNUM),TIMESUM(JNUM))
+(  261)         ZSUMTOT(JNUM)=ZSUMTOT(JNUM)+ZSUM
+(  262)         ZAVEAVE(JNUM)=ZAVEAVE(JNUM)+ZAVE
+(  263)         ZAVEMAX(JNUM)=MAX(ZAVEMAX(JNUM),ZAVE)
+(  264)         ZAVETCPU = TTCPUSUM(JNUM)/ICALLS*1000._JPRD
+(  265)         ZAVEVCPU = TVCPUSUM(JNUM)/ICALLS*1000._JPRD
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 6
+
+(  266)         IF(ICALLS > 1 ) THEN
+(  267)           ZSTDDEV = 1000._JPRD*&
+(  268)            &SQRT(MAX((TIMESQSUM(JNUM)-TIMESUM(JNUM)**2/ICALLS)&
+(  269)            &/(ICALLS-1),0.0_JPRD))
+(  270)         ELSE
+(  271)           ZSTDDEV = 0.0_JPRD
+(  272)         ENDIF
+(  273)         IF(CCTYPE(JNUM).EQ.'MPL') THEN
+(  274)           ZT_SUM=ZT_SUM+ZSUM
+(  275)           ZT_SUMB=ZT_SUMB+ZSUMB
+(  276)         ENDIF
+(  277)         IF(CCTYPE(JNUM).EQ.'BAR' .OR. CCTYPE(JNUM).EQ.'GBR' .OR. CCTYPE(JNUM).EQ.'GB2' ) THEN
+(  278)           ZT_SUM4=ZT_SUM4+ZSUM
+(  279)           ZT_SUMB=ZT_SUMB+ZSUMB
+(  280)         ENDIF
+(  281)         IF(CCTYPE(JNUM).EQ.'OMP') THEN
+(  282)           ZT_SUM2=ZT_SUM2+ZSUM
+(  283)           ZT_SUMB=ZT_SUMB+ZSUMB
+(  284)         ENDIF
+(  285)         IF(CCTYPE(JNUM).EQ.'IO-') THEN
+(  286)           ZT_SUMIO=ZT_SUMIO+ZSUM
+(  287)           ZT_SUMB=ZT_SUMB+ZSUMB
+(  288)         ENDIF
+(  289)         IF(CCTYPE(JNUM).EQ.'SER') THEN
+(  290)           ZT_SUM3=ZT_SUM3+ZSUM
+(  291)           ZT_SUMB=ZT_SUMB+ZSUMB
+(  292)         ENDIF
+(  293)         IF(CCTYPE(JNUM).EQ.'MXD') THEN
+(  294)           ZT_SUM5=ZT_SUM5+ZSUM
+(  295)           ZT_SUMB=ZT_SUMB+ZSUMB
+(  296)         ENDIF
+(  297)         IF( LDETAILED_STATS .AND. JROC <= NPRNT_STATS ) THEN
+(  298) !         IF(JNUM < 501 .OR. LSTATS_COMMS .OR. LSTATS_OMP) THEN 
+(  299)             WRITE(KULOUT,'(I4,1X,A3,1X,A40,1X,I5,6(1X,F9.1),1X,F5.1,1X,F8.2)')&
+(  300)              &JNUM,CCTYPE(JNUM),CCDESC(JNUM),ICALLS,ZSUM,ZAVE,ZAVETCPU,ZAVEVCPU,&
+(  301)              &ZSTDDEV,ZMAX,ZSUMB,ZFRAC
+(  302)             IF(LXML_STATS)THEN
+(  303)               WRITE(IXMLLUN,&
+(  304)                & '(A,I4,A,/,A,A40,A,/,A,I5,A,/,6(A,F9.1,A,/),A,F5.1,A,/,A,F8.2,A,/,A)')&
+(  305)                & '<num id="',JNUM,'">',&
+(  306)                & '<description>',CCDESC(JNUM),'</description>',&
+(  307)                & '<sum unit="seconds">',ICALLS,'</sum>',&
+(  308)                & '<sumcall unit="ms">',ZSUM,'</sumcall>',&
+(  309)                & '<average unit="ms">',ZAVE,'</average>',&
+(  310)                & '<cpuaverage unit="ms">',ZAVETCPU,'</cpuaverage>',&
+(  311)                & '<vave unit="ms">',ZAVEVCPU,'</vave>',&
+(  312)                & '<stddev unit="ms">',ZSTDDEV,'</stddev>',&
+(  313)                & '<max unit="ms">',ZMAX,'</max>',&
+(  314)                & '<sumb unit="seconds">',ZSUMB,'</sumb>',&
+(  315)                & '<frac unit="percent">',ZFRAC,'</frac>',&
+(  316)                & '</num>'
+(  317)              ENDIF
+(  318) !        ENDIF
+(  319)         ENDIF
+(  320)       ENDIF
+(  321)     ENDDO
+(  322) !    ZCOMTIM = SUM(TIMESUM(51:99))+SUM(TIMESUM(151:199))
+(  323) !    ZDETAIL = SUM(TIMESUM(:))-TIMESUM(0)-TIMESUM(1)-SUM(TIMESUM(20:23))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 7
+
+(  324)     IF( LDETAILED_STATS .AND. JROC <= NPRNT_STATS ) THEN
+(  325)       WRITE(KULOUT,*) ''
+(  326)       WRITE(KULOUT,'((A,2F8.1))')&
+(  327)        &'CPU-TIME AND VECTOR CPU-TIME AS PERCENT OF TOTAL ',&
+(  328)        &TTCPUSUM(0)/TIMESUM(0)*100.0_JPRD,TVCPUSUM(0)/TIMESUM(0)*100.0_JPRD
+(  329)       IF(LXML_STATS)THEN
+(  330)         WRITE(IXMLLUN,'((A,F8.1,A,/,A,F8.1,A))')&
+(  331)          &'<cpufraction>',&
+(  332)          &TTCPUSUM(0)/TIMESUM(0)*100.0_JPRD,&
+(  333)          &'</cpufraction>',&
+(  334)          &'<cpuvectorfraction>',&
+(  335)          &TVCPUSUM(0)/TIMESUM(0)*100.0_JPRD,&
+(  336)          &'</cpuvectorfraction>'
+(  337)       ENDIF
+(  338) 
+(  339) 
+(  340)       IF(ZT_SUM > 0.0_JPRD) THEN
+(  341)         WRITE(KULOUT,'(A,F10.1,A,F6.2,A)')'SUMMED TIME IN COMMUNICATIONS   = '&
+(  342)          & ,ZT_SUM, ' SECONDS ',ZT_SUM/TIMESUM(0)*100.0_JPRD,&
+(  343)          &' PERCENT OF TOTAL'
+(  344)         IF(LXML_STATS)THEN
+(  345)           WRITE(IXMLLUN,'(A,F10.1,A,/,A,F6.2,A)')'<zcom unit="seconds">',&
+(  346)            &ZT_SUM,'</zcom>',&
+(  347)            &'<fraczcom unit="percent">',ZT_SUM/TIMESUM(0)*100.0_JPRD,&
+(  348)            &'</fraczcom>'
+(  349)         ENDIF
+(  350)       ENDIF
+(  351)       IF(ZT_SUM2 > 0.0_JPRD) THEN
+(  352)         WRITE(KULOUT,'(A,F10.1,A,F6.2,A)')'SUMMED TIME IN PARALLEL REGIONS = '&
+(  353)          & ,ZT_SUM2, ' SECONDS ',ZT_SUM2/TIMESUM(0)*100.0_JPRD,&
+(  354)          &' PERCENT OF TOTAL'
+(  355)         IF(LXML_STATS)THEN
+(  356)           WRITE(IXMLLUN,'(A,F10.1,A,/,A,F6.2,A)') &
+(  357)            &'<parallelztime unit="seconds">',&
+(  358)            &ZT_SUM2, '</parallelztime>',&
+(  359)            &'<fracparallelztime unit="percent">',ZT_SUM2/TIMESUM(0)*100.0_JPRD,&
+(  360)            &'</fracparallelztime>'
+(  361)         ENDIF
+(  362)       ENDIF
+(  363)       IF(ZT_SUMIO > 0.0_JPRD) THEN
+(  364)         WRITE(KULOUT,'(A,F10.1,A,F6.2,A)')'SUMMED TIME IN I/O SECTIONS     = '&
+(  365)          & ,ZT_SUMIO, ' SECONDS ',ZT_SUMIO/TIMESUM(0)*100.0_JPRD,&
+(  366)          &' PERCENT OF TOTAL'
+(  367)         IF(LXML_STATS)THEN
+(  368)           WRITE(IXMLLUN,'(A,F10.1,A,/,A,F6.2,A)')'<ioztime unit="seconds">',&
+(  369)            &ZT_SUMIO, '</ioztime>',&
+(  370)            &'<fracioztime unit="percent">',ZT_SUMIO/TIMESUM(0)*100.0_JPRD,&
+(  371)            &'</fracioztime>'
+(  372)         ENDIF
+(  373)       ENDIF
+(  374)       IF(ZT_SUM3 > 0.0_JPRD) THEN
+(  375)         WRITE(KULOUT,'(A,F10.1,A,F6.2,A)')'SUMMED TIME IN SERIAL SECTIONS  = '&
+(  376)         & ,ZT_SUM3, ' SECONDS ',ZT_SUM3/TIMESUM(0)*100.0_JPRD,&
+(  377)          &' PERCENT OF TOTAL'
+(  378)         IF(LXML_STATS)THEN
+(  379)           WRITE(IXMLLUN,'(A,F10.1,A,/,A,F6.2,A)')'<serialztime unit="seconds">',&
+(  380)            & ZT_SUM3,'</serialztime>',&
+(  381)            &'<fracserialztime unit="percent">',&
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 8
+
+(  382)            &ZT_SUM3/TIMESUM(0)*100.0_JPRD,&
+(  383)            &'</fracserialztime>'
+(  384)         ENDIF
+(  385)       ENDIF
+(  386)       IF(ZT_SUM4 > 0.0_JPRD) THEN
+(  387)         WRITE(KULOUT,'(A,F10.1,A,F6.2,A)')'SUMMED TIME IN BARRIERS         = '&
+(  388)          & ,ZT_SUM4, ' SECONDS ',ZT_SUM4/TIMESUM(0)*100.0_JPRD,&
+(  389)          &' PERCENT OF TOTAL'
+(  390)         IF(LXML_STATS)THEN
+(  391)           WRITE(IXMLLUN,'(A,F10.1,A,/,A,F6.2,A)')&
+(  392)            &'<barrierztime unit="seconds">',&
+(  393)            &ZT_SUM4,'</barrierztime>',&
+(  394)            & '<fracbarrierztime unit="percent">',&
+(  395)            & ZT_SUM4/TIMESUM(0)*100.0_JPRD,'</fracbarrierztime>'
+(  396)         ENDIF
+(  397)       ENDIF
+(  398)       IF(ZT_SUM5 > 0.0_JPRD) THEN
+(  399)         WRITE(KULOUT,'(A,F10.1,A,F6.2,A)')'SUMMED TIME IN MIXED SECTIONS   = '&
+(  400)          & ,ZT_SUM5, ' SECONDS ',ZT_SUM5/TIMESUM(0)*100.0_JPRD,&
+(  401)          &' PERCENT OF TOTAL'
+(  402)         WRITE(IXMLLUN,'(A,F10.1,A,/,A,F6.2,A)')&
+(  403)          &'<mixedztime unit="seconds">',&
+(  404)          &ZT_SUM5,'</mixedztime>',&
+(  405)          & '<fracmixedztime unit="percent">',&
+(  406)          & ZT_SUM5/TIMESUM(0)*100.0_JPRD,'</fracmixedztime>'
+(  407)       ENDIF
+(  408)       IF(LSTATS_COMMS.AND.LSTATS_OMP)THEN
+(  409)         WRITE(KULOUT,'(A,F8.2)')'FRACTION OF TOTAL TIME ACCOUNTED FOR ',&
+(  410)          & (ZT_SUM+ZT_SUM2+ZT_SUMIO+ZT_SUM3+ZT_SUM4+ZT_SUM5)/TIMESUM(0)*100.0_JPRD
+(  411)         WRITE(KULOUT,'(A,F8.2)')'FRACTION OF TOTAL TIME ACCOUNTED FOR INCLUDING SUMB ',&
+(  412)          & (ZT_SUM+ZT_SUM2+ZT_SUMIO+ZT_SUM3+ZT_SUM4+ZT_SUM5+ZT_SUMB)/TIMESUM(0)*100.0_JPRD
+(  413)         WRITE(KULOUT,'(" ")')
+(  414)         IF(LXML_STATS)THEN
+(  415)           WRITE(IXMLLUN,'(A,F8.2,A)')'<fractotal unit="percent">',&
+(  416)            &(ZT_SUM+ZT_SUM2+ZT_SUMIO+ZT_SUM3+ZT_SUM4+ZT_SUM5)/TIMESUM(0)*100.0_JPRD,&
+(  417)            &'</fractotal>'
+(  418)         ENDIF
+(  419)       ENDIF
+(  420)     ENDIF
+(  421)     IF( LDETAILED_STATS .AND. JROC < 3 ) THEN
+(  422)       IF(LXML_STATS)THEN
+(  423)         WRITE(IXMLLUN,'(A)')'</timing>'
+(  424)       ENDIF
+(  425)     ENDIF
+(  426)     IF( LSTATS_MPL .AND. JROC <= NPRNT_STATS ) THEN
+(  427)       WRITE(KULOUT,'(/,A,I4,/)') 'COMMUNICATIONS STATISTICS:TASK=',JROC
+(  428)       WRITE(KULOUT,'(A)') &
+(  429)        &' NUM     ROUTINE                              '//&
+(  430)        &'  SUM(s)   SENDS  AVG(kb) TOTAL(MB) MB/s '//&
+(  431)        &'  RECVS  AVG(kb) TOTAL(MB) MB/s '
+(  432) 
+(  433)       DO JNUM=501,1000
+(  434)         IF(NUMSEND(JNUM) /= 0 .OR. NUMRECV(JNUM) /= 0 ) THEN
+(  435)            SENDRATE=SENDBYTES(JNUM)*1.E-6/TIMESUM(JNUM)
+(  436)            RECVRATE=RECVBYTES(JNUM)*1.E-6/TIMESUM(JNUM)
+(  437)            IF(NUMSEND(JNUM) /= 0) THEN
+(  438)              AVGSENDLEN=SENDBYTES(JNUM)*1.E-3/NUMSEND(JNUM)
+(  439)            ELSE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 9
+
+(  440)              AVGSENDLEN=0.0_JPRD
+(  441)            ENDIF
+(  442)            IF(NUMRECV(JNUM) /= 0) THEN
+(  443)              AVGRECVLEN=RECVBYTES(JNUM)*1.E-3/NUMRECV(JNUM)
+(  444)            ELSE
+(  445)              AVGSENDLEN=0.0_JPRD
+(  446)            ENDIF
+(  447)            IF(NUMRECV(JNUM) /= 0) THEN
+(  448)              AVGRECVLEN=RECVBYTES(JNUM)*1.E-3/NUMRECV(JNUM)
+(  449)            ELSE
+(  450)              AVGRECVLEN=0.0_JPRD
+(  451)            ENDIF
+(  452)            WRITE(KULOUT,'(I6,1X,A40,f6.1,2(I8,3F8.1))') &
+(  453)             &  JNUM,CCDESC(JNUM),TIMESUM(JNUM),&
+(  454)             &  NUMSEND(JNUM),AVGSENDLEN,SENDBYTES(JNUM)*1.E-6, SENDRATE, &
+(  455)             &  NUMRECV(JNUM),AVGRECVLEN,RECVBYTES(JNUM)*1.E-6, RECVRATE
+(  456)         ENDIF
+(  457)       ENDDO
+(  458)       WRITE(KULOUT,'(/,A,I4,/)') 'UNKNOWN COMMUNICATIONS STATISTICS:TASK=', JROC
+(  459)       WRITE(KULOUT,'(A)') &
+(  460)        &' NUM     BEFORE ROUTINE                        '//&
+(  461)        &'    SENDS TOTAL(MB) '//&
+(  462)        &'RECVS TOTAL(MB)  '
+(  463)       DO JNUM=501,1000
+(  464)         IF(UNKNOWN_NUMSEND(JNUM) /= 0 .OR. UNKNOWN_NUMRECV(JNUM) /= 0 ) THEN
+(  465)            WRITE(KULOUT,'(I6,1X,A40,2(I8,F8.1))') &
+(  466)             &  JNUM,CCDESC(JNUM),&
+(  467)             &  UNKNOWN_NUMSEND(JNUM),UNKNOWN_SENDBYTES(JNUM)*1.E-6, &
+(  468)             &  UNKNOWN_NUMRECV(JNUM),UNKNOWN_RECVBYTES(JNUM)*1.E-6
+(  469)         ENDIF
+(  470)       ENDDO
+(  471)       WRITE(KULOUT,'(7x,"TOTAL",35x,2(I8,F8.1),//)') &
+(  472)        & SUM(UNKNOWN_NUMSEND(:)),SUM(UNKNOWN_SENDBYTES(:))*1.E-6 , &
+(  473)        & SUM(UNKNOWN_NUMRECV(:)),SUM(UNKNOWN_RECVBYTES(:))*1.E-6
+(  474) 
+(  475)      ENDIF
+(  476) 
+(  477)      IF(LSTATS_MPL) THEN
+(  478)       DO JNUM=501,1000
+(  479)          TOTSENDBYTES(JNUM) = TOTSENDBYTES(JNUM) + SENDBYTES(JNUM)
+(  480)          TOTRECVBYTES(JNUM) = TOTRECVBYTES(JNUM) + RECVBYTES(JNUM)
+(  481)          IF(SENDBYTES(JNUM).GT.0.0_JPRD.OR. &
+(  482)          &  RECVBYTES(JNUM).GT.0.0_JPRD) THEN
+(  483)            MAXCOMMTIME(JNUM)  = MAX(MAXCOMMTIME(JNUM),TIMESUM(JNUM))
+(  484)          ENDIF
+(  485)       ENDDO
+(  486)      ENDIF
+(  487) 
+(  488)   ENDDO
+(  489)   IF(LXML_STATS)THEN
+(  490)     WRITE(IXMLLUN,'(A)')'<timing_all_tasks>'
+(  491)   ENDIF
+(  492)   WRITE(KULOUT,*) ''
+(  493)   WRITE(KULOUT,'(A)') 'STATS FOR ALL TASKS'
+(  494)   WRITE(KULOUT,'(A)') &
+(  495)   &' NUM ROUTINE                                     CALLS  MEAN(ms)   MAX(ms)   FRAC(%)  UNBAL(%)'
+(  496)   ZTOTUNBAL = 0.0_JPRD
+(  497)   DO JNUM=0,500
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 10
+
+(  498)     IF(NCALLS(JNUM) > 1) THEN
+(  499)       ICALLS = NCALLS(JNUM)/2
+(  500)       ZMEAN = ZAVEAVE(JNUM)/NPROC_STATS
+(  501)       ZMAX  = ZAVEMAX(JNUM)
+(  502)       ZMEANT = ZSUMTOT(JNUM)/NPROC_STATS
+(  503)       ZMAXT  = ZSUMMAX(JNUM)
+(  504)       IF(ZMEANT .NE. 0.0)THEN
+(  505)         ZUNBAL= (ZMAXT-ZMEANT)/ZTOTAL*100._JPRD
+(  506)       ELSE
+(  507)         ZUNBAL=0.0
+(  508)       ENDIF
+(  509)       ZFRAC=ZFRACMAX(JNUM)
+(  510)       WRITE(KULOUT,'(I4,1X,A40,1X,I8,2(1X,F9.1),2(1X,F9.2))')&
+(  511)        &JNUM,CCDESC(JNUM),ICALLS,ZMEAN,ZMAX,ZFRAC,ZUNBAL
+(  512) 
+(  513)       IF(LXML_STATS)THEN
+(  514)         WRITE(IXMLLUN,'(A,I4,A,/,A,A40,A,/,A,I8,A,2(A,F9.1,A,/),2(A,F9.2,A,/),A)')&
+(  515)          &'<item id="',JNUM,'">',&
+(  516)          &'<description>',CCDESC(JNUM),'</description>',&
+(  517)          &'<calls>',ICALLS,'</calls>',&
+(  518)          &'<mean unit="ms">',ZMEAN,'</mean>',&
+(  519)          &'<max unit="ms">',ZMAX,'</max>',&
+(  520)          &'<fraction unit="percent">',ZFRAC,'</fraction>',&
+(  521)          &'<unbalanced unit="percent">',ZUNBAL,'</unbalanced>','</item>'
+(  522)       ENDIF
+(  523)     ENDIF
+(  524)   ENDDO
+(  525)   IF(LXML_STATS)THEN
+(  526)     WRITE(IXMLLUN,'(A)')'</timing_all_tasks>'
+(  527)   ENDIF
+(  528) 
+(  529) IF(LSTATS_COMMS)THEN
+(  530)   IF(LXML_STATS)THEN
+(  531)     WRITE(IXMLLUN,'(A)')'<timing_communications>'
+(  532)   ENDIF
+(  533)   WRITE(KULOUT,*) ''
+(  534)   WRITE(KULOUT,'(A)') 'STATS FOR COMMUNICATIONS'
+(  535)   WRITE(KULOUT,'(A)')  &
+(  536)   &' NUM ROUTINE                                     CALLS    MEAN(ms)  MAX(ms)   FRAC(%)  UNBAL(%)'
+(  537)   ZT_SUM=0.0
+(  538)   DO JNUM=500,JPMAXSTAT
+(  539)     IF((CCTYPE(JNUM).EQ."MPL".OR.CCTYPE(JNUM).EQ."BAR".OR.CCTYPE(JNUM).EQ."GBR".OR.CCTYPE(JNUM).EQ."GB2") &
+(  540)      & .AND.NCALLS(JNUM) > 1) THEN
+(  541)       ICALLS = NCALLS(JNUM)/2
+(  542)       ZMEAN = ZAVEAVE(JNUM)/NPROC_STATS
+(  543)       ZMAX  = ZAVEMAX(JNUM)
+(  544)       ZMEANT = ZSUMTOT(JNUM)/NPROC_STATS
+(  545)       ZMAXT  = ZSUMMAX(JNUM)
+(  546)       IF(ZMEANT .NE. 0.0)THEN
+(  547)         ZUNBAL= (ZMAXT-ZMEANT)/ZTOTAL*100._JPRD
+(  548)       ELSE
+(  549)         ZUNBAL=0.0
+(  550)       ENDIF
+(  551)       ZFRAC=ZFRACMAX(JNUM)
+(  552)       ZTOTUNBAL = ZTOTUNBAL+(ZMAXT-ZMEANT)
+(  553)       WRITE(KULOUT,'(I4,1X,A40,1X,I8,2(1X,F9.1),2(1X,F9.2))')&
+(  554)        &JNUM,CCDESC(JNUM),ICALLS,ZMEAN,ZMAX,ZFRAC,ZUNBAL
+(  555)       IF(LXML_STATS)THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 11
+
+(  556)         WRITE(IXMLLUN,'(A,I4,A,/,A,A40,A,/,A,I8,A,/,2(A,F9.1,A,/),2(A,F9.2,A,/),A)')&
+(  557)          &'<comitem id="',JNUM,'">',&
+(  558)          &'<description>',CCDESC(JNUM),'</description>',&
+(  559)          &'<calls>',ICALLS,'</calls>',&
+(  560)          &'<mean unit="ms">',ZMEAN,'</mean>',&
+(  561)          &'<max unit="ms">',ZMAX,'</max>',&
+(  562)          &'<fraction unit="percent">',ZFRAC,'</fraction>',&
+(  563)          &'<unbalanced unit="percent">',ZUNBAL,'</unbalanced>','</comitem>'
+(  564)       ENDIF
+(  565) 
+(  566)       ZT_SUM=ZT_SUM+ZMEANT
+(  567)     ENDIF
+(  568)   ENDDO
+(  569) 
+(  570)   WRITE(KULOUT,*) ''
+(  571)   WRITE(KULOUT,'(A,F10.1,A)')'SUMMED TIME IN COMMUNICATIONS   = ',ZT_SUM, ' SECONDS '
+(  572)   IF(LSTATS_MPL) THEN
+(  573)     WRITE(KULOUT,'(/,A,/)') 'TOTAL COMMUNICATIONS VOLUMES AND BANDWIDTH'
+(  574)     WRITE(KULOUT,'(A)') &
+(  575)      &'   NUM   ROUTINE                              '//&
+(  576)      &'  SUM(s)  SEND(GB)  RECV(GB)    GB/s'
+(  577)     DO JNUM=501,1000
+(  578)        IF(TOTSENDBYTES(JNUM).GT.0.0_JPRD.OR.TOTRECVBYTES(JNUM).GT.0.0_JPRD) THEN
+(  579)           WRITE(KULOUT,'(I6,1X,A40,f6.1,2F10.1,F8.1)') &
+(  580)            &  JNUM,CCDESC(JNUM),MAXCOMMTIME(JNUM),&
+(  581)            &  TOTSENDBYTES(JNUM)*1.E-9, &
+(  582)            &  TOTRECVBYTES(JNUM)*1.E-9 , &
+(  583)            &  (TOTSENDBYTES(JNUM)*1.E-9)/MAXCOMMTIME(JNUM)
+(  584)        ENDIF
+(  585)     ENDDO
+(  586)     WRITE(KULOUT,'(/,A,42x,f6.1,2F10.1,F8.1)') &
+(  587)      &   'TOTAL', &
+(  588)      &   SUM(MAXCOMMTIME) , &
+(  589)      &   SUM(TOTSENDBYTES)*1.E-9, &
+(  590)      &   SUM(TOTRECVBYTES)*1.E-9, &
+(  591)      &   (SUM(TOTSENDBYTES)*1.E-9)/SUM(MAXCOMMTIME)
+(  592)   ENDIF
+(  593) 
+(  594)   IF(LXML_STATS)THEN
+(  595)     WRITE(IXMLLUN,'(A,F10.1,A)')'<zcom unit="seconds">',ZT_SUM, '</zcom>'
+(  596)   ENDIF
+(  597)   WRITE(KULOUT,*) ''
+(  598)   IF(LXML_STATS)THEN
+(  599)     WRITE(IXMLLUN,'(A)')'</timing_communications>'
+(  600)   ENDIF
+(  601) 
+(  602) ENDIF
+(  603) IF(LSTATS_OMP)THEN
+(  604)   IF(LXML_STATS)THEN
+(  605)     WRITE(IXMLLUN,'(A)')'<timing_parallel>'
+(  606)   ENDIF
+(  607)   WRITE(KULOUT,*) ''
+(  608)   WRITE(KULOUT,'(A)') 'STATS FOR PARALLEL REGIONS'
+(  609)   WRITE(KULOUT,'(A)')  &
+(  610)   &' NUM ROUTINE                                     CALLS    MEAN(ms)  MAX(ms)   FRAC(%)  UNBAL(%)'
+(  611)   ZT_SUM=0.0
+(  612)   DO JNUM=500,JPMAXSTAT
+(  613)     IF(CCTYPE(JNUM).EQ."OMP".AND.NCALLS(JNUM) > 1) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 12
+
+(  614)       ICALLS = NCALLS(JNUM)/2
+(  615)       ZMEAN = ZAVEAVE(JNUM)/NPROC_STATS
+(  616)       ZMAX  = ZAVEMAX(JNUM)
+(  617)       ZMEANT = ZSUMTOT(JNUM)/NPROC_STATS
+(  618)       ZMAXT  = ZSUMMAX(JNUM)
+(  619)       IF(ZMEANT .NE. 0.0)THEN
+(  620)         ZUNBAL= (ZMAXT-ZMEANT)/ZTOTAL*100._JPRD
+(  621)       ELSE
+(  622)         ZUNBAL=0.0
+(  623)       ENDIF
+(  624)       ZFRAC=ZFRACMAX(JNUM)
+(  625)       ZTOTUNBAL = ZTOTUNBAL+(ZMAXT-ZMEANT)
+(  626)       WRITE(KULOUT,'(I4,1X,A40,1X,I8,2(1X,F9.1),2(1X,F9.2))')&
+(  627)        &JNUM,CCDESC(JNUM),ICALLS,ZMEAN,ZMAX,ZFRAC,ZUNBAL
+(  628)       IF(LXML_STATS)THEN
+(  629)         WRITE(IXMLLUN,'(A,I4,A,/,A,A40,A,/,A,I8,A,/,2(A,F9.1,A,/),2(A,F9.2,A,/),A)')&
+(  630)          &'<parallelitem id="',JNUM,'">',&
+(  631)          &'<description>',CCDESC(JNUM),'</description>',&
+(  632)          &'<calls>',ICALLS,'</calls>',&
+(  633)          &'<mean unit="seconds">',ZMEAN,'</mean>',&
+(  634)          &'<max unit="seconds">',ZMAX,'</max>',&
+(  635)          &'<fraction unit="percent">',ZFRAC,'</fraction>',&
+(  636)          &'<unbalanced unit="percent">',ZUNBAL,'</unbalanced>',&
+(  637)          &'</parallelitem>'
+(  638)       ENDIF
+(  639) 
+(  640)       ZT_SUM=ZT_SUM+ZMEANT
+(  641)     ENDIF
+(  642)   ENDDO
+(  643) 
+(  644)   WRITE(KULOUT,*) ''
+(  645)   WRITE(KULOUT,'(A,F10.1,A)')'SUMMED TIME IN PARALLEL REGIONS = ',ZT_SUM, ' SECONDS '
+(  646)   WRITE(KULOUT,*) ''
+(  647) 
+(  648)   IF(LXML_STATS)THEN
+(  649)     WRITE(IXMLLUN,'(A,F10.1,A)')'<zpar unit="seconds">',ZT_SUM, '</zpar>'
+(  650)   ENDIF
+(  651) 
+(  652)   WRITE(KULOUT,*) ''
+(  653)   WRITE(KULOUT,'(A)') 'STATS FOR I/O REGIONS'
+(  654)   WRITE(KULOUT,'(A)')  &
+(  655)   &' NUM ROUTINE                                     CALLS    MEAN(ms)  MAX(ms)   FRAC(%)  UNBAL(%)'
+(  656)   ZT_SUM=0.0
+(  657)   DO JNUM=500,JPMAXSTAT
+(  658)     IF(CCTYPE(JNUM).EQ."IO-".AND.NCALLS(JNUM) > 1) THEN
+(  659)       ICALLS = NCALLS(JNUM)/2
+(  660)       ZMEAN = ZAVEAVE(JNUM)/NPROC_STATS
+(  661)       ZMAX  = ZAVEMAX(JNUM)
+(  662)       ZMEANT = ZSUMTOT(JNUM)/NPROC_STATS
+(  663)       ZMAXT  = ZSUMMAX(JNUM)
+(  664)       IF(ZMEANT .NE. 0.0)THEN
+(  665)         ZUNBAL= (ZMAXT-ZMEANT)/ZTOTAL*100._JPRD
+(  666)       ELSE
+(  667)         ZUNBAL=0.0
+(  668)       ENDIF
+(  669)       ZFRAC=ZFRACMAX(JNUM)
+(  670)       ZTOTUNBAL = ZTOTUNBAL+(ZMAXT-ZMEANT)
+(  671)       WRITE(KULOUT,'(I4,1X,A40,1X,I8,2(1X,F9.1),2(1X,F9.2))')&
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 13
+
+(  672)        &JNUM,CCDESC(JNUM),ICALLS,ZMEAN,ZMAX,ZFRAC,ZUNBAL
+(  673)       IF(LXML_STATS)THEN
+(  674)         WRITE(IXMLLUN,'(A,I4,A,/,A,A40,A,/,A,I8,A,/,2(A,F9.1,A,/),2(A,F9.2,A,/),A)')&
+(  675)          &'<para_io_item id="',JNUM,'">',&
+(  676)          &'<description>',CCDESC(JNUM),'</description>',&
+(  677)          &'<calls>',ICALLS,'</calls>',&
+(  678)          &'<mean unit="seconds">',ZMEAN,'</mean>','<max unit="seconds">',&
+(  679)          & ZMAX,'</max>',&
+(  680)          &'<fraction unit="percent">',ZFRAC,'</fraction>',&
+(  681)          &'<unbalanced unit="percent">',ZUNBAL,'</unbalanced>',&
+(  682)          &'</para_io_item>'
+(  683)       ENDIF
+(  684) 
+(  685)       ZT_SUM=ZT_SUM+ZMEANT
+(  686)     ENDIF
+(  687)   ENDDO
+(  688) 
+(  689)   WRITE(KULOUT,*) ''
+(  690)   WRITE(KULOUT,'(A,F10.1,A)')'SUMMED TIME IN I/O REGIONS = ',&
+(  691)        &ZT_SUM, ' SECONDS '
+(  692)   WRITE(KULOUT,*) ''
+(  693) 
+(  694)   IF(LXML_STATS)THEN
+(  695)     WRITE(IXMLLUN,'(A,F10.1,A)')'<zio unit="seconds">',ZT_SUM,'</zio>'
+(  696)   ENDIF
+(  697) 
+(  698)   WRITE(KULOUT,*) ''
+(  699)   WRITE(KULOUT,'(A)') 'STATS FOR SERIAL(no OMP) REGIONS'
+(  700)   WRITE(KULOUT,'(A)')  &
+(  701)   &' NUM ROUTINE                                     CALLS    MEAN(ms)  MAX(ms)   FRAC(%)  UNBAL(%)'
+(  702)   ZT_SUM=0.0
+(  703)   DO JNUM=500,JPMAXSTAT
+(  704)     IF(CCTYPE(JNUM).EQ."SER".AND.NCALLS(JNUM) > 1) THEN
+(  705)       ICALLS = NCALLS(JNUM)/2
+(  706)       ZMEAN = ZAVEAVE(JNUM)/NPROC_STATS
+(  707)       ZMAX  = ZAVEMAX(JNUM)
+(  708)       ZMEANT = ZSUMTOT(JNUM)/NPROC_STATS
+(  709)       ZMAXT  = ZSUMMAX(JNUM)
+(  710)       IF(ZMEANT .NE. 0.0)THEN
+(  711)         ZUNBAL= (ZMAXT-ZMEANT)/ZTOTAL*100._JPRD
+(  712)       ELSE
+(  713)         ZUNBAL=0.0
+(  714)       ENDIF
+(  715)       ZFRAC=ZFRACMAX(JNUM)
+(  716)       ZTOTUNBAL = ZTOTUNBAL+(ZMAXT-ZMEANT)
+(  717)       WRITE(KULOUT,'(I4,1X,A40,1X,I8,2(1X,F9.1),2(1X,F9.2))')&
+(  718)        &JNUM,CCDESC(JNUM),ICALLS,ZMEAN,ZMAX,ZFRAC,ZUNBAL
+(  719)       IF(LXML_STATS)THEN
+(  720)         WRITE(IXMLLUN,'(A,I4,A,A,A40,A,A,I8,A,2(A,F9.1,A),2(A,F9.2,A,/),A)')&
+(  721)          &'<serialitem id="',JNUM,'">',&
+(  722)          &'<description>',CCDESC(JNUM),'</description>',&
+(  723)          &'<calls>',ICALLS,'</calls>',&
+(  724)          &'<mean unit="ms">',ZMEAN,'</mean>','<max unit="ms">',ZMAX,'</max>',&
+(  725)          &'<fraction unit="percent">',ZFRAC,'</fraction>',&
+(  726)          &'<unbalanced unit="percent">',ZUNBAL,'</unbalanced>','</serialitem>'
+(  727)       ENDIF
+(  728) 
+(  729)       ZT_SUM=ZT_SUM+ZMEANT
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 14
+
+(  730)     ENDIF
+(  731)   ENDDO
+(  732) 
+(  733)   WRITE(KULOUT,*) ''
+(  734)   WRITE(KULOUT,'(A,F10.1,A)')'SUMMED TIME IN SERIAL REGIONS = ',ZT_SUM, ' SECONDS '
+(  735)   WRITE(KULOUT,*) ''
+(  736) 
+(  737)   IF(LXML_STATS)THEN
+(  738)     WRITE(IXMLLUN,'(A,F10.1,A)')'<zserial unit="seconds">',&
+(  739)      &ZT_SUM, '</zserial>'
+(  740)   ENDIF
+(  741) 
+(  742)   WRITE(KULOUT,*) ''
+(  743)   WRITE(KULOUT,'(A)') 'STATS FOR MIXED SECTIONS'
+(  744)   WRITE(KULOUT,'(A)')  &
+(  745)   &' NUM ROUTINE                                     CALLS    MEAN(ms)  MAX(ms)   FRAC(%)  UNBAL(%)'
+(  746)   ZT_SUM=0.0
+(  747)   DO JNUM=500,JPMAXSTAT
+(  748)     IF(CCTYPE(JNUM).EQ."MXD".AND.NCALLS(JNUM) > 1) THEN
+(  749)       ICALLS = NCALLS(JNUM)/2
+(  750)       ZMEAN = ZAVEAVE(JNUM)/NPROC_STATS
+(  751)       ZMAX  = ZAVEMAX(JNUM)
+(  752)       ZMEANT = ZSUMTOT(JNUM)/NPROC_STATS
+(  753)       ZMAXT  = ZSUMMAX(JNUM)
+(  754)       IF(ZMEANT .NE. 0.0)THEN
+(  755)         ZUNBAL= (ZMAXT-ZMEANT)/ZTOTAL*100._JPRD
+(  756)       ELSE
+(  757)         ZUNBAL=0.0
+(  758)       ENDIF
+(  759)       ZFRAC=ZFRACMAX(JNUM)
+(  760)       ZTOTUNBAL = ZTOTUNBAL+(ZMAXT-ZMEANT)
+(  761)       WRITE(KULOUT,'(I4,1X,A40,1X,I8,2(1X,F9.1),2(1X,F9.2))')&
+(  762)        &JNUM,CCDESC(JNUM),ICALLS,ZMEAN,ZMAX,ZFRAC,ZUNBAL
+(  763)       IF(LXML_STATS)THEN
+(  764)         WRITE(IXMLLUN,'(A,I4,A,A,A40,A,A,I8,A,2(A,F9.1,A),2(A,F9.2,A,/),A)')&
+(  765)          &'<mixeditem id="',JNUM,'">',&
+(  766)          &'<description>',CCDESC(JNUM),'</description>',&
+(  767)          &'<calls>',ICALLS,'</calls>',&
+(  768)          &'<mean unit="ms">',ZMEAN,'</mean>','<max unit="ms">',ZMAX,'</max>',&
+(  769)          &'<fraction unit="percent">',ZFRAC,'</fraction>',&
+(  770)          &'<unbalanced unit="percent">',ZUNBAL,'</unbalanced>','</mixeditem>'
+(  771)       ENDIF
+(  772) 
+(  773)       ZT_SUM=ZT_SUM+ZMEANT
+(  774)     ENDIF
+(  775)   ENDDO
+(  776) 
+(  777)   WRITE(KULOUT,*) ''
+(  778)   WRITE(KULOUT,'(A,F10.1,A)')'SUMMED TIME IN MIXED SECTIONS = ',ZT_SUM, ' SECONDS '
+(  779)   WRITE(KULOUT,*) ''
+(  780) 
+(  781)   IF(LXML_STATS)THEN
+(  782)     WRITE(IXMLLUN,'(A,F10.1,A)')'<zmixed unit="seconds">',&
+(  783)      &ZT_SUM, '</zmixed>'
+(  784)   ENDIF
+(  785) 
+(  786)   IF(LXML_STATS)THEN
+(  787)     WRITE(IXMLLUN,'(A)')'</timing_parallel>'
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 15
+
+(  788)   ENDIF
+(  789) 
+(  790) ENDIF
+(  791) 
+(  792)   WRITE(KULOUT,'(A,F10.1,A,F4.1,A)')&
+(  793)    &'TOTAL MEASURED IMBALANCE =',ZTOTUNBAL,&
+(  794)    &' SECONDS, ',ZTOTUNBAL/ZTOTAL*100._JPRD,' PERCENT'
+(  795) ELSE
+(  796)   ZTOTAL=TIMESUM(0)
+(  797)   ZTOTCPU = TTCPUSUM(0)
+(  798)   ZTOTVCPU = TVCPUSUM(0)
+(  799) ENDIF
+(  800) 
+(  801) IF ( MYPROC_STATS == 1) THEN
+(  802)   WRITE(KULOUT,'(3(A,F10.1)/)')'TOTAL WALLCLOCK TIME ',ZTOTAL,&
+(  803)    &' CPU TIME',ZTOTCPU,' VECTOR TIME ',ZTOTVCPU
+(  804)   IF(LXML_STATS)THEN
+(  805)     WRITE(IXMLLUN,'(3(A,F10.1,A,/)/)')'<totalwallclocktime>',ZTOTAL,&
+(  806)      &'</totalwallclocktime>',&
+(  807)      &'<cputime>',ZTOTCPU,'</cputime>',&
+(  808)      & '<vectortime>',ZTOTVCPU,'</vectortime>'
+(  809)   ENDIF
+(  810) ENDIF
+(  811) IF( LDETAILED_STATS )THEN
+(  812)   ITAG = JPTAGSTAT
+(  813)   ZDELAY_MAX=0.0_JPRD
+(  814)   ZMPL(:)=0.0_JPRD
+(  815)   ZBAR(:)=0.0_JPRD
+(  816)   ZGBR(:)=0.0_JPRD
+(  817)   ZGB2(:)=0.0_JPRD
+(  818)   ZOMP(:)=0.0_JPRD
+(  819)   ZIO (:)=0.0_JPRD
+(  820)   ZSER(:)=0.0_JPRD
+(  821)   ZMXD(:)=0.0_JPRD
+(  822)   DO JROC=1,NPROC_STATS
+(  823)     IF( JROC > 1 )THEN
+(  824)       IF( MYPROC_STATS == JROC )THEN
+(  825)         ISEND=1
+(  826)         CALL MPL_SEND(NDELAY_INDEX,KDEST=NPRCIDS_STATS(ISEND), &
+(  827)          & KTAG=ITAG,CDSTRING='GSTATS_PRINT:')
+(  828)         IF( NDELAY_INDEX > 0 )THEN
+(  829)           CALL MPL_SEND(NDELAY_COUNTER(1:NDELAY_INDEX),KDEST=NPRCIDS_STATS(ISEND), &
+(  830)            & KTAG=ITAG+1,CDSTRING='GSTATS_PRINT:')
+(  831)           CALL MPL_SEND(TDELAY_VALUE(1:NDELAY_INDEX),KDEST=NPRCIDS_STATS(ISEND), &
+(  832)            & KTAG=ITAG+2,CDSTRING='GSTATS_PRINT:')
+(  833)           DO JDELAY=1,NDELAY_INDEX
+(  834)             CLTEMP((JDELAY-1)*10+1:JDELAY*10)=CDELAY_TIME(JDELAY)
+(  835)           ENDDO
+(  836)           CALL MPL_SEND(CLTEMP(1:NDELAY_INDEX*10),KDEST=NPRCIDS_STATS(ISEND), &
+(  837)            & KTAG=ITAG+3,CDSTRING='GSTATS_PRINT:')
+(  838)         ENDIF
+(  839)       ENDIF
+(  840)       IF( MYPROC_STATS == 1 )THEN
+(  841)         CALL MPL_RECV(NDELAY_INDEX,KSOURCE=NPRCIDS_STATS(JROC), &
+(  842)          & KTAG=ITAG,CDSTRING='GSTATS_PRINT:')
+(  843)         IF( NDELAY_INDEX > 0 )THEN
+(  844)           CALL MPL_RECV(NDELAY_COUNTER(1:NDELAY_INDEX),KSOURCE=NPRCIDS_STATS(JROC), &
+(  845)            & KTAG=ITAG+1,CDSTRING='GSTATS_PRINT:')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 16
+
+(  846)           CALL MPL_RECV(TDELAY_VALUE(1:NDELAY_INDEX),KSOURCE=NPRCIDS_STATS(JROC), &
+(  847)            & KTAG=ITAG+2,CDSTRING='GSTATS_PRINT:')
+(  848)           CALL MPL_RECV(CLTEMP(1:NDELAY_INDEX*10),KSOURCE=NPRCIDS_STATS(JROC), &
+(  849)             & KTAG=ITAG+3,CDSTRING='GSTATS_PRINT:')
+(  850)           DO JDELAY=1,NDELAY_INDEX
+(  851)             CDELAY_TIME(JDELAY)=CLTEMP((JDELAY-1)*10+1:JDELAY*10)
+(  852)           ENDDO
+(  853)         ENDIF
+(  854)       ENDIF
+(  855)     ENDIF
+(  856)     IF( MYPROC_STATS == 1 .AND. NDELAY_INDEX > 0 )THEN
+(  857)       WRITE(KULOUT,'("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")')
+(  858)       WRITE(KULOUT,'("TASK=",I6," NUMBER OF UNEXPECTED DELAYS=",I4)') JROC,NDELAY_INDEX
+(  859)       IF( NDELAY_INDEX == JPMAXDELAYS )THEN
+(  860)         WRITE(KULOUT,'(" NOTE THAT THE MAXIMUM NUMBER OF DELAYS HAS BEEN REACHED =",I6)')JPMAXDELAYS
+(  861)       ENDIF
+(  862)       ZDELAY=SUM(TDELAY_VALUE(1:NDELAY_INDEX))
+(  863)       WRITE(KULOUT,'("TOTAL UNEXPECTED DELAY TIME (SECS) =",F9.1)') ZDELAY
+(  864)       ZDELAY_MAX=MAX(ZDELAY_MAX,ZDELAY)
+(  865)       DO JDELAY=1,NDELAY_INDEX
+(  866)         WRITE(KULOUT,'(A,":",A,":",A,1X,I4,1X,A3,1X,A40,1X,F6.1)')&
+(  867)          &CDELAY_TIME(JDELAY)(1:2),CDELAY_TIME(JDELAY)(3:4),CDELAY_TIME(JDELAY)(5:6),&
+(  868)          &NDELAY_COUNTER(JDELAY),CCTYPE(NDELAY_COUNTER(JDELAY)),&
+(  869)          &CCDESC(NDELAY_COUNTER(JDELAY)),TDELAY_VALUE(JDELAY)
+(  870)          IF( CCTYPE(NDELAY_COUNTER(JDELAY)) .EQ. 'MPL' ) ZMPL(JROC)=ZMPL(JROC)+TDELAY_VALUE(JDELAY)
+(  871)          IF( CCTYPE(NDELAY_COUNTER(JDELAY)) .EQ. 'BAR' ) ZBAR(JROC)=ZBAR(JROC)+TDELAY_VALUE(JDELAY)
+(  872)          IF( CCTYPE(NDELAY_COUNTER(JDELAY)) .EQ. 'GBR' ) ZGBR(JROC)=ZGBR(JROC)+TDELAY_VALUE(JDELAY)
+(  873)          IF( CCTYPE(NDELAY_COUNTER(JDELAY)) .EQ. 'GB2' ) ZGB2(JROC)=ZGB2(JROC)+TDELAY_VALUE(JDELAY)
+(  874)          IF( CCTYPE(NDELAY_COUNTER(JDELAY)) .EQ. 'OMP' ) ZOMP(JROC)=ZOMP(JROC)+TDELAY_VALUE(JDELAY)
+(  875)          IF( CCTYPE(NDELAY_COUNTER(JDELAY)) .EQ. 'IO-' ) ZIO (JROC)=ZIO (JROC)+TDELAY_VALUE(JDELAY)
+(  876)          IF( CCTYPE(NDELAY_COUNTER(JDELAY)) .EQ. 'SER' ) ZSER(JROC)=ZSER(JROC)+TDELAY_VALUE(JDELAY)
+(  877)          IF( CCTYPE(NDELAY_COUNTER(JDELAY)) .EQ. 'MXD' ) ZMXD(JROC)=ZMXD(JROC)+TDELAY_VALUE(JDELAY)
+(  878)       ENDDO
+(  879)       WRITE(KULOUT,'(" ")')
+(  880)       WRITE(KULOUT,'("TASK=",I6," UNEXPECTED DELAYS SORTED BY COUNTER")') JROC
+(  881)       DO JNUM=500,JPMAXSTAT
+(  882)         IDELAY=0
+(  883)         ZDELAY=0.0_JPRD
+(  884)         DO JDELAY=1,NDELAY_INDEX
+(  885)           IF( NDELAY_COUNTER(JDELAY) == JNUM )THEN
+(  886)             IDELAY=IDELAY+1
+(  887)             ZDELAY=ZDELAY+TDELAY_VALUE(JDELAY)
+(  888)           ENDIF
+(  889)         ENDDO
+(  890)         IF( IDELAY /= 0 )THEN
+(  891)           WRITE(KULOUT,'(I4,1X,A3,1X,A40,1X,I4,3X,F6.1)')&
+(  892)            &JNUM,CCTYPE(JNUM),CCDESC(JNUM),IDELAY,ZDELAY
+(  893)         ENDIF
+(  894)       ENDDO
+(  895)       WRITE(KULOUT,'(" ")')
+(  896)       WRITE(KULOUT,'(" ")')
+(  897)     ENDIF
+(  898)     CALL MPL_BARRIER(CDSTRING='GSTATS_PRINT')
+(  899)   ENDDO
+(  900)   IF( MYPROC_STATS == 1 )THEN
+(  901)     WRITE(KULOUT,'("MAXIMUM TOTAL UNEXPECTED DELAY TIME (SECS) =",F9.1)') ZDELAY_MAX
+(  902)     WRITE(KULOUT,'(" ")')
+(  903)     WRITE(KULOUT,'(" ")')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 17
+
+(  904)     WRITE(KULOUT,'("  TASK   ","     MPL   ","     BAR   ","     GBR   ","     GB2   ","     OMP   ",&
+(  905)      &"     IO-   ","     SER   ","     MXD   ")')
+(  906)     DO JROC=1,NPROC_STATS
+(  907)       WRITE(KULOUT,'(I6,8(2X,F9.1))') JROC,ZMPL(JROC),ZBAR(JROC),ZGBR(JROC),ZGB2(JROC),&
+(  908)       &ZOMP(JROC),ZIO (JROC),ZSER(JROC),ZMXD(JROC)
+(  909)     ENDDO
+(  910)     WRITE(KULOUT,'(" ")')
+(  911)     WRITE(KULOUT,'(" ")')
+(  912)   ENDIF
+(  913) ENDIF
+(  914) 
+(  915) !   Trace stats
+(  916) 
+(  917) IF (LTRACE_STATS) THEN
+(  918)   WRITE(KULOUT,'(A)') '=== TRACE OF CALLS TO GSTATS'
+(  919)   IF (NCALLS_TOTAL > NTRACE_STATS) THEN
+(  920)     WRITE(KULOUT,'(A,2I10)') ' ONLY PART OF TRACE STORED AS BUFFER TO SMALL ',&
+(  921)      & NCALLS_TOTAL,NTRACE_STATS
+(  922)   ENDIF
+(  923)   WRITE(KULOUT,'(A)') '==='
+(  924)   CLACTION(0)='ON'
+(  925)   CLACTION(1)='OFF'
+(  926)   CLACTION(2)='SUSPEND'
+(  927)   CLACTION(3)='RESUME'
+(  928)   DO JCALL=1,MIN(NCALLS_TOTAL,NTRACE_STATS)
+(  929)     ICALLER = MOD(NCALL_TRACE(JCALL),(JPMAXSTAT+1))
+(  930)     IACTION   = NCALL_TRACE(JCALL)/(JPMAXSTAT+1)
+(  931)     IF (IACTION == 0) THEN
+(  932)       ZTIMELCALL(ICALLER) = TIME_TRACE(JCALL)
+(  933)       ZTHISTIME(ICALLER) = 0.0_JPRD
+(  934)     ELSEIF (IACTION == 2) THEN
+(  935)       ZTHISTIME(ICALLER) = TIME_TRACE(JCALL)-ZTIMELCALL(ICALLER)
+(  936)     ELSEIF (IACTION == 3) THEN
+(  937)       ZTIMELCALL(ICALLER) = TIME_TRACE(JCALL)
+(  938)     ENDIF
+(  939)     IF (IACTION == 1) THEN
+(  940)       WRITE(KULOUT,'(1X,F10.3,1X,A,1X,A,1X,F10.3)') &
+(  941)        &TIME_TRACE(JCALL),CCDESC(ICALLER),CLACTION(IACTION),&
+(  942)        &ZTHISTIME(ICALLER)+(TIME_TRACE(JCALL)-ZTIMELCALL(ICALLER))
+(  943)     ELSE
+(  944)       WRITE(KULOUT,'(1X,F10.3,1X,A,1X,A)') TIME_TRACE(JCALL),CCDESC(ICALLER),&
+(  945)        & CLACTION(IACTION)
+(  946)     ENDIF
+(  947)   ENDDO
+(  948) ENDIF
+(  949) 
+(  950) IF(LSTATS .AND. MYPROC_STATS == 1) THEN
+(  951)   PAVEAVE(0:KLEN) = ZAVEAVE(0:KLEN)
+(  952) ELSE
+(  953)   PAVEAVE(0:KLEN) = 0.0_JPRD
+(  954) ENDIF
+(  955) 
+(  956) WRITE(KULOUT,'(/A)')'===-=== END   OF TIMING STATISTICS ===-==='
+(  957) 
+(  958) 
+(  959) IF(LSTATS_MEM)THEN
+(  960)   IF(LXML_STATS)THEN
+(  961)     WRITE(IXMLLUN,'(A)')'<memory>'
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 18
+
+(  962)   ENDIF
+(  963)   WRITE(KULOUT,*) ''
+(  964)   WRITE(KULOUT,*) 'STATS FOR MEMORY'
+(  965)   WRITE(KULOUT,*)  &
+(  966)  &' NUM ROUTINE               CALLS  CALL    MAXINCR   TOTINCR   MININCR'
+(  967)   WRITE(KULOUT,*)  &
+(  968)  &'                                   NO      (KB)      (KB)      (KB)'
+(  969)   DO JNUM=0,JPMAXSTAT
+(  970)     IF(NCALLS(JNUM) > 1) THEN
+(  971)       ICALLS = NCALLS(JNUM)/2
+(  972)       IMEM=NTMEM(JNUM,1)
+(  973)       INUM=NTMEM(JNUM,3)/2
+(  974)       JMEM=NTMEM(JNUM,4)
+(  975)       WRITE(KULOUT,'(I4,1X,A20,1X,I8,1X,I6,3(1X,I9))')&
+(  976)        &JNUM,CCDESC(JNUM),ICALLS,INUM,IMEM,JMEM,NTMEM(JNUM,5)
+(  977) 
+(  978)       IF(LXML_STATS)THEN
+(  979)         WRITE(IXMLLUN,'(A,I4,A,/,A,A20,A,/,A,I8,A,/,A,I6,A,/,3(A,I9,A,/))')&
+(  980)          &'<memitem id="',JNUM,'"/>',&
+(  981)          &'<description>',CCDESC(JNUM),'</description>',&
+(  982)          &'<calls>',ICALLS,'</calls>',&
+(  983)          &'<callnum>',INUM,'</callnum>','<maxincr unit="kb">',IMEM,'</maxincr>',&
+(  984)          &'<totincr unit="kb">',JMEM,'</totincr>',&
+(  985)          &'<minincr unit="kb">',NTMEM(JNUM,5),'</minincr>'
+(  986)       ENDIF
+(  987)     ENDIF
+(  988)   ENDDO
+(  989) 
+(  990)   WRITE(KULOUT,*) ''
+(  991)   WRITE(KULOUT,'(/A)')'===-=== END   OF MEMORY STATISTICS ===-==='
+(  992)   WRITE(KULOUT,*) ''
+(  993)   IF(LXML_STATS)THEN
+(  994)     WRITE(IXMLLUN,'(A)')'</memory>'
+(  995)   ENDIF
+(  996) ENDIF
+(  997) IF(LXML_STATS .AND. MYPROC_STATS==1)THEN
+(  998)   WRITE(IXMLLUN,'(A)')'</gstats>'
+(  999)   CLOSE(IXMLLUN)
+( 1000) ENDIF
+( 1001) 
+( 1002) RETURN
+( 1003) END SUBROUTINE GSTATS_PRINT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 19
+
+(    1) # 1 "gstats_print.F90"
+(    1) SUBROUTINE GSTATS_PRINT(KULOUT,PAVEAVE,KLEN)
+(    2) # 3 "gstats_print.F90"
+(    3) !**** *GSTATS_PRINT* - print timing statistics
+(    4) # 5 "gstats_print.F90"
+(    5) !     PURPOSE.
+(    6) !     --------
+(    7) !       To print out timings gathered by GSTATS
+(    8) # 10 "gstats_print.F90"
+(   10) !**   INTERFACE.
+(   11) !     ----------
+(   12) !       *CALL* *GSTATS_PRINT*
+(   13) # 14 "gstats_print.F90"
+(   14) !        EXPLICIT ARGUMENTS     None
+(   15) !        --------------------
+(   16) # 18 "gstats_print.F90"
+(   18) !        IMPLICIT ARGUMENTS
+(   19) !        --------------------
+(   20) !        Module YOMSTATS
+(   21) # 22 "gstats_print.F90"
+(   22) !     METHOD.
+(   23) !     -------
+(   24) # 26 "gstats_print.F90"
+(   26) !     EXTERNALS.   
+(   27) !     ----------   
+(   28) # 29 "gstats_print.F90"
+(   29) !     REFERENCE.
+(   30) !     ----------
+(   31) !        ECMWF Research Department documentation of the IFS
+(   32) # 33 "gstats_print.F90"
+(   33) !     AUTHOR.
+(   34) !     -------
+(   35) !        Mats Hamrud ECMWF
+(   36) # 37 "gstats_print.F90"
+(   37) !     MODIFICATIONS.
+(   38) !     --------------
+(   39) !        ORIGINAL : 98-11-15
+(   40) !        D.Salmond: 99-09-21 : Timer for SLCOMM2
+(   41) !        G.Mozdzynski 05-09-25 : fix master ncalls overwrite for nproc>1
+(   42) !        C.Larsson    8-May-2006 : Added xml file output
+(   43) !        G.Mozdzynski 16-Oct-2007 : xml file output under switch LXML_STATS
+(   44) !        P.Towers     11-May-2011 : mpl comms statistics output
+(   45) !        F. Vana  05-Mar-2015  Support for single precision
+(   46) !        G. Mozdzynski 18-Aug-2015 Avoid confusion, procs are tasks
+(   47) !     ------------------------------------------------------------------
+(   48) USE PARKIND1  ,ONLY : JPRD, JPIM
+(   49) # 50 "gstats_print.F90"
+(   50) USE YOMGSTATS
+(   51) USE YOMMPI   , ONLY : MREALT
+(   52) USE MPL_MODULE
+(   53) USE MPL_STATS_MOD
+(   54) # 55 "gstats_print.F90"
+(   55) IMPLICIT NONE
+(   56) # 57 "gstats_print.F90"
+(   57) INTEGER(KIND=JPIM) :: KULOUT,KLEN
+(   58) REAL(KIND=JPRD) :: PAVEAVE(0:KLEN)
+(   59) CHARACTER*7  CLACTION(0:3)
+(   60) CHARACTER(LEN=JPMAXDELAYS*10) CLTEMP
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 20
+
+(   61) INTEGER(KIND=JPIM),PARAMETER :: JPARRAYS=8
+(   62) REAL(KIND=JPRD) :: ZREABUF(JPARRAYS*(JPMAXSTAT+1))
+(   63) REAL(KIND=JPRD) :: ZAVEAVE(0:JPMAXSTAT),ZAVEMAX(0:JPMAXSTAT),ZTIMELCALL(0:JPMAXSTAT),&
+(   64)          &ZTHISTIME(0:JPMAXSTAT),ZFRACMAX(0:JPMAXSTAT),&
+(   65)          &ZSUMMAX(0:JPMAXSTAT),ZSUMTOT(0:JPMAXSTAT)
+(   66) REAL(KIND=JPRD) :: ZT_SUM,ZT_SUM2,ZT_SUM3,ZT_SUMIO,ZT_SUM4,ZT_SUM5,ZT_SUMB
+(   67) REAL(KIND=JPRD) :: ZDELAY,ZDELAY_MAX
+(   68) # 69 "gstats_print.F90"
+(   69) REAL(KIND=JPRD) :: ZMPL(NPROC_STATS)
+(   70) REAL(KIND=JPRD) :: ZBAR(NPROC_STATS)
+(   71) REAL(KIND=JPRD) :: ZGBR(NPROC_STATS)
+(   72) REAL(KIND=JPRD) :: ZGB2(NPROC_STATS)
+(   73) REAL(KIND=JPRD) :: ZOMP(NPROC_STATS)
+(   74) REAL(KIND=JPRD) :: ZIO (NPROC_STATS)
+(   75) REAL(KIND=JPRD) :: ZSER(NPROC_STATS)
+(   76) REAL(KIND=JPRD) :: ZMXD(NPROC_STATS)
+(   77) # 78 "gstats_print.F90"
+(   78) INTEGER(KIND=JPIM) :: ICALLSX(0:JPMAXSTAT)
+(   79) # 80 "gstats_print.F90"
+(   80) !     LOCAL INTEGER SCALARS
+(   81) INTEGER(KIND=JPIM) :: ICALLS, ILBUF, ILSEND, ILRECV, &
+(   82)              &ISEND, ITAG, JJ, JNUM, JROC, JCALL, ICALLER,IACTION
+(   83) INTEGER(KIND=JPIM) :: IMEM, INUM, JMEM
+(   84) INTEGER(KIND=JPIM) :: JDELAY, IDELAY
+(   85) INTEGER(KIND=JPIM) :: NSEND,NRECV
+(   86) # 87 "gstats_print.F90"
+(   87) !     LOCAL REAL SCALARS
+(   88) REAL(KIND=JPRD) :: ZAVE, ZAVETCPU, ZAVEVCPU, ZCOMTIM, ZDETAIL,&
+(   89)           &ZFRAC, ZMAX, ZMEAN, ZSTDDEV, ZSUM, ZSUMB, &
+(   90)           &ZTOTAL, ZTOTCPU, ZTOTUNBAL, ZTOTVCPU, &
+(   91)           &ZUNBAL, ZMEANT, ZMAXT
+(   92) # 93 "gstats_print.F90"
+(   93) REAL(KIND=JPRD)    :: SBYTES,RBYTES,SENDRATE,RECVRATE
+(   94) REAL(KIND=JPRD)    :: AVGSENDLEN,AVGRECVLEN
+(   95) REAL(KIND=JPRD)    :: MAXCOMMTIME(501:1000)
+(   96) REAL(KIND=JPRD)    :: TOTSENDBYTES(501:1000)
+(   97) REAL(KIND=JPRD)    :: TOTRECVBYTES(501:1000)
+(   98) # 99 "gstats_print.F90"
+(   99) INTEGER(KIND=JPIM) :: IXMLLUN  
+(  100) # 101 "gstats_print.F90"
+(  101) !     ------------------------------------------------------------------
+(  102) # 103 "gstats_print.F90"
+(  103) ! write(0,*) "JPMAXSTAT,NPRNT_STATS =",JPMAXSTAT,NPRNT_STATS
+(  104) # 105 "gstats_print.F90"
+(  105) ILBUF = JPARRAYS*(JPMAXSTAT+1)
+(  106) ILRECV = 500*4
+(  107) ZAVEAVE(:) = 0.0_JPRD
+(  108) ZAVEMAX(:) = 0.0_JPRD
+(  109) ZFRACMAX(:)= 0.0_JPRD
+(  110) ZSUMMAX(:)= 0.0_JPRD
+(  111) ZSUMTOT(:)= 0.0_JPRD
+(  112) # 113 "gstats_print.F90"
+(  113) ! OPEN GSTATS.XML for xml statistics
+(  114) IF(LXML_STATS .AND. MYPROC_STATS==1)THEN
+(  115)   IXMLLUN=40
+(  116)   OPEN (UNIT=IXMLLUN, FILE='gstats.xml',ACTION='write')
+(  117)   WRITE(IXMLLUN,'(A)')'<?xml version="1.0" encoding="UTF-8"?>'
+(  118)   WRITE(IXMLLUN,'(A)')'<gstats '
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 21
+
+(  119)   WRITE(IXMLLUN,'(A)')' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"&
+(  120)   & xsi:schemaLocation="http://www.ecmwf.int/services/prepifs/gstats   ./gstats.xsd">'
+(  121) ENDIF
+(  122) # 123 "gstats_print.F90"
+(  123) WRITE(KULOUT,'(A)')'===-=== START OF TIMING STATISTICS ===-==='
+(  124) IF(LSYNCSTATS.AND.NPROC_STATS>1) THEN
+(  125)   WRITE(KULOUT,'(A)')'START OF TIMINGS SYNCRONIZED'
+(  126) ENDIF
+(  127) IF(LDETAILED_STATS) THEN
+(  128)   LSTATS_COMMS=.TRUE.
+(  129)   LSTATS_OMP=.TRUE.
+(  130) ENDIF
+(  131) IF(LBARRIER_STATS2) THEN
+(  132)   DO JNUM=1,JBMAXBASE
+(  133)     IF(NBAR_PTR(JNUM) > 0) THEN
+(  134)       INUM=NBAR_PTR(JNUM)
+(  135)       CCDESC(INUM)=CCDESC(JNUM)
+(  136)       CCTYPE(INUM)='GB2'
+(  137)     ENDIF
+(  138)   ENDDO
+(  139) ENDIF
+(  140) IF (LSTATS .AND. MYPROC_STATS /= 1) THEN
+(  141)   JJ = 1
+(  142)   DO JNUM=0,JPMAXSTAT
+(  143)     ZREABUF(JJ  ) = TIMESUM(JNUM)
+(  144)     ZREABUF(JJ+1) = TIMESQSUM(JNUM)
+(  145)     ZREABUF(JJ+2) = TIMEMAX(JNUM)
+(  146)     ZREABUF(JJ+3) = TIMESUMB(JNUM)
+(  147)     ZREABUF(JJ+4) = TIMELCALL(JNUM)
+(  148)     ZREABUF(JJ+5) = NCALLS(JNUM)
+(  149)     ZREABUF(JJ+6) = TTCPUSUM(JNUM)
+(  150)     ZREABUF(JJ+7) = TVCPUSUM(JNUM)
+(  151)     JJ = JJ+JPARRAYS
+(  152)   ENDDO
+(  153)   ILSEND = ILBUF
+(  154)   ISEND =1
+(  155)   ITAG = JPTAGSTAT
+(  156)   CALL MPL_SEND(ZREABUF(1:ILSEND),KDEST=NPRCIDS_STATS(ISEND), &
+(  157)        & KTAG=ITAG,CDSTRING='GSTATS_PRINT:')
+(  158) # 159 "gstats_print.F90"
+(  159)   IF(LSTATS_MPL) THEN
+(  160)     JJ=1
+(  161)     DO JNUM=501,1000
+(  162)       ZREABUF(JJ  ) = NUMSEND(JNUM)
+(  163)       ZREABUF(JJ+1) = SENDBYTES(JNUM)
+(  164)       ZREABUF(JJ+2) = NUMRECV(JNUM)
+(  165)       ZREABUF(JJ+3) = RECVBYTES(JNUM)
+(  166)       JJ=JJ+4
+(  167)     ENDDO
+(  168) # 169 "gstats_print.F90"
+(  169)     ILSEND = JJ-1
+(  170)     ITAG = JPTAGSTAT + 1
+(  171) # 172 "gstats_print.F90"
+(  172)     CALL MPL_SEND(ZREABUF(1:ILSEND),KDEST=NPRCIDS_STATS(ISEND), &
+(  173)          & KTAG=ITAG,CDSTRING='GSTATS_PRINT:')
+(  174) # 175 "gstats_print.F90"
+(  175)   ENDIF
+(  176) ELSEIF(LSTATS) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 22
+
+(  177)   IF(LSTATS_MPL) THEN
+(  178)     DO JNUM=501,1000
+(  179)       MAXCOMMTIME(JNUM)=0.0_JPRD
+(  180)       TOTSENDBYTES(JNUM)=0.0_JPRD
+(  181)       TOTRECVBYTES(JNUM)=0.0_JPRD
+(  182)     ENDDO
+(  183)   ENDIF
+(  184)   DO JROC=1,NPROC_STATS
+(  185)     IF (JROC /= 1) THEN
+(  186)       ITAG = JPTAGSTAT
+(  187)       CALL MPL_RECV(ZREABUF(1:ILBUF),KSOURCE=NPRCIDS_STATS(JROC), &
+(  188)        & KTAG=ITAG,CDSTRING='GSTATS_PRINT:')
+(  189)       JJ = 1
+(  190)       DO JNUM=0,JPMAXSTAT
+(  191)         TIMESUM(JNUM)   = ZREABUF(JJ  )
+(  192)         TIMESQSUM(JNUM) = ZREABUF(JJ+1)
+(  193)         TIMEMAX(JNUM)   = ZREABUF(JJ+2)
+(  194)         TIMESUMB(JNUM)  = ZREABUF(JJ+3)
+(  195)         TIMELCALL(JNUM) = ZREABUF(JJ+4)
+(  196)         ICALLSX(JNUM)    = NINT(ZREABUF(JJ+5))
+(  197)         TTCPUSUM(JNUM)  = ZREABUF(JJ+6)
+(  198)         TVCPUSUM(JNUM)  = ZREABUF(JJ+7)
+(  199)         JJ = JJ+JPARRAYS
+(  200)       ENDDO
+(  201) # 202 "gstats_print.F90"
+(  202)       IF(LSTATS_MPL) THEN
+(  203)         ITAG = JPTAGSTAT+1
+(  204)         CALL MPL_RECV(ZREABUF(1:ILRECV),KSOURCE=NPRCIDS_STATS(JROC), &
+(  205)          & KTAG=ITAG,CDSTRING='GSTATS_PRINT:')
+(  206)         JJ = 1
+(  207)         DO JNUM=501,1000
+(  208)           NUMSEND(JNUM)   = NINT(ZREABUF(JJ))
+(  209)           SENDBYTES(JNUM) = ZREABUF(JJ+1)
+(  210)           NUMRECV(JNUM)   = NINT(ZREABUF(JJ+2))
+(  211)           RECVBYTES(JNUM) = ZREABUF(JJ+3)
+(  212)           JJ=JJ+4
+(  213)         ENDDO
+(  214)       ENDIF
+(  215) # 216 "gstats_print.F90"
+(  216)     ELSE
+(  217)       ICALLSX(:)=NCALLS(:)
+(  218) # 219 "gstats_print.F90"
+(  219)     ENDIF
+(  220)     IF (JROC == 1) THEN
+(  221)       ZTOTAL=TIMESUM(0)
+(  222)       ZTOTCPU = TTCPUSUM(0)
+(  223)       ZTOTVCPU = TVCPUSUM(0)
+(  224)     ENDIF
+(  225)     IF(.NOT. LSTATSCPU) THEN
+(  226)       TTCPUSUM(1:JPMAXSTAT) = -0.0_JPRD
+(  227)       TVCPUSUM(1:JPMAXSTAT) = -0.0_JPRD
+(  228)     ENDIF
+(  229)     ZT_SUM=0.0_JPRD
+(  230)     ZT_SUM2=0.0_JPRD
+(  231)     ZT_SUM3=0.0_JPRD
+(  232)     ZT_SUM4=0.0_JPRD
+(  233)     ZT_SUM5=0.0_JPRD
+(  234)     ZT_SUMIO=0.0_JPRD
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 23
+
+(  235)     ZT_SUMB=0.0_JPRD
+(  236)     IF( LDETAILED_STATS .AND. JROC <= NPRNT_STATS ) THEN
+(  237)       WRITE(KULOUT,'(A,I4)') 'TIMING STATISTICS:TASK=',JROC
+(  238)       IF(LXML_STATS)THEN
+(  239)         WRITE(IXMLLUN,'(A,I4,A)')'<timing task="',JROC,'">'
+(  240)       ENDIF
+(  241)       IF(NPROC_STATS > 1) THEN
+(  242)         WRITE(KULOUT,'(A,F6.1,A)')'STARTUP COST ',&
+(  243)          &TIME_START(JROC),' SECONDS'
+(  244)       ENDIF
+(  245)       WRITE(KULOUT,'(A)')&
+(  246)        &' NUM     ROUTINE                                     '//&
+(  247)        &'CALLS  SUM(s)   AVE(ms)   CPUAVE(ms) VAVE(ms) '//&
+(  248)        &'STDDEV(ms)  MAX(ms) '//&
+(  249)        &'SUMB(s) FRAC(%)'
+(  250)     ENDIF
+(  251)     DO JNUM=0,JPMAXSTAT
+(  252)       IF(ICALLSX(JNUM) > 1) THEN
+(  253)         ICALLS = ICALLSX(JNUM)/2
+(  254)         ZSUM = TIMESUM(JNUM)
+(  255)         ZAVE = TIMESUM(JNUM)/ICALLS*1000._JPRD
+(  256)         ZMAX = TIMEMAX(JNUM)*1000._JPRD
+(  257)         ZSUMB = TIMESUMB(JNUM)
+(  258)         ZFRAC = TIMESUM(JNUM)/ZTOTAL*100.0_JPRD
+(  259)         ZFRACMAX(JNUM)=MAX(ZFRACMAX(JNUM),ZFRAC)
+(  260)         ZSUMMAX(JNUM)=MAX(ZSUMMAX(JNUM),TIMESUM(JNUM))
+(  261)         ZSUMTOT(JNUM)=ZSUMTOT(JNUM)+ZSUM
+(  262)         ZAVEAVE(JNUM)=ZAVEAVE(JNUM)+ZAVE
+(  263)         ZAVEMAX(JNUM)=MAX(ZAVEMAX(JNUM),ZAVE)
+(  264)         ZAVETCPU = TTCPUSUM(JNUM)/ICALLS*1000._JPRD
+(  265)         ZAVEVCPU = TVCPUSUM(JNUM)/ICALLS*1000._JPRD
+(  266)         IF(ICALLS > 1 ) THEN
+(  267)           ZSTDDEV = 1000._JPRD*&
+(  268)            &SQRT(MAX((TIMESQSUM(JNUM)-TIMESUM(JNUM)**2/ICALLS)&
+(  269)            &/(ICALLS-1),0.0_JPRD))
+(  270)         ELSE
+(  271)           ZSTDDEV = 0.0_JPRD
+(  272)         ENDIF
+(  273)         IF(CCTYPE(JNUM).EQ.'MPL') THEN
+(  274)           ZT_SUM=ZT_SUM+ZSUM
+(  275)           ZT_SUMB=ZT_SUMB+ZSUMB
+(  276)         ENDIF
+(  277)         IF(CCTYPE(JNUM).EQ.'BAR' .OR. CCTYPE(JNUM).EQ.'GBR' .OR. CCTYPE(JNUM).EQ.'GB2' ) THEN
+(  278)           ZT_SUM4=ZT_SUM4+ZSUM
+(  279)           ZT_SUMB=ZT_SUMB+ZSUMB
+(  280)         ENDIF
+(  281)         IF(CCTYPE(JNUM).EQ.'OMP') THEN
+(  282)           ZT_SUM2=ZT_SUM2+ZSUM
+(  283)           ZT_SUMB=ZT_SUMB+ZSUMB
+(  284)         ENDIF
+(  285)         IF(CCTYPE(JNUM).EQ.'IO-') THEN
+(  286)           ZT_SUMIO=ZT_SUMIO+ZSUM
+(  287)           ZT_SUMB=ZT_SUMB+ZSUMB
+(  288)         ENDIF
+(  289)         IF(CCTYPE(JNUM).EQ.'SER') THEN
+(  290)           ZT_SUM3=ZT_SUM3+ZSUM
+(  291)           ZT_SUMB=ZT_SUMB+ZSUMB
+(  292)         ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 24
+
+(  293)         IF(CCTYPE(JNUM).EQ.'MXD') THEN
+(  294)           ZT_SUM5=ZT_SUM5+ZSUM
+(  295)           ZT_SUMB=ZT_SUMB+ZSUMB
+(  296)         ENDIF
+(  297)         IF( LDETAILED_STATS .AND. JROC <= NPRNT_STATS ) THEN
+(  298) !         IF(JNUM < 501 .OR. LSTATS_COMMS .OR. LSTATS_OMP) THEN 
+(  299)             WRITE(KULOUT,'(I4,1X,A3,1X,A40,1X,I5,6(1X,F9.1),1X,F5.1,1X,F8.2)')&
+(  300)              &JNUM,CCTYPE(JNUM),CCDESC(JNUM),ICALLS,ZSUM,ZAVE,ZAVETCPU,ZAVEVCPU,&
+(  301)              &ZSTDDEV,ZMAX,ZSUMB,ZFRAC
+(  302)             IF(LXML_STATS)THEN
+(  303)               WRITE(IXMLLUN,&
+(  304)                & '(A,I4,A,/,A,A40,A,/,A,I5,A,/,6(A,F9.1,A,/),A,F5.1,A,/,A,F8.2,A,/,A)')&
+(  305)                & '<num id="',JNUM,'">',&
+(  306)                & '<description>',CCDESC(JNUM),'</description>',&
+(  307)                & '<sum unit="seconds">',ICALLS,'</sum>',&
+(  308)                & '<sumcall unit="ms">',ZSUM,'</sumcall>',&
+(  309)                & '<average unit="ms">',ZAVE,'</average>',&
+(  310)                & '<cpuaverage unit="ms">',ZAVETCPU,'</cpuaverage>',&
+(  311)                & '<vave unit="ms">',ZAVEVCPU,'</vave>',&
+(  312)                & '<stddev unit="ms">',ZSTDDEV,'</stddev>',&
+(  313)                & '<max unit="ms">',ZMAX,'</max>',&
+(  314)                & '<sumb unit="seconds">',ZSUMB,'</sumb>',&
+(  315)                & '<frac unit="percent">',ZFRAC,'</frac>',&
+(  316)                & '</num>'
+(  317)              ENDIF
+(  318) !        ENDIF
+(  319)         ENDIF
+(  320)       ENDIF
+(  321)     ENDDO
+(  322) !    ZCOMTIM = SUM(TIMESUM(51:99))+SUM(TIMESUM(151:199))
+(  323) !    ZDETAIL = SUM(TIMESUM(:))-TIMESUM(0)-TIMESUM(1)-SUM(TIMESUM(20:23))
+(  324)     IF( LDETAILED_STATS .AND. JROC <= NPRNT_STATS ) THEN
+(  325)       WRITE(KULOUT,*) ''
+(  326)       WRITE(KULOUT,'((A,2F8.1))')&
+(  327)        &'CPU-TIME AND VECTOR CPU-TIME AS PERCENT OF TOTAL ',&
+(  328)        &TTCPUSUM(0)/TIMESUM(0)*100.0_JPRD,TVCPUSUM(0)/TIMESUM(0)*100.0_JPRD
+(  329)       IF(LXML_STATS)THEN
+(  330)         WRITE(IXMLLUN,'((A,F8.1,A,/,A,F8.1,A))')&
+(  331)          &'<cpufraction>',&
+(  332)          &TTCPUSUM(0)/TIMESUM(0)*100.0_JPRD,&
+(  333)          &'</cpufraction>',&
+(  334)          &'<cpuvectorfraction>',&
+(  335)          &TVCPUSUM(0)/TIMESUM(0)*100.0_JPRD,&
+(  336)          &'</cpuvectorfraction>'
+(  337)       ENDIF
+(  338) # 340 "gstats_print.F90"
+(  340)       IF(ZT_SUM > 0.0_JPRD) THEN
+(  341)         WRITE(KULOUT,'(A,F10.1,A,F6.2,A)')'SUMMED TIME IN COMMUNICATIONS   = '&
+(  342)          & ,ZT_SUM, ' SECONDS ',ZT_SUM/TIMESUM(0)*100.0_JPRD,&
+(  343)          &' PERCENT OF TOTAL'
+(  344)         IF(LXML_STATS)THEN
+(  345)           WRITE(IXMLLUN,'(A,F10.1,A,/,A,F6.2,A)')'<zcom unit="seconds">',&
+(  346)            &ZT_SUM,'</zcom>',&
+(  347)            &'<fraczcom unit="percent">',ZT_SUM/TIMESUM(0)*100.0_JPRD,&
+(  348)            &'</fraczcom>'
+(  349)         ENDIF
+(  350)       ENDIF
+(  351)       IF(ZT_SUM2 > 0.0_JPRD) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 25
+
+(  352)         WRITE(KULOUT,'(A,F10.1,A,F6.2,A)')'SUMMED TIME IN PARALLEL REGIONS = '&
+(  353)          & ,ZT_SUM2, ' SECONDS ',ZT_SUM2/TIMESUM(0)*100.0_JPRD,&
+(  354)          &' PERCENT OF TOTAL'
+(  355)         IF(LXML_STATS)THEN
+(  356)           WRITE(IXMLLUN,'(A,F10.1,A,/,A,F6.2,A)') &
+(  357)            &'<parallelztime unit="seconds">',&
+(  358)            &ZT_SUM2, '</parallelztime>',&
+(  359)            &'<fracparallelztime unit="percent">',ZT_SUM2/TIMESUM(0)*100.0_JPRD,&
+(  360)            &'</fracparallelztime>'
+(  361)         ENDIF
+(  362)       ENDIF
+(  363)       IF(ZT_SUMIO > 0.0_JPRD) THEN
+(  364)         WRITE(KULOUT,'(A,F10.1,A,F6.2,A)')'SUMMED TIME IN I/O SECTIONS     = '&
+(  365)          & ,ZT_SUMIO, ' SECONDS ',ZT_SUMIO/TIMESUM(0)*100.0_JPRD,&
+(  366)          &' PERCENT OF TOTAL'
+(  367)         IF(LXML_STATS)THEN
+(  368)           WRITE(IXMLLUN,'(A,F10.1,A,/,A,F6.2,A)')'<ioztime unit="seconds">',&
+(  369)            &ZT_SUMIO, '</ioztime>',&
+(  370)            &'<fracioztime unit="percent">',ZT_SUMIO/TIMESUM(0)*100.0_JPRD,&
+(  371)            &'</fracioztime>'
+(  372)         ENDIF
+(  373)       ENDIF
+(  374)       IF(ZT_SUM3 > 0.0_JPRD) THEN
+(  375)         WRITE(KULOUT,'(A,F10.1,A,F6.2,A)')'SUMMED TIME IN SERIAL SECTIONS  = '&
+(  376)         & ,ZT_SUM3, ' SECONDS ',ZT_SUM3/TIMESUM(0)*100.0_JPRD,&
+(  377)          &' PERCENT OF TOTAL'
+(  378)         IF(LXML_STATS)THEN
+(  379)           WRITE(IXMLLUN,'(A,F10.1,A,/,A,F6.2,A)')'<serialztime unit="seconds">',&
+(  380)            & ZT_SUM3,'</serialztime>',&
+(  381)            &'<fracserialztime unit="percent">',&
+(  382)            &ZT_SUM3/TIMESUM(0)*100.0_JPRD,&
+(  383)            &'</fracserialztime>'
+(  384)         ENDIF
+(  385)       ENDIF
+(  386)       IF(ZT_SUM4 > 0.0_JPRD) THEN
+(  387)         WRITE(KULOUT,'(A,F10.1,A,F6.2,A)')'SUMMED TIME IN BARRIERS         = '&
+(  388)          & ,ZT_SUM4, ' SECONDS ',ZT_SUM4/TIMESUM(0)*100.0_JPRD,&
+(  389)          &' PERCENT OF TOTAL'
+(  390)         IF(LXML_STATS)THEN
+(  391)           WRITE(IXMLLUN,'(A,F10.1,A,/,A,F6.2,A)')&
+(  392)            &'<barrierztime unit="seconds">',&
+(  393)            &ZT_SUM4,'</barrierztime>',&
+(  394)            & '<fracbarrierztime unit="percent">',&
+(  395)            & ZT_SUM4/TIMESUM(0)*100.0_JPRD,'</fracbarrierztime>'
+(  396)         ENDIF
+(  397)       ENDIF
+(  398)       IF(ZT_SUM5 > 0.0_JPRD) THEN
+(  399)         WRITE(KULOUT,'(A,F10.1,A,F6.2,A)')'SUMMED TIME IN MIXED SECTIONS   = '&
+(  400)          & ,ZT_SUM5, ' SECONDS ',ZT_SUM5/TIMESUM(0)*100.0_JPRD,&
+(  401)          &' PERCENT OF TOTAL'
+(  402)         WRITE(IXMLLUN,'(A,F10.1,A,/,A,F6.2,A)')&
+(  403)          &'<mixedztime unit="seconds">',&
+(  404)          &ZT_SUM5,'</mixedztime>',&
+(  405)          & '<fracmixedztime unit="percent">',&
+(  406)          & ZT_SUM5/TIMESUM(0)*100.0_JPRD,'</fracmixedztime>'
+(  407)       ENDIF
+(  408)       IF(LSTATS_COMMS.AND.LSTATS_OMP)THEN
+(  409)         WRITE(KULOUT,'(A,F8.2)')'FRACTION OF TOTAL TIME ACCOUNTED FOR ',&
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 26
+
+(  410)          & (ZT_SUM+ZT_SUM2+ZT_SUMIO+ZT_SUM3+ZT_SUM4+ZT_SUM5)/TIMESUM(0)*100.0_JPRD
+(  411)         WRITE(KULOUT,'(A,F8.2)')'FRACTION OF TOTAL TIME ACCOUNTED FOR INCLUDING SUMB ',&
+(  412)          & (ZT_SUM+ZT_SUM2+ZT_SUMIO+ZT_SUM3+ZT_SUM4+ZT_SUM5+ZT_SUMB)/TIMESUM(0)*100.0_JPRD
+(  413)         WRITE(KULOUT,'(" ")')
+(  414)         IF(LXML_STATS)THEN
+(  415)           WRITE(IXMLLUN,'(A,F8.2,A)')'<fractotal unit="percent">',&
+(  416)            &(ZT_SUM+ZT_SUM2+ZT_SUMIO+ZT_SUM3+ZT_SUM4+ZT_SUM5)/TIMESUM(0)*100.0_JPRD,&
+(  417)            &'</fractotal>'
+(  418)         ENDIF
+(  419)       ENDIF
+(  420)     ENDIF
+(  421)     IF( LDETAILED_STATS .AND. JROC < 3 ) THEN
+(  422)       IF(LXML_STATS)THEN
+(  423)         WRITE(IXMLLUN,'(A)')'</timing>'
+(  424)       ENDIF
+(  425)     ENDIF
+(  426)     IF( LSTATS_MPL .AND. JROC <= NPRNT_STATS ) THEN
+(  427)       WRITE(KULOUT,'(/,A,I4,/)') 'COMMUNICATIONS STATISTICS:TASK=',JROC
+(  428)       WRITE(KULOUT,'(A)') &
+(  429)        &' NUM     ROUTINE                              '//&
+(  430)        &'  SUM(s)   SENDS  AVG(kb) TOTAL(MB) MB/s '//&
+(  431)        &'  RECVS  AVG(kb) TOTAL(MB) MB/s '
+(  432) # 433 "gstats_print.F90"
+(  433)       DO JNUM=501,1000
+(  434)         IF(NUMSEND(JNUM) /= 0 .OR. NUMRECV(JNUM) /= 0 ) THEN
+(  435)            SENDRATE=SENDBYTES(JNUM)*1.E-6/TIMESUM(JNUM)
+(  436)            RECVRATE=RECVBYTES(JNUM)*1.E-6/TIMESUM(JNUM)
+(  437)            IF(NUMSEND(JNUM) /= 0) THEN
+(  438)              AVGSENDLEN=SENDBYTES(JNUM)*1.E-3/NUMSEND(JNUM)
+(  439)            ELSE
+(  440)              AVGSENDLEN=0.0_JPRD
+(  441)            ENDIF
+(  442)            IF(NUMRECV(JNUM) /= 0) THEN
+(  443)              AVGRECVLEN=RECVBYTES(JNUM)*1.E-3/NUMRECV(JNUM)
+(  444)            ELSE
+(  445)              AVGSENDLEN=0.0_JPRD
+(  446)            ENDIF
+(  447)            IF(NUMRECV(JNUM) /= 0) THEN
+(  448)              AVGRECVLEN=RECVBYTES(JNUM)*1.E-3/NUMRECV(JNUM)
+(  449)            ELSE
+(  450)              AVGRECVLEN=0.0_JPRD
+(  451)            ENDIF
+(  452)            WRITE(KULOUT,'(I6,1X,A40,f6.1,2(I8,3F8.1))') &
+(  453)             &  JNUM,CCDESC(JNUM),TIMESUM(JNUM),&
+(  454)             &  NUMSEND(JNUM),AVGSENDLEN,SENDBYTES(JNUM)*1.E-6, SENDRATE, &
+(  455)             &  NUMRECV(JNUM),AVGRECVLEN,RECVBYTES(JNUM)*1.E-6, RECVRATE
+(  456)         ENDIF
+(  457)       ENDDO
+(  458)       WRITE(KULOUT,'(/,A,I4,/)') 'UNKNOWN COMMUNICATIONS STATISTICS:TASK=', JROC
+(  459)       WRITE(KULOUT,'(A)') &
+(  460)        &' NUM     BEFORE ROUTINE                        '//&
+(  461)        &'    SENDS TOTAL(MB) '//&
+(  462)        &'RECVS TOTAL(MB)  '
+(  463)       DO JNUM=501,1000
+(  464)         IF(UNKNOWN_NUMSEND(JNUM) /= 0 .OR. UNKNOWN_NUMRECV(JNUM) /= 0 ) THEN
+(  465)            WRITE(KULOUT,'(I6,1X,A40,2(I8,F8.1))') &
+(  466)             &  JNUM,CCDESC(JNUM),&
+(  467)             &  UNKNOWN_NUMSEND(JNUM),UNKNOWN_SENDBYTES(JNUM)*1.E-6, &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 27
+
+(  468)             &  UNKNOWN_NUMRECV(JNUM),UNKNOWN_RECVBYTES(JNUM)*1.E-6
+(  469)         ENDIF
+(  470)       ENDDO
+(  471)       WRITE(KULOUT,'(7x,"TOTAL",35x,2(I8,F8.1),//)') &
+(  472)        & SUM(UNKNOWN_NUMSEND(:)),SUM(UNKNOWN_SENDBYTES(:))*1.E-6 , &
+(  473)        & SUM(UNKNOWN_NUMRECV(:)),SUM(UNKNOWN_RECVBYTES(:))*1.E-6
+(  474) # 475 "gstats_print.F90"
+(  475)      ENDIF
+(  476) # 477 "gstats_print.F90"
+(  477)      IF(LSTATS_MPL) THEN
+(  478)       DO JNUM=501,1000
+(  479)          TOTSENDBYTES(JNUM) = TOTSENDBYTES(JNUM) + SENDBYTES(JNUM)
+(  480)          TOTRECVBYTES(JNUM) = TOTRECVBYTES(JNUM) + RECVBYTES(JNUM)
+(  481)          IF(SENDBYTES(JNUM).GT.0.0_JPRD.OR. &
+(  482)          &  RECVBYTES(JNUM).GT.0.0_JPRD) THEN
+(  483)            MAXCOMMTIME(JNUM)  = MAX(MAXCOMMTIME(JNUM),TIMESUM(JNUM))
+(  484)          ENDIF
+(  485)       ENDDO
+(  486)      ENDIF
+(  487) # 488 "gstats_print.F90"
+(  488)   ENDDO
+(  489)   IF(LXML_STATS)THEN
+(  490)     WRITE(IXMLLUN,'(A)')'<timing_all_tasks>'
+(  491)   ENDIF
+(  492)   WRITE(KULOUT,*) ''
+(  493)   WRITE(KULOUT,'(A)') 'STATS FOR ALL TASKS'
+(  494)   WRITE(KULOUT,'(A)') &
+(  495)   &' NUM ROUTINE                                     CALLS  MEAN(ms)   MAX(ms)   FRAC(%)  UNBAL(%)'
+(  496)   ZTOTUNBAL = 0.0_JPRD
+(  497)   DO JNUM=0,500
+(  498)     IF(NCALLS(JNUM) > 1) THEN
+(  499)       ICALLS = NCALLS(JNUM)/2
+(  500)       ZMEAN = ZAVEAVE(JNUM)/NPROC_STATS
+(  501)       ZMAX  = ZAVEMAX(JNUM)
+(  502)       ZMEANT = ZSUMTOT(JNUM)/NPROC_STATS
+(  503)       ZMAXT  = ZSUMMAX(JNUM)
+(  504)       IF(ZMEANT .NE. 0.0)THEN
+(  505)         ZUNBAL= (ZMAXT-ZMEANT)/ZTOTAL*100._JPRD
+(  506)       ELSE
+(  507)         ZUNBAL=0.0
+(  508)       ENDIF
+(  509)       ZFRAC=ZFRACMAX(JNUM)
+(  510)       WRITE(KULOUT,'(I4,1X,A40,1X,I8,2(1X,F9.1),2(1X,F9.2))')&
+(  511)        &JNUM,CCDESC(JNUM),ICALLS,ZMEAN,ZMAX,ZFRAC,ZUNBAL
+(  512) # 513 "gstats_print.F90"
+(  513)       IF(LXML_STATS)THEN
+(  514)         WRITE(IXMLLUN,'(A,I4,A,/,A,A40,A,/,A,I8,A,2(A,F9.1,A,/),2(A,F9.2,A,/),A)')&
+(  515)          &'<item id="',JNUM,'">',&
+(  516)          &'<description>',CCDESC(JNUM),'</description>',&
+(  517)          &'<calls>',ICALLS,'</calls>',&
+(  518)          &'<mean unit="ms">',ZMEAN,'</mean>',&
+(  519)          &'<max unit="ms">',ZMAX,'</max>',&
+(  520)          &'<fraction unit="percent">',ZFRAC,'</fraction>',&
+(  521)          &'<unbalanced unit="percent">',ZUNBAL,'</unbalanced>','</item>'
+(  522)       ENDIF
+(  523)     ENDIF
+(  524)   ENDDO
+(  525)   IF(LXML_STATS)THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 28
+
+(  526)     WRITE(IXMLLUN,'(A)')'</timing_all_tasks>'
+(  527)   ENDIF
+(  528) # 529 "gstats_print.F90"
+(  529) IF(LSTATS_COMMS)THEN
+(  530)   IF(LXML_STATS)THEN
+(  531)     WRITE(IXMLLUN,'(A)')'<timing_communications>'
+(  532)   ENDIF
+(  533)   WRITE(KULOUT,*) ''
+(  534)   WRITE(KULOUT,'(A)') 'STATS FOR COMMUNICATIONS'
+(  535)   WRITE(KULOUT,'(A)')  &
+(  536)   &' NUM ROUTINE                                     CALLS    MEAN(ms)  MAX(ms)   FRAC(%)  UNBAL(%)'
+(  537)   ZT_SUM=0.0
+(  538)   DO JNUM=500,JPMAXSTAT
+(  539)     IF((CCTYPE(JNUM).EQ."MPL".OR.CCTYPE(JNUM).EQ."BAR".OR.CCTYPE(JNUM).EQ."GBR".OR.CCTYPE(JNUM).EQ."GB2") &
+(  540)      & .AND.NCALLS(JNUM) > 1) THEN
+(  541)       ICALLS = NCALLS(JNUM)/2
+(  542)       ZMEAN = ZAVEAVE(JNUM)/NPROC_STATS
+(  543)       ZMAX  = ZAVEMAX(JNUM)
+(  544)       ZMEANT = ZSUMTOT(JNUM)/NPROC_STATS
+(  545)       ZMAXT  = ZSUMMAX(JNUM)
+(  546)       IF(ZMEANT .NE. 0.0)THEN
+(  547)         ZUNBAL= (ZMAXT-ZMEANT)/ZTOTAL*100._JPRD
+(  548)       ELSE
+(  549)         ZUNBAL=0.0
+(  550)       ENDIF
+(  551)       ZFRAC=ZFRACMAX(JNUM)
+(  552)       ZTOTUNBAL = ZTOTUNBAL+(ZMAXT-ZMEANT)
+(  553)       WRITE(KULOUT,'(I4,1X,A40,1X,I8,2(1X,F9.1),2(1X,F9.2))')&
+(  554)        &JNUM,CCDESC(JNUM),ICALLS,ZMEAN,ZMAX,ZFRAC,ZUNBAL
+(  555)       IF(LXML_STATS)THEN
+(  556)         WRITE(IXMLLUN,'(A,I4,A,/,A,A40,A,/,A,I8,A,/,2(A,F9.1,A,/),2(A,F9.2,A,/),A)')&
+(  557)          &'<comitem id="',JNUM,'">',&
+(  558)          &'<description>',CCDESC(JNUM),'</description>',&
+(  559)          &'<calls>',ICALLS,'</calls>',&
+(  560)          &'<mean unit="ms">',ZMEAN,'</mean>',&
+(  561)          &'<max unit="ms">',ZMAX,'</max>',&
+(  562)          &'<fraction unit="percent">',ZFRAC,'</fraction>',&
+(  563)          &'<unbalanced unit="percent">',ZUNBAL,'</unbalanced>','</comitem>'
+(  564)       ENDIF
+(  565) # 566 "gstats_print.F90"
+(  566)       ZT_SUM=ZT_SUM+ZMEANT
+(  567)     ENDIF
+(  568)   ENDDO
+(  569) # 570 "gstats_print.F90"
+(  570)   WRITE(KULOUT,*) ''
+(  571)   WRITE(KULOUT,'(A,F10.1,A)')'SUMMED TIME IN COMMUNICATIONS   = ',ZT_SUM, ' SECONDS '
+(  572)   IF(LSTATS_MPL) THEN
+(  573)     WRITE(KULOUT,'(/,A,/)') 'TOTAL COMMUNICATIONS VOLUMES AND BANDWIDTH'
+(  574)     WRITE(KULOUT,'(A)') &
+(  575)      &'   NUM   ROUTINE                              '//&
+(  576)      &'  SUM(s)  SEND(GB)  RECV(GB)    GB/s'
+(  577)     DO JNUM=501,1000
+(  578)        IF(TOTSENDBYTES(JNUM).GT.0.0_JPRD.OR.TOTRECVBYTES(JNUM).GT.0.0_JPRD) THEN
+(  579)           WRITE(KULOUT,'(I6,1X,A40,f6.1,2F10.1,F8.1)') &
+(  580)            &  JNUM,CCDESC(JNUM),MAXCOMMTIME(JNUM),&
+(  581)            &  TOTSENDBYTES(JNUM)*1.E-9, &
+(  582)            &  TOTRECVBYTES(JNUM)*1.E-9 , &
+(  583)            &  (TOTSENDBYTES(JNUM)*1.E-9)/MAXCOMMTIME(JNUM)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 29
+
+(  584)        ENDIF
+(  585)     ENDDO
+(  586)     WRITE(KULOUT,'(/,A,42x,f6.1,2F10.1,F8.1)') &
+(  587)      &   'TOTAL', &
+(  588)      &   SUM(MAXCOMMTIME) , &
+(  589)      &   SUM(TOTSENDBYTES)*1.E-9, &
+(  590)      &   SUM(TOTRECVBYTES)*1.E-9, &
+(  591)      &   (SUM(TOTSENDBYTES)*1.E-9)/SUM(MAXCOMMTIME)
+(  592)   ENDIF
+(  593) # 594 "gstats_print.F90"
+(  594)   IF(LXML_STATS)THEN
+(  595)     WRITE(IXMLLUN,'(A,F10.1,A)')'<zcom unit="seconds">',ZT_SUM, '</zcom>'
+(  596)   ENDIF
+(  597)   WRITE(KULOUT,*) ''
+(  598)   IF(LXML_STATS)THEN
+(  599)     WRITE(IXMLLUN,'(A)')'</timing_communications>'
+(  600)   ENDIF
+(  601) # 602 "gstats_print.F90"
+(  602) ENDIF
+(  603) IF(LSTATS_OMP)THEN
+(  604)   IF(LXML_STATS)THEN
+(  605)     WRITE(IXMLLUN,'(A)')'<timing_parallel>'
+(  606)   ENDIF
+(  607)   WRITE(KULOUT,*) ''
+(  608)   WRITE(KULOUT,'(A)') 'STATS FOR PARALLEL REGIONS'
+(  609)   WRITE(KULOUT,'(A)')  &
+(  610)   &' NUM ROUTINE                                     CALLS    MEAN(ms)  MAX(ms)   FRAC(%)  UNBAL(%)'
+(  611)   ZT_SUM=0.0
+(  612)   DO JNUM=500,JPMAXSTAT
+(  613)     IF(CCTYPE(JNUM).EQ."OMP".AND.NCALLS(JNUM) > 1) THEN
+(  614)       ICALLS = NCALLS(JNUM)/2
+(  615)       ZMEAN = ZAVEAVE(JNUM)/NPROC_STATS
+(  616)       ZMAX  = ZAVEMAX(JNUM)
+(  617)       ZMEANT = ZSUMTOT(JNUM)/NPROC_STATS
+(  618)       ZMAXT  = ZSUMMAX(JNUM)
+(  619)       IF(ZMEANT .NE. 0.0)THEN
+(  620)         ZUNBAL= (ZMAXT-ZMEANT)/ZTOTAL*100._JPRD
+(  621)       ELSE
+(  622)         ZUNBAL=0.0
+(  623)       ENDIF
+(  624)       ZFRAC=ZFRACMAX(JNUM)
+(  625)       ZTOTUNBAL = ZTOTUNBAL+(ZMAXT-ZMEANT)
+(  626)       WRITE(KULOUT,'(I4,1X,A40,1X,I8,2(1X,F9.1),2(1X,F9.2))')&
+(  627)        &JNUM,CCDESC(JNUM),ICALLS,ZMEAN,ZMAX,ZFRAC,ZUNBAL
+(  628)       IF(LXML_STATS)THEN
+(  629)         WRITE(IXMLLUN,'(A,I4,A,/,A,A40,A,/,A,I8,A,/,2(A,F9.1,A,/),2(A,F9.2,A,/),A)')&
+(  630)          &'<parallelitem id="',JNUM,'">',&
+(  631)          &'<description>',CCDESC(JNUM),'</description>',&
+(  632)          &'<calls>',ICALLS,'</calls>',&
+(  633)          &'<mean unit="seconds">',ZMEAN,'</mean>',&
+(  634)          &'<max unit="seconds">',ZMAX,'</max>',&
+(  635)          &'<fraction unit="percent">',ZFRAC,'</fraction>',&
+(  636)          &'<unbalanced unit="percent">',ZUNBAL,'</unbalanced>',&
+(  637)          &'</parallelitem>'
+(  638)       ENDIF
+(  639) # 640 "gstats_print.F90"
+(  640)       ZT_SUM=ZT_SUM+ZMEANT
+(  641)     ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 30
+
+(  642)   ENDDO
+(  643) # 644 "gstats_print.F90"
+(  644)   WRITE(KULOUT,*) ''
+(  645)   WRITE(KULOUT,'(A,F10.1,A)')'SUMMED TIME IN PARALLEL REGIONS = ',ZT_SUM, ' SECONDS '
+(  646)   WRITE(KULOUT,*) ''
+(  647) # 648 "gstats_print.F90"
+(  648)   IF(LXML_STATS)THEN
+(  649)     WRITE(IXMLLUN,'(A,F10.1,A)')'<zpar unit="seconds">',ZT_SUM, '</zpar>'
+(  650)   ENDIF
+(  651) # 652 "gstats_print.F90"
+(  652)   WRITE(KULOUT,*) ''
+(  653)   WRITE(KULOUT,'(A)') 'STATS FOR I/O REGIONS'
+(  654)   WRITE(KULOUT,'(A)')  &
+(  655)   &' NUM ROUTINE                                     CALLS    MEAN(ms)  MAX(ms)   FRAC(%)  UNBAL(%)'
+(  656)   ZT_SUM=0.0
+(  657)   DO JNUM=500,JPMAXSTAT
+(  658)     IF(CCTYPE(JNUM).EQ."IO-".AND.NCALLS(JNUM) > 1) THEN
+(  659)       ICALLS = NCALLS(JNUM)/2
+(  660)       ZMEAN = ZAVEAVE(JNUM)/NPROC_STATS
+(  661)       ZMAX  = ZAVEMAX(JNUM)
+(  662)       ZMEANT = ZSUMTOT(JNUM)/NPROC_STATS
+(  663)       ZMAXT  = ZSUMMAX(JNUM)
+(  664)       IF(ZMEANT .NE. 0.0)THEN
+(  665)         ZUNBAL= (ZMAXT-ZMEANT)/ZTOTAL*100._JPRD
+(  666)       ELSE
+(  667)         ZUNBAL=0.0
+(  668)       ENDIF
+(  669)       ZFRAC=ZFRACMAX(JNUM)
+(  670)       ZTOTUNBAL = ZTOTUNBAL+(ZMAXT-ZMEANT)
+(  671)       WRITE(KULOUT,'(I4,1X,A40,1X,I8,2(1X,F9.1),2(1X,F9.2))')&
+(  672)        &JNUM,CCDESC(JNUM),ICALLS,ZMEAN,ZMAX,ZFRAC,ZUNBAL
+(  673)       IF(LXML_STATS)THEN
+(  674)         WRITE(IXMLLUN,'(A,I4,A,/,A,A40,A,/,A,I8,A,/,2(A,F9.1,A,/),2(A,F9.2,A,/),A)')&
+(  675)          &'<para_io_item id="',JNUM,'">',&
+(  676)          &'<description>',CCDESC(JNUM),'</description>',&
+(  677)          &'<calls>',ICALLS,'</calls>',&
+(  678)          &'<mean unit="seconds">',ZMEAN,'</mean>','<max unit="seconds">',&
+(  679)          & ZMAX,'</max>',&
+(  680)          &'<fraction unit="percent">',ZFRAC,'</fraction>',&
+(  681)          &'<unbalanced unit="percent">',ZUNBAL,'</unbalanced>',&
+(  682)          &'</para_io_item>'
+(  683)       ENDIF
+(  684) # 685 "gstats_print.F90"
+(  685)       ZT_SUM=ZT_SUM+ZMEANT
+(  686)     ENDIF
+(  687)   ENDDO
+(  688) # 689 "gstats_print.F90"
+(  689)   WRITE(KULOUT,*) ''
+(  690)   WRITE(KULOUT,'(A,F10.1,A)')'SUMMED TIME IN I/O REGIONS = ',&
+(  691)        &ZT_SUM, ' SECONDS '
+(  692)   WRITE(KULOUT,*) ''
+(  693) # 694 "gstats_print.F90"
+(  694)   IF(LXML_STATS)THEN
+(  695)     WRITE(IXMLLUN,'(A,F10.1,A)')'<zio unit="seconds">',ZT_SUM,'</zio>'
+(  696)   ENDIF
+(  697) # 698 "gstats_print.F90"
+(  698)   WRITE(KULOUT,*) ''
+(  699)   WRITE(KULOUT,'(A)') 'STATS FOR SERIAL(no OMP) REGIONS'
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 31
+
+(  700)   WRITE(KULOUT,'(A)')  &
+(  701)   &' NUM ROUTINE                                     CALLS    MEAN(ms)  MAX(ms)   FRAC(%)  UNBAL(%)'
+(  702)   ZT_SUM=0.0
+(  703)   DO JNUM=500,JPMAXSTAT
+(  704)     IF(CCTYPE(JNUM).EQ."SER".AND.NCALLS(JNUM) > 1) THEN
+(  705)       ICALLS = NCALLS(JNUM)/2
+(  706)       ZMEAN = ZAVEAVE(JNUM)/NPROC_STATS
+(  707)       ZMAX  = ZAVEMAX(JNUM)
+(  708)       ZMEANT = ZSUMTOT(JNUM)/NPROC_STATS
+(  709)       ZMAXT  = ZSUMMAX(JNUM)
+(  710)       IF(ZMEANT .NE. 0.0)THEN
+(  711)         ZUNBAL= (ZMAXT-ZMEANT)/ZTOTAL*100._JPRD
+(  712)       ELSE
+(  713)         ZUNBAL=0.0
+(  714)       ENDIF
+(  715)       ZFRAC=ZFRACMAX(JNUM)
+(  716)       ZTOTUNBAL = ZTOTUNBAL+(ZMAXT-ZMEANT)
+(  717)       WRITE(KULOUT,'(I4,1X,A40,1X,I8,2(1X,F9.1),2(1X,F9.2))')&
+(  718)        &JNUM,CCDESC(JNUM),ICALLS,ZMEAN,ZMAX,ZFRAC,ZUNBAL
+(  719)       IF(LXML_STATS)THEN
+(  720)         WRITE(IXMLLUN,'(A,I4,A,A,A40,A,A,I8,A,2(A,F9.1,A),2(A,F9.2,A,/),A)')&
+(  721)          &'<serialitem id="',JNUM,'">',&
+(  722)          &'<description>',CCDESC(JNUM),'</description>',&
+(  723)          &'<calls>',ICALLS,'</calls>',&
+(  724)          &'<mean unit="ms">',ZMEAN,'</mean>','<max unit="ms">',ZMAX,'</max>',&
+(  725)          &'<fraction unit="percent">',ZFRAC,'</fraction>',&
+(  726)          &'<unbalanced unit="percent">',ZUNBAL,'</unbalanced>','</serialitem>'
+(  727)       ENDIF
+(  728) # 729 "gstats_print.F90"
+(  729)       ZT_SUM=ZT_SUM+ZMEANT
+(  730)     ENDIF
+(  731)   ENDDO
+(  732) # 733 "gstats_print.F90"
+(  733)   WRITE(KULOUT,*) ''
+(  734)   WRITE(KULOUT,'(A,F10.1,A)')'SUMMED TIME IN SERIAL REGIONS = ',ZT_SUM, ' SECONDS '
+(  735)   WRITE(KULOUT,*) ''
+(  736) # 737 "gstats_print.F90"
+(  737)   IF(LXML_STATS)THEN
+(  738)     WRITE(IXMLLUN,'(A,F10.1,A)')'<zserial unit="seconds">',&
+(  739)      &ZT_SUM, '</zserial>'
+(  740)   ENDIF
+(  741) # 742 "gstats_print.F90"
+(  742)   WRITE(KULOUT,*) ''
+(  743)   WRITE(KULOUT,'(A)') 'STATS FOR MIXED SECTIONS'
+(  744)   WRITE(KULOUT,'(A)')  &
+(  745)   &' NUM ROUTINE                                     CALLS    MEAN(ms)  MAX(ms)   FRAC(%)  UNBAL(%)'
+(  746)   ZT_SUM=0.0
+(  747)   DO JNUM=500,JPMAXSTAT
+(  748)     IF(CCTYPE(JNUM).EQ."MXD".AND.NCALLS(JNUM) > 1) THEN
+(  749)       ICALLS = NCALLS(JNUM)/2
+(  750)       ZMEAN = ZAVEAVE(JNUM)/NPROC_STATS
+(  751)       ZMAX  = ZAVEMAX(JNUM)
+(  752)       ZMEANT = ZSUMTOT(JNUM)/NPROC_STATS
+(  753)       ZMAXT  = ZSUMMAX(JNUM)
+(  754)       IF(ZMEANT .NE. 0.0)THEN
+(  755)         ZUNBAL= (ZMAXT-ZMEANT)/ZTOTAL*100._JPRD
+(  756)       ELSE
+(  757)         ZUNBAL=0.0
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 32
+
+(  758)       ENDIF
+(  759)       ZFRAC=ZFRACMAX(JNUM)
+(  760)       ZTOTUNBAL = ZTOTUNBAL+(ZMAXT-ZMEANT)
+(  761)       WRITE(KULOUT,'(I4,1X,A40,1X,I8,2(1X,F9.1),2(1X,F9.2))')&
+(  762)        &JNUM,CCDESC(JNUM),ICALLS,ZMEAN,ZMAX,ZFRAC,ZUNBAL
+(  763)       IF(LXML_STATS)THEN
+(  764)         WRITE(IXMLLUN,'(A,I4,A,A,A40,A,A,I8,A,2(A,F9.1,A),2(A,F9.2,A,/),A)')&
+(  765)          &'<mixeditem id="',JNUM,'">',&
+(  766)          &'<description>',CCDESC(JNUM),'</description>',&
+(  767)          &'<calls>',ICALLS,'</calls>',&
+(  768)          &'<mean unit="ms">',ZMEAN,'</mean>','<max unit="ms">',ZMAX,'</max>',&
+(  769)          &'<fraction unit="percent">',ZFRAC,'</fraction>',&
+(  770)          &'<unbalanced unit="percent">',ZUNBAL,'</unbalanced>','</mixeditem>'
+(  771)       ENDIF
+(  772) # 773 "gstats_print.F90"
+(  773)       ZT_SUM=ZT_SUM+ZMEANT
+(  774)     ENDIF
+(  775)   ENDDO
+(  776) # 777 "gstats_print.F90"
+(  777)   WRITE(KULOUT,*) ''
+(  778)   WRITE(KULOUT,'(A,F10.1,A)')'SUMMED TIME IN MIXED SECTIONS = ',ZT_SUM, ' SECONDS '
+(  779)   WRITE(KULOUT,*) ''
+(  780) # 781 "gstats_print.F90"
+(  781)   IF(LXML_STATS)THEN
+(  782)     WRITE(IXMLLUN,'(A,F10.1,A)')'<zmixed unit="seconds">',&
+(  783)      &ZT_SUM, '</zmixed>'
+(  784)   ENDIF
+(  785) # 786 "gstats_print.F90"
+(  786)   IF(LXML_STATS)THEN
+(  787)     WRITE(IXMLLUN,'(A)')'</timing_parallel>'
+(  788)   ENDIF
+(  789) # 790 "gstats_print.F90"
+(  790) ENDIF
+(  791) # 792 "gstats_print.F90"
+(  792)   WRITE(KULOUT,'(A,F10.1,A,F4.1,A)')&
+(  793)    &'TOTAL MEASURED IMBALANCE =',ZTOTUNBAL,&
+(  794)    &' SECONDS, ',ZTOTUNBAL/ZTOTAL*100._JPRD,' PERCENT'
+(  795) ELSE
+(  796)   ZTOTAL=TIMESUM(0)
+(  797)   ZTOTCPU = TTCPUSUM(0)
+(  798)   ZTOTVCPU = TVCPUSUM(0)
+(  799) ENDIF
+(  800) # 801 "gstats_print.F90"
+(  801) IF ( MYPROC_STATS == 1) THEN
+(  802)   WRITE(KULOUT,'(3(A,F10.1)/)')'TOTAL WALLCLOCK TIME ',ZTOTAL,&
+(  803)    &' CPU TIME',ZTOTCPU,' VECTOR TIME ',ZTOTVCPU
+(  804)   IF(LXML_STATS)THEN
+(  805)     WRITE(IXMLLUN,'(3(A,F10.1,A,/)/)')'<totalwallclocktime>',ZTOTAL,&
+(  806)      &'</totalwallclocktime>',&
+(  807)      &'<cputime>',ZTOTCPU,'</cputime>',&
+(  808)      & '<vectortime>',ZTOTVCPU,'</vectortime>'
+(  809)   ENDIF
+(  810) ENDIF
+(  811) IF( LDETAILED_STATS )THEN
+(  812)   ITAG = JPTAGSTAT
+(  813)   ZDELAY_MAX=0.0_JPRD
+(  814)   ZMPL(:)=0.0_JPRD
+(  815)   ZBAR(:)=0.0_JPRD
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 33
+
+(  816)   ZGBR(:)=0.0_JPRD
+(  817)   ZGB2(:)=0.0_JPRD
+(  818)   ZOMP(:)=0.0_JPRD
+(  819)   ZIO (:)=0.0_JPRD
+(  820)   ZSER(:)=0.0_JPRD
+(  821)   ZMXD(:)=0.0_JPRD
+(  822)   DO JROC=1,NPROC_STATS
+(  823)     IF( JROC > 1 )THEN
+(  824)       IF( MYPROC_STATS == JROC )THEN
+(  825)         ISEND=1
+(  826)         CALL MPL_SEND(NDELAY_INDEX,KDEST=NPRCIDS_STATS(ISEND), &
+(  827)          & KTAG=ITAG,CDSTRING='GSTATS_PRINT:')
+(  828)         IF( NDELAY_INDEX > 0 )THEN
+(  829)           CALL MPL_SEND(NDELAY_COUNTER(1:NDELAY_INDEX),KDEST=NPRCIDS_STATS(ISEND), &
+(  830)            & KTAG=ITAG+1,CDSTRING='GSTATS_PRINT:')
+(  831)           CALL MPL_SEND(TDELAY_VALUE(1:NDELAY_INDEX),KDEST=NPRCIDS_STATS(ISEND), &
+(  832)            & KTAG=ITAG+2,CDSTRING='GSTATS_PRINT:')
+(  833)           DO JDELAY=1,NDELAY_INDEX
+(  834)             CLTEMP((JDELAY-1)*10+1:JDELAY*10)=CDELAY_TIME(JDELAY)
+(  835)           ENDDO
+(  836)           CALL MPL_SEND(CLTEMP(1:NDELAY_INDEX*10),KDEST=NPRCIDS_STATS(ISEND), &
+(  837)            & KTAG=ITAG+3,CDSTRING='GSTATS_PRINT:')
+(  838)         ENDIF
+(  839)       ENDIF
+(  840)       IF( MYPROC_STATS == 1 )THEN
+(  841)         CALL MPL_RECV(NDELAY_INDEX,KSOURCE=NPRCIDS_STATS(JROC), &
+(  842)          & KTAG=ITAG,CDSTRING='GSTATS_PRINT:')
+(  843)         IF( NDELAY_INDEX > 0 )THEN
+(  844)           CALL MPL_RECV(NDELAY_COUNTER(1:NDELAY_INDEX),KSOURCE=NPRCIDS_STATS(JROC), &
+(  845)            & KTAG=ITAG+1,CDSTRING='GSTATS_PRINT:')
+(  846)           CALL MPL_RECV(TDELAY_VALUE(1:NDELAY_INDEX),KSOURCE=NPRCIDS_STATS(JROC), &
+(  847)            & KTAG=ITAG+2,CDSTRING='GSTATS_PRINT:')
+(  848)           CALL MPL_RECV(CLTEMP(1:NDELAY_INDEX*10),KSOURCE=NPRCIDS_STATS(JROC), &
+(  849)             & KTAG=ITAG+3,CDSTRING='GSTATS_PRINT:')
+(  850)           DO JDELAY=1,NDELAY_INDEX
+(  851)             CDELAY_TIME(JDELAY)=CLTEMP((JDELAY-1)*10+1:JDELAY*10)
+(  852)           ENDDO
+(  853)         ENDIF
+(  854)       ENDIF
+(  855)     ENDIF
+(  856)     IF( MYPROC_STATS == 1 .AND. NDELAY_INDEX > 0 )THEN
+(  857)       WRITE(KULOUT,'("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")')
+(  858)       WRITE(KULOUT,'("TASK=",I6," NUMBER OF UNEXPECTED DELAYS=",I4)') JROC,NDELAY_INDEX
+(  859)       IF( NDELAY_INDEX == JPMAXDELAYS )THEN
+(  860)         WRITE(KULOUT,'(" NOTE THAT THE MAXIMUM NUMBER OF DELAYS HAS BEEN REACHED =",I6)')JPMAXDELAYS
+(  861)       ENDIF
+(  862)       ZDELAY=SUM(TDELAY_VALUE(1:NDELAY_INDEX))
+(  863)       WRITE(KULOUT,'("TOTAL UNEXPECTED DELAY TIME (SECS) =",F9.1)') ZDELAY
+(  864)       ZDELAY_MAX=MAX(ZDELAY_MAX,ZDELAY)
+(  865)       DO JDELAY=1,NDELAY_INDEX
+(  866)         WRITE(KULOUT,'(A,":",A,":",A,1X,I4,1X,A3,1X,A40,1X,F6.1)')&
+(  867)          &CDELAY_TIME(JDELAY)(1:2),CDELAY_TIME(JDELAY)(3:4),CDELAY_TIME(JDELAY)(5:6),&
+(  868)          &NDELAY_COUNTER(JDELAY),CCTYPE(NDELAY_COUNTER(JDELAY)),&
+(  869)          &CCDESC(NDELAY_COUNTER(JDELAY)),TDELAY_VALUE(JDELAY)
+(  870)          IF( CCTYPE(NDELAY_COUNTER(JDELAY)) .EQ. 'MPL' ) ZMPL(JROC)=ZMPL(JROC)+TDELAY_VALUE(JDELAY)
+(  871)          IF( CCTYPE(NDELAY_COUNTER(JDELAY)) .EQ. 'BAR' ) ZBAR(JROC)=ZBAR(JROC)+TDELAY_VALUE(JDELAY)
+(  872)          IF( CCTYPE(NDELAY_COUNTER(JDELAY)) .EQ. 'GBR' ) ZGBR(JROC)=ZGBR(JROC)+TDELAY_VALUE(JDELAY)
+(  873)          IF( CCTYPE(NDELAY_COUNTER(JDELAY)) .EQ. 'GB2' ) ZGB2(JROC)=ZGB2(JROC)+TDELAY_VALUE(JDELAY)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 34
+
+(  874)          IF( CCTYPE(NDELAY_COUNTER(JDELAY)) .EQ. 'OMP' ) ZOMP(JROC)=ZOMP(JROC)+TDELAY_VALUE(JDELAY)
+(  875)          IF( CCTYPE(NDELAY_COUNTER(JDELAY)) .EQ. 'IO-' ) ZIO (JROC)=ZIO (JROC)+TDELAY_VALUE(JDELAY)
+(  876)          IF( CCTYPE(NDELAY_COUNTER(JDELAY)) .EQ. 'SER' ) ZSER(JROC)=ZSER(JROC)+TDELAY_VALUE(JDELAY)
+(  877)          IF( CCTYPE(NDELAY_COUNTER(JDELAY)) .EQ. 'MXD' ) ZMXD(JROC)=ZMXD(JROC)+TDELAY_VALUE(JDELAY)
+(  878)       ENDDO
+(  879)       WRITE(KULOUT,'(" ")')
+(  880)       WRITE(KULOUT,'("TASK=",I6," UNEXPECTED DELAYS SORTED BY COUNTER")') JROC
+(  881)       DO JNUM=500,JPMAXSTAT
+(  882)         IDELAY=0
+(  883)         ZDELAY=0.0_JPRD
+(  884)         DO JDELAY=1,NDELAY_INDEX
+(  885)           IF( NDELAY_COUNTER(JDELAY) == JNUM )THEN
+(  886)             IDELAY=IDELAY+1
+(  887)             ZDELAY=ZDELAY+TDELAY_VALUE(JDELAY)
+(  888)           ENDIF
+(  889)         ENDDO
+(  890)         IF( IDELAY /= 0 )THEN
+(  891)           WRITE(KULOUT,'(I4,1X,A3,1X,A40,1X,I4,3X,F6.1)')&
+(  892)            &JNUM,CCTYPE(JNUM),CCDESC(JNUM),IDELAY,ZDELAY
+(  893)         ENDIF
+(  894)       ENDDO
+(  895)       WRITE(KULOUT,'(" ")')
+(  896)       WRITE(KULOUT,'(" ")')
+(  897)     ENDIF
+(  898)     CALL MPL_BARRIER(CDSTRING='GSTATS_PRINT')
+(  899)   ENDDO
+(  900)   IF( MYPROC_STATS == 1 )THEN
+(  901)     WRITE(KULOUT,'("MAXIMUM TOTAL UNEXPECTED DELAY TIME (SECS) =",F9.1)') ZDELAY_MAX
+(  902)     WRITE(KULOUT,'(" ")')
+(  903)     WRITE(KULOUT,'(" ")')
+(  904)     WRITE(KULOUT,'("  TASK   ","     MPL   ","     BAR   ","     GBR   ","     GB2   ","     OMP   ",&
+(  905)      &"     IO-   ","     SER   ","     MXD   ")')
+(  906)     DO JROC=1,NPROC_STATS
+(  907)       WRITE(KULOUT,'(I6,8(2X,F9.1))') JROC,ZMPL(JROC),ZBAR(JROC),ZGBR(JROC),ZGB2(JROC),&
+(  908)       &ZOMP(JROC),ZIO (JROC),ZSER(JROC),ZMXD(JROC)
+(  909)     ENDDO
+(  910)     WRITE(KULOUT,'(" ")')
+(  911)     WRITE(KULOUT,'(" ")')
+(  912)   ENDIF
+(  913) ENDIF
+(  914) # 915 "gstats_print.F90"
+(  915) !   Trace stats
+(  916) # 917 "gstats_print.F90"
+(  917) IF (LTRACE_STATS) THEN
+(  918)   WRITE(KULOUT,'(A)') '=== TRACE OF CALLS TO GSTATS'
+(  919)   IF (NCALLS_TOTAL > NTRACE_STATS) THEN
+(  920)     WRITE(KULOUT,'(A,2I10)') ' ONLY PART OF TRACE STORED AS BUFFER TO SMALL ',&
+(  921)      & NCALLS_TOTAL,NTRACE_STATS
+(  922)   ENDIF
+(  923)   WRITE(KULOUT,'(A)') '==='
+(  924)   CLACTION(0)='ON'
+(  925)   CLACTION(1)='OFF'
+(  926)   CLACTION(2)='SUSPEND'
+(  927)   CLACTION(3)='RESUME'
+(  928)   DO JCALL=1,MIN(NCALLS_TOTAL,NTRACE_STATS)
+(  929)     ICALLER = MOD(NCALL_TRACE(JCALL),(JPMAXSTAT+1))
+(  930)     IACTION   = NCALL_TRACE(JCALL)/(JPMAXSTAT+1)
+(  931)     IF (IACTION == 0) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 35
+
+(  932)       ZTIMELCALL(ICALLER) = TIME_TRACE(JCALL)
+(  933)       ZTHISTIME(ICALLER) = 0.0_JPRD
+(  934)     ELSEIF (IACTION == 2) THEN
+(  935)       ZTHISTIME(ICALLER) = TIME_TRACE(JCALL)-ZTIMELCALL(ICALLER)
+(  936)     ELSEIF (IACTION == 3) THEN
+(  937)       ZTIMELCALL(ICALLER) = TIME_TRACE(JCALL)
+(  938)     ENDIF
+(  939)     IF (IACTION == 1) THEN
+(  940)       WRITE(KULOUT,'(1X,F10.3,1X,A,1X,A,1X,F10.3)') &
+(  941)        &TIME_TRACE(JCALL),CCDESC(ICALLER),CLACTION(IACTION),&
+(  942)        &ZTHISTIME(ICALLER)+(TIME_TRACE(JCALL)-ZTIMELCALL(ICALLER))
+(  943)     ELSE
+(  944)       WRITE(KULOUT,'(1X,F10.3,1X,A,1X,A)') TIME_TRACE(JCALL),CCDESC(ICALLER),&
+(  945)        & CLACTION(IACTION)
+(  946)     ENDIF
+(  947)   ENDDO
+(  948) ENDIF
+(  949) # 950 "gstats_print.F90"
+(  950) IF(LSTATS .AND. MYPROC_STATS == 1) THEN
+(  951)   PAVEAVE(0:KLEN) = ZAVEAVE(0:KLEN)
+(  952) ELSE
+(  953)   PAVEAVE(0:KLEN) = 0.0_JPRD
+(  954) ENDIF
+(  955) # 956 "gstats_print.F90"
+(  956) WRITE(KULOUT,'(/A)')'===-=== END   OF TIMING STATISTICS ===-==='
+(  957) # 959 "gstats_print.F90"
+(  959) IF(LSTATS_MEM)THEN
+(  960)   IF(LXML_STATS)THEN
+(  961)     WRITE(IXMLLUN,'(A)')'<memory>'
+(  962)   ENDIF
+(  963)   WRITE(KULOUT,*) ''
+(  964)   WRITE(KULOUT,*) 'STATS FOR MEMORY'
+(  965)   WRITE(KULOUT,*)  &
+(  966)  &' NUM ROUTINE               CALLS  CALL    MAXINCR   TOTINCR   MININCR'
+(  967)   WRITE(KULOUT,*)  &
+(  968)  &'                                   NO      (KB)      (KB)      (KB)'
+(  969)   DO JNUM=0,JPMAXSTAT
+(  970)     IF(NCALLS(JNUM) > 1) THEN
+(  971)       ICALLS = NCALLS(JNUM)/2
+(  972)       IMEM=NTMEM(JNUM,1)
+(  973)       INUM=NTMEM(JNUM,3)/2
+(  974)       JMEM=NTMEM(JNUM,4)
+(  975)       WRITE(KULOUT,'(I4,1X,A20,1X,I8,1X,I6,3(1X,I9))')&
+(  976)        &JNUM,CCDESC(JNUM),ICALLS,INUM,IMEM,JMEM,NTMEM(JNUM,5)
+(  977) # 978 "gstats_print.F90"
+(  978)       IF(LXML_STATS)THEN
+(  979)         WRITE(IXMLLUN,'(A,I4,A,/,A,A20,A,/,A,I8,A,/,A,I6,A,/,3(A,I9,A,/))')&
+(  980)          &'<memitem id="',JNUM,'"/>',&
+(  981)          &'<description>',CCDESC(JNUM),'</description>',&
+(  982)          &'<calls>',ICALLS,'</calls>',&
+(  983)          &'<callnum>',INUM,'</callnum>','<maxincr unit="kb">',IMEM,'</maxincr>',&
+(  984)          &'<totincr unit="kb">',JMEM,'</totincr>',&
+(  985)          &'<minincr unit="kb">',NTMEM(JNUM,5),'</minincr>'
+(  986)       ENDIF
+(  987)     ENDIF
+(  988)   ENDDO
+(  989) # 990 "gstats_print.F90"
+(  990)   WRITE(KULOUT,*) ''
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:47      page 36
+
+(  991)   WRITE(KULOUT,'(/A)')'===-=== END   OF MEMORY STATISTICS ===-==='
+(  992)   WRITE(KULOUT,*) ''
+(  993)   IF(LXML_STATS)THEN
+(  994)     WRITE(IXMLLUN,'(A)')'</memory>'
+(  995)   ENDIF
+(  996) ENDIF
+(  997) IF(LXML_STATS .AND. MYPROC_STATS==1)THEN
+(  998)   WRITE(IXMLLUN,'(A)')'</gstats>'
+(  999)   CLOSE(IXMLLUN)
+( 1000) ENDIF
+( 1001) # 1002 "gstats_print.F90"
+( 1002) RETURN
+( 1003) END SUBROUTINE GSTATS_PRINT

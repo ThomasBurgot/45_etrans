@@ -1,0 +1,357 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:00      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: dist_grid.F90
+
+(    1) SUBROUTINE DIST_GRID(PGPG,KPROMA,KFDISTG,KFROM,KRESOL,PGP,KSORT)
+(    2) 
+(    3) !**** *DIST_GRID* - Distribute global gridpoint array among processors
+(    4) 
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !        Interface routine for distributing gridpoint array
+(    8) 
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL DIST_GRID(...)
+(   12) 
+(   13) !     Explicit arguments :
+(   14) !     --------------------
+(   15) !     PGPG(:,:) - Global spectral array
+(   16) !     KFDISTG     - Global number of fields to be distributed
+(   17) !     KPROMA      - required blocking factor for gridpoint input
+(   18) !     KFROM(:)    - Processor resposible for distributing each field
+(   19) !     KRESOL      - resolution tag  which is required ,default is the
+(   20) !                   first defined resulution (input)
+(   21) !     PGP(:,:)  - Local spectral array
+(   22) !     KSORT (:) - Re-order fields on output
+(   23) !
+(   24) !     Method.
+(   25) !     -------
+(   26) 
+(   27) !     Externals.  SET_RESOL      - set resolution
+(   28) !     ----------  DIST_GRID_CTL  - control routine
+(   29) 
+(   30) !     Author.
+(   31) !     -------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:00      page 2
+
+(   32) !        Mats Hamrud *ECMWF*
+(   33) 
+(   34) !     Modifications.
+(   35) !     --------------
+(   36) !        Original : 00-03-03
+(   37) !    P.Marguinaud : 10-10-14 Add KSORT
+(   38) 
+(   39) !     ------------------------------------------------------------------
+(   40) 
+(   41) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   42) 
+(   43) !ifndef INTERFACE
+(   44) 
+(   45) USE TPM_GEN         ,ONLY : NERR, NOUT
+(   46) !USE TPM_DIM
+(   47) USE TPM_DISTR       ,ONLY : D, MYPROC, NPROC
+(   48) 
+(   49) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(   50) USE DIST_GRID_CTL_MOD ,ONLY : DIST_GRID_CTL
+(   51) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   52) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   53) 
+(   54) !endif INTERFACE
+(   55) 
+(   56) IMPLICIT NONE
+(   57) 
+(   58) ! Declaration of arguments
+(   59) 
+(   60) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PGPG(:,:)
+(   61) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KPROMA
+(   62) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFDISTG
+(   63) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFROM(:)
+(   64) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   65) REAL(KIND=JPRB)             , INTENT(OUT) :: PGP(:,:,:)
+(   66) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KSORT (:)
+(   67) 
+(   68) !ifndef INTERFACE
+(   69) 
+(   70) INTEGER(KIND=JPIM) :: IFSEND,J,IUBOUND(3),IPROMA,IGPBLKS
+(   71) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   72) 
+(   73) !     ------------------------------------------------------------------
+(   74) 
+(   75) IF (LHOOK) CALL DR_HOOK('DIST_GRID',0,ZHOOK_HANDLE)
+(   76) ! Set current resolution
+(   77) CALL SET_RESOL(KRESOL)
+(   78) 
+(   79) IPROMA = D%NGPTOT
+(   80) IF(PRESENT(KPROMA)) THEN
+(   81)   IPROMA = KPROMA
+(   82) ENDIF
+(   83) IGPBLKS = (D%NGPTOT-1)/IPROMA+1
+(   84) 
+(   85) IF(UBOUND(KFROM,1) < KFDISTG) THEN
+(   86)  CALL ABORT_TRANS('DIST_GRID: KFROM TOO SHORT!')
+(   87) ENDIF
+(   88) IFSEND = 0
+(   89) DO J=1,KFDISTG
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:00      page 3
+
+(   90)   IF(KFROM(J) < 1 .OR. KFROM(J) > NPROC) THEN
+(   91)     WRITE(NERR,*) 'DIST_GRID:ILLEGAL KFROM VALUE',KFROM(J),J
+(   92)     CALL ABORT_TRANS('DIST_GRID:ILLEGAL KFROM VALUE')
+(   93)   ENDIF
+(   94)   IF(KFROM(J) == MYPROC) IFSEND = IFSEND+1
+(   95) ENDDO
+(   96) 
+(   97) IUBOUND=UBOUND(PGP)
+(   98) IF(IUBOUND(1) < IPROMA) THEN
+(   99)   WRITE(NOUT,*)'DIST_GRID:FIRST DIM. OF PGP TOO SMALL ',IUBOUND(1),IPROMA
+(  100)   CALL ABORT_TRANS('DIST_GRID:FIRST DIMENSION OF PGP TOO SMALL ')
+(  101) ENDIF
+(  102) IF(IUBOUND(2) < KFDISTG) THEN
+(  103)   WRITE(NOUT,*)'DIST_GRID:SEC. DIM. OF PGP TOO SMALL ',IUBOUND(2),KFDISTG
+(  104)   CALL ABORT_TRANS('DIST_GRID:SECOND DIMENSION OF PGP TOO SMALL ')
+(  105) ENDIF
+(  106) IF(IUBOUND(3) < IGPBLKS) THEN
+(  107)   WRITE(NOUT,*)'DIST_GRID:THIRD DIM. OF PGP TOO SMALL ',IUBOUND(3),IGPBLKS
+(  108)   CALL ABORT_TRANS('DIST_GRID:THIRD DIMENSION OF PGP TOO SMALL ')
+(  109) ENDIF
+(  110) 
+(  111) IF(IFSEND > 0) THEN
+(  112)   IF(.NOT.PRESENT(PGPG)) THEN
+(  113)     CALL ABORT_TRANS('DIST_GRID:PGPG MISSING')
+(  114)   ENDIF
+(  115)   IF(UBOUND(PGPG,1) < D%NGPTOTG) THEN
+(  116)     CALL ABORT_TRANS('DIST_GRID:FIRST DIMENSION OF PGPG TOO SMALL')
+(  117)   ENDIF
+(  118)  IF(UBOUND(PGPG,2) < IFSEND) THEN
+(  119)     CALL ABORT_TRANS('DIST_GRID:FIRST DIMENSION OF PGPG TOO SMALL')
+(  120)   ENDIF
+(  121) ENDIF
+(  122) 
+(  123) IF (PRESENT (KSORT)) THEN
+(  124)   IF (UBOUND (KSORT, 1) /= UBOUND (PGP, 2)) THEN
+(  125)     CALL ABORT_TRANS('DIST_GRID: DIMENSION MISMATCH KSORT, PGP')
+(  126)   ENDIF
+(  127) ENDIF
+(  128) 
+(  129) CALL DIST_GRID_CTL(PGPG,KFDISTG,IPROMA,KFROM,PGP,KSORT)
+(  130) 
+(  131) IF (LHOOK) CALL DR_HOOK('DIST_GRID',1,ZHOOK_HANDLE)
+(  132) !endif INTERFACE
+(  133) 
+(  134) !     ------------------------------------------------------------------
+(  135) 
+(  136) END SUBROUTINE DIST_GRID
+(  137) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:00      page 4
+
+(    1) # 1 "dist_grid.F90"
+(    1) SUBROUTINE DIST_GRID(PGPG,KPROMA,KFDISTG,KFROM,KRESOL,PGP,KSORT)
+(    2) # 3 "dist_grid.F90"
+(    3) !**** *DIST_GRID* - Distribute global gridpoint array among processors
+(    4) # 5 "dist_grid.F90"
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !        Interface routine for distributing gridpoint array
+(    8) # 9 "dist_grid.F90"
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL DIST_GRID(...)
+(   12) # 13 "dist_grid.F90"
+(   13) !     Explicit arguments :
+(   14) !     --------------------
+(   15) !     PGPG(:,:) - Global spectral array
+(   16) !     KFDISTG     - Global number of fields to be distributed
+(   17) !     KPROMA      - required blocking factor for gridpoint input
+(   18) !     KFROM(:)    - Processor resposible for distributing each field
+(   19) !     KRESOL      - resolution tag  which is required ,default is the
+(   20) !                   first defined resulution (input)
+(   21) !     PGP(:,:)  - Local spectral array
+(   22) !     KSORT (:) - Re-order fields on output
+(   23) !
+(   24) !     Method.
+(   25) !     -------
+(   26) # 27 "dist_grid.F90"
+(   27) !     Externals.  SET_RESOL      - set resolution
+(   28) !     ----------  DIST_GRID_CTL  - control routine
+(   29) # 30 "dist_grid.F90"
+(   30) !     Author.
+(   31) !     -------
+(   32) !        Mats Hamrud *ECMWF*
+(   33) # 34 "dist_grid.F90"
+(   34) !     Modifications.
+(   35) !     --------------
+(   36) !        Original : 00-03-03
+(   37) !    P.Marguinaud : 10-10-14 Add KSORT
+(   38) # 39 "dist_grid.F90"
+(   39) !     ------------------------------------------------------------------
+(   40) # 41 "dist_grid.F90"
+(   41) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   42) # 43 "dist_grid.F90"
+(   43) !ifndef INTERFACE
+(   44) # 45 "dist_grid.F90"
+(   45) USE TPM_GEN         ,ONLY : NERR, NOUT
+(   46) !USE TPM_DIM
+(   47) USE TPM_DISTR       ,ONLY : D, MYPROC, NPROC
+(   48) # 49 "dist_grid.F90"
+(   49) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(   50) USE DIST_GRID_CTL_MOD ,ONLY : DIST_GRID_CTL
+(   51) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   52) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   53) # 54 "dist_grid.F90"
+(   54) !endif INTERFACE
+(   55) # 56 "dist_grid.F90"
+(   56) IMPLICIT NONE
+(   57) # 58 "dist_grid.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:00      page 5
+
+(   58) ! Declaration of arguments
+(   59) # 60 "dist_grid.F90"
+(   60) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PGPG(:,:)
+(   61) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KPROMA
+(   62) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFDISTG
+(   63) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFROM(:)
+(   64) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   65) REAL(KIND=JPRB)             , INTENT(OUT) :: PGP(:,:,:)
+(   66) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KSORT (:)
+(   67) # 68 "dist_grid.F90"
+(   68) !ifndef INTERFACE
+(   69) # 70 "dist_grid.F90"
+(   70) INTEGER(KIND=JPIM) :: IFSEND,J,IUBOUND(3),IPROMA,IGPBLKS
+(   71) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   72) # 73 "dist_grid.F90"
+(   73) !     ------------------------------------------------------------------
+(   74) # 75 "dist_grid.F90"
+(   75) IF (LHOOK) CALL DR_HOOK('DIST_GRID',0,ZHOOK_HANDLE)
+(   76) ! Set current resolution
+(   77) CALL SET_RESOL(KRESOL)
+(   78) # 79 "dist_grid.F90"
+(   79) IPROMA = D%NGPTOT
+(   80) IF(PRESENT(KPROMA)) THEN
+(   81)   IPROMA = KPROMA
+(   82) ENDIF
+(   83) IGPBLKS = (D%NGPTOT-1)/IPROMA+1
+(   84) # 85 "dist_grid.F90"
+(   85) IF(UBOUND(KFROM,1) < KFDISTG) THEN
+(   86)  CALL ABORT_TRANS('DIST_GRID: KFROM TOO SHORT!')
+(   87) ENDIF
+(   88) IFSEND = 0
+(   89) DO J=1,KFDISTG
+(   90)   IF(KFROM(J) < 1 .OR. KFROM(J) > NPROC) THEN
+(   91)     WRITE(NERR,*) 'DIST_GRID:ILLEGAL KFROM VALUE',KFROM(J),J
+(   92)     CALL ABORT_TRANS('DIST_GRID:ILLEGAL KFROM VALUE')
+(   93)   ENDIF
+(   94)   IF(KFROM(J) == MYPROC) IFSEND = IFSEND+1
+(   95) ENDDO
+(   96) # 97 "dist_grid.F90"
+(   97) IUBOUND=UBOUND(PGP)
+(   98) IF(IUBOUND(1) < IPROMA) THEN
+(   99)   WRITE(NOUT,*)'DIST_GRID:FIRST DIM. OF PGP TOO SMALL ',IUBOUND(1),IPROMA
+(  100)   CALL ABORT_TRANS('DIST_GRID:FIRST DIMENSION OF PGP TOO SMALL ')
+(  101) ENDIF
+(  102) IF(IUBOUND(2) < KFDISTG) THEN
+(  103)   WRITE(NOUT,*)'DIST_GRID:SEC. DIM. OF PGP TOO SMALL ',IUBOUND(2),KFDISTG
+(  104)   CALL ABORT_TRANS('DIST_GRID:SECOND DIMENSION OF PGP TOO SMALL ')
+(  105) ENDIF
+(  106) IF(IUBOUND(3) < IGPBLKS) THEN
+(  107)   WRITE(NOUT,*)'DIST_GRID:THIRD DIM. OF PGP TOO SMALL ',IUBOUND(3),IGPBLKS
+(  108)   CALL ABORT_TRANS('DIST_GRID:THIRD DIMENSION OF PGP TOO SMALL ')
+(  109) ENDIF
+(  110) # 111 "dist_grid.F90"
+(  111) IF(IFSEND > 0) THEN
+(  112)   IF(.NOT.PRESENT(PGPG)) THEN
+(  113)     CALL ABORT_TRANS('DIST_GRID:PGPG MISSING')
+(  114)   ENDIF
+(  115)   IF(UBOUND(PGPG,1) < D%NGPTOTG) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:00      page 6
+
+(  116)     CALL ABORT_TRANS('DIST_GRID:FIRST DIMENSION OF PGPG TOO SMALL')
+(  117)   ENDIF
+(  118)  IF(UBOUND(PGPG,2) < IFSEND) THEN
+(  119)     CALL ABORT_TRANS('DIST_GRID:FIRST DIMENSION OF PGPG TOO SMALL')
+(  120)   ENDIF
+(  121) ENDIF
+(  122) # 123 "dist_grid.F90"
+(  123) IF (PRESENT (KSORT)) THEN
+(  124)   IF (UBOUND (KSORT, 1) /= UBOUND (PGP, 2)) THEN
+(  125)     CALL ABORT_TRANS('DIST_GRID: DIMENSION MISMATCH KSORT, PGP')
+(  126)   ENDIF
+(  127) ENDIF
+(  128) # 129 "dist_grid.F90"
+(  129) CALL DIST_GRID_CTL(PGPG,KFDISTG,IPROMA,KFROM,PGP,KSORT)
+(  130) # 131 "dist_grid.F90"
+(  131) IF (LHOOK) CALL DR_HOOK('DIST_GRID',1,ZHOOK_HANDLE)
+(  132) !endif INTERFACE
+(  133) # 134 "dist_grid.F90"
+(  134) !     ------------------------------------------------------------------
+(  135) # 136 "dist_grid.F90"
+(  136) END SUBROUTINE DIST_GRID

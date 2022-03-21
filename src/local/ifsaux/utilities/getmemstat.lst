@@ -1,0 +1,210 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:36      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: getmemstat.F90
+
+(    1) SUBROUTINE GETMEMSTAT(KOUT, CDLABEL)
+(    2) 
+(    3) USE PARKIND1  ,ONLY : JPIM     ,JPRB     ,JPIB
+(    4) 
+(    5) USE MPL_MODULE
+(    6) 
+(    7) IMPLICIT NONE
+(    8) 
+(    9) INTEGER(KIND=JPIM), INTENT(IN) :: KOUT
+(   10) CHARACTER(LEN=*), INTENT(IN) :: CDLABEL
+(   11) INTEGER(KIND=JPIM) :: I, IMYPROC, INPROC, IOFFSET
+(   12) INTEGER(KIND=JPIM), PARAMETER :: JP_MEMKEYS = 5  ! pls. consult ifsaux/utilities/getmemvals.F90
+(   13) INTEGER(KIND=JPIM) IMEMKEYS(JP_MEMKEYS)
+(   14) INTEGER(KIND=JPIB) IMEMVALS(JP_MEMKEYS)
+(   15) REAL(KIND=JPRB), ALLOCATABLE :: ZSEND(:), ZRECV(:)
+(   16) INTEGER(KIND=JPIM), ALLOCATABLE :: ICOUNTS(:)
+(   17) CHARACTER(LEN=1) CLENV
+(   18) 
+(   19) CALL GET_ENVIRONMENT_VARIABLE("EC_PROFILE_MEM", CLENV) ! turn OFF by export EC_PROFILE_MEM=0
+(   20) 
+(   21) IF (KOUT >= 0 .AND. CLENV /= '0') THEN
+(   22)   IMYPROC = MPL_MYRANK()
+(   23)   INPROC  = MPL_NPROC()
+(   24) 
+(   25)   ALLOCATE(ZSEND(JP_MEMKEYS))
+(   26)   ALLOCATE(ZRECV(JP_MEMKEYS * INPROC))
+(   27)   ALLOCATE(ICOUNTS(INPROC))
+(   28) 
+(   29) !                 1=MAXHEAP, 2=MAXRSS, 3=CURRENTHEAP, 5=MAXSTACK, 6=PAGING
+(   30)   IMEMKEYS(:) = (/1,         2,        3,             5,          6/) 
+(   31)   CALL GETMEMVALS(JP_MEMKEYS, IMEMKEYS, IMEMVALS)
+(   32) 
+(   33)   ZSEND(:) = 0
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:36      page 2
+
+(   34)   DO I=1,JP_MEMKEYS
+(   35)     ZSEND(I) = IMEMVALS(I)
+(   36)   ENDDO
+(   37)   ZRECV(:) = -1
+(   38) 
+(   39)   ICOUNTS(:) = JP_MEMKEYS
+(   40)   CALL MPL_GATHERV(ZSEND(:), KROOT=1, KRECVCOUNTS=ICOUNTS(:), &
+(   41)                   &PRECVBUF=ZRECV, CDSTRING='GETMEMSTAT:')
+(   42) 
+(   43)   IF (IMYPROC == 1) THEN
+(   44)      WRITE(KOUT,9000) TRIM(CDLABEL)
+(   45) 9000 FORMAT(/,"Memory Utilization Information (in bytes) : ",a,/,79("="),//,&
+(   46)          &  "Node   Max heapsize   Max resident   Current heap      Max stack   I/O-paging #",/,&
+(   47)          &  "====   ============   ============   ============   ============   ============",//)
+(   48)      IOFFSET = 0
+(   49)      DO I=1,INPROC
+(   50)        IMEMVALS(:) = ZRECV(IOFFSET+1:IOFFSET+JP_MEMKEYS)
+(   51)        WRITE(KOUT,'(I4,5(3X,I12))') I,IMEMVALS(:)
+(   52)        IOFFSET = IOFFSET + JP_MEMKEYS
+(   53)      ENDDO
+(   54)      WRITE(KOUT,'(/,a,/)') 'End of Memory Utilization Information'
+(   55)   ENDIF
+(   56) 
+(   57)   DEALLOCATE(ZSEND)
+(   58)   DEALLOCATE(ZRECV)
+(   59)   DEALLOCATE(ICOUNTS)
+(   60) 
+(   61)   CALL GETHEAPSTAT(KOUT, CDLABEL)
+(   62) ENDIF
+(   63) END SUBROUTINE GETMEMSTAT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:36      page 3
+
+(    1) # 1 "getmemstat.F90"
+(    1) SUBROUTINE GETMEMSTAT(KOUT, CDLABEL)
+(    2) # 3 "getmemstat.F90"
+(    3) USE PARKIND1  ,ONLY : JPIM     ,JPRB     ,JPIB
+(    4) # 5 "getmemstat.F90"
+(    5) USE MPL_MODULE
+(    6) # 7 "getmemstat.F90"
+(    7) IMPLICIT NONE
+(    8) # 9 "getmemstat.F90"
+(    9) INTEGER(KIND=JPIM), INTENT(IN) :: KOUT
+(   10) CHARACTER(LEN=*), INTENT(IN) :: CDLABEL
+(   11) INTEGER(KIND=JPIM) :: I, IMYPROC, INPROC, IOFFSET
+(   12) INTEGER(KIND=JPIM), PARAMETER :: JP_MEMKEYS = 5  ! pls. consult ifsaux/utilities/getmemvals.F90
+(   13) INTEGER(KIND=JPIM) IMEMKEYS(JP_MEMKEYS)
+(   14) INTEGER(KIND=JPIB) IMEMVALS(JP_MEMKEYS)
+(   15) REAL(KIND=JPRB), ALLOCATABLE :: ZSEND(:), ZRECV(:)
+(   16) INTEGER(KIND=JPIM), ALLOCATABLE :: ICOUNTS(:)
+(   17) CHARACTER(LEN=1) CLENV
+(   18) # 19 "getmemstat.F90"
+(   19) CALL GET_ENVIRONMENT_VARIABLE("EC_PROFILE_MEM", CLENV) ! turn OFF by export EC_PROFILE_MEM=0
+(   20) # 21 "getmemstat.F90"
+(   21) IF (KOUT >= 0 .AND. CLENV /= '0') THEN
+(   22)   IMYPROC = MPL_MYRANK()
+(   23)   INPROC  = MPL_NPROC()
+(   24) # 25 "getmemstat.F90"
+(   25)   ALLOCATE(ZSEND(JP_MEMKEYS))
+(   26)   ALLOCATE(ZRECV(JP_MEMKEYS * INPROC))
+(   27)   ALLOCATE(ICOUNTS(INPROC))
+(   28) # 29 "getmemstat.F90"
+(   29) !                 1=MAXHEAP, 2=MAXRSS, 3=CURRENTHEAP, 5=MAXSTACK, 6=PAGING
+(   30)   IMEMKEYS(:) = (/1,         2,        3,             5,          6/) 
+(   31)   CALL GETMEMVALS(JP_MEMKEYS, IMEMKEYS, IMEMVALS)
+(   32) # 33 "getmemstat.F90"
+(   33)   ZSEND(:) = 0
+(   34)   DO I=1,JP_MEMKEYS
+(   35)     ZSEND(I) = IMEMVALS(I)
+(   36)   ENDDO
+(   37)   ZRECV(:) = -1
+(   38) # 39 "getmemstat.F90"
+(   39)   ICOUNTS(:) = JP_MEMKEYS
+(   40)   CALL MPL_GATHERV(ZSEND(:), KROOT=1, KRECVCOUNTS=ICOUNTS(:), &
+(   41)                   &PRECVBUF=ZRECV, CDSTRING='GETMEMSTAT:')
+(   42) # 43 "getmemstat.F90"
+(   43)   IF (IMYPROC == 1) THEN
+(   44)      WRITE(KOUT,9000) TRIM(CDLABEL)
+(   45) 9000 FORMAT(/,"Memory Utilization Information (in bytes) : ",a,/,79("="),//,&
+(   46)          &  "Node   Max heapsize   Max resident   Current heap      Max stack   I/O-paging #",/,&
+(   47)          &  "====   ============   ============   ============   ============   ============",//)
+(   48)      IOFFSET = 0
+(   49)      DO I=1,INPROC
+(   50)        IMEMVALS(:) = ZRECV(IOFFSET+1:IOFFSET+JP_MEMKEYS)
+(   51)        WRITE(KOUT,'(I4,5(3X,I12))') I,IMEMVALS(:)
+(   52)        IOFFSET = IOFFSET + JP_MEMKEYS
+(   53)      ENDDO
+(   54)      WRITE(KOUT,'(/,a,/)') 'End of Memory Utilization Information'
+(   55)   ENDIF
+(   56) # 57 "getmemstat.F90"
+(   57)   DEALLOCATE(ZSEND)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:36      page 4
+
+(   58)   DEALLOCATE(ZRECV)
+(   59)   DEALLOCATE(ICOUNTS)
+(   60) # 61 "getmemstat.F90"
+(   61)   CALL GETHEAPSTAT(KOUT, CDLABEL)
+(   62) ENDIF
+(   63) END SUBROUTINE GETMEMSTAT

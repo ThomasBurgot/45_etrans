@@ -1,0 +1,313 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:01      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eleinv_mod.F90
+
+(    1) MODULE ELEINV_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ELEINV(KFC,KF_OUT_LT,PFFT)
+(    4) 
+(    5) !**** *LEINV* - Inverse Legendre transform.
+(    6) 
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Inverse Legendre tranform of all variables(kernel).
+(   10) 
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        CALL LEINV(...)
+(   14) 
+(   15) !        Explicit arguments :  KM - zonal wavenumber (input-c)
+(   16) !        --------------------  KFC - number of fields to tranform (input-c)
+(   17) !                              PIA - spectral fields
+(   18) !                              for zonal wavenumber KM (input)
+(   19) !                              PAOA1 - antisymmetric part of Fourier
+(   20) !                              fields for zonal wavenumber KM (output)
+(   21) !                              PSOA1 - symmetric part of Fourier
+(   22) !                              fields for zonal wavenumber KM (output)
+(   23) !                              PLEPO - Legendre polonomials for zonal
+(   24) !                              wavenumber KM (input-c)
+(   25) 
+(   26) !        Implicit arguments :  None.
+(   27) !        --------------------
+(   28) 
+(   29) !     Method.
+(   30) !     -------
+(   31) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:01      page 2
+
+(   32) !     Externals.   MXMAOP - calls SGEMVX (matrix multiply)
+(   33) !     ----------
+(   34) 
+(   35) !     Reference.
+(   36) !     ----------
+(   37) !        ECMWF Research Department documentation of the IFS
+(   38) 
+(   39) !     Author.
+(   40) !     -------
+(   41) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   42) 
+(   43) !     Modifications.
+(   44) !     --------------
+(   45) !        Original : 00-02-01 From LEINV in IFS CY22R1
+(   46) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   47) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   48) !        R. El Khatib 01-Sep-2015 support for FFTW transforms
+(   49) 
+(   50) !     ------------------------------------------------------------------
+(   51) 
+(   52) USE PARKIND1  ,ONLY : JPIM, JPRB
+(   53) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   54) 
+(   55) USE TPM_DISTR       ,ONLY : D, D_NUMP
+(   56) USE TPM_DIM         ,ONLY : R
+(   57) USE TPM_FFTC        ,ONLY : CREATE_PLAN_FFT
+(   58) USE TPMALD_DIM      ,ONLY : RALD
+(   59) USE TPMALD_FFT      ,ONLY : TALD
+(   60) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   61) USE CUDA_DEVICE_MOD
+(   62) !
+(   63) 
+(   64) IMPLICIT NONE
+(   65) 
+(   66) INTEGER(KIND=JPIM), INTENT(IN)  :: KFC
+(   67) INTEGER(KIND=JPIM), INTENT(IN)  :: KF_OUT_LT
+(   68) REAL(KIND=JPRB),    INTENT(INOUT)  :: PFFT(:,:,:)
+(   69) 
+(   70) INTEGER(KIND=JPIM) :: IRLEN, ICLEN
+(   71) INTEGER(KIND=JPIM) :: IPLAN_C2R
+(   72) REAL (KIND=JPRB)   :: ZSCAL
+(   73) 
+(   74) integer :: istat
+(   75) 
+(   76) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   77) 
+(   78) !     ------------------------------------------------------------------
+(   79) 
+(   80) !*       1.       PERFORM LEGENDRE TRANFORM.
+(   81) !                 --------------------------
+(   82) 
+(   83) IF (LHOOK) CALL DR_HOOK('ELEINV_MOD:ELEINV',0,ZHOOK_HANDLE)
+(   84) 
+(   85) 
+(   86) IRLEN=R%NDGL+R%NNOEXTZG
+(   87) ICLEN=RALD%NDGLSUR+R%NNOEXTZG
+(   88) 
+(   89) CALL CREATE_PLAN_FFT (IPLAN_C2R, +1, KN=IRLEN, KLOT=UBOUND (PFFT,2)*UBOUND (PFFT, 3), &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:01      page 3
+
+(   90)                     & KISTRIDE=1, KIDIST=ICLEN/2, KOSTRIDE=1, KODIST=ICLEN)
+(   91) 
+(   92) 
+(   93) !$acc host_data use_device (PFFT) 
+(   94) CALL EXECUTE_PLAN_FFTC(IPLAN_C2R, +1, PFFT (1, 1, 1))
+(   95) !$acc end host_data
+(   96) 
+(   97) istat = cuda_Synchronize()
+(   98) 
+(   99) IF (LHOOK) CALL DR_HOOK('ELEINV_MOD:ELEINV',1,ZHOOK_HANDLE)
+(  100) 
+(  101) END SUBROUTINE ELEINV
+(  102) END MODULE ELEINV_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:01      page 4
+
+(    1) # 1 "eleinv_mod.F90"
+(    1) MODULE ELEINV_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ELEINV(KFC,KF_OUT_LT,PFFT)
+(    4) # 5 "eleinv_mod.F90"
+(    5) !**** *LEINV* - Inverse Legendre transform.
+(    6) # 7 "eleinv_mod.F90"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Inverse Legendre tranform of all variables(kernel).
+(   10) # 11 "eleinv_mod.F90"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        CALL LEINV(...)
+(   14) # 15 "eleinv_mod.F90"
+(   15) !        Explicit arguments :  KM - zonal wavenumber (input-c)
+(   16) !        --------------------  KFC - number of fields to tranform (input-c)
+(   17) !                              PIA - spectral fields
+(   18) !                              for zonal wavenumber KM (input)
+(   19) !                              PAOA1 - antisymmetric part of Fourier
+(   20) !                              fields for zonal wavenumber KM (output)
+(   21) !                              PSOA1 - symmetric part of Fourier
+(   22) !                              fields for zonal wavenumber KM (output)
+(   23) !                              PLEPO - Legendre polonomials for zonal
+(   24) !                              wavenumber KM (input-c)
+(   25) # 26 "eleinv_mod.F90"
+(   26) !        Implicit arguments :  None.
+(   27) !        --------------------
+(   28) # 29 "eleinv_mod.F90"
+(   29) !     Method.
+(   30) !     -------
+(   31) # 32 "eleinv_mod.F90"
+(   32) !     Externals.   MXMAOP - calls SGEMVX (matrix multiply)
+(   33) !     ----------
+(   34) # 35 "eleinv_mod.F90"
+(   35) !     Reference.
+(   36) !     ----------
+(   37) !        ECMWF Research Department documentation of the IFS
+(   38) # 39 "eleinv_mod.F90"
+(   39) !     Author.
+(   40) !     -------
+(   41) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   42) # 43 "eleinv_mod.F90"
+(   43) !     Modifications.
+(   44) !     --------------
+(   45) !        Original : 00-02-01 From LEINV in IFS CY22R1
+(   46) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   47) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   48) !        R. El Khatib 01-Sep-2015 support for FFTW transforms
+(   49) # 50 "eleinv_mod.F90"
+(   50) !     ------------------------------------------------------------------
+(   51) # 52 "eleinv_mod.F90"
+(   52) USE PARKIND1  ,ONLY : JPIM, JPRB
+(   53) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   54) # 55 "eleinv_mod.F90"
+(   55) USE TPM_DISTR       ,ONLY : D, D_NUMP
+(   56) USE TPM_DIM         ,ONLY : R
+(   57) USE TPM_FFTC        ,ONLY : CREATE_PLAN_FFT
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:01      page 5
+
+(   58) USE TPMALD_DIM      ,ONLY : RALD
+(   59) USE TPMALD_FFT      ,ONLY : TALD
+(   60) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   61) USE CUDA_DEVICE_MOD
+(   62) !
+(   63) # 64 "eleinv_mod.F90"
+(   64) IMPLICIT NONE
+(   65) # 66 "eleinv_mod.F90"
+(   66) INTEGER(KIND=JPIM), INTENT(IN)  :: KFC
+(   67) INTEGER(KIND=JPIM), INTENT(IN)  :: KF_OUT_LT
+(   68) REAL(KIND=JPRB),    INTENT(INOUT)  :: PFFT(:,:,:)
+(   69) # 70 "eleinv_mod.F90"
+(   70) INTEGER(KIND=JPIM) :: IRLEN, ICLEN
+(   71) INTEGER(KIND=JPIM) :: IPLAN_C2R
+(   72) REAL (KIND=JPRB)   :: ZSCAL
+(   73) # 74 "eleinv_mod.F90"
+(   74) integer :: istat
+(   75) # 76 "eleinv_mod.F90"
+(   76) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   77) # 78 "eleinv_mod.F90"
+(   78) !     ------------------------------------------------------------------
+(   79) # 80 "eleinv_mod.F90"
+(   80) !*       1.       PERFORM LEGENDRE TRANFORM.
+(   81) !                 --------------------------
+(   82) # 83 "eleinv_mod.F90"
+(   83) IF (LHOOK) CALL DR_HOOK('ELEINV_MOD:ELEINV',0,ZHOOK_HANDLE)
+(   84) # 86 "eleinv_mod.F90"
+(   86) IRLEN=R%NDGL+R%NNOEXTZG
+(   87) ICLEN=RALD%NDGLSUR+R%NNOEXTZG
+(   88) # 89 "eleinv_mod.F90"
+(   89) CALL CREATE_PLAN_FFT (IPLAN_C2R, +1, KN=IRLEN, KLOT=UBOUND (PFFT,2)*UBOUND (PFFT, 3), &
+(   90)                     & KISTRIDE=1, KIDIST=ICLEN/2, KOSTRIDE=1, KODIST=ICLEN)
+(   91) # 93 "eleinv_mod.F90"
+(   93) !$acc host_data use_device (PFFT) 
+(   94) CALL EXECUTE_PLAN_FFTC(IPLAN_C2R, +1, PFFT (1, 1, 1))
+(   95) !$acc end host_data
+(   96) # 97 "eleinv_mod.F90"
+(   97) istat = cuda_Synchronize()
+(   98) # 99 "eleinv_mod.F90"
+(   99) IF (LHOOK) CALL DR_HOOK('ELEINV_MOD:ELEINV',1,ZHOOK_HANDLE)
+(  100) # 101 "eleinv_mod.F90"
+(  101) END SUBROUTINE ELEINV
+(  102) END MODULE ELEINV_MOD

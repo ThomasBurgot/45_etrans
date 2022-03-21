@@ -1,0 +1,1480 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: test_TwoTrunc.F90
+
+(    1) PROGRAM TEST_TWOTRUNC
+(    2) !   purpose  :
+(    3) !   --------
+(    4) !    To test SPECTRAL TRANSFORM.
+(    5) 
+(    6) !    method  :
+(    7) !   ---------
+(    8) !    Input spectral transform with two horizontal field's after biperiodicization
+(    9) !    (analitical temperature filed in this test). First grid is smaller and has smaller
+(   10) !    maximum truncation number.
+(   11) !    Do direct and inverse transform. Compute RMSE after inverse transform
+(   12) !    on C+I zone for both domains.
+(   13) 
+(   14) !   interface  :
+(   15) !   ---------
+(   16) !
+(   17) !   externals :
+(   18) !   ----------
+(   19) !   SETUP_TRANS0 - General setup routine for transform package
+(   20) !   ESETUP_TRANS - Setup transform package for specific resolution
+(   21) !   ETRANS_INQ   - Extract information from the transform package
+(   22) !   EINV_TRANS   - Inverse spectral transform (from spectral to grid-point)
+(   23) !   EDIR_TRANS   - Direct spectral transform (from grid-point to spectral)
+(   24) !   HORIZ_FIELD  - Calculate test analitical temperature field
+(   25) !   FPBIPERE     - Interface routine for biperiodicization
+(   26) 
+(   27) !   references :
+(   28) !    ----------
+(   29) 
+(   30) !    author :
+(   31) !    -----
+(   32) !    15-04-2008   Antonio Stanesic
+(   33) !    ----------------------------------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 2
+
+(   34) 
+(   35) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   36) 
+(   37) IMPLICIT NONE
+(   38) INTEGER(KIND=JPIM)              :: NDLON1,NDGL1,NDGUX1,NDLUX1,NGPTOT1,NSMAX1,NMSMAX1,NSPEC21,NRESOL1
+(   39) INTEGER(KIND=JPIM)              :: NDLON2,NDGL2,NDGUX2,NDLUX2,NGPTOT2,NSMAX2,NMSMAX2,NSPEC22,NRESOL2
+(   40) REAL(KIND=JPRB),ALLOCATABLE     :: GGPBI1(:,:,:),GGPBIR1(:,:,:),SPECTEMP1(:,:)
+(   41) REAL(KIND=JPRB),ALLOCATABLE     :: GGPBI2(:,:,:),GGPBIR2(:,:,:),SPECTEMP2(:,:)
+(   42) INTEGER(KIND=JPIM),ALLOCATABLE  :: NLOEN1(:)
+(   43) INTEGER(KIND=JPIM),ALLOCATABLE  :: NLOEN2(:)
+(   44) INTEGER(KIND=JPIM)              :: JX,JY,ISTAE,COUNT
+(   45) REAL(KIND=JPRB)                 :: SUM2,RMS
+(   46) REAL(KIND=JPRB),ALLOCATABLE     :: HFIELD(:,:)
+(   47) 
+(   48) #include "setup_trans0.h"
+(   49) #include "esetup_trans.h"
+(   50) #include "etrans_inq.h"
+(   51) #include "einv_trans.h"
+(   52) #include "edir_trans.h"
+(   53) #include "horiz_field.h"
+(   54) #include "fpbipere.h"
+(   55) 
+(   56) 
+(   57) !-----------------------------------------------------------
+(   58) !1. GRID SETUP
+(   59) !-----------------------------------------------------------
+(   60) 
+(   61) WRITE(*,*) '*****************************************************************'
+(   62) WRITE(*,*) '*                                                               *'
+(   63) WRITE(*,*) '*                 TEST OF SPECTRAL TRANSFORMS                   *'
+(   64) WRITE(*,*) '*                                                               *'
+(   65) WRITE(*,*) '*****************************************************************'
+(   66) WRITE(*,*) ' '
+(   67) WRITE(*,*) '************************** START SETUP **************************'
+(   68) WRITE(*,*) ' '
+(   69) 
+(   70) !1.1. Setup for grid 1
+(   71) !------------------------
+(   72) 
+(   73) NDLON1=288
+(   74) NDGL1=288
+(   75) NDLUX1=266
+(   76) NDGUX1=266
+(   77) ALLOCATE(NLOEN1(NDGL1))
+(   78) NLOEN1(:)=NDLON1
+(   79) NSMAX1=143
+(   80) NMSMAX1=143
+(   81) WRITE(*,*) '************ GRIDPOINT SETUP 1 **************'
+(   82) WRITE(UNIT=*,FMT='(4(A,I4,2X))') 'NDLON:',NDLON1,'NDGL:',NDGL1,'NDLUX:',NDLUX1,'NDGUX:',NDGUX1
+(   83) WRITE(UNIT=*,FMT='(4(A,I4,2X))') 'NSMAX:',NSMAX1,'NMSMAX:',NMSMAX1
+(   84) 
+(   85) !1.1.1 Read and biper input field
+(   86) !--------------------------------
+(   87) !allocate two horizontal field's
+(   88) !one for spectral transformations and one for reference
+(   89) ALLOCATE(GGPBI1(NDLON1*NDGL1,1,1),GGPBIR1(NDLON1*NDGL1,1,1))
+(   90) 
+(   91) !read input field
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 3
+
+(   92) WRITE(*,*) 'READ FIELD 1'
+(   93) ALLOCATE(HFIELD(NDLUX1,NDGUX1))
+(   94) 
+(   95) CALL HORIZ_FIELD(NDLUX1,NDGUX1,HFIELD)
+(   96) 
+(   97) !change layout
+(   98) ISTAE=0
+(   99) DO JY=1,NDGUX1
+(  100)   DO JX=1,NDLUX1
+(  101)    GGPBI1(ISTAE+JX,1,1)=HFIELD(JX,JY)
+(  102)   ENDDO
+(  103) ISTAE=ISTAE+NDLUX1
+(  104) ENDDO
+(  105) 
+(  106) !biper input field
+(  107) WRITE(*,*) 'BIPER FIELD 1'
+(  108) 
+(  109) CALL FPBIPERE(NDLUX1,NDGUX1,NDLON1,NDGL1,1,NDLON1*NDGL1,GGPBI1,0,.FALSE.)
+(  110) 
+(  111) 
+(  112) !1.2. Setup for grid 2
+(  113) !------------------------
+(  114) 
+(  115) NDLON2=384
+(  116) NDGL2=384
+(  117) NDLUX2=362
+(  118) NDGUX2=362
+(  119) ALLOCATE(NLOEN2(NDGL2))
+(  120) NLOEN2(:)=NDLON2
+(  121) NSMAX2=191
+(  122) NMSMAX2=191
+(  123) 
+(  124) WRITE(*,*) '************ GRIDPOINT SETUP 2 **************'
+(  125) WRITE(UNIT=*,FMT='(4(A,I4,2X))') 'NDLON:',NDLON2,'NDGL:',NDGL2,'NDLUX:',NDLUX2,'NDGUX:',NDGUX2
+(  126) WRITE(UNIT=*,FMT='(4(A,I4,2X))') 'NSMAX:',NSMAX2,'NMSMAX:',NMSMAX2
+(  127) 
+(  128) !1.2.1 Read and biper input field
+(  129) !----------------------------
+(  130) !allocate two horizontal field's
+(  131) !one for spectral transformations and one for reference
+(  132) ALLOCATE(GGPBI2(NDLON2*NDGL2,1,1),GGPBIR2(NDLON2*NDGL2,1,1))
+(  133) 
+(  134) !read input field
+(  135) WRITE(*,*) 'READ FIELD 2'
+(  136) ALLOCATE(HFIELD(NDLUX2,NDGUX2))
+(  137) 
+(  138) CALL HORIZ_FIELD(NDLUX2,NDGUX2,HFIELD)
+(  139) 
+(  140) !change layout
+(  141) ISTAE=0
+(  142) DO JY=1,NDGUX2
+(  143)   DO JX=1,NDLUX2
+(  144)    GGPBI2(ISTAE+JX,1,1)=HFIELD(JX,JY)
+(  145)   ENDDO
+(  146) ISTAE=ISTAE+NDLUX2
+(  147) ENDDO
+(  148) 
+(  149) !biper input field
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 4
+
+(  150) WRITE(*,*) 'BIPER FIELD 2'
+(  151) 
+(  152) CALL FPBIPERE(NDLUX2,NDGUX2,NDLON2,NDGL2,1,NDLON2*NDGL2,GGPBI2,0,.FALSE.)
+(  153) 
+(  154) 
+(  155) !-----------------------------------------------------------
+(  156) !2. SPECTRAL SETUP
+(  157) !-----------------------------------------------------------
+(  158) 
+(  159) !2.1. Resolution independent part
+(  160) !---------------------------------
+(  161) 
+(  162) 
+(  163) CALL SETUP_TRANS0(KMAX_RESOL=2,LDMPOFF=.TRUE.)
+(  164) 
+(  165) 
+(  166) !2.2. Setup for grid 1
+(  167) !-------------------------------------
+(  168) 
+(  169) WRITE(*,*) '************ SPECTRAL SETUP 1 **************'
+(  170) 
+(  171) CALL ESETUP_TRANS(NMSMAX1,NSMAX1,NDGL1,NDGUX1,NLOEN1,KRESOL=NRESOL1)
+(  172) 
+(  173) CALL ETRANS_INQ(KRESOL=NRESOL1,KSPEC2=NSPEC21,KGPTOT=NGPTOT1)
+(  174) 
+(  175) ALLOCATE(SPECTEMP1(1,NSPEC21))
+(  176) 
+(  177) WRITE(UNIT=*,FMT='(3(A,I7,2X))') 'NSPEC21:',NSPEC21,'NGPTOT1:',NGPTOT1,'NRESOL1:',NRESOL1
+(  178) WRITE(*,*) 'END SETUP 1'
+(  179) 
+(  180) 
+(  181) !2.3. Setup for grid 2
+(  182) !-------------------------------------
+(  183) 
+(  184) WRITE(*,*) '************ SPECTRAL SETUP 2 **************'
+(  185) 
+(  186) CALL ESETUP_TRANS(NMSMAX2,NSMAX2,NDGL2,NDGUX2,NLOEN2,KRESOL=NRESOL2)
+(  187) 
+(  188) CALL ETRANS_INQ(KRESOL=NRESOL2,KSPEC2=NSPEC22,KGPTOT=NGPTOT2)
+(  189) 
+(  190) ALLOCATE(SPECTEMP2(1,NSPEC22))
+(  191) 
+(  192) WRITE(UNIT=*,FMT='(3(A,I7,2X))') 'NSPEC22:',NSPEC22,'NGPTOT2:',NGPTOT2,'NRESOL2:',NRESOL2
+(  193) WRITE(*,FMT=*) 'END SETUP 2'
+(  194) 
+(  195) WRITE(UNIT=*,FMT=*) '*************************** END SETUP ***************************'
+(  196) WRITE(*,*) ' '
+(  197) 
+(  198) 
+(  199) !-----------------------------------------------------------
+(  200) !3. DIRECT AND INVERSE TRANSFORM + RMSE COMPUTATIONS
+(  201) !-----------------------------------------------------------
+(  202) 
+(  203) !3.1. Computations for grid 1
+(  204) !----------------------------
+(  205) 
+(  206) WRITE(*,*) '**********************************************'
+(  207) WRITE(*,*) '*         DATA ON SMALLER GRID               *'
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 5
+
+(  208) WRITE(*,*) '**********************************************'
+(  209) WRITE(*,*) ' '
+(  210) 
+(  211) 
+(  212) !3.1.1. Go to spectral
+(  213) !----------------------------
+(  214) 
+(  215) WRITE(*,*) 'DIRECT TRANSFORM OF FIELD 1'
+(  216) 
+(  217) CALL EDIR_TRANS(PSPSCALAR=SPECTEMP1,PGP=GGPBI1,KPROMA=NGPTOT1,KRESOL=NRESOL1)
+(  218) 
+(  219) 
+(  220) !3.1.2. Go back to gridpoint
+(  221) !----------------------------
+(  222) 
+(  223) WRITE(UNIT=*,FMT='(A,I2)') 'INVERSE TRANSFORM OF FIELD 1'
+(  224) 
+(  225) CALL EINV_TRANS(PSPSCALAR=SPECTEMP1,PGP=GGPBIR1,KPROMA=NGPTOT1,KRESOL=NRESOL1)
+(  226) 
+(  227) 
+(  228) !3.1.3. Compute RMS on C U I
+(  229) !----------------------------
+(  230) 
+(  231) SUM2=0
+(  232) ISTAE=0
+(  233) COUNT=0
+(  234) DO JY=1,NDGUX1
+(  235)  DO JX=1,NDLUX1
+(  236)   SUM2=SUM2+(GGPBI1(JX+ISTAE,1,1)-GGPBIR1(JX+ISTAE,1,1))**2
+(  237)   COUNT=COUNT+1
+(  238)  ENDDO
+(  239) ISTAE=ISTAE+NDLON1
+(  240) ENDDO
+(  241) RMS=SQRT(SUM2/COUNT)
+(  242) 
+(  243) 
+(  244) WRITE(UNIT=*,FMT='(A,I2)') 'CALCULATION OF RMS ERROR ON C+I ZONE FOR FIELD 1'
+(  245) WRITE(UNIT=*,FMT='(A,I5)') 'NUMBER OF POINTS IN CALCULATION 1:',COUNT
+(  246) WRITE(*,*) 'RMS ERROR 1:',RMS
+(  247) 
+(  248) DEALLOCATE(GGPBI1,GGPBIR1,SPECTEMP1)
+(  249) !3.2. Computations for grid 2
+(  250) !----------------------------
+(  251) 
+(  252) WRITE(*,*) ' '
+(  253) WRITE(*,*) '**********************************************'
+(  254) WRITE(*,*) '*         DATA ON BIGGER GRID                *'
+(  255) WRITE(*,*) '**********************************************'
+(  256) WRITE(*,*) ' '
+(  257) 
+(  258) !3.2.1. Go to spectral
+(  259) !----------------------------
+(  260) 
+(  261) WRITE(*,*) 'DIRECT TRANSFORM OF FIELD 2'
+(  262) 
+(  263) CALL EDIR_TRANS(PSPSCALAR=SPECTEMP2,PGP=GGPBI2,KPROMA=NGPTOT2,KRESOL=NRESOL2)
+(  264) 
+(  265) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 6
+
+(  266) !3.2.2. Go back to gridpoint
+(  267) !----------------------------
+(  268) WRITE(UNIT=*,FMT='(A,I2)') 'INVERSE TRANSFORM OF FIELD 2'
+(  269) 
+(  270) CALL EINV_TRANS(PSPSCALAR=SPECTEMP2,PGP=GGPBIR2,KPROMA=NGPTOT2,KRESOL=NRESOL2)
+(  271) 
+(  272) 
+(  273) !3.2.3. Compute RMS on C U I
+(  274) !-----------------------------
+(  275) 
+(  276) SUM2=0
+(  277) ISTAE=0
+(  278) COUNT=0
+(  279) DO JY=1,NDGUX2
+(  280)  DO JX=1,NDLUX2
+(  281)   SUM2=SUM2+(GGPBI2(JX+ISTAE,1,1)-GGPBIR2(JX+ISTAE,1,1))**2
+(  282)   COUNT=COUNT+1
+(  283)  ENDDO
+(  284) ISTAE=ISTAE+NDLON2
+(  285) ENDDO
+(  286) 
+(  287) RMS=SQRT(SUM2/COUNT)
+(  288) 
+(  289) WRITE(UNIT=*,FMT='(A,I2)') 'CALCULATION OF RMS ERROR ON C+I ZONE FOR FIELD 2'
+(  290) WRITE(UNIT=*,FMT='(A,I9)') 'NUMBER OF POINTS IN CALCULATION 2:',COUNT
+(  291) WRITE(*,*) 'RMS ERROR 2:',RMS
+(  292) 
+(  293) 
+(  294) !-----------------------------------------------------------
+(  295) !4. END SPECTRAL TRANSFORM
+(  296) !-----------------------------------------------------------
+(  297) 
+(  298) CALL TRANS_END
+(  299) 
+(  300) 
+(  301) END PROGRAM TEST_TWOTRUNC
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 7
+
+(    1) # 1 "test_TwoTrunc.F90"
+(    1) PROGRAM TEST_TWOTRUNC
+(    2) !   purpose  :
+(    3) !   --------
+(    4) !    To test SPECTRAL TRANSFORM.
+(    5) # 6 "test_TwoTrunc.F90"
+(    6) !    method  :
+(    7) !   ---------
+(    8) !    Input spectral transform with two horizontal field's after biperiodicization
+(    9) !    (analitical temperature filed in this test). First grid is smaller and has smaller
+(   10) !    maximum truncation number.
+(   11) !    Do direct and inverse transform. Compute RMSE after inverse transform
+(   12) !    on C+I zone for both domains.
+(   13) # 14 "test_TwoTrunc.F90"
+(   14) !   interface  :
+(   15) !   ---------
+(   16) !
+(   17) !   externals :
+(   18) !   ----------
+(   19) !   SETUP_TRANS0 - General setup routine for transform package
+(   20) !   ESETUP_TRANS - Setup transform package for specific resolution
+(   21) !   ETRANS_INQ   - Extract information from the transform package
+(   22) !   EINV_TRANS   - Inverse spectral transform (from spectral to grid-point)
+(   23) !   EDIR_TRANS   - Direct spectral transform (from grid-point to spectral)
+(   24) !   HORIZ_FIELD  - Calculate test analitical temperature field
+(   25) !   FPBIPERE     - Interface routine for biperiodicization
+(   26) # 27 "test_TwoTrunc.F90"
+(   27) !   references :
+(   28) !    ----------
+(   29) # 30 "test_TwoTrunc.F90"
+(   30) !    author :
+(   31) !    -----
+(   32) !    15-04-2008   Antonio Stanesic
+(   33) !    ----------------------------------------------
+(   34) # 35 "test_TwoTrunc.F90"
+(   35) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   36) # 37 "test_TwoTrunc.F90"
+(   37) IMPLICIT NONE
+(   38) INTEGER(KIND=JPIM)              :: NDLON1,NDGL1,NDGUX1,NDLUX1,NGPTOT1,NSMAX1,NMSMAX1,NSPEC21,NRESOL1
+(   39) INTEGER(KIND=JPIM)              :: NDLON2,NDGL2,NDGUX2,NDLUX2,NGPTOT2,NSMAX2,NMSMAX2,NSPEC22,NRESOL2
+(   40) REAL(KIND=JPRB),ALLOCATABLE     :: GGPBI1(:,:,:),GGPBIR1(:,:,:),SPECTEMP1(:,:)
+(   41) REAL(KIND=JPRB),ALLOCATABLE     :: GGPBI2(:,:,:),GGPBIR2(:,:,:),SPECTEMP2(:,:)
+(   42) INTEGER(KIND=JPIM),ALLOCATABLE  :: NLOEN1(:)
+(   43) INTEGER(KIND=JPIM),ALLOCATABLE  :: NLOEN2(:)
+(   44) INTEGER(KIND=JPIM)              :: JX,JY,ISTAE,COUNT
+(   45) REAL(KIND=JPRB)                 :: SUM2,RMS
+(   46) REAL(KIND=JPRB),ALLOCATABLE     :: HFIELD(:,:)
+(   47) # 48 "test_TwoTrunc.F90"
+(   48) # 1 ".D[8]/setup_trans0.h"
+(    1) INTERFACE
+(    2) SUBROUTINE SETUP_TRANS0(KOUT,KERR,KPRINTLEV,KMAX_RESOL,KPROMATR,&
+(    3) &                       KPRGPNS,KPRGPEW,KPRTRW,KCOMBFLEN,&
+(    4) &                       LDMPOFF,LDSYNC_TRANS,KTRANS_SYNC_LEVEL,&
+(    5) &                       LDEQ_REGIONS,K_REGIONS_NS,K_REGIONS_EW,K_REGIONS,&
+(    6) &                       PRAD,LDALLOPERM,LDALLOPERM2)
+(    7) # 8 ".D[8]/setup_trans0.h"
+(    8) !**** *SETUP_TRANS0* - General setup routine for transform package
+(    9) # 10 ".D[8]/setup_trans0.h"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 8
+
+(   10) !     Purpose.
+(   11) !     --------
+(   12) !     Resolution independent part of setup of transform package
+(   13) !     Has to be called BEFORE SETUP_TRANS
+(   14) # 15 ".D[8]/setup_trans0.h"
+(   15) !**   Interface.
+(   16) !     ----------
+(   17) !     CALL SETUP_TRANS0(...)
+(   18) # 19 ".D[8]/setup_trans0.h"
+(   19) !     Explicit arguments : All arguments are optional, [..] default value
+(   20) !     -------------------
+(   21) !     KOUT - Unit number for listing output [6]
+(   22) !     KERR - Unit number for error messages [0]
+(   23) !     KPRINTLEV - level of output to KOUT, 0->no output,1->normal,2->debug [0]
+(   24) !     KMAX_RESOL - maximum number of different resolutions for this run [1]
+(   25) !     KPRGPNS - splitting level in N-S direction in grid-point space [1]
+(   26) !     KPRGPEW - splitting level in E-W direction in grid-point space [1]
+(   27) !     KPRTRW  - splitting level in wave direction in spectral space [1]
+(   28) !     KCOMBFLEN - Size of communication buffer [1800000 (*8bytes) ]
+(   29) !     LDMPOFF - switch off message passing [false]
+(   30) !     LDSYNC_TRANS - switch to activate barrier before transforms [false]
+(   31) !     KTRANS_SYNC_LEVEL - use of synchronization/blocking [0]
+(   32) !     LDEQ_REGIONS - true if new eq_regions partitioning [false]
+(   33) !     K_REGIONS    - Number of regions (1D or 2D partitioning)
+(   34) !     K_REGIONS_NS - Maximum number of NS partitions
+(   35) !     K_REGIONS_EW - Maximum number of EW partitions
+(   36) !     PRAD         - Radius of the planet
+(   37) !     LDALLOPERM  - Allocate certain arrays permanently
+(   38) # 39 ".D[8]/setup_trans0.h"
+(   39) !     The total number of (MPI)-processors has to be equal to KPRGPNS*KPRGPEW
+(   40) # 41 ".D[8]/setup_trans0.h"
+(   41) !     Method.
+(   42) !     -------
+(   43) # 44 ".D[8]/setup_trans0.h"
+(   44) !     Externals.  SUMP_TRANS0 - initial setup routine
+(   45) !     ----------
+(   46) # 47 ".D[8]/setup_trans0.h"
+(   47) !     Author.
+(   48) !     -------
+(   49) !        Mats Hamrud *ECMWF*
+(   50) # 51 ".D[8]/setup_trans0.h"
+(   51) !     Modifications.
+(   52) !     --------------
+(   53) !        Original : 00-03-03
+(   54) !        R. El Khatib 03-01-24 LDMPOFF
+(   55) !        G. Mozdzynski 2006-09-13 LDEQ_REGIONS
+(   56) !        N. Wedi  2009-11-30 add radius
+(   57) # 58 ".D[8]/setup_trans0.h"
+(   58) !     ------------------------------------------------------------------
+(   59) # 60 ".D[8]/setup_trans0.h"
+(   60) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   61) # 62 ".D[8]/setup_trans0.h"
+(   62) IMPLICIT NONE
+(   63) # 64 ".D[8]/setup_trans0.h"
+(   64) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN)  :: KOUT,KERR,KPRINTLEV,KMAX_RESOL,KPROMATR
+(   65) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN)  :: KPRGPNS,KPRGPEW,KPRTRW,KCOMBFLEN
+(   66) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDMPOFF
+(   67) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDSYNC_TRANS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 9
+
+(   68) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN)  :: KTRANS_SYNC_LEVEL
+(   69) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDEQ_REGIONS
+(   70) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDALLOPERM
+(   71) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDALLOPERM2
+(   72) REAL(KIND=JPRB)    ,OPTIONAL,INTENT(IN)  :: PRAD
+(   73) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT) :: K_REGIONS(:)
+(   74) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT) :: K_REGIONS_NS
+(   75) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT) :: K_REGIONS_EW
+(   76) # 77 ".D[8]/setup_trans0.h"
+(   77) END SUBROUTINE SETUP_TRANS0
+(   78) # 81 ".D[8]/setup_trans0.h"
+(   81) END INTERFACE
+(   82) # 49 "test_TwoTrunc.F90"
+(   49) # 49 "test_TwoTrunc.F90"
+(   49) # 1 ".D[6]/esetup_trans.h"
+(    1) INTERFACE
+(    2) SUBROUTINE ESETUP_TRANS(KMSMAX,KSMAX,KDGL,KDGUX,KLOEN,LDSPLIT,&
+(    3)  & KFLEV,KTMAX,KRESOL,PEXWN,PEYWN,PWEIGHT,LDGRIDONLY,KNOEXTZL,KNOEXTZG,&
+(    4)  & LDUSEFFTW)
+(    5) !**** *ESETUP_TRANS* - Setup transform package for specific resolution
+(    6) # 7 ".D[6]/esetup_trans.h"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !     To setup for making spectral transforms. Each call to this routine
+(   10) !     creates a new resolution up to a maximum of NMAX_RESOL set up in
+(   11) !     SETUP_TRANS0. You need to call SETUP_TRANS0 before this routine can
+(   12) !     be called.
+(   13) # 14 ".D[6]/esetup_trans.h"
+(   14) !**   Interface.
+(   15) !     ----------
+(   16) !     CALL ESETUP_TRANS(...)
+(   17) # 18 ".D[6]/esetup_trans.h"
+(   18) !     Explicit arguments : KLOEN,LDSPLIT are optional arguments
+(   19) !     -------------------- 
+(   20) !     KSMAX - spectral truncation required
+(   21) !     KDGL  - number of Gaussian latitudes
+(   22) !     KLOEN(:) - number of points on each Gaussian latitude [2*KDGL]
+(   23) !     LDSPLIT - true if split latitudes in grid-point space [false]
+(   24) !     KTMAX - truncation order for tendencies?
+(   25) !     KRESOL - the resolution identifier
+(   26) !     KSMAX,KDGL,KTMAX and KLOEN are GLOBAL variables desribing the resolution
+(   27) !     in spectral and grid-point space
+(   28) !     LDGRIDONLY - true if only grid space is required
+(   29) # 31 ".D[6]/esetup_trans.h"
+(   31) !     LDSPLIT describe the distribution among processors of
+(   32) !     grid-point data and has no relevance if you are using a single processor
+(   33)  
+(   34) !     LDUSEFFTW   - Use FFTW for FFTs
+(   35) # 36 ".D[6]/esetup_trans.h"
+(   36) !     Method.
+(   37) !     -------
+(   38) # 39 ".D[6]/esetup_trans.h"
+(   39) !     Externals.  ESET_RESOL   - set resolution
+(   40) !     ----------  ESETUP_DIMS  - setup distribution independent dimensions
+(   41) !                 SUEMP_TRANS_PRELEG - first part of setup of distr. environment
+(   42) !                 SULEG - Compute Legandre polonomial and Gaussian 
+(   43) !                         Latitudes and Weights
+(   44) !                 ESETUP_GEOM - Compute arrays related to grid-point geometry
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 10
+
+(   45) !                 SUEMP_TRANS - Second part of setup of distributed environment
+(   46) !                 SUEFFT - setup for FFT
+(   47) # 48 ".D[6]/esetup_trans.h"
+(   48) !     Author.
+(   49) !     -------
+(   50) !        Mats Hamrud *ECMWF*
+(   51) # 52 ".D[6]/esetup_trans.h"
+(   52) !     Modifications.
+(   53) !     --------------
+(   54) !        Original : 00-03-03
+(   55) !        02-04-11 A. Bogatchev: Passing of TCDIS
+(   56) !        02-11-14 C. Fischer: soften test on KDGL
+(   57) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   58) !        A.Nmiri       15-Nov-2007 Phasing with TFL 32R3
+(   59) !        A.Bogatchev   16-Sep-2010 Phasing cy37
+(   60) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   61) # 62 ".D[6]/esetup_trans.h"
+(   62) !     ------------------------------------------------------------------
+(   63) # 64 ".D[6]/esetup_trans.h"
+(   64) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   65) # 66 ".D[6]/esetup_trans.h"
+(   66) IMPLICIT NONE
+(   67) # 68 ".D[6]/esetup_trans.h"
+(   68) ! Dummy arguments
+(   69) INTEGER(KIND=JPIM),INTENT(IN)    :: KMSMAX 
+(   70) INTEGER(KIND=JPIM),INTENT(IN)    :: KSMAX 
+(   71) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGL 
+(   72) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGUX 
+(   73) INTEGER(KIND=JPIM),INTENT(IN)    :: KLOEN(:) 
+(   74) LOGICAL           ,OPTIONAL,INTENT(IN)    :: LDSPLIT 
+(   75) LOGICAL           ,OPTIONAL,INTENT(IN)    :: LDGRIDONLY
+(   76) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KTMAX 
+(   77) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLEV
+(   78) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KRESOL 
+(   79) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)    :: PEXWN 
+(   80) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)    :: PEYWN 
+(   81) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)    :: PWEIGHT(:)
+(   82) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KNOEXTZL
+(   83) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KNOEXTZG
+(   84) LOGICAL   ,OPTIONAL,INTENT(IN)            :: LDUSEFFTW
+(   85) # 86 ".D[6]/esetup_trans.h"
+(   86) END SUBROUTINE ESETUP_TRANS
+(   87) END INTERFACE
+(   88) # 50 "test_TwoTrunc.F90"
+(   50) # 50 "test_TwoTrunc.F90"
+(   50) # 1 ".D[6]/etrans_inq.h"
+(    1) INTERFACE
+(    2) SUBROUTINE ETRANS_INQ(KRESOL,KSPEC,KSPEC2,KSPEC2G,KSPEC2MX,KNUMP,&
+(    3)  & KGPTOT,KGPTOTG,KGPTOTMX,KGPTOTL,&
+(    4)  & KMYMS,KESM0,KUMPP,KPOSSP,KPTRMS,KALLMS,KDIM0G,&
+(    5)  & KFRSTLAT,KLSTLAT,KFRSTLOFF,KPTRLAT,&
+(    6)  & KPTRFRSTLAT,KPTRLSTLAT,KPTRFLOFF,KSTA,KONL,&
+(    7)  & KULTPP,KPTRLS,&
+(    8)  & KPRTRW,KMYSETW,KMYSETV,KMY_REGION_NS,KMY_REGION_EW,&
+(    9)  & LDSPLITLAT,&
+(   10)  & KSMAX,KMSMAX,KNVALUE,KMVALUE,PLEPINM,KDEF_RESOL,LDLAM,&
+(   11)  & PMU,PGW,PRPNM,KLEI3,KSPOLEGL,KPMS,KCPL2M,KCPL4M,KPROCM)  
+(   12) # 13 ".D[6]/etrans_inq.h"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 11
+
+(   13) !**** *ETRANS_INQ* - Extract information from the transform package
+(   14) # 15 ".D[6]/etrans_inq.h"
+(   15) !     Purpose.
+(   16) !     --------
+(   17) !     Interface routine for extracting information from the T.P.
+(   18) # 19 ".D[6]/etrans_inq.h"
+(   19) !**   Interface.
+(   20) !     ----------
+(   21) !     CALL ETRANS_INQ(...)
+(   22) !     Explicit arguments : All arguments are optional.
+(   23) !     -------------------- 
+(   24) !     KRESOL   - resolution tag for which info is required ,default is the
+(   25) !                first defined resulution (input)
+(   26) # 27 ".D[6]/etrans_inq.h"
+(   27) !                   MULTI-TRANSFORMS MANAGEMENT
+(   28) !     KDEF_RESOL - number or resolutions defined
+(   29) !     LDLAM      - .T. if the corresponding resolution is LAM, .F. if it is global
+(   30) # 31 ".D[6]/etrans_inq.h"
+(   31) !                   SPECTRAL SPACE
+(   32) !     KSPEC    - number of complex spectral coefficients on this PE
+(   33) !     KSPEC2   - 2*KSPEC 
+(   34) !     KSPEC2G  - global KSPEC2
+(   35) !     KSPEC2MX - maximun KSPEC2 among all PEs
+(   36) !     KNUMP    - Number of spectral waves handled by this PE
+(   37) !     KGPTOT   - Total number of grid columns on this PE
+(   38) !     KGPTOTG  - Total number of grid columns on the Globe
+(   39) !     KGPTOTMX - Maximum number of grid columns on any of the PEs
+(   40) !     KGPTOTL  - Number of grid columns one each PE (dimension N_REGIONS_NS:N_REGIONS_EW)
+(   41) !     KMYMS    - This PEs spectral zonal wavenumbers
+(   42) !     KESM0    - Address in a spectral array of (m, n=m)
+(   43) !     KUMPP    - No. of wave numbers each wave set is responsible for
+(   44) !     KPOSSP   - Defines partitioning of global spectral fields among PEs
+(   45) !     KPTRMS   - Pointer to the first wave number of a given a-set
+(   46) !     KALLMS   - Wave numbers for all wave-set concatenated together 
+(   47) !                to give all wave numbers in wave-set order
+(   48) !     KDIM0G   - Defines partitioning of global spectral fields among PEs
+(   49) !     KSMAX    - spectral truncation - n direction
+(   50) !     KMSMAX   - spectral truncation - m direction
+(   51) !     KNVALUE  - n value for each KSPEC2 spectral coeffient
+(   52) !     KMVALUE  - m value for each KSPEC2 spectral coeffient
+(   53) # 54 ".D[6]/etrans_inq.h"
+(   54) !                 GRIDPOINT SPACE                  
+(   55) !     KFRSTLAT    - First latitude of each a-set in grid-point space
+(   56) !     KLSTTLAT    - Last latitude of each a-set in grid-point space
+(   57) !     KFRSTLOFF   - Offset for first lat of own a-set in grid-point space
+(   58) !     KPTRLAT     - Pointer to the start of each latitude
+(   59) !     KPTRFRSTLAT - Pointer to the first latitude of each a-set in 
+(   60) !                   NSTA and NONL arrays
+(   61) !     KPTRLSTLAT  - Pointer to the last latitude of each a-set in
+(   62) !                   NSTA and NONL arrays
+(   63) !     KPTRFLOFF   - Offset for pointer to the first latitude of own a-set
+(   64) !                   NSTA and NONL arrays, i.e. nptrfrstlat(myseta)-1
+(   65) !     KSTA        - Position of first grid column for the latitudes on a 
+(   66) !                   processor. The information is available for all processors.
+(   67) !                   The b-sets are distinguished by the last dimension of 
+(   68) !                   nsta().The latitude band for each a-set is addressed by 
+(   69) !                   nptrfrstlat(jaset),nptrlstlat(jaset), and 
+(   70) !                   nptrfloff=nptrfrstlat(myseta) on this processors a-set.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 12
+
+(   71) !                   Each split latitude has two entries in nsta(,:) which 
+(   72) !                   necessitates the rather complex addressing of nsta(,:)
+(   73) !                   and the overdimensioning of nsta by N_REGIONS_NS.
+(   74) !     KONL        - Number of grid columns for the latitudes on a processor.
+(   75) !                   Similar to nsta() in data structure.
+(   76) !     LDSPLITLAT  - TRUE if latitude is split in grid point space over 
+(   77) !                   two a-sets
+(   78) # 79 ".D[6]/etrans_inq.h"
+(   79) !                FOURIER SPACE
+(   80) !     KULTPP   - number of latitudes for which each a-set is calculating 
+(   81) !                the FFT's.
+(   82) !     KPTRLS   - pointer to first global latitude of each a-set for which
+(   83) !                it performs the Fourier calculations
+(   84) # 85 ".D[6]/etrans_inq.h"
+(   85) !                 LEGENDRE
+(   86) !     PMU      - sin(Gaussian latitudes)
+(   87) !     PGW      - Gaussian weights
+(   88) !     PRPNM    - Legendre polynomials
+(   89) !     KLEI3    - First dimension of Legendre polynomials
+(   90) !     KSPOLEGL - Second dimension of Legendre polynomials
+(   91) !     KPMS     - Adress for legendre polynomial for given M (NSMAX)
+(   92) !     PLEPINM  - Eigen-values of the inverse Laplace operator
+(   93) # 94 ".D[6]/etrans_inq.h"
+(   94) !     Method.
+(   95) !     -------
+(   96) # 97 ".D[6]/etrans_inq.h"
+(   97) !     Externals.  ESET_RESOL - set resolution
+(   98) !     ----------  
+(   99) # 100 ".D[6]/etrans_inq.h"
+(  100) !     Author.
+(  101) !     -------
+(  102) !        Mats Hamrud *ECMWF*
+(  103) # 104 ".D[6]/etrans_inq.h"
+(  104) !     Modifications.
+(  105) !     --------------
+(  106) !        Original : 00-03-03
+(  107) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(  108) !        A.Nmiri       15-Nov-2007 Phasing with TFL 32R3
+(  109) !        A.Bogatchev   16-Sep-2010 Phasing with TFL 36R4
+(  110) !        R. El Khatib 08-Aug-2012 KSMAX,KMSMAX,KNVALUE,KMVALUE,PLEPINM,LDLAM,KDEF_RESOL
+(  111) # 112 ".D[6]/etrans_inq.h"
+(  112) !     ------------------------------------------------------------------
+(  113) # 114 ".D[6]/etrans_inq.h"
+(  114) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(  115) # 116 ".D[6]/etrans_inq.h"
+(  116) IMPLICIT NONE
+(  117) # 118 ".D[6]/etrans_inq.h"
+(  118) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KRESOL 
+(  119) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KSPEC 
+(  120) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KSPEC2 
+(  121) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KSPEC2G 
+(  122) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KSPEC2MX 
+(  123) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KNUMP 
+(  124) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KGPTOT 
+(  125) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KGPTOTG 
+(  126) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KGPTOTMX 
+(  127) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KGPTOTL(:,:) 
+(  128) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KMYMS(:) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 13
+
+(  129) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KESM0(0:) 
+(  130) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KUMPP(:) 
+(  131) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KPOSSP(:) 
+(  132) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KPTRMS(:) 
+(  133) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KALLMS(:) 
+(  134) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KDIM0G(0:) 
+(  135) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KFRSTLAT(:) 
+(  136) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KLSTLAT(:) 
+(  137) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KFRSTLOFF 
+(  138) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KPTRLAT(:) 
+(  139) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KPTRFRSTLAT(:) 
+(  140) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KPTRLSTLAT(:) 
+(  141) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KPTRFLOFF 
+(  142) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KSTA(:,:) 
+(  143) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KONL(:,:) 
+(  144) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KULTPP(:) 
+(  145) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KPTRLS(:) 
+(  146) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPRTRW
+(  147) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KMYSETW
+(  148) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KMYSETV
+(  149) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KMY_REGION_NS
+(  150) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KMY_REGION_EW
+(  151) LOGICAL           ,OPTIONAL,INTENT(INOUT) :: LDSPLITLAT(:) 
+(  152) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PMU(:) 
+(  153) REAL(KIND=JPRB)   ,OPTIONAL               :: PGW(:) ! Argument NOT used
+(  154) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PRPNM(:,:) 
+(  155) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KLEI3 
+(  156) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KSPOLEGL 
+(  157) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KPMS(0:) 
+(  158) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KCPL2M(0:) 
+(  159) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KCPL4M(0:) 
+(  160) INTEGER(KIND=JPIM),OPTIONAL,INTENT(INOUT) :: KPROCM(0:) 
+(  161) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KSMAX
+(  162) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KMSMAX
+(  163) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KNVALUE(:)
+(  164) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KMVALUE(:)
+(  165) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PLEPINM(:)
+(  166) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KDEF_RESOL
+(  167) LOGICAL           ,OPTIONAL,INTENT(OUT)   :: LDLAM
+(  168) # 169 ".D[6]/etrans_inq.h"
+(  169) END SUBROUTINE ETRANS_INQ
+(  170) END INTERFACE
+(  171) # 51 "test_TwoTrunc.F90"
+(   51) # 51 "test_TwoTrunc.F90"
+(   51) # 1 ".D[6]/einv_trans.h"
+(    1) INTERFACE
+(    2) SUBROUTINE EINV_TRANS(PSPVOR,PSPDIV,PSPSCALAR,PSPSC3A,PSPSC3B,PSPSC2,&
+(    3)  & FSPGL_PROC,&
+(    4)  & LDSCDERS,LDVORGP,LDDIVGP,LDUVDER,KPROMA,KVSETUV,KVSETSC,KRESOL,&
+(    5)  & KVSETSC3A,KVSETSC3B,KVSETSC2,&
+(    6)  & PGP,PGPUV,PGP3A,PGP3B,PGP2,PMEANU,PMEANV)
+(    7) # 8 ".D[6]/einv_trans.h"
+(    8) !**** *EINV_TRANS* - Inverse spectral transform.
+(    9) # 10 ".D[6]/einv_trans.h"
+(   10) !     Purpose.
+(   11) !     --------
+(   12) !        Interface routine for the inverse spectral transform
+(   13) # 14 ".D[6]/einv_trans.h"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 14
+
+(   14) !**   Interface.
+(   15) !     ----------
+(   16) !     CALL EINV_TRANS(...)
+(   17) # 18 ".D[6]/einv_trans.h"
+(   18) !     Explicit arguments : All arguments are optional.
+(   19) !     --------------------
+(   20) !     PSPVOR(:,:) - spectral vorticity (input)
+(   21) !     PSPDIV(:,:) - spectral divergence (input)
+(   22) !     PSPSCALAR(:,:) - spectral scalarvalued fields (input)
+(   23) !     PSPSC3A(:,:,:) - alternative to use of PSPSCALAR, see PGP3A below (input)
+(   24) !     PSPSC3B(:,:,:) - alternative to use of PSPSCALAR, see PGP3B below (input)
+(   25) !     PSPSC2(:,:)  - alternative to use of PSPSCALAR, see PGP2 below (input)
+(   26) !     FSPGL_PROC  - external procedure to be executed in fourier space
+(   27) !                   before transposition
+(   28) !     LDSCDERS    - indicating if derivatives of scalar variables are req.
+(   29) !     LDVORGP     - indicating if grid-point vorticity is req.
+(   30) !     LDDIVGP     - indicating if grid-point divergence is req.
+(   31) !     LDUVDER     - indicating if E-W derivatives of u and v are req.
+(   32) !     KPROMA      - required blocking factor for gridpoint output
+(   33) !     KVSETUV(:)  - indicating which 'b-set' in spectral space owns a
+(   34) !                   vor/div field. Equivalant to NBSETLEV in the IFS.
+(   35) !                   The length of KVSETUV should be the GLOBAL number
+(   36) !                   of u/v fields which is the dimension of u and v releated
+(   37) !                   fields in grid-point space.
+(   38) !     KVESETSC(:) - indicating which 'b-set' in spectral space owns a
+(   39) !                   scalar field. As for KVSETUV this argument is required
+(   40) !                   if the total number of processors is greater than
+(   41) !                   the number of processors used for distribution in
+(   42) !                   spectral wave space.
+(   43) !     KVSETSC3A(:) - as KVESETSC for PSPSC3A (distribution on first dimension)
+(   44) !     KVSETSC3B(:) - as KVESETSC for PSPSC3B (distribution on first dimension)
+(   45) !     KVSETSC2(:) - as KVESETSC for PSPSC2 (distribution on first dimension)
+(   46) !     KRESOL   - resolution tag  which is required ,default is the
+(   47) !                first defined resulution (input)
+(   48) !     PGP(:,:,:) - gridpoint fields (output)
+(   49) !                  PGP need to  dimensioned (NPROMA,IF_GP,NGPBLKS) where
+(   50) !                  NPROMA is the blocking factor, IF_GP the total number
+(   51) !                  of output fields and NGPBLKS the number of NPROMA blocks.
+(   52) !                  The ordering of the output fields is as follows (all
+(   53) !                  parts are optional depending on the input switches):
+(   54) !
+(   55) !       vorticity     : IF_UV_G fields (if psvor present and LDVORGP)
+(   56) !       divergence    : IF_UV_G fields (if psvor present and LDDIVGP)
+(   57) !       u             : IF_UV_G fields (if psvor present)
+(   58) !       v             : IF_UV_G fields (if psvor present)
+(   59) !       scalar fields : IF_SCALARS_G fields (if pspscalar present)
+(   60) !       N-S derivative of scalar fields : IF_SCALARS_G fields (if pspscalar
+(   61) !                                         present and LDSCDERS)
+(   62) !       E-W derivative of u : IF_UV_G fields (if psvor present and and LDUVDER)
+(   63) !       E-W derivative of v : IF_UV_G fields (if psvor present and and LDUVDER)
+(   64) !       E-W derivative of scalar fields : IF_SCALARS_G fields (if pspscalar
+(   65) !                                         present and LDSCDERS)
+(   66) !
+(   67) !       Here IF_UV_G is the GLOBAL number of u/v fields as given by the length
+(   68) !       of KVSETUV (or by PSPVOR if no split in spectral 'b-set' direction
+(   69) !       IF_SCALARS_G is the GLOBAL number of scalar fields as giben by the
+(   70) !       length of KVESETSC (or by number of fields in PSPSCALAR if no spectral
+(   71) !       'b-set' split
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 15
+
+(   72) # 73 ".D[6]/einv_trans.h"
+(   73) !     As an alternative to using PGP you can also use a combination of the
+(   74) !     following arrays. The reason for introducing these alternative ways
+(   75) !     of calling INV_TRANS is to avoid uneccessary copies where your data
+(   76) !     structures don't fit in to the 'PSPVOR,PSPDIV, PSPSCALAR, PGP' layout.
+(   77) !     The use of any of these precludes the use of PGP and vice versa.
+(   78) # 79 ".D[6]/einv_trans.h"
+(   79) !     PGPUV(:,:,:,:) - the 'u-v' related grid-point variables in the order
+(   80) !                      described for PGP. The second dimension of PGPUV should
+(   81) !                      be the same as the "global" first dimension of
+(   82) !                      PSPVOR,PSPDIV (in the IFS this is the number of levels)
+(   83) !                      PGPUV need to be dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   84) !                      IFLDS is the number of 'variables' (u,v,vor,div ...)
+(   85) !     PGP3A(:,:,:,:) - grid-point array directly connected with PSPSC3A
+(   86) !                      dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   87) !                      IFLDS is the number of 'variables' (the same as in
+(   88) !                      PSPSC3A if no derivatives, 3 times that with der.)
+(   89) !     PGP3B(:,:,:,:) - grid-point array directly connected with PSPSC3B
+(   90) !                      dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   91) !                      IFLDS is the number of 'variables' (the same as in
+(   92) !                      PSPSC3B if no derivatives, 3 times that with der.)
+(   93) !     PGP2(:,:,:)    - grid-point array directly connected with PSPSC2
+(   94) !                      dimensioned(NPROMA,IFLDS,NGPBLKS)
+(   95) !                      IFLDS is the number of 'variables' (the same as in
+(   96) !                      PSPSC2 if no derivatives, 3 times that with der.)
+(   97) !     Method.
+(   98) !     -------
+(   99) # 100 ".D[6]/einv_trans.h"
+(  100) !     Externals.  ESET_RESOL   - set resolution
+(  101) !     ----------  ELTINV_CTL   - control of Legendre transform
+(  102) !                 EFTINV_CTL   - control of Fourier transform
+(  103) # 104 ".D[6]/einv_trans.h"
+(  104) !     Author.
+(  105) !     -------
+(  106) !        Mats Hamrud *ECMWF*
+(  107) # 108 ".D[6]/einv_trans.h"
+(  108) !     Modifications.
+(  109) !     --------------
+(  110) !        Original : 00-03-03
+(  111) !        26-02-03 Mats Hamrud & Gabor Radnoti : modified condition for scalar fields
+(  112) !                                               and derivatives (IF_SCALARS_G)
+(  113) # 114 ".D[6]/einv_trans.h"
+(  114) !     ------------------------------------------------------------------
+(  115) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(  116) # 117 ".D[6]/einv_trans.h"
+(  117) IMPLICIT NONE
+(  118) # 119 ".D[6]/einv_trans.h"
+(  119) ! Declaration of arguments
+(  120) # 121 ".D[6]/einv_trans.h"
+(  121) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPVOR(:,:)
+(  122) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPDIV(:,:)
+(  123) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPSCALAR(:,:)
+(  124) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPSC3A(:,:,:)
+(  125) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPSC3B(:,:,:)
+(  126) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN) :: PSPSC2(:,:)
+(  127) LOGICAL   ,OPTIONAL, INTENT(IN) :: LDSCDERS
+(  128) LOGICAL   ,OPTIONAL, INTENT(IN) :: LDVORGP
+(  129) LOGICAL   ,OPTIONAL, INTENT(IN) :: LDDIVGP
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 16
+
+(  130) LOGICAL   ,OPTIONAL, INTENT(IN) :: LDUVDER
+(  131) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KPROMA
+(  132) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETUV(:)
+(  133) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC(:)
+(  134) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3A(:)
+(  135) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3B(:)
+(  136) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC2(:)
+(  137) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KRESOL
+(  138) EXTERNAL  FSPGL_PROC
+(  139) OPTIONAL  FSPGL_PROC
+(  140) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGP(:,:,:)
+(  141) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGPUV(:,:,:,:)
+(  142) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGP3A(:,:,:,:)
+(  143) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGP3B(:,:,:,:)
+(  144) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PGP2(:,:,:)
+(  145) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN)  :: PMEANU(:)
+(  146) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN)  :: PMEANV(:)
+(  147) # 149 ".D[6]/einv_trans.h"
+(  149) END SUBROUTINE EINV_TRANS
+(  150) # 151 ".D[6]/einv_trans.h"
+(  151) END INTERFACE
+(  152) # 52 "test_TwoTrunc.F90"
+(   52) # 52 "test_TwoTrunc.F90"
+(   52) # 1 ".D[6]/edir_trans.h"
+(    1) INTERFACE
+(    2) SUBROUTINE EDIR_TRANS(PSPVOR,PSPDIV,PSPSCALAR,PSPSC3A,PSPSC3B,PSPSC2,&
+(    3) & KPROMA,KVSETUV,KVSETSC,KRESOL,KVSETSC3A,KVSETSC3B,KVSETSC2,&
+(    4) & PGP,PGPUV,PGP3A,PGP3B,PGP2,PMEANU,PMEANV,AUX_PROC)
+(    5) # 7 ".D[6]/edir_trans.h"
+(    7) !**** *EDIR_TRANS* - Direct spectral transform (from grid-point to spectral).
+(    8) # 9 ".D[6]/edir_trans.h"
+(    9) !     Purpose.
+(   10) !     --------
+(   11) !        Interface routine for the direct spectral transform
+(   12) # 13 ".D[6]/edir_trans.h"
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !     CALL EDIR_TRANS(...)
+(   16) # 17 ".D[6]/edir_trans.h"
+(   17) !     Explicit arguments : All arguments except from PGP are optional.
+(   18) !     --------------------
+(   19) !     PSPVOR(:,:) - spectral vorticity (output)
+(   20) !     PSPDIV(:,:) - spectral divergence (output)
+(   21) !     PSPSCALAR(:,:) - spectral scalarvalued fields (output)
+(   22) !     PSPSC3A(:,:,:) - alternative to use of PSPSCALAR, see PGP3A below (input)
+(   23) !     PSPSC3B(:,:,:) - alternative to use of PSPSCALAR, see PGP3B below (input)
+(   24) !     PSPSC2(:,:)  - alternative to use of PSPSCALAR, see PGP2 below (input)
+(   25) !     KPROMA      - required blocking factor for gridpoint output
+(   26) !     KVSETUV(:)  - indicating which 'b-set' in spectral space owns a
+(   27) !                   vor/div field. Equivalant to NBSETLEV in the IFS.
+(   28) !                   The length of KVSETUV should be the GLOBAL number
+(   29) !                   of u/v fields which is the dimension of u and v releated
+(   30) !                   fields in grid-point space.
+(   31) !     KVESETSC(:) - indicating which 'b-set' in spectral space owns a
+(   32) !                   scalar field. As for KVSETUV this argument is required
+(   33) !                   if the total number of processors is greater than
+(   34) !                   the number of processors used for distribution in
+(   35) !                   spectral wave space.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 17
+
+(   36) !     KVSETSC3A(:) - as KVESETSC for PSPSC3A (distribution on first dimension)
+(   37) !     KVSETSC3B(:) - as KVESETSC for PSPSC3B (distribution on first dimension)
+(   38) !     KVSETSC2(:) - as KVESETSC for PSPSC2 (distribution on first dimension)
+(   39) !     KRESOL   - resolution tag  which is required ,default is the
+(   40) !                first defined resulution (input)
+(   41) !     PGP(:,:,:) - gridpoint fields (input)
+(   42) !                  PGP need to  dimensioned (NPROMA,IF_GP,NGPBLKS) where
+(   43) !                  NPROMA is the blocking factor, IF_GP the total number
+(   44) !                  of output fields and NGPBLKS the number of NPROMA blocks.
+(   45) !                  The ordering of the output fields is as follows (all
+(   46) !                  parts are optional depending on the input switches):
+(   47) !
+(   48) !     u             : IF_UV_G fields (if psvor present)
+(   49) !     v             : IF_UV_G fields (if psvor present)
+(   50) !     scalar fields : IF_SCALARS_G fields (if pspscalar present)
+(   51) !
+(   52) !     Here IF_UV_G is the GLOBAL number of u/v fields as given by the length
+(   53) !     of KVSETUV (or by PSPVOR if no split in spectral 'b-set' direction
+(   54) !     IF_SCALARS_G is the GLOBAL number of scalar fields as giben by the
+(   55) !     length of KVESETSC (or by number of fields in PSPSCALAR if no spectral
+(   56) !     'b-set' split
+(   57) # 58 ".D[6]/edir_trans.h"
+(   58) !     As an alternative to using PGP you can also use a combination of the
+(   59) !     following arrays. The reason for introducing these alternative ways
+(   60) !     of calling DIR_TRANS is to avoid uneccessary copies where your data
+(   61) !     structures don't fit in to the 'PSPVOR,PSPDIV, PSPSCALAR, PGP' layout.
+(   62) !     The use of any of these precludes the use of PGP and vice versa.
+(   63) # 64 ".D[6]/edir_trans.h"
+(   64) !     PGPUV(:,:,:,:) - the 'u-v' related grid-point variables in the order
+(   65) !                      described for PGP. The second dimension of PGPUV should
+(   66) !                      be the same as the "global" first dimension of
+(   67) !                      PSPVOR,PSPDIV (in the IFS this is the number of levels)
+(   68) !                      PGPUV need to be dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   69) !                      IFLDS is the number of 'variables' (u,v)
+(   70) !     PGP3A(:,:,:,:) - grid-point array directly connected with PSPSC3A
+(   71) !                      dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   72) !                      IFLDS is the number of 'variables' (the same as in
+(   73) !                      PSPSC3A )
+(   74) !     PGP3B(:,:,:,:) - grid-point array directly connected with PSPSC3B
+(   75) !                      dimensioned(NPROMA,ILEVS,IFLDS,NGPBLKS)
+(   76) !                      IFLDS is the number of 'variables' (the same as in
+(   77) !                      PSPSC3B)
+(   78) !     PGP2(:,:,:)    - grid-point array directly connected with PSPSC2
+(   79) !                      dimensioned(NPROMA,IFLDS,NGPBLKS)
+(   80) !                      IFLDS is the number of 'variables' (the same as in
+(   81) !                      PSPSC2 )
+(   82) !     PMEANU(:),PMEANV(:) - mean wind
+(   83) !     AUX_PROC       - optional external procedure for biperiodization of
+(   84) !                      aux.fields
+(   85) # 86 ".D[6]/edir_trans.h"
+(   86) !     Method.
+(   87) !     -------
+(   88) # 89 ".D[6]/edir_trans.h"
+(   89) !     Externals.  SET_RESOL   - set resolution
+(   90) !     ----------  LTDIR_CTL   - control of Legendre transform
+(   91) !                 FTDIR_CTL   - control of Fourier transform
+(   92) # 93 ".D[6]/edir_trans.h"
+(   93) !     Author.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 18
+
+(   94) !     -------
+(   95) !        Mats Hamrud *ECMWF*
+(   96) # 97 ".D[6]/edir_trans.h"
+(   97) !     Modifications.
+(   98) !     --------------
+(   99) !        Original : 00-03-03
+(  100) # 101 ".D[6]/edir_trans.h"
+(  101) !     ------------------------------------------------------------------
+(  102) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(  103) # 104 ".D[6]/edir_trans.h"
+(  104) IMPLICIT NONE
+(  105) # 106 ".D[6]/edir_trans.h"
+(  106) ! Declaration of arguments
+(  107) # 108 ".D[6]/edir_trans.h"
+(  108) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPVOR(:,:)
+(  109) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPDIV(:,:)
+(  110) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSCALAR(:,:)
+(  111) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSC3A(:,:,:)
+(  112) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSC3B(:,:,:)
+(  113) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPSC2(:,:)
+(  114) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KPROMA
+(  115) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETUV(:)
+(  116) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC(:)
+(  117) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3A(:)
+(  118) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3B(:)
+(  119) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC2(:)
+(  120) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KRESOL
+(  121) # 122 ".D[6]/edir_trans.h"
+(  122) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGP(:,:,:)
+(  123) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGPUV(:,:,:,:)
+(  124) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGP3A(:,:,:,:)
+(  125) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGP3B(:,:,:,:)
+(  126) REAL(KIND=JPRB),OPTIONAL    ,INTENT(IN) :: PGP2(:,:,:)
+(  127) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PMEANU(:)
+(  128) REAL(KIND=JPRB),OPTIONAL    ,INTENT(OUT) :: PMEANV(:)
+(  129) EXTERNAL AUX_PROC
+(  130) OPTIONAL AUX_PROC
+(  131) # 133 ".D[6]/edir_trans.h"
+(  133) END SUBROUTINE EDIR_TRANS
+(  134) # 135 ".D[6]/edir_trans.h"
+(  135) END INTERFACE
+(  136) # 53 "test_TwoTrunc.F90"
+(   53) # 53 "test_TwoTrunc.F90"
+(   53) # 1 ".D[5]/horiz_field.h"
+(    1) INTERFACE
+(    2) SUBROUTINE HORIZ_FIELD(KX,KY,PHFIELD)
+(    3) # 4 ".D[5]/horiz_field.h"
+(    4) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    5) # 6 ".D[5]/horiz_field.h"
+(    6) IMPLICIT NONE
+(    7) # 8 ".D[5]/horiz_field.h"
+(    8) INTEGER(KIND=JPIM),   INTENT(IN)    :: KX
+(    9) INTEGER(KIND=JPIM),   INTENT(IN)    :: KY
+(   10) REAL(KIND=JPRB),      INTENT(OUT)   :: PHFIELD(KX,KY)
+(   11) REAL(KIND=JPRB),      PARAMETER     :: PPI=3.141592
+(   12) END SUBROUTINE HORIZ_FIELD
+(   13) END INTERFACE
+(   14) # 54 "test_TwoTrunc.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 19
+
+(   54) # 54 "test_TwoTrunc.F90"
+(   54) # 1 ".D[5]/fpbipere.h"
+(    1) INTERFACE
+(    2) SUBROUTINE FPBIPERE(KDLUX,KDGUX,KDLON,KDGL,KNUBI,KD1,PGPBI,KDADD,LDZON,&
+(    3) & LDBOYD,KDBOYD,PLBOYD,PBIPOUT)
+(    4) USE PARKIND1 ,ONLY : JPIM ,JPRB
+(    5) INTEGER(KIND=JPIM),INTENT(IN) :: KNUBI
+(    6) INTEGER(KIND=JPIM),INTENT(IN) :: KD1
+(    7) INTEGER(KIND=JPIM),INTENT(IN) :: KDLUX
+(    8) INTEGER(KIND=JPIM),INTENT(IN) :: KDGUX
+(    9) INTEGER(KIND=JPIM),INTENT(IN) :: KDLON
+(   10) INTEGER(KIND=JPIM),INTENT(IN) :: KDGL
+(   11) INTEGER(KIND=JPIM),INTENT(IN) :: KDADD
+(   12) REAL(KIND=JPRB) ,INTENT(INOUT):: PGPBI(KD1,KNUBI)
+(   13) LOGICAL, OPTIONAL ,INTENT(IN) :: LDZON
+(   14) LOGICAL, OPTIONAL ,INTENT(IN) :: LDBOYD
+(   15) INTEGER(KIND=JPIM), INTENT(IN), OPTIONAL :: KDBOYD(6)
+(   16) REAL(KIND=JPRB)   , INTENT(IN), OPTIONAL :: PLBOYD
+(   17) REAL(KIND=JPRB)   ,INTENT(OUT), OPTIONAL :: PBIPOUT(:,:)
+(   18) END SUBROUTINE FPBIPERE
+(   19) END INTERFACE
+(   20) # 55 "test_TwoTrunc.F90"
+(   55) # 57 "test_TwoTrunc.F90"
+(   57) !-----------------------------------------------------------
+(   58) !1. GRID SETUP
+(   59) !-----------------------------------------------------------
+(   60) # 61 "test_TwoTrunc.F90"
+(   61) WRITE(*,*) '*****************************************************************'
+(   62) WRITE(*,*) '*                                                               *'
+(   63) WRITE(*,*) '*                 TEST OF SPECTRAL TRANSFORMS                   *'
+(   64) WRITE(*,*) '*                                                               *'
+(   65) WRITE(*,*) '*****************************************************************'
+(   66) WRITE(*,*) ' '
+(   67) WRITE(*,*) '************************** START SETUP **************************'
+(   68) WRITE(*,*) ' '
+(   69) # 70 "test_TwoTrunc.F90"
+(   70) !1.1. Setup for grid 1
+(   71) !------------------------
+(   72) # 73 "test_TwoTrunc.F90"
+(   73) NDLON1=288
+(   74) NDGL1=288
+(   75) NDLUX1=266
+(   76) NDGUX1=266
+(   77) ALLOCATE(NLOEN1(NDGL1))
+(   78) NLOEN1(:)=NDLON1
+(   79) NSMAX1=143
+(   80) NMSMAX1=143
+(   81) WRITE(*,*) '************ GRIDPOINT SETUP 1 **************'
+(   82) WRITE(UNIT=*,FMT='(4(A,I4,2X))') 'NDLON:',NDLON1,'NDGL:',NDGL1,'NDLUX:',NDLUX1,'NDGUX:',NDGUX1
+(   83) WRITE(UNIT=*,FMT='(4(A,I4,2X))') 'NSMAX:',NSMAX1,'NMSMAX:',NMSMAX1
+(   84) # 85 "test_TwoTrunc.F90"
+(   85) !1.1.1 Read and biper input field
+(   86) !--------------------------------
+(   87) !allocate two horizontal field's
+(   88) !one for spectral transformations and one for reference
+(   89) ALLOCATE(GGPBI1(NDLON1*NDGL1,1,1),GGPBIR1(NDLON1*NDGL1,1,1))
+(   90) # 91 "test_TwoTrunc.F90"
+(   91) !read input field
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 20
+
+(   92) WRITE(*,*) 'READ FIELD 1'
+(   93) ALLOCATE(HFIELD(NDLUX1,NDGUX1))
+(   94) # 95 "test_TwoTrunc.F90"
+(   95) CALL HORIZ_FIELD(NDLUX1,NDGUX1,HFIELD)
+(   96) # 97 "test_TwoTrunc.F90"
+(   97) !change layout
+(   98) ISTAE=0
+(   99) DO JY=1,NDGUX1
+(  100)   DO JX=1,NDLUX1
+(  101)    GGPBI1(ISTAE+JX,1,1)=HFIELD(JX,JY)
+(  102)   ENDDO
+(  103) ISTAE=ISTAE+NDLUX1
+(  104) ENDDO
+(  105) # 106 "test_TwoTrunc.F90"
+(  106) !biper input field
+(  107) WRITE(*,*) 'BIPER FIELD 1'
+(  108) # 109 "test_TwoTrunc.F90"
+(  109) CALL FPBIPERE(NDLUX1,NDGUX1,NDLON1,NDGL1,1,NDLON1*NDGL1,GGPBI1,0,.FALSE.)
+(  110) # 112 "test_TwoTrunc.F90"
+(  112) !1.2. Setup for grid 2
+(  113) !------------------------
+(  114) # 115 "test_TwoTrunc.F90"
+(  115) NDLON2=384
+(  116) NDGL2=384
+(  117) NDLUX2=362
+(  118) NDGUX2=362
+(  119) ALLOCATE(NLOEN2(NDGL2))
+(  120) NLOEN2(:)=NDLON2
+(  121) NSMAX2=191
+(  122) NMSMAX2=191
+(  123) # 124 "test_TwoTrunc.F90"
+(  124) WRITE(*,*) '************ GRIDPOINT SETUP 2 **************'
+(  125) WRITE(UNIT=*,FMT='(4(A,I4,2X))') 'NDLON:',NDLON2,'NDGL:',NDGL2,'NDLUX:',NDLUX2,'NDGUX:',NDGUX2
+(  126) WRITE(UNIT=*,FMT='(4(A,I4,2X))') 'NSMAX:',NSMAX2,'NMSMAX:',NMSMAX2
+(  127) # 128 "test_TwoTrunc.F90"
+(  128) !1.2.1 Read and biper input field
+(  129) !----------------------------
+(  130) !allocate two horizontal field's
+(  131) !one for spectral transformations and one for reference
+(  132) ALLOCATE(GGPBI2(NDLON2*NDGL2,1,1),GGPBIR2(NDLON2*NDGL2,1,1))
+(  133) # 134 "test_TwoTrunc.F90"
+(  134) !read input field
+(  135) WRITE(*,*) 'READ FIELD 2'
+(  136) ALLOCATE(HFIELD(NDLUX2,NDGUX2))
+(  137) # 138 "test_TwoTrunc.F90"
+(  138) CALL HORIZ_FIELD(NDLUX2,NDGUX2,HFIELD)
+(  139) # 140 "test_TwoTrunc.F90"
+(  140) !change layout
+(  141) ISTAE=0
+(  142) DO JY=1,NDGUX2
+(  143)   DO JX=1,NDLUX2
+(  144)    GGPBI2(ISTAE+JX,1,1)=HFIELD(JX,JY)
+(  145)   ENDDO
+(  146) ISTAE=ISTAE+NDLUX2
+(  147) ENDDO
+(  148) # 149 "test_TwoTrunc.F90"
+(  149) !biper input field
+(  150) WRITE(*,*) 'BIPER FIELD 2'
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 21
+
+(  151) # 152 "test_TwoTrunc.F90"
+(  152) CALL FPBIPERE(NDLUX2,NDGUX2,NDLON2,NDGL2,1,NDLON2*NDGL2,GGPBI2,0,.FALSE.)
+(  153) # 155 "test_TwoTrunc.F90"
+(  155) !-----------------------------------------------------------
+(  156) !2. SPECTRAL SETUP
+(  157) !-----------------------------------------------------------
+(  158) # 159 "test_TwoTrunc.F90"
+(  159) !2.1. Resolution independent part
+(  160) !---------------------------------
+(  161) # 163 "test_TwoTrunc.F90"
+(  163) CALL SETUP_TRANS0(KMAX_RESOL=2,LDMPOFF=.TRUE.)
+(  164) # 166 "test_TwoTrunc.F90"
+(  166) !2.2. Setup for grid 1
+(  167) !-------------------------------------
+(  168) # 169 "test_TwoTrunc.F90"
+(  169) WRITE(*,*) '************ SPECTRAL SETUP 1 **************'
+(  170) # 171 "test_TwoTrunc.F90"
+(  171) CALL ESETUP_TRANS(NMSMAX1,NSMAX1,NDGL1,NDGUX1,NLOEN1,KRESOL=NRESOL1)
+(  172) # 173 "test_TwoTrunc.F90"
+(  173) CALL ETRANS_INQ(KRESOL=NRESOL1,KSPEC2=NSPEC21,KGPTOT=NGPTOT1)
+(  174) # 175 "test_TwoTrunc.F90"
+(  175) ALLOCATE(SPECTEMP1(1,NSPEC21))
+(  176) # 177 "test_TwoTrunc.F90"
+(  177) WRITE(UNIT=*,FMT='(3(A,I7,2X))') 'NSPEC21:',NSPEC21,'NGPTOT1:',NGPTOT1,'NRESOL1:',NRESOL1
+(  178) WRITE(*,*) 'END SETUP 1'
+(  179) # 181 "test_TwoTrunc.F90"
+(  181) !2.3. Setup for grid 2
+(  182) !-------------------------------------
+(  183) # 184 "test_TwoTrunc.F90"
+(  184) WRITE(*,*) '************ SPECTRAL SETUP 2 **************'
+(  185) # 186 "test_TwoTrunc.F90"
+(  186) CALL ESETUP_TRANS(NMSMAX2,NSMAX2,NDGL2,NDGUX2,NLOEN2,KRESOL=NRESOL2)
+(  187) # 188 "test_TwoTrunc.F90"
+(  188) CALL ETRANS_INQ(KRESOL=NRESOL2,KSPEC2=NSPEC22,KGPTOT=NGPTOT2)
+(  189) # 190 "test_TwoTrunc.F90"
+(  190) ALLOCATE(SPECTEMP2(1,NSPEC22))
+(  191) # 192 "test_TwoTrunc.F90"
+(  192) WRITE(UNIT=*,FMT='(3(A,I7,2X))') 'NSPEC22:',NSPEC22,'NGPTOT2:',NGPTOT2,'NRESOL2:',NRESOL2
+(  193) WRITE(*,FMT=*) 'END SETUP 2'
+(  194) # 195 "test_TwoTrunc.F90"
+(  195) WRITE(UNIT=*,FMT=*) '*************************** END SETUP ***************************'
+(  196) WRITE(*,*) ' '
+(  197) # 199 "test_TwoTrunc.F90"
+(  199) !-----------------------------------------------------------
+(  200) !3. DIRECT AND INVERSE TRANSFORM + RMSE COMPUTATIONS
+(  201) !-----------------------------------------------------------
+(  202) # 203 "test_TwoTrunc.F90"
+(  203) !3.1. Computations for grid 1
+(  204) !----------------------------
+(  205) # 206 "test_TwoTrunc.F90"
+(  206) WRITE(*,*) '**********************************************'
+(  207) WRITE(*,*) '*         DATA ON SMALLER GRID               *'
+(  208) WRITE(*,*) '**********************************************'
+(  209) WRITE(*,*) ' '
+(  210) # 212 "test_TwoTrunc.F90"
+(  212) !3.1.1. Go to spectral
+(  213) !----------------------------
+(  214) # 215 "test_TwoTrunc.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 22
+
+(  215) WRITE(*,*) 'DIRECT TRANSFORM OF FIELD 1'
+(  216) # 217 "test_TwoTrunc.F90"
+(  217) CALL EDIR_TRANS(PSPSCALAR=SPECTEMP1,PGP=GGPBI1,KPROMA=NGPTOT1,KRESOL=NRESOL1)
+(  218) # 220 "test_TwoTrunc.F90"
+(  220) !3.1.2. Go back to gridpoint
+(  221) !----------------------------
+(  222) # 223 "test_TwoTrunc.F90"
+(  223) WRITE(UNIT=*,FMT='(A,I2)') 'INVERSE TRANSFORM OF FIELD 1'
+(  224) # 225 "test_TwoTrunc.F90"
+(  225) CALL EINV_TRANS(PSPSCALAR=SPECTEMP1,PGP=GGPBIR1,KPROMA=NGPTOT1,KRESOL=NRESOL1)
+(  226) # 228 "test_TwoTrunc.F90"
+(  228) !3.1.3. Compute RMS on C U I
+(  229) !----------------------------
+(  230) # 231 "test_TwoTrunc.F90"
+(  231) SUM2=0
+(  232) ISTAE=0
+(  233) COUNT=0
+(  234) DO JY=1,NDGUX1
+(  235)  DO JX=1,NDLUX1
+(  236)   SUM2=SUM2+(GGPBI1(JX+ISTAE,1,1)-GGPBIR1(JX+ISTAE,1,1))**2
+(  237)   COUNT=COUNT+1
+(  238)  ENDDO
+(  239) ISTAE=ISTAE+NDLON1
+(  240) ENDDO
+(  241) RMS=SQRT(SUM2/COUNT)
+(  242) # 244 "test_TwoTrunc.F90"
+(  244) WRITE(UNIT=*,FMT='(A,I2)') 'CALCULATION OF RMS ERROR ON C+I ZONE FOR FIELD 1'
+(  245) WRITE(UNIT=*,FMT='(A,I5)') 'NUMBER OF POINTS IN CALCULATION 1:',COUNT
+(  246) WRITE(*,*) 'RMS ERROR 1:',RMS
+(  247) # 248 "test_TwoTrunc.F90"
+(  248) DEALLOCATE(GGPBI1,GGPBIR1,SPECTEMP1)
+(  249) !3.2. Computations for grid 2
+(  250) !----------------------------
+(  251) # 252 "test_TwoTrunc.F90"
+(  252) WRITE(*,*) ' '
+(  253) WRITE(*,*) '**********************************************'
+(  254) WRITE(*,*) '*         DATA ON BIGGER GRID                *'
+(  255) WRITE(*,*) '**********************************************'
+(  256) WRITE(*,*) ' '
+(  257) # 258 "test_TwoTrunc.F90"
+(  258) !3.2.1. Go to spectral
+(  259) !----------------------------
+(  260) # 261 "test_TwoTrunc.F90"
+(  261) WRITE(*,*) 'DIRECT TRANSFORM OF FIELD 2'
+(  262) # 263 "test_TwoTrunc.F90"
+(  263) CALL EDIR_TRANS(PSPSCALAR=SPECTEMP2,PGP=GGPBI2,KPROMA=NGPTOT2,KRESOL=NRESOL2)
+(  264) # 266 "test_TwoTrunc.F90"
+(  266) !3.2.2. Go back to gridpoint
+(  267) !----------------------------
+(  268) WRITE(UNIT=*,FMT='(A,I2)') 'INVERSE TRANSFORM OF FIELD 2'
+(  269) # 270 "test_TwoTrunc.F90"
+(  270) CALL EINV_TRANS(PSPSCALAR=SPECTEMP2,PGP=GGPBIR2,KPROMA=NGPTOT2,KRESOL=NRESOL2)
+(  271) # 273 "test_TwoTrunc.F90"
+(  273) !3.2.3. Compute RMS on C U I
+(  274) !-----------------------------
+(  275) # 276 "test_TwoTrunc.F90"
+(  276) SUM2=0
+(  277) ISTAE=0
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:29      page 23
+
+(  278) COUNT=0
+(  279) DO JY=1,NDGUX2
+(  280)  DO JX=1,NDLUX2
+(  281)   SUM2=SUM2+(GGPBI2(JX+ISTAE,1,1)-GGPBIR2(JX+ISTAE,1,1))**2
+(  282)   COUNT=COUNT+1
+(  283)  ENDDO
+(  284) ISTAE=ISTAE+NDLON2
+(  285) ENDDO
+(  286) # 287 "test_TwoTrunc.F90"
+(  287) RMS=SQRT(SUM2/COUNT)
+(  288) # 289 "test_TwoTrunc.F90"
+(  289) WRITE(UNIT=*,FMT='(A,I2)') 'CALCULATION OF RMS ERROR ON C+I ZONE FOR FIELD 2'
+(  290) WRITE(UNIT=*,FMT='(A,I9)') 'NUMBER OF POINTS IN CALCULATION 2:',COUNT
+(  291) WRITE(*,*) 'RMS ERROR 2:',RMS
+(  292) # 294 "test_TwoTrunc.F90"
+(  294) !-----------------------------------------------------------
+(  295) !4. END SPECTRAL TRANSFORM
+(  296) !-----------------------------------------------------------
+(  297) # 298 "test_TwoTrunc.F90"
+(  298) CALL TRANS_END
+(  299) # 301 "test_TwoTrunc.F90"
+(  301) END PROGRAM TEST_TWOTRUNC

@@ -1,0 +1,357 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:01      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: sumplatf_mod.F90
+
+(    1) MODULE SUMPLATF_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUMPLATF(KDGL,KPROCA,KMYSETA,&
+(    4)                    &KULTPP,KPROCL,KPTRLS)
+(    5) 
+(    6) !**** *SUMPLATF * - Initialize fourier space distibution in N-S direction
+(    7) 
+(    8) !     Purpose.
+(    9) !     --------
+(   10) 
+(   11) 
+(   12) !**   Interface.
+(   13) !     ----------
+(   14) !        *CALL* *SUMPLATF *
+(   15) 
+(   16) !     Explicit arguments - input :
+(   17) !     --------------------
+(   18) !                          KDGL       -last  latitude
+(   19) !                          KPROCA     -number of processors in A direction
+(   20) !                          KMYSETA    -process number in A direction
+(   21) 
+(   22) !     Explicit arguments - output:
+(   23) !     --------------------
+(   24) 
+(   25) !                          KULTPP     -number of latitudes in process
+(   26) !                                      (in Fourier space)
+(   27) !                          KPROCL     -process responsible for latitude
+(   28) !                                      (in Fourier space)
+(   29) !                          KPTRLS     -pointer to first global latitude
+(   30) !                                      of process (in Fourier space)
+(   31) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:01      page 2
+
+(   32) !        Implicit arguments :
+(   33) !        --------------------
+(   34) 
+(   35) 
+(   36) !     Method.
+(   37) !     -------
+(   38) !        See documentation
+(   39) 
+(   40) !     Externals.   SUMPLATB and SUEMPLATB.
+(   41) !     ----------
+(   42) 
+(   43) !     Reference.
+(   44) !     ----------
+(   45) !        ECMWF Research Department documentation of the IFS
+(   46) 
+(   47) !     Author.
+(   48) !     -------
+(   49) !        MPP Group *ECMWF*
+(   50) 
+(   51) !     Modifications.
+(   52) !     --------------
+(   53) !        Original : 95-10-01
+(   54) !        David Dent:97-06-02 parameters KFRSTLAT etc added
+(   55) !        JF. Estrade:97-11-13 Adaptation to ALADIN case
+(   56) !        J.Boutahar: 98-07-06  phasing with CY19
+(   57) !        Modified 98-08-10 by K. YESSAD: removal of LRPOLE option + cleanings
+(   58) !         (correct computation of extrapolar latitudes for KPROCL).
+(   59) !        Modified 98-12-07 by K. YESSAD and C. FISCHER: cleaning.
+(   60) !         - merge old sumplat.F and suemplat.F
+(   61) !         - gather 'lelam' code and 'not lelam' code.
+(   62) !         - clean (useless duplication of variables, non doctor features).
+(   63) !         - remodularise according to lelam/not lelam
+(   64) !           -> lelam features in new routine suemplatb.F,
+(   65) !              not lelam features in new routine sumplatb.F
+(   66) !     ------------------------------------------------------------------
+(   67) 
+(   68) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   69) 
+(   70) USE TPM_GEOMETRY    ,ONLY : G
+(   71) 
+(   72) USE SUMPLATB_MOD    ,ONLY : SUMPLATB
+(   73) !
+(   74) 
+(   75) IMPLICIT NONE
+(   76) 
+(   77) !     * DUMMY:
+(   78) INTEGER(KIND=JPIM),INTENT(IN)  :: KDGL
+(   79) INTEGER(KIND=JPIM),INTENT(IN)  :: KPROCA
+(   80) INTEGER(KIND=JPIM),INTENT(IN)  :: KMYSETA
+(   81) INTEGER(KIND=JPIM),INTENT(OUT) :: KULTPP(:)
+(   82) INTEGER(KIND=JPIM),INTENT(OUT) :: KPROCL(:)
+(   83) INTEGER(KIND=JPIM),INTENT(OUT) :: KPTRLS(:)
+(   84) 
+(   85) !     * LOCAL:
+(   86) INTEGER(KIND=JPIM) :: INDIC(KPROCA),ILAST(KPROCA)
+(   87) 
+(   88) !     LOCAL INTEGER SCALARS
+(   89) INTEGER(KIND=JPIM) :: IA, ILAT, ISTART, IMEDIAP,IRESTM, JA,  JLTLOC
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:01      page 3
+
+(   90) 
+(   91) LOGICAL :: LLSPLIT,LLFOURIER
+(   92) 
+(   93) !      -----------------------------------------------------------------
+(   94) 
+(   95) !*       1.    CODE DEPENDING ON 'LELAM': COMPUTATION OF
+(   96) !              KMEDIAP, KRESTM, INDIC, ILAST.
+(   97) !              -----------------------------------------
+(   98) 
+(   99) LLSPLIT = .FALSE.
+(  100) LLFOURIER = .TRUE.
+(  101) 
+(  102) CALL SUMPLATB(1,KDGL,KPROCA,G%NLOEN,LLSPLIT,LLFOURIER,&
+(  103)  &IMEDIAP,IRESTM,INDIC,ILAST)
+(  104) 
+(  105) !      -----------------------------------------------------------------
+(  106) 
+(  107) !*       2.    CODE NOT DEPENDING ON 'LELAM':
+(  108) !              ------------------------------
+(  109) 
+(  110) 
+(  111) 
+(  112) !     * Definitions related to distribution of latitudes along sets
+(  113) !       ------------ in fourier-space -----------------------------
+(  114) ISTART = 0
+(  115) KULTPP(1) = ILAST(1)
+(  116) DO JA=1,KPROCA
+(  117)   IF(JA > 1) THEN
+(  118)     IF(ILAST(JA) /= 0) THEN
+(  119)       KULTPP(JA) = ILAST(JA)-ILAST(JA-1)
+(  120)     ELSE
+(  121)       KULTPP(JA) = 0
+(  122)     ENDIF
+(  123)   ENDIF
+(  124)   DO JLTLOC=1,KULTPP(JA)
+(  125)     ILAT = ISTART + JLTLOC
+(  126)     KPROCL(ILAT) = JA
+(  127)   ENDDO
+(  128)   ISTART = ISTART + KULTPP(JA)
+(  129) ENDDO
+(  130) 
+(  131) !     * Computes KPTRLS.
+(  132) 
+(  133) IA = KPROCL(1)
+(  134) KPTRLS(IA) = 1
+(  135) DO JA=IA+1,KPROCA
+(  136)   KPTRLS(JA) = KPTRLS(JA-1) + KULTPP(JA-1)
+(  137) ENDDO
+(  138) 
+(  139) END SUBROUTINE SUMPLATF
+(  140) END MODULE SUMPLATF_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:01      page 4
+
+(    1) # 1 "sumplatf_mod.F90"
+(    1) MODULE SUMPLATF_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUMPLATF(KDGL,KPROCA,KMYSETA,&
+(    4)                    &KULTPP,KPROCL,KPTRLS)
+(    5) # 6 "sumplatf_mod.F90"
+(    6) !**** *SUMPLATF * - Initialize fourier space distibution in N-S direction
+(    7) # 8 "sumplatf_mod.F90"
+(    8) !     Purpose.
+(    9) !     --------
+(   10) # 12 "sumplatf_mod.F90"
+(   12) !**   Interface.
+(   13) !     ----------
+(   14) !        *CALL* *SUMPLATF *
+(   15) # 16 "sumplatf_mod.F90"
+(   16) !     Explicit arguments - input :
+(   17) !     --------------------
+(   18) !                          KDGL       -last  latitude
+(   19) !                          KPROCA     -number of processors in A direction
+(   20) !                          KMYSETA    -process number in A direction
+(   21) # 22 "sumplatf_mod.F90"
+(   22) !     Explicit arguments - output:
+(   23) !     --------------------
+(   24) # 25 "sumplatf_mod.F90"
+(   25) !                          KULTPP     -number of latitudes in process
+(   26) !                                      (in Fourier space)
+(   27) !                          KPROCL     -process responsible for latitude
+(   28) !                                      (in Fourier space)
+(   29) !                          KPTRLS     -pointer to first global latitude
+(   30) !                                      of process (in Fourier space)
+(   31) # 32 "sumplatf_mod.F90"
+(   32) !        Implicit arguments :
+(   33) !        --------------------
+(   34) # 36 "sumplatf_mod.F90"
+(   36) !     Method.
+(   37) !     -------
+(   38) !        See documentation
+(   39) # 40 "sumplatf_mod.F90"
+(   40) !     Externals.   SUMPLATB and SUEMPLATB.
+(   41) !     ----------
+(   42) # 43 "sumplatf_mod.F90"
+(   43) !     Reference.
+(   44) !     ----------
+(   45) !        ECMWF Research Department documentation of the IFS
+(   46) # 47 "sumplatf_mod.F90"
+(   47) !     Author.
+(   48) !     -------
+(   49) !        MPP Group *ECMWF*
+(   50) # 51 "sumplatf_mod.F90"
+(   51) !     Modifications.
+(   52) !     --------------
+(   53) !        Original : 95-10-01
+(   54) !        David Dent:97-06-02 parameters KFRSTLAT etc added
+(   55) !        JF. Estrade:97-11-13 Adaptation to ALADIN case
+(   56) !        J.Boutahar: 98-07-06  phasing with CY19
+(   57) !        Modified 98-08-10 by K. YESSAD: removal of LRPOLE option + cleanings
+(   58) !         (correct computation of extrapolar latitudes for KPROCL).
+(   59) !        Modified 98-12-07 by K. YESSAD and C. FISCHER: cleaning.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:01      page 5
+
+(   60) !         - merge old sumplat.F and suemplat.F
+(   61) !         - gather 'lelam' code and 'not lelam' code.
+(   62) !         - clean (useless duplication of variables, non doctor features).
+(   63) !         - remodularise according to lelam/not lelam
+(   64) !           -> lelam features in new routine suemplatb.F,
+(   65) !              not lelam features in new routine sumplatb.F
+(   66) !     ------------------------------------------------------------------
+(   67) # 68 "sumplatf_mod.F90"
+(   68) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   69) # 70 "sumplatf_mod.F90"
+(   70) USE TPM_GEOMETRY    ,ONLY : G
+(   71) # 72 "sumplatf_mod.F90"
+(   72) USE SUMPLATB_MOD    ,ONLY : SUMPLATB
+(   73) !
+(   74) # 75 "sumplatf_mod.F90"
+(   75) IMPLICIT NONE
+(   76) # 77 "sumplatf_mod.F90"
+(   77) !     * DUMMY:
+(   78) INTEGER(KIND=JPIM),INTENT(IN)  :: KDGL
+(   79) INTEGER(KIND=JPIM),INTENT(IN)  :: KPROCA
+(   80) INTEGER(KIND=JPIM),INTENT(IN)  :: KMYSETA
+(   81) INTEGER(KIND=JPIM),INTENT(OUT) :: KULTPP(:)
+(   82) INTEGER(KIND=JPIM),INTENT(OUT) :: KPROCL(:)
+(   83) INTEGER(KIND=JPIM),INTENT(OUT) :: KPTRLS(:)
+(   84) # 85 "sumplatf_mod.F90"
+(   85) !     * LOCAL:
+(   86) INTEGER(KIND=JPIM) :: INDIC(KPROCA),ILAST(KPROCA)
+(   87) # 88 "sumplatf_mod.F90"
+(   88) !     LOCAL INTEGER SCALARS
+(   89) INTEGER(KIND=JPIM) :: IA, ILAT, ISTART, IMEDIAP,IRESTM, JA,  JLTLOC
+(   90) # 91 "sumplatf_mod.F90"
+(   91) LOGICAL :: LLSPLIT,LLFOURIER
+(   92) # 93 "sumplatf_mod.F90"
+(   93) !      -----------------------------------------------------------------
+(   94) # 95 "sumplatf_mod.F90"
+(   95) !*       1.    CODE DEPENDING ON 'LELAM': COMPUTATION OF
+(   96) !              KMEDIAP, KRESTM, INDIC, ILAST.
+(   97) !              -----------------------------------------
+(   98) # 99 "sumplatf_mod.F90"
+(   99) LLSPLIT = .FALSE.
+(  100) LLFOURIER = .TRUE.
+(  101) # 102 "sumplatf_mod.F90"
+(  102) CALL SUMPLATB(1,KDGL,KPROCA,G%NLOEN,LLSPLIT,LLFOURIER,&
+(  103)  &IMEDIAP,IRESTM,INDIC,ILAST)
+(  104) # 105 "sumplatf_mod.F90"
+(  105) !      -----------------------------------------------------------------
+(  106) # 107 "sumplatf_mod.F90"
+(  107) !*       2.    CODE NOT DEPENDING ON 'LELAM':
+(  108) !              ------------------------------
+(  109) # 112 "sumplatf_mod.F90"
+(  112) !     * Definitions related to distribution of latitudes along sets
+(  113) !       ------------ in fourier-space -----------------------------
+(  114) ISTART = 0
+(  115) KULTPP(1) = ILAST(1)
+(  116) DO JA=1,KPROCA
+(  117)   IF(JA > 1) THEN
+(  118)     IF(ILAST(JA) /= 0) THEN
+(  119)       KULTPP(JA) = ILAST(JA)-ILAST(JA-1)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:01      page 6
+
+(  120)     ELSE
+(  121)       KULTPP(JA) = 0
+(  122)     ENDIF
+(  123)   ENDIF
+(  124)   DO JLTLOC=1,KULTPP(JA)
+(  125)     ILAT = ISTART + JLTLOC
+(  126)     KPROCL(ILAT) = JA
+(  127)   ENDDO
+(  128)   ISTART = ISTART + KULTPP(JA)
+(  129) ENDDO
+(  130) # 131 "sumplatf_mod.F90"
+(  131) !     * Computes KPTRLS.
+(  132) # 133 "sumplatf_mod.F90"
+(  133) IA = KPROCL(1)
+(  134) KPTRLS(IA) = 1
+(  135) DO JA=IA+1,KPROCA
+(  136)   KPTRLS(JA) = KPTRLS(JA-1) + KULTPP(JA-1)
+(  137) ENDDO
+(  138) # 139 "sumplatf_mod.F90"
+(  139) END SUBROUTINE SUMPLATF
+(  140) END MODULE SUMPLATF_MOD

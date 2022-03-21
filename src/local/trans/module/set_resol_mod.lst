@@ -1,0 +1,212 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:31      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: set_resol_mod.F90
+
+(    1) MODULE SET_RESOL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SET_RESOL(KRESOL,LDSETUP)
+(    4) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    5) 
+(    6) USE TPM_GEN         ,ONLY : NOUT, MSETUP0, NCUR_RESOL, NMAX_RESOL,LENABLED
+(    7) USE TPM_DIM         ,ONLY : R, DIM_RESOL
+(    8) !USE TPM_TRANS
+(    9) USE TPM_DISTR       ,ONLY : D, DISTR_RESOL
+(   10) USE TPM_GEOMETRY    ,ONLY : G, GEOM_RESOL
+(   11) USE TPM_FIELDS      ,ONLY : F, FIELDS_RESOL
+(   12) USE TPM_FFT         ,ONLY : T, FFT_RESOL, TB, FFTB_RESOL
+(   13) #ifdef WITH_FFTW
+(   14) USE TPM_FFTW        ,ONLY : TW, FFTW_RESOL
+(   15) #endif
+(   16) USE TPM_FFTC        ,ONLY : TC, FFTC_RESOL
+(   17) USE TPM_FLT
+(   18) USE TPM_CTL        ,ONLY : C, CTL_RESOL
+(   19) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   20) !
+(   21) 
+(   22) IMPLICIT NONE
+(   23) 
+(   24) ! Declaration of arguments
+(   25) 
+(   26) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KRESOL
+(   27) LOGICAL            ,OPTIONAL, INTENT(IN) :: LDSETUP
+(   28) 
+(   29) ! Local varaibles
+(   30) INTEGER(KIND=JPIM) :: IRESOL
+(   31) LOGICAL :: LLSETUP
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:31      page 2
+
+(   32) 
+(   33) !     ------------------------------------------------------------------
+(   34) 
+(   35) IF(MSETUP0 == 0) CALL ABORT_TRANS('SET_RESOL:TRANS NOT SETUP')
+(   36) LLSETUP = .FALSE.
+(   37) IF(PRESENT(LDSETUP)) LLSETUP = LDSETUP
+(   38) IRESOL = 1
+(   39) IF(PRESENT(KRESOL)) THEN
+(   40)   IRESOL = KRESOL
+(   41)  IF(IRESOL < 1 .OR. IRESOL > NMAX_RESOL) THEN
+(   42)    WRITE(NOUT,*)'SET_RESOL: UNKNOWN RESOLUTION ',IRESOL,NMAX_RESOL
+(   43)    CALL ABORT_TRANS('SET_RESOL:IRESOL < 1 .OR. KRESOL > NMAX_RESOL')
+(   44)   ENDIF
+(   45)   IF(.NOT.LLSETUP) THEN
+(   46)     IF(.NOT.LENABLED(IRESOL)) THEN
+(   47)       WRITE(NOUT,*)'SET_RESOL: UNKNOWN RESOLUTION ',IRESOL,LENABLED
+(   48)       CALL ABORT_TRANS('SET_RESOL:IRESOL NOT ENABLED')
+(   49)      ENDIF
+(   50)    ENDIF
+(   51) ENDIF
+(   52) IF(IRESOL /= NCUR_RESOL) THEN
+(   53)   NCUR_RESOL = IRESOL
+(   54)   R => DIM_RESOL(NCUR_RESOL)
+(   55)   F => FIELDS_RESOL(NCUR_RESOL)
+(   56)   G => GEOM_RESOL(NCUR_RESOL)
+(   57)   D => DISTR_RESOL(NCUR_RESOL)
+(   58)   T => FFT_RESOL(NCUR_RESOL)
+(   59)   TB => FFTB_RESOL(NCUR_RESOL)
+(   60) #ifdef WITH_FFTW
+(   61)   TW => FFTW_RESOL(NCUR_RESOL)
+(   62) #endif
+(   63)   TC => FFTC_RESOL(NCUR_RESOL)
+(   64)   S => FLT_RESOL(NCUR_RESOL)
+(   65)   C => CTL_RESOL(NCUR_RESOL)
+(   66) ENDIF
+(   67) 
+(   68) END SUBROUTINE SET_RESOL
+(   69) END MODULE SET_RESOL_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:31      page 3
+
+(    1) # 1 "set_resol_mod.F90"
+(    1) MODULE SET_RESOL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SET_RESOL(KRESOL,LDSETUP)
+(    4) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    5) # 6 "set_resol_mod.F90"
+(    6) USE TPM_GEN         ,ONLY : NOUT, MSETUP0, NCUR_RESOL, NMAX_RESOL,LENABLED
+(    7) USE TPM_DIM         ,ONLY : R, DIM_RESOL
+(    8) !USE TPM_TRANS
+(    9) USE TPM_DISTR       ,ONLY : D, DISTR_RESOL
+(   10) USE TPM_GEOMETRY    ,ONLY : G, GEOM_RESOL
+(   11) USE TPM_FIELDS      ,ONLY : F, FIELDS_RESOL
+(   12) USE TPM_FFT         ,ONLY : T, FFT_RESOL, TB, FFTB_RESOL
+(   13) # 16 "set_resol_mod.F90"
+(   16) USE TPM_FFTC        ,ONLY : TC, FFTC_RESOL
+(   17) USE TPM_FLT
+(   18) USE TPM_CTL        ,ONLY : C, CTL_RESOL
+(   19) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   20) !
+(   21) # 22 "set_resol_mod.F90"
+(   22) IMPLICIT NONE
+(   23) # 24 "set_resol_mod.F90"
+(   24) ! Declaration of arguments
+(   25) # 26 "set_resol_mod.F90"
+(   26) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KRESOL
+(   27) LOGICAL            ,OPTIONAL, INTENT(IN) :: LDSETUP
+(   28) # 29 "set_resol_mod.F90"
+(   29) ! Local varaibles
+(   30) INTEGER(KIND=JPIM) :: IRESOL
+(   31) LOGICAL :: LLSETUP
+(   32) # 33 "set_resol_mod.F90"
+(   33) !     ------------------------------------------------------------------
+(   34) # 35 "set_resol_mod.F90"
+(   35) IF(MSETUP0 == 0) CALL ABORT_TRANS('SET_RESOL:TRANS NOT SETUP')
+(   36) LLSETUP = .FALSE.
+(   37) IF(PRESENT(LDSETUP)) LLSETUP = LDSETUP
+(   38) IRESOL = 1
+(   39) IF(PRESENT(KRESOL)) THEN
+(   40)   IRESOL = KRESOL
+(   41)  IF(IRESOL < 1 .OR. IRESOL > NMAX_RESOL) THEN
+(   42)    WRITE(NOUT,*)'SET_RESOL: UNKNOWN RESOLUTION ',IRESOL,NMAX_RESOL
+(   43)    CALL ABORT_TRANS('SET_RESOL:IRESOL < 1 .OR. KRESOL > NMAX_RESOL')
+(   44)   ENDIF
+(   45)   IF(.NOT.LLSETUP) THEN
+(   46)     IF(.NOT.LENABLED(IRESOL)) THEN
+(   47)       WRITE(NOUT,*)'SET_RESOL: UNKNOWN RESOLUTION ',IRESOL,LENABLED
+(   48)       CALL ABORT_TRANS('SET_RESOL:IRESOL NOT ENABLED')
+(   49)      ENDIF
+(   50)    ENDIF
+(   51) ENDIF
+(   52) IF(IRESOL /= NCUR_RESOL) THEN
+(   53)   NCUR_RESOL = IRESOL
+(   54)   R => DIM_RESOL(NCUR_RESOL)
+(   55)   F => FIELDS_RESOL(NCUR_RESOL)
+(   56)   G => GEOM_RESOL(NCUR_RESOL)
+(   57)   D => DISTR_RESOL(NCUR_RESOL)
+(   58)   T => FFT_RESOL(NCUR_RESOL)
+(   59)   TB => FFTB_RESOL(NCUR_RESOL)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:31      page 4
+
+(   60) # 63 "set_resol_mod.F90"
+(   63)   TC => FFTC_RESOL(NCUR_RESOL)
+(   64)   S => FLT_RESOL(NCUR_RESOL)
+(   65)   C => CTL_RESOL(NCUR_RESOL)
+(   66) ENDIF
+(   67) # 68 "set_resol_mod.F90"
+(   68) END SUBROUTINE SET_RESOL
+(   69) END MODULE SET_RESOL_MOD

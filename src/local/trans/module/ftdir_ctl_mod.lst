@@ -1,0 +1,571 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:38      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: ftdir_ctl_mod.F90
+
+(    1) MODULE FTDIR_CTL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE FTDIR_CTL(KF_UV_G,KF_SCALARS_G,KF_GP,KF_FS, &
+(    4)  & KVSETUV,KVSETSC,KPTRGP,&
+(    5)  & KVSETSC3A,KVSETSC3B,KVSETSC2,&
+(    6)  & PGP,PGPUV,PGP3A,PGP3B,PGP2)
+(    7) 
+(    8) 
+(    9) !**** *FTDIR_CTL - Direct Fourier transform control
+(   10) 
+(   11) !     Purpose. Control routine for Grid-point to Fourier transform
+(   12) !     --------
+(   13) 
+(   14) !**   Interface.
+(   15) !     ----------
+(   16) !     CALL FTDIR_CTL(..)
+(   17) 
+(   18) !     Explicit arguments :
+(   19) !     --------------------
+(   20) !     KF_UV_G      - global number of spectral u-v fields
+(   21) !     KF_SCALARS_G - global number of scalar spectral fields
+(   22) !     KF_GP        - total number of output gridpoint fields
+(   23) !     KF_FS        - total number of fields in fourier space
+(   24) !     PGP     -  gridpoint array
+(   25) !     KVSETUV - "B" set in spectral/fourier space for
+(   26) !                u and v variables
+(   27) !     KVSETSC - "B" set in spectral/fourier space for
+(   28) !                scalar variables
+(   29) !     KPTRGP  -  pointer array to fields in gridpoint space
+(   30) 
+(   31) !     Method.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:38      page 2
+
+(   32) !     -------
+(   33) 
+(   34) !     Externals.  TRGTOL      - transposition routine
+(   35) !     ----------  FOURIER_OUT - copy fourier data to Fourier buffer
+(   36) !                 FTDIR       - fourier transform
+(   37) 
+(   38) !     Author.
+(   39) !     -------
+(   40) !        Mats Hamrud *ECMWF*
+(   41) 
+(   42) !     Modifications.
+(   43) !     --------------
+(   44) !        Original : 00-03-03
+(   45) 
+(   46) !     ------------------------------------------------------------------
+(   47) 
+(   48) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   49) 
+(   50) USE TPM_GEN, only: nout
+(   51) !USE TPM_DIM
+(   52) !USE TPM_GEOMETRY
+(   53) USE TPM_TRANS       ,ONLY : ZGTF
+(   54) USE TPM_DISTR       ,ONLY : D, MYPROC, NPROC
+(   55) 
+(   56) USE TRGTOL_MOD      ,ONLY : TRGTOL, TRGTOL_CUDAAWARE
+(   57) USE FOURIER_OUT_MOD ,ONLY : FOURIER_OUT
+(   58) USE FTDIR_MOD       ,ONLY : FTDIR
+(   59) use ieee_arithmetic
+(   60) !
+(   61) 
+(   62) IMPLICIT NONE
+(   63) 
+(   64) 
+(   65) INTERFACE
+(   66)   SUBROUTINE cudaProfilerStart() BIND(C,name='cudaProfilerStart')
+(   67)     USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_INT
+(   68)     IMPLICIT NONE
+(   69)   END SUBROUTINE cudaProfilerStart
+(   70) END INTERFACE
+(   71) 
+(   72) INTERFACE
+(   73)   SUBROUTINE cudaProfilerStop() BIND(C,name='cudaProfilerStop')
+(   74)     USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_INT
+(   75)     IMPLICIT NONE
+(   76)   END SUBROUTINE cudaProfilerStop
+(   77) END INTERFACE
+(   78) 
+(   79) ! Dummy arguments
+(   80) 
+(   81) INTEGER(KIND=JPIM),INTENT(IN) :: KF_UV_G,KF_SCALARS_G,KF_GP,KF_FS
+(   82) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETUV(:)
+(   83) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC(:)
+(   84) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KPTRGP(:)
+(   85) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3A(:)
+(   86) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3B(:)
+(   87) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC2(:)
+(   88) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP(:,:,:)
+(   89) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGPUV(:,:,:,:)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:38      page 3
+
+(   90) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP3A(:,:,:,:)
+(   91) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP3B(:,:,:,:)
+(   92) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP2(:,:,:)
+(   93) 
+(   94) ! Local variables
+(   95) !REAL(KIND=JPRBT),ALLOCATABLE :: ZGTF(:,:)
+(   96) 
+(   97) INTEGER(KIND=JPIM) :: IST,JGL,IGL,JF_FS
+(   98) INTEGER(KIND=JPIM) :: IVSETUV(KF_UV_G)
+(   99) INTEGER(KIND=JPIM) :: IVSETSC(KF_SCALARS_G)
+(  100) INTEGER(KIND=JPIM) :: IVSET(KF_GP)
+(  101) INTEGER(KIND=JPIM) :: IFGP2,IFGP3A,IFGP3B,IOFF,J3
+(  102) INTEGER(KIND=JPIM) :: IBEG,IEND,IINC
+(  103) 
+(  104) !     ------------------------------------------------------------------
+(  105) 
+(  106) ! Field distribution in Spectral/Fourier space
+(  107) 
+(  108) ! done in setup_trans
+(  109) !ALLOCATE(ZGTF(KF_FS,D%NLENGTF))
+(  110) !!$ACC enter data create(ZGTF)
+(  111) 
+(  112) !call cudaProfilerStart()
+(  113) 
+(  114) IF(PRESENT(KVSETUV)) THEN
+(  115)   IVSETUV(:) = KVSETUV(:)
+(  116) ELSE
+(  117)   IVSETUV(:) = -1
+(  118) ENDIF
+(  119) IVSETSC(:) = -1
+(  120) IF(PRESENT(KVSETSC)) THEN
+(  121)   IVSETSC(:) = KVSETSC(:)
+(  122) ELSE
+(  123)   IOFF=0
+(  124)   IF(PRESENT(KVSETSC2)) THEN
+(  125)     IFGP2=UBOUND(KVSETSC2,1)
+(  126)     IVSETSC(1:IFGP2)=KVSETSC2(:)
+(  127)     IOFF=IOFF+IFGP2
+(  128)   ENDIF
+(  129)   IF(PRESENT(KVSETSC3A)) THEN
+(  130)     IFGP3A=UBOUND(KVSETSC3A,1)
+(  131)     DO J3=1,UBOUND(PGP3A,3)
+(  132)       IVSETSC(IOFF+1:IOFF+IFGP3A)=KVSETSC3A(:)
+(  133)       IOFF=IOFF+IFGP3A
+(  134)     ENDDO
+(  135)   ENDIF
+(  136)   IF(PRESENT(KVSETSC3B)) THEN
+(  137)     IFGP3B=UBOUND(KVSETSC3B,1)
+(  138)     DO J3=1,UBOUND(PGP3B,3)
+(  139)       IVSETSC(IOFF+1:IOFF+IFGP3B)=KVSETSC3B(:)
+(  140)       IOFF=IOFF+IFGP3B
+(  141)     ENDDO
+(  142)   ENDIF
+(  143) ENDIF
+(  144) 
+(  145) IST = 1
+(  146) IF(KF_UV_G > 0) THEN
+(  147)   IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:38      page 4
+
+(  148)   IST = IST+KF_UV_G
+(  149)   IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  150)   IST = IST+KF_UV_G
+(  151) ENDIF
+(  152) IF(KF_SCALARS_G > 0) THEN
+(  153)   IVSET(IST:IST+KF_SCALARS_G-1) = IVSETSC(:)
+(  154)   IST = IST+KF_SCALARS_G
+(  155) ENDIF
+(  156) 
+(  157) ! Transposition
+(  158) 
+(  159) CALL GSTATS(158,0)
+(  160) 
+(  161) !debug
+(  162) !!$acc data present(ZGTF)
+(  163) !  ZGTF(:,:)=0._JPRBT
+(  164) !!$acc end data
+(  165) !!$acc update host(zgtf)
+(  166) ! needed ??? JF_FS=KF_FS-D%IADJUST_D
+(  167) #ifdef USE_CUDA_AWARE_MPI_FT
+(  168) CALL TRGTOL_CUDAAWARE(ZGTF,KF_FS,KF_GP,KF_SCALARS_G,IVSET,KPTRGP,&
+(  169)  &PGP,PGPUV,PGP3A,PGP3B,PGP2)
+(  170) #else
+(  171) CALL TRGTOL(ZGTF,KF_FS,KF_GP,KF_SCALARS_G,IVSET,KPTRGP,&
+(  172)  &PGP,PGPUV,PGP3A,PGP3B,PGP2)
+(  173) #endif
+(  174) 
+(  175) CALL GSTATS(158,1)
+(  176) CALL GSTATS(106,0)
+(  177) 
+(  178) ! Fourier transform
+(  179) 
+(  180) ! in setup_trans
+(  181) !ALLOCATE(FOUBUF_IN(MAX(1,D%NLENGT0B*2*KF_FS)))
+(  182) !!$ACC enter data create(FOUBUF_IN)
+(  183) 
+(  184) IF(MYPROC > NPROC/2)THEN
+(  185)   IBEG=1
+(  186)   IEND=D%NDGL_FS
+(  187)   IINC=1
+(  188) ELSE
+(  189)   IBEG=D%NDGL_FS
+(  190)   IEND=1
+(  191)   IINC=-1
+(  192) ENDIF
+(  193) 
+(  194) !write(301,*) 'sizey: ', myproc, size(zgtf,1), KF_FS
+(  195) 
+(  196) CALL GSTATS(1640,0)
+(  197) !!$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JGL,IGL)
+(  198) IF(KF_FS>0) THEN
+(  199)   !!!$acc data copy(ZGTF) ! This one is already on the device
+(  200)   CALL FTDIR(size(zgtf,1))
+(  201)   !!!$acc end data
+(  202)   ! needs whole size CALL FTDIR(2*KF_FS)
+(  203) ENDIF
+(  204) !!!!!$acc update host(ZGTF)
+(  205) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:38      page 5
+
+(  206) ! Save Fourier data in FOUBUF_IN
+(  207) 
+(  208)   CALL FOURIER_OUT(KF_FS)
+(  209) !!$OMP END PARALLEL DO
+(  210) CALL GSTATS(1640,1)
+(  211) !DEALLOCATE(ZGTF)
+(  212) CALL GSTATS(106,1)
+(  213) !     ------------------------------------------------------------------
+(  214) !call cudaProfilerStop()
+(  215) END SUBROUTINE FTDIR_CTL
+(  216) END MODULE FTDIR_CTL_MOD
+(  217) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:38      page 6
+
+(    1) # 1 "ftdir_ctl_mod.F90"
+(    1) MODULE FTDIR_CTL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE FTDIR_CTL(KF_UV_G,KF_SCALARS_G,KF_GP,KF_FS, &
+(    4)  & KVSETUV,KVSETSC,KPTRGP,&
+(    5)  & KVSETSC3A,KVSETSC3B,KVSETSC2,&
+(    6)  & PGP,PGPUV,PGP3A,PGP3B,PGP2)
+(    7) # 9 "ftdir_ctl_mod.F90"
+(    9) !**** *FTDIR_CTL - Direct Fourier transform control
+(   10) # 11 "ftdir_ctl_mod.F90"
+(   11) !     Purpose. Control routine for Grid-point to Fourier transform
+(   12) !     --------
+(   13) # 14 "ftdir_ctl_mod.F90"
+(   14) !**   Interface.
+(   15) !     ----------
+(   16) !     CALL FTDIR_CTL(..)
+(   17) # 18 "ftdir_ctl_mod.F90"
+(   18) !     Explicit arguments :
+(   19) !     --------------------
+(   20) !     KF_UV_G      - global number of spectral u-v fields
+(   21) !     KF_SCALARS_G - global number of scalar spectral fields
+(   22) !     KF_GP        - total number of output gridpoint fields
+(   23) !     KF_FS        - total number of fields in fourier space
+(   24) !     PGP     -  gridpoint array
+(   25) !     KVSETUV - "B" set in spectral/fourier space for
+(   26) !                u and v variables
+(   27) !     KVSETSC - "B" set in spectral/fourier space for
+(   28) !                scalar variables
+(   29) !     KPTRGP  -  pointer array to fields in gridpoint space
+(   30) # 31 "ftdir_ctl_mod.F90"
+(   31) !     Method.
+(   32) !     -------
+(   33) # 34 "ftdir_ctl_mod.F90"
+(   34) !     Externals.  TRGTOL      - transposition routine
+(   35) !     ----------  FOURIER_OUT - copy fourier data to Fourier buffer
+(   36) !                 FTDIR       - fourier transform
+(   37) # 38 "ftdir_ctl_mod.F90"
+(   38) !     Author.
+(   39) !     -------
+(   40) !        Mats Hamrud *ECMWF*
+(   41) # 42 "ftdir_ctl_mod.F90"
+(   42) !     Modifications.
+(   43) !     --------------
+(   44) !        Original : 00-03-03
+(   45) # 46 "ftdir_ctl_mod.F90"
+(   46) !     ------------------------------------------------------------------
+(   47) # 48 "ftdir_ctl_mod.F90"
+(   48) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   49) # 50 "ftdir_ctl_mod.F90"
+(   50) USE TPM_GEN, only: nout
+(   51) !USE TPM_DIM
+(   52) !USE TPM_GEOMETRY
+(   53) USE TPM_TRANS       ,ONLY : ZGTF
+(   54) USE TPM_DISTR       ,ONLY : D, MYPROC, NPROC
+(   55) # 56 "ftdir_ctl_mod.F90"
+(   56) USE TRGTOL_MOD      ,ONLY : TRGTOL, TRGTOL_CUDAAWARE
+(   57) USE FOURIER_OUT_MOD ,ONLY : FOURIER_OUT
+(   58) USE FTDIR_MOD       ,ONLY : FTDIR
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:38      page 7
+
+(   59) use ieee_arithmetic
+(   60) !
+(   61) # 62 "ftdir_ctl_mod.F90"
+(   62) IMPLICIT NONE
+(   63) # 65 "ftdir_ctl_mod.F90"
+(   65) INTERFACE
+(   66)   SUBROUTINE cudaProfilerStart() BIND(C,name='cudaProfilerStart')
+(   67)     USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_INT
+(   68)     IMPLICIT NONE
+(   69)   END SUBROUTINE cudaProfilerStart
+(   70) END INTERFACE
+(   71) # 72 "ftdir_ctl_mod.F90"
+(   72) INTERFACE
+(   73)   SUBROUTINE cudaProfilerStop() BIND(C,name='cudaProfilerStop')
+(   74)     USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_INT
+(   75)     IMPLICIT NONE
+(   76)   END SUBROUTINE cudaProfilerStop
+(   77) END INTERFACE
+(   78) # 79 "ftdir_ctl_mod.F90"
+(   79) ! Dummy arguments
+(   80) # 81 "ftdir_ctl_mod.F90"
+(   81) INTEGER(KIND=JPIM),INTENT(IN) :: KF_UV_G,KF_SCALARS_G,KF_GP,KF_FS
+(   82) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETUV(:)
+(   83) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC(:)
+(   84) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KPTRGP(:)
+(   85) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3A(:)
+(   86) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC3B(:)
+(   87) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETSC2(:)
+(   88) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP(:,:,:)
+(   89) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGPUV(:,:,:,:)
+(   90) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP3A(:,:,:,:)
+(   91) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP3B(:,:,:,:)
+(   92) REAL(KIND=JPRB),OPTIONAL    , INTENT(IN) :: PGP2(:,:,:)
+(   93) # 94 "ftdir_ctl_mod.F90"
+(   94) ! Local variables
+(   95) !REAL(KIND=JPRBT),ALLOCATABLE :: ZGTF(:,:)
+(   96) # 97 "ftdir_ctl_mod.F90"
+(   97) INTEGER(KIND=JPIM) :: IST,JGL,IGL,JF_FS
+(   98) INTEGER(KIND=JPIM) :: IVSETUV(KF_UV_G)
+(   99) INTEGER(KIND=JPIM) :: IVSETSC(KF_SCALARS_G)
+(  100) INTEGER(KIND=JPIM) :: IVSET(KF_GP)
+(  101) INTEGER(KIND=JPIM) :: IFGP2,IFGP3A,IFGP3B,IOFF,J3
+(  102) INTEGER(KIND=JPIM) :: IBEG,IEND,IINC
+(  103) # 104 "ftdir_ctl_mod.F90"
+(  104) !     ------------------------------------------------------------------
+(  105) # 106 "ftdir_ctl_mod.F90"
+(  106) ! Field distribution in Spectral/Fourier space
+(  107) # 108 "ftdir_ctl_mod.F90"
+(  108) ! done in setup_trans
+(  109) !ALLOCATE(ZGTF(KF_FS,D%NLENGTF))
+(  110) !!$ACC enter data create(ZGTF)
+(  111) # 112 "ftdir_ctl_mod.F90"
+(  112) !call cudaProfilerStart()
+(  113) # 114 "ftdir_ctl_mod.F90"
+(  114) IF(PRESENT(KVSETUV)) THEN
+(  115)   IVSETUV(:) = KVSETUV(:)
+(  116) ELSE
+(  117)   IVSETUV(:) = -1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:38      page 8
+
+(  118) ENDIF
+(  119) IVSETSC(:) = -1
+(  120) IF(PRESENT(KVSETSC)) THEN
+(  121)   IVSETSC(:) = KVSETSC(:)
+(  122) ELSE
+(  123)   IOFF=0
+(  124)   IF(PRESENT(KVSETSC2)) THEN
+(  125)     IFGP2=UBOUND(KVSETSC2,1)
+(  126)     IVSETSC(1:IFGP2)=KVSETSC2(:)
+(  127)     IOFF=IOFF+IFGP2
+(  128)   ENDIF
+(  129)   IF(PRESENT(KVSETSC3A)) THEN
+(  130)     IFGP3A=UBOUND(KVSETSC3A,1)
+(  131)     DO J3=1,UBOUND(PGP3A,3)
+(  132)       IVSETSC(IOFF+1:IOFF+IFGP3A)=KVSETSC3A(:)
+(  133)       IOFF=IOFF+IFGP3A
+(  134)     ENDDO
+(  135)   ENDIF
+(  136)   IF(PRESENT(KVSETSC3B)) THEN
+(  137)     IFGP3B=UBOUND(KVSETSC3B,1)
+(  138)     DO J3=1,UBOUND(PGP3B,3)
+(  139)       IVSETSC(IOFF+1:IOFF+IFGP3B)=KVSETSC3B(:)
+(  140)       IOFF=IOFF+IFGP3B
+(  141)     ENDDO
+(  142)   ENDIF
+(  143) ENDIF
+(  144) # 145 "ftdir_ctl_mod.F90"
+(  145) IST = 1
+(  146) IF(KF_UV_G > 0) THEN
+(  147)   IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  148)   IST = IST+KF_UV_G
+(  149)   IVSET(IST:IST+KF_UV_G-1) = IVSETUV(:)
+(  150)   IST = IST+KF_UV_G
+(  151) ENDIF
+(  152) IF(KF_SCALARS_G > 0) THEN
+(  153)   IVSET(IST:IST+KF_SCALARS_G-1) = IVSETSC(:)
+(  154)   IST = IST+KF_SCALARS_G
+(  155) ENDIF
+(  156) # 157 "ftdir_ctl_mod.F90"
+(  157) ! Transposition
+(  158) # 159 "ftdir_ctl_mod.F90"
+(  159) CALL GSTATS(158,0)
+(  160) # 161 "ftdir_ctl_mod.F90"
+(  161) !debug
+(  162) !!$acc data present(ZGTF)
+(  163) !  ZGTF(:,:)=0._JPRBT
+(  164) !!$acc end data
+(  165) !!$acc update host(zgtf)
+(  166) ! needed ??? JF_FS=KF_FS-D%IADJUST_D
+(  167) # 171 "ftdir_ctl_mod.F90"
+(  171) CALL TRGTOL(ZGTF,KF_FS,KF_GP,KF_SCALARS_G,IVSET,KPTRGP,&
+(  172)  &PGP,PGPUV,PGP3A,PGP3B,PGP2)
+(  173) # 175 "ftdir_ctl_mod.F90"
+(  175) CALL GSTATS(158,1)
+(  176) CALL GSTATS(106,0)
+(  177) # 178 "ftdir_ctl_mod.F90"
+(  178) ! Fourier transform
+(  179) # 180 "ftdir_ctl_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:38      page 9
+
+(  180) ! in setup_trans
+(  181) !ALLOCATE(FOUBUF_IN(MAX(1,D%NLENGT0B*2*KF_FS)))
+(  182) !!$ACC enter data create(FOUBUF_IN)
+(  183) # 184 "ftdir_ctl_mod.F90"
+(  184) IF(MYPROC > NPROC/2)THEN
+(  185)   IBEG=1
+(  186)   IEND=D%NDGL_FS
+(  187)   IINC=1
+(  188) ELSE
+(  189)   IBEG=D%NDGL_FS
+(  190)   IEND=1
+(  191)   IINC=-1
+(  192) ENDIF
+(  193) # 194 "ftdir_ctl_mod.F90"
+(  194) !write(301,*) 'sizey: ', myproc, size(zgtf,1), KF_FS
+(  195) # 196 "ftdir_ctl_mod.F90"
+(  196) CALL GSTATS(1640,0)
+(  197) !!$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JGL,IGL)
+(  198) IF(KF_FS>0) THEN
+(  199)   !!!$acc data copy(ZGTF) ! This one is already on the device
+(  200)   CALL FTDIR(size(zgtf,1))
+(  201)   !!!$acc end data
+(  202)   ! needs whole size CALL FTDIR(2*KF_FS)
+(  203) ENDIF
+(  204) !!!!!$acc update host(ZGTF)
+(  205) # 206 "ftdir_ctl_mod.F90"
+(  206) ! Save Fourier data in FOUBUF_IN
+(  207) # 208 "ftdir_ctl_mod.F90"
+(  208)   CALL FOURIER_OUT(KF_FS)
+(  209) !!$OMP END PARALLEL DO
+(  210) CALL GSTATS(1640,1)
+(  211) !DEALLOCATE(ZGTF)
+(  212) CALL GSTATS(106,1)
+(  213) !     ------------------------------------------------------------------
+(  214) !call cudaProfilerStop()
+(  215) END SUBROUTINE FTDIR_CTL
+(  216) END MODULE FTDIR_CTL_MOD

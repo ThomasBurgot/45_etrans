@@ -1,0 +1,342 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:50:06      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eltdir_ctl_mod.F90
+
+(    1) MODULE ELTDIR_CTL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ELTDIR_CTL(KF_FS,KF_UV,KF_SCALARS, &
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR, &
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2, &
+(    6)  & KFLDPTRUV,KFLDPTRSC,PSPMEANU,PSPMEANV,AUX_PROC)
+(    7) 
+(    8) !**** *ELTDIR_CTL* - Control routine for direct Legendre transform
+(    9) 
+(   10) !     Purpose.
+(   11) !     --------
+(   12) !        Direct Legendre transform
+(   13) 
+(   14) !**   Interface.
+(   15) !     ----------
+(   16) !     CALL ELTDIR_CTL(...)
+(   17) 
+(   18) !     Explicit arguments :
+(   19) !     --------------------
+(   20) !     KF_FS      - number of fields in Fourier space
+(   21) !     KF_UV      - local number of spectral u-v fields
+(   22) !     KF_SCALARS - local number of scalar spectral fields
+(   23) !     PSPVOR(:,:) - spectral vorticity (output)
+(   24) !     PSPDIV(:,:) - spectral divergence (output)
+(   25) !     PSPSCALAR(:,:) - spectral scalarvalued fields (output)
+(   26) !     KFLDPTRUV(:) - field pointer for vorticity and divergence (input)
+(   27) !     KFLDPTRSC(:) - field pointer for scalarvalued fields (input)
+(   28) !     PSPMEANU(:),PSPMEANV(:) - mean winds
+(   29) !     ------------------------------------------------------------------
+(   30) 
+(   31) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   32) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   33) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:50:06      page 2
+
+(   34) USE TPM_GEN         ,ONLY : LALLOPERM
+(   35) USE TPM_TRANS       ,ONLY : FOUBUF, FOUBUF_IN
+(   36) USE TPM_DISTR       ,ONLY : D
+(   37) 
+(   38) USE ELTDIR_MOD      ,ONLY : ELTDIR
+(   39) USE TRLTOM_MOD      ,ONLY : TRLTOM, TRLTOM_CUDAAWARE
+(   40) !
+(   41) 
+(   42) IMPLICIT NONE
+(   43) 
+(   44) INTEGER(KIND=JPIM),INTENT(IN) :: KF_FS,KF_UV,KF_SCALARS
+(   45) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPVOR(:,:)
+(   46) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPDIV(:,:)
+(   47) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSCALAR(:,:)
+(   48) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC3A(:,:,:)
+(   49) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC3B(:,:,:)
+(   50) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC2(:,:)
+(   51) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRUV(:)
+(   52) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRSC(:)
+(   53) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPMEANU(:)
+(   54) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPMEANV(:)
+(   55) EXTERNAL AUX_PROC
+(   56) OPTIONAL AUX_PROC
+(   57) 
+(   58) INTEGER(KIND=JPIM) :: JM,IM,IBLEN,ILED2,INUL
+(   59) REAL(KIND=JPRB) :: ZDUM
+(   60) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   61) !     ------------------------------------------------------------------
+(   62) 
+(   63) ! Transposition from Fourier space distribution to spectral space distribution
+(   64) 
+(   65) IF (LHOOK) CALL DR_HOOK('ELTDIR_CTL_MOD:ELTDIR_CTL',0,ZHOOK_HANDLE)
+(   66) 
+(   67) IBLEN = D%NLENGT0B*2*KF_FS
+(   68) 
+(   69) IF (ALLOCATED(FOUBUF)) THEN
+(   70)   IF (MAX(1,IBLEN) > SIZE(FOUBUF)) THEN
+(   71) !$acc exit data delete (FOUBUF)
+(   72)     DEALLOCATE(FOUBUF)
+(   73)     ALLOCATE (FOUBUF (MAX (1,IBLEN)))
+(   74) !$acc enter data create (FOUBUF)
+(   75)   ENDIF
+(   76) ELSE
+(   77)   ALLOCATE (FOUBUF (MAX (1,IBLEN)))
+(   78) !$acc enter data create (FOUBUF)
+(   79) ENDIF
+(   80) 
+(   81) CALL GSTATS(153,0)
+(   82) #ifdef USE_CUDA_AWARE_MPI_ELTDIR
+(   83) CALL TRLTOM_CUDAAWARE(FOUBUF_IN,FOUBUF,2*KF_FS)
+(   84) #else
+(   85) CALL TRLTOM(FOUBUF_IN,FOUBUF,2*KF_FS)
+(   86) #endif
+(   87) CALL GSTATS(153,1)
+(   88) 
+(   89) IF (.NOT.LALLOPERM) THEN
+(   90) !$acc exit data delete (FOUBUF_IN)
+(   91)   DEALLOCATE (FOUBUF_IN)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:50:06      page 3
+
+(   92) ENDIF
+(   93) 
+(   94) ! Periodization of auxiliary fields in y direction
+(   95) 
+(   96) IF (PRESENT(AUX_PROC)) THEN
+(   97)   CALL AUX_PROC(ZDUM,FOUBUF,2*KF_FS,1,IBLEN,0,D%NUMP,.FALSE.,&
+(   98)    & INUL,D%NPROCL,D%NSTAGT0B,D%NPNTGTB1)
+(   99) ENDIF
+(  100) 
+(  101) ! Direct Legendre transform
+(  102) 
+(  103) ILED2 = 2*KF_FS
+(  104) CALL GSTATS(1645,0)
+(  105) IF(KF_FS>0) THEN
+(  106)     CALL ELTDIR(KF_FS,KF_UV,KF_SCALARS,ILED2, &
+(  107)      & PSPVOR,PSPDIV,PSPSCALAR,&
+(  108)      & PSPSC3A,PSPSC3B,PSPSC2 , &
+(  109)      & KFLDPTRUV,KFLDPTRSC,PSPMEANU,PSPMEANV)
+(  110) ENDIF
+(  111) CALL GSTATS(1645,1)
+(  112)   
+(  113) IF (.NOT.LALLOPERM) THEN
+(  114) !$acc exit data delete (FOUBUF)
+(  115)   DEALLOCATE (FOUBUF)
+(  116) ENDIF
+(  117) 
+(  118) IF (LHOOK) CALL DR_HOOK('ELTDIR_CTL_MOD:ELTDIR_CTL',1,ZHOOK_HANDLE)
+(  119) 
+(  120) !     -----------------------------------------------------------------
+(  121) 
+(  122) END SUBROUTINE ELTDIR_CTL
+(  123) END MODULE ELTDIR_CTL_MOD
+(  124) 
+(  125) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:50:06      page 4
+
+(    1) # 1 "eltdir_ctl_mod.F90"
+(    1) MODULE ELTDIR_CTL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ELTDIR_CTL(KF_FS,KF_UV,KF_SCALARS, &
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR, &
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2, &
+(    6)  & KFLDPTRUV,KFLDPTRSC,PSPMEANU,PSPMEANV,AUX_PROC)
+(    7) # 8 "eltdir_ctl_mod.F90"
+(    8) !**** *ELTDIR_CTL* - Control routine for direct Legendre transform
+(    9) # 10 "eltdir_ctl_mod.F90"
+(   10) !     Purpose.
+(   11) !     --------
+(   12) !        Direct Legendre transform
+(   13) # 14 "eltdir_ctl_mod.F90"
+(   14) !**   Interface.
+(   15) !     ----------
+(   16) !     CALL ELTDIR_CTL(...)
+(   17) # 18 "eltdir_ctl_mod.F90"
+(   18) !     Explicit arguments :
+(   19) !     --------------------
+(   20) !     KF_FS      - number of fields in Fourier space
+(   21) !     KF_UV      - local number of spectral u-v fields
+(   22) !     KF_SCALARS - local number of scalar spectral fields
+(   23) !     PSPVOR(:,:) - spectral vorticity (output)
+(   24) !     PSPDIV(:,:) - spectral divergence (output)
+(   25) !     PSPSCALAR(:,:) - spectral scalarvalued fields (output)
+(   26) !     KFLDPTRUV(:) - field pointer for vorticity and divergence (input)
+(   27) !     KFLDPTRSC(:) - field pointer for scalarvalued fields (input)
+(   28) !     PSPMEANU(:),PSPMEANV(:) - mean winds
+(   29) !     ------------------------------------------------------------------
+(   30) # 31 "eltdir_ctl_mod.F90"
+(   31) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   32) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   33) # 34 "eltdir_ctl_mod.F90"
+(   34) USE TPM_GEN         ,ONLY : LALLOPERM
+(   35) USE TPM_TRANS       ,ONLY : FOUBUF, FOUBUF_IN
+(   36) USE TPM_DISTR       ,ONLY : D
+(   37) # 38 "eltdir_ctl_mod.F90"
+(   38) USE ELTDIR_MOD      ,ONLY : ELTDIR
+(   39) USE TRLTOM_MOD      ,ONLY : TRLTOM, TRLTOM_CUDAAWARE
+(   40) !
+(   41) # 42 "eltdir_ctl_mod.F90"
+(   42) IMPLICIT NONE
+(   43) # 44 "eltdir_ctl_mod.F90"
+(   44) INTEGER(KIND=JPIM),INTENT(IN) :: KF_FS,KF_UV,KF_SCALARS
+(   45) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPVOR(:,:)
+(   46) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPDIV(:,:)
+(   47) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSCALAR(:,:)
+(   48) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC3A(:,:,:)
+(   49) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC3B(:,:,:)
+(   50) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPSC2(:,:)
+(   51) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRUV(:)
+(   52) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRSC(:)
+(   53) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPMEANU(:)
+(   54) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT) :: PSPMEANV(:)
+(   55) EXTERNAL AUX_PROC
+(   56) OPTIONAL AUX_PROC
+(   57) # 58 "eltdir_ctl_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:50:06      page 5
+
+(   58) INTEGER(KIND=JPIM) :: JM,IM,IBLEN,ILED2,INUL
+(   59) REAL(KIND=JPRB) :: ZDUM
+(   60) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   61) !     ------------------------------------------------------------------
+(   62) # 63 "eltdir_ctl_mod.F90"
+(   63) ! Transposition from Fourier space distribution to spectral space distribution
+(   64) # 65 "eltdir_ctl_mod.F90"
+(   65) IF (LHOOK) CALL DR_HOOK('ELTDIR_CTL_MOD:ELTDIR_CTL',0,ZHOOK_HANDLE)
+(   66) # 67 "eltdir_ctl_mod.F90"
+(   67) IBLEN = D%NLENGT0B*2*KF_FS
+(   68) # 69 "eltdir_ctl_mod.F90"
+(   69) IF (ALLOCATED(FOUBUF)) THEN
+(   70)   IF (MAX(1,IBLEN) > SIZE(FOUBUF)) THEN
+(   71) !$acc exit data delete (FOUBUF)
+(   72)     DEALLOCATE(FOUBUF)
+(   73)     ALLOCATE (FOUBUF (MAX (1,IBLEN)))
+(   74) !$acc enter data create (FOUBUF)
+(   75)   ENDIF
+(   76) ELSE
+(   77)   ALLOCATE (FOUBUF (MAX (1,IBLEN)))
+(   78) !$acc enter data create (FOUBUF)
+(   79) ENDIF
+(   80) # 81 "eltdir_ctl_mod.F90"
+(   81) CALL GSTATS(153,0)
+(   82) # 83 "eltdir_ctl_mod.F90"
+(   83) CALL TRLTOM_CUDAAWARE(FOUBUF_IN,FOUBUF,2*KF_FS)
+(   84) # 87 "eltdir_ctl_mod.F90"
+(   87) CALL GSTATS(153,1)
+(   88) # 89 "eltdir_ctl_mod.F90"
+(   89) IF (.NOT.LALLOPERM) THEN
+(   90) !$acc exit data delete (FOUBUF_IN)
+(   91)   DEALLOCATE (FOUBUF_IN)
+(   92) ENDIF
+(   93) # 94 "eltdir_ctl_mod.F90"
+(   94) ! Periodization of auxiliary fields in y direction
+(   95) # 96 "eltdir_ctl_mod.F90"
+(   96) IF (PRESENT(AUX_PROC)) THEN
+(   97)   CALL AUX_PROC(ZDUM,FOUBUF,2*KF_FS,1,IBLEN,0,D%NUMP,.FALSE.,&
+(   98)    & INUL,D%NPROCL,D%NSTAGT0B,D%NPNTGTB1)
+(   99) ENDIF
+(  100) # 101 "eltdir_ctl_mod.F90"
+(  101) ! Direct Legendre transform
+(  102) # 103 "eltdir_ctl_mod.F90"
+(  103) ILED2 = 2*KF_FS
+(  104) CALL GSTATS(1645,0)
+(  105) IF(KF_FS>0) THEN
+(  106)     CALL ELTDIR(KF_FS,KF_UV,KF_SCALARS,ILED2, &
+(  107)      & PSPVOR,PSPDIV,PSPSCALAR,&
+(  108)      & PSPSC3A,PSPSC3B,PSPSC2 , &
+(  109)      & KFLDPTRUV,KFLDPTRSC,PSPMEANU,PSPMEANV)
+(  110) ENDIF
+(  111) CALL GSTATS(1645,1)
+(  112)   
+(  113) IF (.NOT.LALLOPERM) THEN
+(  114) !$acc exit data delete (FOUBUF)
+(  115)   DEALLOCATE (FOUBUF)
+(  116) ENDIF
+(  117) # 118 "eltdir_ctl_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:50:06      page 6
+
+(  118) IF (LHOOK) CALL DR_HOOK('ELTDIR_CTL_MOD:ELTDIR_CTL',1,ZHOOK_HANDLE)
+(  119) # 120 "eltdir_ctl_mod.F90"
+(  120) !     -----------------------------------------------------------------
+(  121) # 122 "eltdir_ctl_mod.F90"
+(  122) END SUBROUTINE ELTDIR_CTL
+(  123) END MODULE ELTDIR_CTL_MOD

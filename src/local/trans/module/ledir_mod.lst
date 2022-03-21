@@ -1,0 +1,583 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:35      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: ledir_mod.F90
+
+(    1) MODULE LEDIR_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE LEDIR(KF_FS,KLED2,PAIA,PSIA,POA1)
+(    4) 
+(    5) !**** *LEDIR* - Direct Legendre transform.
+(    6) 
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Direct Legendre tranform of state variables.
+(   10) 
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        CALL LEDIR(...)
+(   14) 
+(   15) !        Explicit arguments :  KM - zonal wavenumber
+(   16) !        --------------------  KFC - number of field to transform
+(   17) !                              PAIA - antisymmetric part of Fourier
+(   18) !                              fields for zonal wavenumber KM
+(   19) !                              PSIA - symmetric part of Fourier
+(   20) !                              fields for zonal wavenumber KM
+(   21) !                              POA1 -  spectral
+(   22) !                              fields for zonal wavenumber KM
+(   23) 
+(   24) !        Implicit arguments :  None.
+(   25) !        --------------------
+(   26) 
+(   27) !     Method.
+(   28) !     -------   use butterfly or dgemm
+(   29) 
+(   30) !     Externals.   
+(   31) !     ----------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:35      page 2
+
+(   32) 
+(   33) !     Reference.
+(   34) !     ----------
+(   35) !        ECMWF Research Department documentation of the IFS
+(   36) 
+(   37) !     Author.
+(   38) !     -------
+(   39) !          Nils Wedi + Mats Hamrud + George Modzynski
+(   40) 
+(   41) !     Modifications.
+(   42) !     --------------
+(   43) !        J.Hague : Oct 2012 DR_HOOK round calls to DGEMM:
+(   44) !      F. Vana  05-Mar-2015  Support for single precision
+(   45) !     ------------------------------------------------------------------
+(   46) 
+(   47) USE PARKIND1  ,ONLY : JPRD, JPIM     ,JPRBT, JPRB, JPIB
+(   48) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   49) 
+(   50) use tpm_gen, only: nout
+(   51) USE TPM_DIM         ,ONLY : R,R_NDGNH,R_NSMAX,R_NTMAX
+(   52) USE TPM_GEOMETRY    ,ONLY : G,G_NDGLU
+(   53) USE TPM_FLT
+(   54) USE TPM_FIELDS ,ONLY : F, &
+(   55) & ZAA,ZAS,LDZAA,LDZAS,TDZAA,TDZAS,&
+(   56) & DZBAT,DZBST,DLDZBA,DLDZBS,DTDZBA,DTDZBS,&
+(   57) & DZCA,DZCS,DZCAT,DZCST,DLDZCA,DLDZCS,DTDZCA,DTDZCS
+(   58) USE TPM_DISTR
+(   59) USE BUTTERFLY_ALG_MOD
+(   60) use ieee_arithmetic
+(   61) 
+(   62) USE CUDA_GEMM_BATCHED_MOD
+(   63) USE CUDA_DEVICE_MOD
+(   64) USE, INTRINSIC :: ISO_C_BINDING
+(   65) use, intrinsic :: ieee_exceptions
+(   66) 
+(   67) 
+(   68) IMPLICIT NONE
+(   69) 
+(   70) 
+(   71) !     DUMMY ARGUMENTS
+(   72) INTEGER(KIND=JPIM)  :: KM
+(   73) INTEGER(KIND=JPIM)  :: KMLOC
+(   74) INTEGER(KIND=JPIM)  :: KFC
+(   75) INTEGER(KIND=JPIM)  :: KIFC
+(   76) INTEGER(KIND=JPIM) :: KDGLU
+(   77) INTEGER(KIND=JPIM), INTENT(IN)  :: KF_FS
+(   78) INTEGER(KIND=JPIM), INTENT(IN)  :: KLED2
+(   79) 
+(   80) REAL(KIND=JPRBT),    INTENT(IN)  :: PSIA(:,:,:),   PAIA(:,:,:)
+(   81) REAL(KIND=JPRBT),    INTENT(OUT) :: POA1(:,:,:)
+(   82) 
+(   83) !     LOCAL VARIABLES
+(   84) INTEGER(KIND=JPIM) :: IA, ILA, ILS, IS, ISKIP, ISL, IF, J, JK, IRET
+(   85) INTEGER(KIND=JPIM) :: ITHRESHOLD
+(   86) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   87) 
+(   88) !type(C_PTR) :: STREAMPTRA,STREAMPTRS
+(   89) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:35      page 3
+
+(   90) IF (LHOOK) CALL DR_HOOK('LE_DGEMM',0,ZHOOK_HANDLE)
+(   91) 
+(   92) KFC = 2*KF_FS
+(   93) KIFC = KFC
+(   94) 
+(   95) !$ACC data &
+(   96) !$ACC& COPY(F,F%RW) &
+(   97) !$ACC& COPY(D,D_NUMP,D_MYMS,R,R_NDGNH,G,G_NDGLU,R_NSMAX,R_NTMAX) &
+(   98) !$ACC& present(PSIA,PAIA) &
+(   99) !$ACC& present(ZAA,ZAS,DZBAT,DZBST,DZCA,DZCS,DZCA,DZCS,DZCAT,DZCST) &
+(  100) !$ACC& present(POA1)
+(  101) 
+(  102) !loop over wavenumber
+(  103) DO KMLOC=1,D_NUMP
+(  104)    KM = D_MYMS(KMLOC)
+(  105)    
+(  106)    KDGLU = MIN(R_NDGNH,G_NDGLU(KM))
+(  107)    IF( KDGLU <= 0 ) THEN
+(  108)       stop 'ledir_mod: kdglu Error: code path is not (yet) supported in GPU version'
+(  109)    END IF
+(  110)    
+(  111)    
+(  112)    
+(  113)    
+(  114)    KIFC=KFC
+(  115)    IF(KM == 0)THEN
+(  116)       KIFC=KFC/2
+(  117)    ENDIF
+(  118)    
+(  119)    
+(  120)    IA  = 1+MOD(R_NSMAX-KM+2,2)
+(  121)    IS  = 1+MOD(R_NSMAX-KM+1,2)
+(  122)    ILA = (R_NSMAX-KM+2)/2
+(  123)    ILS = (R_NSMAX-KM+3)/2
+(  124)    ISL = MAX(R_NDGNH-G_NDGLU(KM)+1,1)
+(  125)    
+(  126)    IF(ILA > S%ITHRESHOLD .AND. S%LUSEFLT) THEN
+(  127)       stop 'ledir_mod: ila Error: code path is not (yet) supported in GPU version'
+(  128)    END IF
+(  129)    
+(  130)    !end loop over wavenumber
+(  131) END DO
+(  132) 
+(  133) !loop over wavenumber
+(  134) !$acc parallel loop collapse(3) private(KM,KDGLU,ISL,ISKIP)
+(  135) DO KMLOC=1,D_NUMP
+(  136)    DO J=1,R_NDGNH   
+(  137)       DO JK=1,KFC
+(  138)          
+(  139)          KM = D_MYMS(KMLOC)   
+(  140)          KDGLU = MIN(R_NDGNH,G_NDGLU(KM))
+(  141)          if (J .le. KDGLU) then
+(  142)    
+(  143)    
+(  144)             ISL = MAX(R_NDGNH-G_NDGLU(KM)+1,1)
+(  145)             
+(  146)             IF(KM == 0)THEN
+(  147)                ISKIP = 2
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:35      page 4
+
+(  148)             ELSE
+(  149)                ISKIP = 1
+(  150)             ENDIF
+(  151)             
+(  152)             
+(  153) 
+(  154)             if (MOD((JK-1),ISKIP) .eq. 0) then
+(  155)                DZBAT((JK-1)/ISKIP+1,J,KMLOC)=PAIA(JK,ISL+J-1,KMLOC)*F%RW(ISL+J-1)
+(  156)                DZBST((JK-1)/ISKIP+1,J,KMLOC)=PSIA(JK,ISL+J-1,KMLOC)*F%RW(ISL+J-1)
+(  157)             end if
+(  158)             
+(  159)             
+(  160)             
+(  161)          end if
+(  162)       ENDDO
+(  163)    ENDDO
+(  164)     !end loop over wavenumber
+(  165) END DO
+(  166) 
+(  167) 
+(  168)    !$ACC host_data use_device(ZAA,DZBAT,DZCAT,ZAS,DZBST,DZCST)
+(  169)     ! Get C in transpose format to get better memory access patterns later
+(  170)     !C=A*B =>
+(  171)     ! C^T=B^T*A^T
+(  172)     !call CUDA_GEMM_BATCHED('N','N',DTDZBA,TDZAA,DLDZBA,1.0_JPRBT,DZBAT,DTDZBA,INT(DTDZBA*DLDZBA,JPIB),&
+(  173)     !     &ZAA,LDZAA,INT(LDZAA*TDZAA,JPIB),0._JPRBT,DZCAT,DTDZCA,INT(DTDZCA*DLDZCA,JPIB),D_NUMP)
+(  174)     call CUDA_GEMM_BATCHED('N','N',DTDZBA,TDZAA,DLDZBA,1.0_JPRBT,DZBAT,DTDZBA,DLDZBA,&
+(  175)          &ZAA,LDZAA,TDZAA,0._JPRBT,DZCAT,DTDZCA,DLDZCA,D_NUMP)
+(  176) 
+(  177) 
+(  178)     ! Get C in transpose format to get better memory access patterns later
+(  179)     !C=A*B =>
+(  180)     ! C^T=B^T*A^T
+(  181)     !call CUDA_GEMM_BATCHED('N','N',DTDZBS,TDZAS,DLDZBS,1.0_JPRBT,DZBST,DTDZBS,INT(DTDZBS*DLDZBS,JPIB),&
+(  182)     !     &ZAS,LDZAS,INT(LDZAS*TDZAS,JPIB),0._JPRBT,DZCST,DTDZCS,INT(DTDZCS*DLDZCS,JPIB),D_NUMP)
+(  183)     call CUDA_GEMM_BATCHED('N','N',DTDZBS,TDZAS,DLDZBS,1.0_JPRBT,DZBST,DTDZBS,DLDZBS,&
+(  184)          &ZAS,LDZAS,TDZAS,0._JPRBT,DZCST,DTDZCS,DLDZCS,D_NUMP)
+(  185)     !$ACC end host_data
+(  186) 
+(  187) !$ACC parallel loop collapse(3) private(KM,ISKIP,ILA,IA,ILS,IS)
+(  188) DO KMLOC=1,D_NUMP
+(  189)    DO J=1,(R_NTMAX+3)/2
+(  190)       DO JK=1,KFC
+(  191) 
+(  192) 
+(  193)          KM = D_MYMS(KMLOC)
+(  194) 
+(  195)          
+(  196)          IF(KM == 0)THEN
+(  197)             ISKIP = 2
+(  198)          ELSE
+(  199)             ISKIP = 1
+(  200)          ENDIF
+(  201)          
+(  202)          if (MOD((JK-1),ISKIP) .eq. 0) then
+(  203)             
+(  204)             ILA = (R_NTMAX-KM+2)/2
+(  205)             if (J .le. ILA) then
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:35      page 5
+
+(  206)                IA  = 1+MOD(R_NTMAX-KM+2,2)
+(  207)                POA1(JK,IA+(J-1)*2,KMLOC) = DZCAT((JK-1)/ISKIP+1,J,KMLOC)
+(  208)             end if
+(  209)             
+(  210)             ILS = (R_NTMAX-KM+3)/2
+(  211)             if (J .le. ILS) then                  
+(  212)                IS  = 1+MOD(R_NTMAX-KM+1,2)
+(  213)                POA1(JK,IS+(J-1)*2,KMLOC) = DZCST((JK-1)/ISKIP+1,J,KMLOC)            
+(  214)             end if
+(  215)             
+(  216)          end if
+(  217)             
+(  218)     ENDDO
+(  219)   ENDDO
+(  220)   !end loop over wavenumber
+(  221) END DO
+(  222) !$ACC end data
+(  223) 
+(  224) IF (LHOOK) CALL DR_HOOK('LE_DGEMM',1,ZHOOK_HANDLE)
+(  225) !     ------------------------------------------------------------------
+(  226) 
+(  227) END SUBROUTINE LEDIR
+(  228) END MODULE LEDIR_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:35      page 6
+
+(    1) # 1 "ledir_mod.F90"
+(    1) MODULE LEDIR_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE LEDIR(KF_FS,KLED2,PAIA,PSIA,POA1)
+(    4) # 5 "ledir_mod.F90"
+(    5) !**** *LEDIR* - Direct Legendre transform.
+(    6) # 7 "ledir_mod.F90"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Direct Legendre tranform of state variables.
+(   10) # 11 "ledir_mod.F90"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        CALL LEDIR(...)
+(   14) # 15 "ledir_mod.F90"
+(   15) !        Explicit arguments :  KM - zonal wavenumber
+(   16) !        --------------------  KFC - number of field to transform
+(   17) !                              PAIA - antisymmetric part of Fourier
+(   18) !                              fields for zonal wavenumber KM
+(   19) !                              PSIA - symmetric part of Fourier
+(   20) !                              fields for zonal wavenumber KM
+(   21) !                              POA1 -  spectral
+(   22) !                              fields for zonal wavenumber KM
+(   23) # 24 "ledir_mod.F90"
+(   24) !        Implicit arguments :  None.
+(   25) !        --------------------
+(   26) # 27 "ledir_mod.F90"
+(   27) !     Method.
+(   28) !     -------   use butterfly or dgemm
+(   29) # 30 "ledir_mod.F90"
+(   30) !     Externals.   
+(   31) !     ----------
+(   32) # 33 "ledir_mod.F90"
+(   33) !     Reference.
+(   34) !     ----------
+(   35) !        ECMWF Research Department documentation of the IFS
+(   36) # 37 "ledir_mod.F90"
+(   37) !     Author.
+(   38) !     -------
+(   39) !          Nils Wedi + Mats Hamrud + George Modzynski
+(   40) # 41 "ledir_mod.F90"
+(   41) !     Modifications.
+(   42) !     --------------
+(   43) !        J.Hague : Oct 2012 DR_HOOK round calls to DGEMM:
+(   44) !      F. Vana  05-Mar-2015  Support for single precision
+(   45) !     ------------------------------------------------------------------
+(   46) # 47 "ledir_mod.F90"
+(   47) USE PARKIND1  ,ONLY : JPRD, JPIM     ,JPRBT, JPRB, JPIB
+(   48) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   49) # 50 "ledir_mod.F90"
+(   50) use tpm_gen, only: nout
+(   51) USE TPM_DIM         ,ONLY : R,R_NDGNH,R_NSMAX,R_NTMAX
+(   52) USE TPM_GEOMETRY    ,ONLY : G,G_NDGLU
+(   53) USE TPM_FLT
+(   54) USE TPM_FIELDS ,ONLY : F, &
+(   55) & ZAA,ZAS,LDZAA,LDZAS,TDZAA,TDZAS,&
+(   56) & DZBAT,DZBST,DLDZBA,DLDZBS,DTDZBA,DTDZBS,&
+(   57) & DZCA,DZCS,DZCAT,DZCST,DLDZCA,DLDZCS,DTDZCA,DTDZCS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:35      page 7
+
+(   58) USE TPM_DISTR
+(   59) USE BUTTERFLY_ALG_MOD
+(   60) use ieee_arithmetic
+(   61) # 62 "ledir_mod.F90"
+(   62) USE CUDA_GEMM_BATCHED_MOD
+(   63) USE CUDA_DEVICE_MOD
+(   64) USE, INTRINSIC :: ISO_C_BINDING
+(   65) use, intrinsic :: ieee_exceptions
+(   66) # 68 "ledir_mod.F90"
+(   68) IMPLICIT NONE
+(   69) # 71 "ledir_mod.F90"
+(   71) !     DUMMY ARGUMENTS
+(   72) INTEGER(KIND=JPIM)  :: KM
+(   73) INTEGER(KIND=JPIM)  :: KMLOC
+(   74) INTEGER(KIND=JPIM)  :: KFC
+(   75) INTEGER(KIND=JPIM)  :: KIFC
+(   76) INTEGER(KIND=JPIM) :: KDGLU
+(   77) INTEGER(KIND=JPIM), INTENT(IN)  :: KF_FS
+(   78) INTEGER(KIND=JPIM), INTENT(IN)  :: KLED2
+(   79) # 80 "ledir_mod.F90"
+(   80) REAL(KIND=JPRBT),    INTENT(IN)  :: PSIA(:,:,:),   PAIA(:,:,:)
+(   81) REAL(KIND=JPRBT),    INTENT(OUT) :: POA1(:,:,:)
+(   82) # 83 "ledir_mod.F90"
+(   83) !     LOCAL VARIABLES
+(   84) INTEGER(KIND=JPIM) :: IA, ILA, ILS, IS, ISKIP, ISL, IF, J, JK, IRET
+(   85) INTEGER(KIND=JPIM) :: ITHRESHOLD
+(   86) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   87) # 88 "ledir_mod.F90"
+(   88) !type(C_PTR) :: STREAMPTRA,STREAMPTRS
+(   89) # 90 "ledir_mod.F90"
+(   90) IF (LHOOK) CALL DR_HOOK('LE_DGEMM',0,ZHOOK_HANDLE)
+(   91) # 92 "ledir_mod.F90"
+(   92) KFC = 2*KF_FS
+(   93) KIFC = KFC
+(   94) # 95 "ledir_mod.F90"
+(   96) !$ACC& COPY(F,F%RW) &
+(   97) !$ACC& COPY(D,D_NUMP,D_MYMS,R,R_NDGNH,G,G_NDGLU,R_NSMAX,R_NTMAX) &
+(   98) !$ACC& present(PSIA,PAIA) &
+(   99) !$ACC& present(ZAA,ZAS,DZBAT,DZBST,DZCA,DZCS,DZCA,DZCS,DZCAT,DZCST) &
+(  100) !$ACC& present(POA1)
+(  101) # 102 "ledir_mod.F90"
+(  102) !loop over wavenumber
+(  103) DO KMLOC=1,D_NUMP
+(  104)    KM = D_MYMS(KMLOC)
+(  105)    
+(  106)    KDGLU = MIN(R_NDGNH,G_NDGLU(KM))
+(  107)    IF( KDGLU <= 0 ) THEN
+(  108)       stop 'ledir_mod: kdglu Error: code path is not (yet) supported in GPU version'
+(  109)    END IF
+(  110)    
+(  111)    
+(  112)    
+(  113)    
+(  114)    KIFC=KFC
+(  115)    IF(KM == 0)THEN
+(  116)       KIFC=KFC/2
+(  117)    ENDIF
+(  118)    
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:35      page 8
+
+(  119)    
+(  120)    IA  = 1+MOD(R_NSMAX-KM+2,2)
+(  121)    IS  = 1+MOD(R_NSMAX-KM+1,2)
+(  122)    ILA = (R_NSMAX-KM+2)/2
+(  123)    ILS = (R_NSMAX-KM+3)/2
+(  124)    ISL = MAX(R_NDGNH-G_NDGLU(KM)+1,1)
+(  125)    
+(  126)    IF(ILA > S%ITHRESHOLD .AND. S%LUSEFLT) THEN
+(  127)       stop 'ledir_mod: ila Error: code path is not (yet) supported in GPU version'
+(  128)    END IF
+(  129)    
+(  130)    !end loop over wavenumber
+(  131) END DO
+(  132) # 133 "ledir_mod.F90"
+(  133) !loop over wavenumber
+(  134) !$acc parallel loop collapse(3) private(KM,KDGLU,ISL,ISKIP)
+(  135) DO KMLOC=1,D_NUMP
+(  136)    DO J=1,R_NDGNH   
+(  137)       DO JK=1,KFC
+(  138)          
+(  139)          KM = D_MYMS(KMLOC)   
+(  140)          KDGLU = MIN(R_NDGNH,G_NDGLU(KM))
+(  141)          if (J .le. KDGLU) then
+(  142)    
+(  143)    
+(  144)             ISL = MAX(R_NDGNH-G_NDGLU(KM)+1,1)
+(  145)             
+(  146)             IF(KM == 0)THEN
+(  147)                ISKIP = 2
+(  148)             ELSE
+(  149)                ISKIP = 1
+(  150)             ENDIF
+(  151)             
+(  152)             
+(  153) # 154 "ledir_mod.F90"
+(  154)             if (MOD((JK-1),ISKIP) .eq. 0) then
+(  155)                DZBAT((JK-1)/ISKIP+1,J,KMLOC)=PAIA(JK,ISL+J-1,KMLOC)*F%RW(ISL+J-1)
+(  156)                DZBST((JK-1)/ISKIP+1,J,KMLOC)=PSIA(JK,ISL+J-1,KMLOC)*F%RW(ISL+J-1)
+(  157)             end if
+(  158)             
+(  159)             
+(  160)             
+(  161)          end if
+(  162)       ENDDO
+(  163)    ENDDO
+(  164)     !end loop over wavenumber
+(  165) END DO
+(  166) # 168 "ledir_mod.F90"
+(  168)    !$ACC host_data use_device(ZAA,DZBAT,DZCAT,ZAS,DZBST,DZCST)
+(  169)     ! Get C in transpose format to get better memory access patterns later
+(  170)     !C=A*B =>
+(  171)     ! C^T=B^T*A^T
+(  172)     !call CUDA_GEMM_BATCHED('N','N',DTDZBA,TDZAA,DLDZBA,1.0_JPRBT,DZBAT,DTDZBA,INT(DTDZBA*DLDZBA,JPIB),&
+(  173)     !     &ZAA,LDZAA,INT(LDZAA*TDZAA,JPIB),0._JPRBT,DZCAT,DTDZCA,INT(DTDZCA*DLDZCA,JPIB),D_NUMP)
+(  174)     call CUDA_GEMM_BATCHED('N','N',DTDZBA,TDZAA,DLDZBA,1.0_JPRBT,DZBAT,DTDZBA,DLDZBA,&
+(  175)          &ZAA,LDZAA,TDZAA,0._JPRBT,DZCAT,DTDZCA,DLDZCA,D_NUMP)
+(  176) # 178 "ledir_mod.F90"
+(  178)     ! Get C in transpose format to get better memory access patterns later
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:35      page 9
+
+(  179)     !C=A*B =>
+(  180)     ! C^T=B^T*A^T
+(  181)     !call CUDA_GEMM_BATCHED('N','N',DTDZBS,TDZAS,DLDZBS,1.0_JPRBT,DZBST,DTDZBS,INT(DTDZBS*DLDZBS,JPIB),&
+(  182)     !     &ZAS,LDZAS,INT(LDZAS*TDZAS,JPIB),0._JPRBT,DZCST,DTDZCS,INT(DTDZCS*DLDZCS,JPIB),D_NUMP)
+(  183)     call CUDA_GEMM_BATCHED('N','N',DTDZBS,TDZAS,DLDZBS,1.0_JPRBT,DZBST,DTDZBS,DLDZBS,&
+(  184)          &ZAS,LDZAS,TDZAS,0._JPRBT,DZCST,DTDZCS,DLDZCS,D_NUMP)
+(  185)     !$ACC end host_data
+(  186) # 187 "ledir_mod.F90"
+(  187) !$ACC parallel loop collapse(3) private(KM,ISKIP,ILA,IA,ILS,IS)
+(  188) DO KMLOC=1,D_NUMP
+(  189)    DO J=1,(R_NTMAX+3)/2
+(  190)       DO JK=1,KFC
+(  191) # 193 "ledir_mod.F90"
+(  193)          KM = D_MYMS(KMLOC)
+(  194) # 195 "ledir_mod.F90"
+(  195)          
+(  196)          IF(KM == 0)THEN
+(  197)             ISKIP = 2
+(  198)          ELSE
+(  199)             ISKIP = 1
+(  200)          ENDIF
+(  201)          
+(  202)          if (MOD((JK-1),ISKIP) .eq. 0) then
+(  203)             
+(  204)             ILA = (R_NTMAX-KM+2)/2
+(  205)             if (J .le. ILA) then
+(  206)                IA  = 1+MOD(R_NTMAX-KM+2,2)
+(  207)                POA1(JK,IA+(J-1)*2,KMLOC) = DZCAT((JK-1)/ISKIP+1,J,KMLOC)
+(  208)             end if
+(  209)             
+(  210)             ILS = (R_NTMAX-KM+3)/2
+(  211)             if (J .le. ILS) then                  
+(  212)                IS  = 1+MOD(R_NTMAX-KM+1,2)
+(  213)                POA1(JK,IS+(J-1)*2,KMLOC) = DZCST((JK-1)/ISKIP+1,J,KMLOC)            
+(  214)             end if
+(  215)             
+(  216)          end if
+(  217)             
+(  218)     ENDDO
+(  219)   ENDDO
+(  220)   !end loop over wavenumber
+(  221) END DO
+(  222) !$ACC end data
+(  223) # 224 "ledir_mod.F90"
+(  224) IF (LHOOK) CALL DR_HOOK('LE_DGEMM',1,ZHOOK_HANDLE)
+(  225) !     ------------------------------------------------------------------
+(  226) # 227 "ledir_mod.F90"
+(  227) END SUBROUTINE LEDIR
+(  228) END MODULE LEDIR_MOD

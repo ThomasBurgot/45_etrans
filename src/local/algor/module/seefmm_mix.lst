@@ -1,0 +1,1275 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: seefmm_mix.F90
+
+(    1) #ifdef RS6K
+(    2) @PROCESS HOT
+(    3) #endif
+(    4) module seefmm_mix
+(    5) !**** *SEEFMM_MIX*  - Implementation of Simple Exponential Expansion FMM
+(    6) 
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !     Implementation of Simple Exponential Expansion FMM
+(   10) 
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) 
+(   14) !     Method.
+(   15) !     -------
+(   16) !     Based on Algorithm described in Section 4 of the article 
+(   17) !     "An improved fast multipole algorithm for potential fields on the line "
+(   18) 
+(   19) 
+(   20) !     Reference.
+(   21) !     ----------
+(   22) !     "An improved fast multipole algorithm for potential fields on the line "
+(   23) !     by Norman Yarvin and Vladimir Rohklin, SIAM J. Numer. Anal. Vol. 36,No. 2,629-666.  [1]
+(   24) !
+(   25) !     Author.
+(   26) !     -------
+(   27) !     Mats Hamrud *ECMWF*
+(   28) 
+(   29) !     Modifications.
+(   30) !     --------------
+(   31) !     Original : 2009-06-04
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 2
+
+(   32) !     ------------------------------------------------------------------
+(   33) 
+(   34) 
+(   35) use parkind1,only : jpim     ,JPRBT, jprd
+(   36) use ecsort_mix
+(   37) use wts500_mod
+(   38) 
+(   39) integer(kind=jpim) :: nfmm_lim=200 ! Appr. break-even limit for FMM
+(   40) integer(kind=jpim),parameter :: nquadEm14=28 ! Quadrature size for eps~=1.e-14
+(   41) integer(kind=jpim),parameter :: nquadEm10=20!  Quadrature size for eps~=1.e-10
+(   42) integer(kind=jpim),parameter :: nquadEm07=14!  Quadrature size for eps~=1.e-07
+(   43) 
+(   44) type fmm_type
+(   45) integer(kind=jpim)          :: nxy    ! Total number of point "nx+ny"
+(   46) integer(kind=jpim)          :: nx     ! Number of 'x' points
+(   47) integer(kind=jpim)          :: nquad  ! Quadrature N
+(   48) integer(kind=jpim)          :: ncik   ! Number of elem. in cik
+(   49) real(kind=JPRBT)             :: rw(56) ! Quadrature weights
+(   50) real(kind=JPRBT)   , pointer :: rdexp(:,:)  ! exp(xy(i)-xy(i-1))
+(   51) integer(kind=jpim), pointer :: index(:)    ! index for sorted xy
+(   52) integer(kind=jpim), pointer :: nclose(:)   ! No of "close" points
+(   53) real(kind=JPRBT)   , pointer :: cik(:)      ! Correction term (142 in [1])
+(   54) 
+(   55) end type fmm_type
+(   56) 
+(   57) contains
+(   58) recursive subroutine setup_seefmm(kx,px,ky,py,ydfmm,pdiff)
+(   59) 
+(   60) implicit none
+(   61) 
+(   62) !**** *SETUP_SEEFMM*  - Setup seefmm
+(   63) 
+(   64) ! Purpose - Pre-computations for applying SEEFMM
+(   65) 
+(   66) ! Explicit arguments :
+(   67) ! --------------------
+(   68) ! kx - Number of x points
+(   69) ! px - x points
+(   70) ! ky - Number of y points 
+(   71) ! py - y points
+(   72) ! ydfmm - result of pre-computations
+(   73) ! pdiff - difference matrix (optional)
+(   74) 
+(   75) integer(kind=jpim),intent(in)  :: kx    
+(   76) real(kind=jprd)   ,intent(in)  :: px(:)
+(   77) integer(kind=jpim),intent(in)  :: ky
+(   78) real(kind=JPRBT)   ,intent(in)  :: py(:)
+(   79) type(fmm_type)    ,intent(out) :: ydfmm
+(   80) real(kind=JPRBT),optional,intent(in)  :: pdiff(:,:)
+(   81) 
+(   82) real(kind=JPRBT) :: zxy(kx+ky),zrt(56),zcik((kx+ky)*(kx+ky))
+(   83) real(kind=JPRBT) :: zr
+(   84) integer(kind=jpim) :: ixy
+(   85) !---------------------------------------------------------------------------
+(   86) ydfmm%nx=kx
+(   87) ixy=kx+ky
+(   88) ydfmm%nxy=ixy
+(   89) allocate(ydfmm%index(ixy))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 3
+
+(   90) !ydfmm%nquad=nquadEm14 !Set precicion to 1.E-14
+(   91) ydfmm%nquad=nquadEm07 !Set precicion to 1.E-07
+(   92) ! Combine px and py to form xxy, compute ascending index for xxy
+(   93) call comb_xy(kx,px,ky,py,ixy,zxy,ydfmm%index)
+(   94) ! Setup quadrature, scale (see 3.1.1 in [1])
+(   95) call suquad(ixy,zxy(ydfmm%index(1))-zxy(ydfmm%index(ixy)),&
+(   96)  & ydfmm%nquad,ydfmm%rw,zrt,zr)
+(   97) allocate(ydfmm%rdexp(ydfmm%nquad,ixy))
+(   98) allocate(ydfmm%nclose(ixy))
+(   99) ! Main pre-computation
+(  100) call prepotf(kx,ixy,ydfmm%nquad,ydfmm%rw,zrt,zr,zxy,ydfmm%index,&
+(  101)  & ydfmm%rdexp,ydfmm%nclose,zcik,ydfmm%ncik,pdiff)
+(  102) ! Needed as size of cik unknown beforehand
+(  103) allocate(ydfmm%cik(ydfmm%ncik))
+(  104) ydfmm%cik(:)=zcik(1:ydfmm%ncik)
+(  105) 
+(  106) end subroutine setup_seefmm
+(  107) !==========================================================================
+(  108) 
+(  109) subroutine free_seefmm(ydfmm)
+(  110) implicit none
+(  111) 
+(  112) !**** *FREE_SEEFMM*  - Release memory
+(  113) 
+(  114) ! Purpose - Release memory used by ydfmm
+(  115) 
+(  116) ! Explicit arguments :
+(  117) ! --------------------
+(  118) ! ydfmm - result of pre-computations
+(  119) type(fmm_type)    ,intent(inout) :: ydfmm
+(  120) 
+(  121) deallocate(ydfmm%index)
+(  122) deallocate(ydfmm%rdexp)
+(  123) deallocate(ydfmm%nclose)
+(  124) deallocate(ydfmm%cik)
+(  125) 
+(  126) end subroutine free_seefmm
+(  127) 
+(  128) !==========================================================================
+(  129) recursive subroutine potf(kn,kx,ldxout,kquad,prw,pq,prdexp,kindex,kclosel,kcik,pcik,ptheta)
+(  130) implicit none
+(  131) 
+(  132) integer(kind=jpim),intent(in)  :: kn
+(  133) integer(kind=jpim),intent(in)  :: kx
+(  134) logical           ,intent(in)  :: ldxout
+(  135) integer(kind=jpim),intent(in)  :: kquad
+(  136) real(kind=JPRBT)   ,intent(in)  :: prw(:)
+(  137) real(kind=JPRBT)   ,intent(in)  :: pq(:)
+(  138) real(kind=JPRBT)   ,intent(in)  :: prdexp(:,:)
+(  139) integer(kind=jpim),intent(in)  :: kindex(:)
+(  140) integer(kind=jpim),intent(in)  :: kclosel(:)
+(  141) integer(kind=jpim),intent(in)  :: kcik
+(  142) real(kind=JPRBT)   ,intent(in)  :: pcik(:)
+(  143) real(kind=JPRBT)   ,intent(out) :: ptheta(:)
+(  144) 
+(  145) real(kind=JPRBT)    :: zalpha(kquad),zq(kn),ztheta(kn)
+(  146) integer(kind=jpim) :: j1,j2,jm,inumc,idist,iquad
+(  147) integer(kind=jpim) :: iout,iq,i1,i1p1,i1pd,ik1,ix,iy
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 4
+
+(  148) logical :: lxy,llxy(kn)
+(  149)  
+(  150) lxy(ik1) = (ik1 <= kx .eqv. ldxout)
+(  151) !-------------------------------------------------------------------------
+(  152) 
+(  153) ztheta(:)=0.0_JPRBT
+(  154) if(ldxout) then
+(  155)   ix=0
+(  156)   iy=-kx
+(  157) else
+(  158)   ix=-kx
+(  159)   iy=0
+(  160) endif
+(  161) 
+(  162) do j1=1,kn
+(  163)   i1=kindex(j1)
+(  164)   llxy(j1)=lxy(i1)
+(  165)   if(llxy(j1)) then
+(  166)     zq(j1)=pq(kindex(j1)+ix)
+(  167)   else
+(  168)     zq(j1)=0.0_JPRBT
+(  169)   endif
+(  170) enddo
+(  171) 
+(  172) zalpha(:)=zq(1)
+(  173) do j1=2,kn
+(  174)   if(llxy(j1)) then
+(  175)     do jm=1,kquad
+(  176)       zalpha(jm)=zalpha(jm)*prdexp(jm,j1)+zq(j1)
+(  177)     enddo
+(  178)   else
+(  179)     do jm=1,kquad
+(  180)       zalpha(jm)=zalpha(jm)*prdexp(jm,j1)
+(  181)       ztheta(j1)=ztheta(j1)+prw(jm)*zalpha(jm)
+(  182)     enddo
+(  183)   endif
+(  184) enddo
+(  185) 
+(  186) zalpha(1:kquad)=zq(kn)
+(  187) do j1=kn-1,1,-1
+(  188)   if(llxy(j1)) then
+(  189)     do jm=1,kquad
+(  190)       zalpha(jm)=zalpha(jm)*prdexp(jm,j1+1)+zq(j1)
+(  191)     enddo
+(  192)   else
+(  193)     do jm=1,kquad
+(  194)       zalpha(jm)=zalpha(jm)*prdexp(jm,j1+1)
+(  195)       ztheta(j1)=ztheta(j1)-prw(jm)*zalpha(jm)
+(  196)     enddo
+(  197)   endif
+(  198) enddo
+(  199) 
+(  200) 
+(  201) IF(kcik > 0) then
+(  202)   inumc=0
+(  203)   do j1=1,kn-1
+(  204)     do j2=1,kclosel(j1)
+(  205)       idist=j2
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 5
+
+(  206)       if(.not.llxy(j1) .and. llxy(j1+idist)) then
+(  207)         inumc=inumc+1
+(  208)         ztheta(j1)=ztheta(j1)-pcik(inumc)*zq(j1+idist)
+(  209)       elseif(llxy(j1) .and. .not.llxy(j1+idist)) then
+(  210)         inumc=inumc+1
+(  211)         ztheta(j1+idist)=ztheta(j1+idist)+pcik(inumc)*zq(j1)
+(  212)       endif
+(  213)     enddo
+(  214)   enddo
+(  215) endif
+(  216) 
+(  217) do j1=1,kn
+(  218)   if(.not. llxy(j1)) then
+(  219)     i1=kindex(j1)
+(  220)     ptheta(i1+iy)=ztheta(j1)
+(  221)   endif
+(  222) enddo
+(  223) 
+(  224) end subroutine potf
+(  225) !==========================================================================
+(  226) recursive subroutine seefmm_mulv(ydfmm,ldxout,pq,ptheta)
+(  227) implicit none
+(  228) 
+(  229) type(fmm_type)    ,intent(in)  :: ydfmm
+(  230) logical           ,intent(in)  :: ldxout
+(  231) real(kind=JPRBT)   ,intent(in)  :: pq(:)
+(  232) real(kind=JPRBT)   ,intent(out) :: ptheta(:)
+(  233) 
+(  234) !-------------------------------------------------------------------------
+(  235) call potf(ydfmm%nxy,ydfmm%nx,ldxout,ydfmm%nquad,&
+(  236)  & ydfmm%rw,pq,ydfmm%rdexp,ydfmm%index,&
+(  237)  & ydfmm%nclose,ydfmm%ncik,ydfmm%cik,ptheta)
+(  238) 
+(  239) end subroutine seefmm_mulv
+(  240) !==========================================================================
+(  241) recursive subroutine seefmm_mulm(ydfmm,km,kskip,ldxout,pq,ptheta)
+(  242) implicit none
+(  243) 
+(  244) type(fmm_type)    ,intent(in)  :: ydfmm
+(  245) integer(kind=jpim),intent(in)  :: km
+(  246) integer(kind=jpim),intent(in)  :: kskip
+(  247) logical           ,intent(in)  :: ldxout
+(  248) real(kind=JPRBT)   ,intent(in)  :: pq(:,:)
+(  249) real(kind=JPRBT)   ,intent(out) :: ptheta(:,:)
+(  250) 
+(  251) !-------------------------------------------------------------------------
+(  252) call potfm(ydfmm%nxy,km,kskip,ydfmm%nx,ldxout,ydfmm%nquad,&
+(  253)  & ydfmm%rw,pq,ydfmm%rdexp,ydfmm%index,&
+(  254)  & ydfmm%nclose,ydfmm%ncik,ydfmm%cik,ptheta)
+(  255) end subroutine seefmm_mulm
+(  256) !==========================================================================
+(  257) 
+(  258) recursive subroutine potfm(kn,km,kskip,kx,ldxout,kquad,prw,pq,prdexp,kindex,kclosel,kcik,pcik,ptheta)
+(  259) implicit none
+(  260) 
+(  261) integer(kind=jpim),intent(in)  :: kn
+(  262) integer(kind=jpim),intent(in)  :: km
+(  263) integer(kind=jpim),intent(in)  :: kskip
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 6
+
+(  264) integer(kind=jpim),intent(in)  :: kx
+(  265) logical           ,intent(in)  :: ldxout
+(  266) integer(kind=jpim),intent(in)  :: kquad
+(  267) real(kind=JPRBT)   ,intent(in)  :: prw(:)
+(  268) real(kind=JPRBT)   ,intent(in)  :: pq(:,:)
+(  269) real(kind=JPRBT)   ,intent(in)  :: prdexp(:,:)
+(  270) integer(kind=jpim),intent(in)  :: kindex(:)
+(  271) integer(kind=jpim),intent(in)  :: kclosel(:)
+(  272) integer(kind=jpim),intent(in)  :: kcik
+(  273) real(kind=JPRBT)   ,intent(in)  :: pcik(:)
+(  274) real(kind=JPRBT)   ,intent(out) :: ptheta(:,:)
+(  275) 
+(  276) real(kind=JPRBT) :: zalpha(kquad,km)
+(  277) integer(kind=jpim) :: j1,j2,jm,jq,inumc,idist,iquad
+(  278) integer(kind=jpim) :: iout,iq,i1,i1p1,i1pd,ik1,ix,iy
+(  279) logical :: lxy,llxy(kn)
+(  280)  
+(  281) lxy(ik1) = (ik1 <= kx .eqv. ldxout)
+(  282) !-------------------------------------------------------------------------
+(  283) 
+(  284) !CALL GSTATS(209,0)
+(  285) ptheta(:,:)=0.0_JPRBT
+(  286) if(ldxout) then
+(  287)   ix=0
+(  288)   iy=-kx
+(  289) else
+(  290)   ix=-kx
+(  291)   iy=0
+(  292) endif
+(  293) do j1=1,kn
+(  294)   i1=kindex(j1)
+(  295)   llxy(j1)=lxy(i1)
+(  296) enddo
+(  297) 
+(  298) if(llxy(1)) then
+(  299)   do jm=1,km,kskip
+(  300)     zalpha(:,jm)=pq(jm,kindex(1)+ix)
+(  301)   enddo
+(  302) else
+(  303)   zalpha(:,:)=0.0_JPRBT
+(  304) endif
+(  305) !CALL GSTATS(209,1)
+(  306) !CALL GSTATS(210,0)
+(  307) do j1=2,kn
+(  308)   i1=kindex(j1)
+(  309)   if(llxy(j1) ) then
+(  310)     if( kskip==1 )then
+(  311)       do jq=1,kquad
+(  312)         do jm=1,km
+(  313)           zalpha(jq,jm)=zalpha(jq,jm)*prdexp(jq,j1)
+(  314)           zalpha(jq,jm)=zalpha(jq,jm)+pq(jm,i1+ix)
+(  315)         enddo
+(  316)       enddo
+(  317)    else
+(  318)       do jq=1,kquad
+(  319)         do jm=1,km,kskip
+(  320)           zalpha(jq,jm)=zalpha(jq,jm)*prdexp(jq,j1)
+(  321)           zalpha(jq,jm)=zalpha(jq,jm)+pq(jm,i1+ix)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 7
+
+(  322)         enddo
+(  323)       enddo
+(  324)    endif
+(  325)   else
+(  326)     if( kskip==1 )then
+(  327)       do jq=1,kquad
+(  328)         do jm=1,km
+(  329)           zalpha(jq,jm)=zalpha(jq,jm)*prdexp(jq,j1)
+(  330)           ptheta(jm,i1+iy)=ptheta(jm,i1+iy)+prw(jq)*zalpha(jq,jm)
+(  331)         enddo
+(  332)       enddo
+(  333)     else
+(  334)       do jq=1,kquad
+(  335)         do jm=1,km,kskip
+(  336)           zalpha(jq,jm)=zalpha(jq,jm)*prdexp(jq,j1)
+(  337)           ptheta(jm,i1+iy)=ptheta(jm,i1+iy)+prw(jq)*zalpha(jq,jm)
+(  338)         enddo
+(  339)       enddo
+(  340)     endif
+(  341)   endif
+(  342) enddo
+(  343) !CALL GSTATS(210,1)
+(  344) 
+(  345) !CALL GSTATS(211,0)
+(  346) if(llxy(kn)) then
+(  347)   do jm=1,km,kskip
+(  348)     zalpha(:,jm)=pq(jm,kindex(kn)+ix)
+(  349)   enddo
+(  350) else
+(  351)   zalpha(:,:)=0.0
+(  352) endif
+(  353) !CALL GSTATS(211,1)
+(  354) !CALL GSTATS(212,0)
+(  355) do j1=kn-1,1,-1
+(  356)   i1=kindex(j1)
+(  357)   i1p1=kindex(j1+1)
+(  358)   if(llxy(j1)) then
+(  359)     if( kskip==1 )then
+(  360)       do jq=1,kquad
+(  361)         do jm=1,km
+(  362)           zalpha(jq,jm)=zalpha(jq,jm)*prdexp(jq,j1+1)
+(  363)           zalpha(jq,jm)=zalpha(jq,jm)+pq(jm,i1+ix)
+(  364)         enddo
+(  365)       enddo
+(  366)     else
+(  367)       do jq=1,kquad
+(  368)         do jm=1,km,kskip
+(  369)           zalpha(jq,jm)=zalpha(jq,jm)*prdexp(jq,j1+1)
+(  370)           zalpha(jq,jm)=zalpha(jq,jm)+pq(jm,i1+ix)
+(  371)         enddo
+(  372)       enddo
+(  373)     endif
+(  374)   else
+(  375)     if( kskip==1 )then
+(  376)       do jq=1,kquad
+(  377)         do jm=1,km
+(  378)           zalpha(jq,jm)=zalpha(jq,jm)*prdexp(jq,j1+1)
+(  379)           ptheta(jm,i1+iy)=ptheta(jm,i1+iy)-prw(jq)*zalpha(jq,jm)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 8
+
+(  380)         enddo
+(  381)       enddo
+(  382)     else
+(  383)       do jq=1,kquad
+(  384)         do jm=1,km,kskip
+(  385)           zalpha(jq,jm)=zalpha(jq,jm)*prdexp(jq,j1+1)
+(  386)           ptheta(jm,i1+iy)=ptheta(jm,i1+iy)-prw(jq)*zalpha(jq,jm)
+(  387)         enddo
+(  388)       enddo
+(  389)     endif
+(  390)   endif
+(  391) enddo
+(  392) !CALL GSTATS(212,1)
+(  393) 
+(  394) 
+(  395) IF(kcik > 0) then
+(  396) !  CALL GSTATS(213,0)
+(  397)   inumc=0
+(  398)   do j1=1,kn-1
+(  399)     do j2=1,kclosel(j1)
+(  400)       idist=j2
+(  401)       i1=kindex(j1)
+(  402)       i1pd=kindex(j1+idist)
+(  403)       if(.not.llxy(j1) .and. llxy(j1+idist)) then
+(  404)         inumc=inumc+1
+(  405)         do jm=1,km,kskip
+(  406)           ptheta(jm,i1+iy)=ptheta(jm,i1+iy)-pcik(inumc)*pq(jm,i1pd+ix)
+(  407)         enddo
+(  408)       elseif(llxy(j1) .and. .not.llxy(j1+idist)) then
+(  409)         inumc=inumc+1
+(  410)         do jm=1,km,kskip
+(  411)           ptheta(jm,i1pd+iy)=ptheta(jm,i1pd+iy)+pcik(inumc)*pq(jm,i1+ix)
+(  412)         enddo
+(  413)       endif
+(  414)     enddo
+(  415)   enddo
+(  416) !  CALL GSTATS(213,1)
+(  417) endif
+(  418) 
+(  419) end subroutine potfm
+(  420) !=========================================================================
+(  421) recursive subroutine suquad(kn,prange,kquad,prw,prt,pr)
+(  422) implicit none
+(  423) 
+(  424) integer(kind=jpim)        ,intent(in)  :: kn
+(  425) real(kind=JPRBT),intent(in)  :: prange
+(  426) integer(kind=jpim)        ,intent(in) :: kquad
+(  427) real(kind=JPRBT),intent(out) :: prw(:)
+(  428) real(kind=JPRBT),intent(out) :: prt(:)
+(  429) real(kind=JPRBT),intent(out) :: pr
+(  430) 
+(  431) real(kind=JPRBT) :: za,zb,zs
+(  432) integer(kind=jpim) :: jm
+(  433) !-------------------------------------------------------------------------
+(  434) 
+(  435) za=1.0
+(  436) zb=500.0
+(  437) zs=zb/prange
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 9
+
+(  438) pr=za/zs
+(  439) call wts500(prt,prw,kquad)
+(  440) do jm=1,kquad
+(  441)   prw(jm)=prw(jm)*zs
+(  442)   prt(jm)=prt(jm)*zs
+(  443) enddo
+(  444) end subroutine suquad
+(  445) !==========================================================================
+(  446) 
+(  447) recursive subroutine comb_xy(kx,px,ky,py,kxy,pxy,kindex)
+(  448) 
+(  449) implicit none
+(  450) 
+(  451) integer(kind=jpim), intent(in)  :: kx,ky
+(  452) real(kind=jprd),    intent(in)  :: px(:)
+(  453) real(kind=JPRBT),    intent(in)  :: py(:)
+(  454) integer(kind=jpim), intent(in)  :: kxy
+(  455) real(kind=JPRBT),    intent(out) :: pxy(:)
+(  456) integer(kind=jpim), intent(out) :: kindex(:)
+(  457) integer(kind=jpim) :: jxy,ix,iy,iret
+(  458) 
+(  459) !-------------------------------------------------------------------------
+(  460) 
+(  461) pxy(1:kx)=px(1:kx)
+(  462) pxy(kx+1:kx+ky)=py(1:ky)
+(  463) !call m01daf(pxy,1,kxy,'D',irank,ifail)
+(  464) call keysort(iret,pxy,kxy,descending=.true.,index=kindex,init=.true.)
+(  465) !!$do jxy=1,kxy
+(  466) !!$  kindex(irank(jxy))=jxy
+(  467) !!$enddo
+(  468) 
+(  469) end subroutine comb_xy
+(  470) !==========================================================================
+(  471) recursive subroutine prepotf(kx,kxy,kquad,prw,prt,pr,pxy,kindex,prdexp,&
+(  472)  & kclosel,pcik,knocik,pdiff)
+(  473) 
+(  474) implicit none
+(  475) 
+(  476) integer(kind=jpim), intent(in)  :: kx
+(  477) integer(kind=jpim), intent(in)  :: kxy
+(  478) integer(kind=jpim), intent(in)  :: kquad
+(  479) real(kind=JPRBT),    intent(in)  :: pxy(:)
+(  480) real(kind=JPRBT),    intent(in)  :: prw(:)
+(  481) real(kind=JPRBT),    intent(in)  :: pr
+(  482) real(kind=JPRBT),    intent(in)  :: prt(:)
+(  483) integer(kind=jpim), intent(in)  :: kindex(:)
+(  484) real(kind=JPRBT),    intent(out) :: prdexp(:,:)
+(  485) integer(kind=jpim), intent(out) :: kclosel(:)
+(  486) real(kind=JPRBT),    intent(out) :: pcik(:)
+(  487) integer(kind=jpim), intent(out) :: knocik
+(  488) real(kind=JPRBT),optional, intent(in)  :: pdiff(:,:)
+(  489) 
+(  490) real(kind=JPRBT) :: zdx
+(  491) real(kind=JPRBT) :: zsum
+(  492) real(kind=JPRBT) :: zdiff(kxy,kxy)
+(  493) integer(kind=jpim)  :: jxy,jq,isize,jdist,ixy,ixym1,i1,i1pd,j1,j2
+(  494) logical :: llexit
+(  495) !-------------------------------------------------------------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 10
+
+(  496) if(present(pdiff)) then
+(  497)   zdiff(:,:)=pdiff(:,:)
+(  498) else
+(  499)   do j1=1,kxy
+(  500)     do j2=1,kxy
+(  501)       zdiff(j1,j2)=pxy(j1)-pxy(j2)
+(  502)     enddo
+(  503)   enddo
+(  504) endif
+(  505) do jxy=2,kxy
+(  506)   ixy=kindex(jxy)
+(  507)   ixym1=kindex(jxy-1)
+(  508)   do jq=1,kquad
+(  509)     prdexp(jq,jxy)=exp(zdiff(ixy,ixym1)*prt(jq))
+(  510)   enddo
+(  511) enddo
+(  512) kclosel(:)=0
+(  513) knocik=0
+(  514) isize=size(pcik)
+(  515) llexit=.true.
+(  516) do jxy=1,kxy-1
+(  517)   do jdist=1,kxy-jxy
+(  518)     i1=kindex(jxy)
+(  519)     i1pd=kindex(jxy+jdist)
+(  520)     zdx=zdiff(i1,i1pd)
+(  521)     if(zdx < pr) then
+(  522)       llexit=.false.
+(  523)       kclosel(jxy)=kclosel(jxy)+1
+(  524)       if((i1 > kx .and. i1pd <= kx) .or. (i1pd > kx .and.  i1 <= kx)) then
+(  525)         knocik=knocik+1
+(  526)         zsum=0.0_JPRBT
+(  527)         do jq=1,kquad
+(  528)           zsum=zsum+prw(jq)*exp(-zdx*prt(jq))
+(  529)         enddo
+(  530)         pcik(knocik)=1.0_JPRBT/zdx-zsum
+(  531)       endif
+(  532)     else
+(  533)       exit
+(  534)     endif
+(  535)   enddo
+(  536)   if(knocik > isize) stop ' precompfint : pcik tto small'
+(  537) enddo
+(  538) 
+(  539) end subroutine prepotf
+(  540) !==========================================================================
+(  541) 
+(  542) end module seefmm_mix
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 11
+
+(    1) # 1 "seefmm_mix.F90"
+(    1) # 4 "seefmm_mix.F90"
+(    4) module seefmm_mix
+(    5) !**** *SEEFMM_MIX*  - Implementation of Simple Exponential Expansion FMM
+(    6) # 7 "seefmm_mix.F90"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !     Implementation of Simple Exponential Expansion FMM
+(   10) # 11 "seefmm_mix.F90"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) # 14 "seefmm_mix.F90"
+(   14) !     Method.
+(   15) !     -------
+(   16) !     Based on Algorithm described in Section 4 of the article 
+(   17) !     "An improved fast multipole algorithm for potential fields on the line "
+(   18) # 20 "seefmm_mix.F90"
+(   20) !     Reference.
+(   21) !     ----------
+(   22) !     "An improved fast multipole algorithm for potential fields on the line "
+(   23) !     by Norman Yarvin and Vladimir Rohklin, SIAM J. Numer. Anal. Vol. 36,No. 2,629-666.  [1]
+(   24) !
+(   25) !     Author.
+(   26) !     -------
+(   27) !     Mats Hamrud *ECMWF*
+(   28) # 29 "seefmm_mix.F90"
+(   29) !     Modifications.
+(   30) !     --------------
+(   31) !     Original : 2009-06-04
+(   32) !     ------------------------------------------------------------------
+(   33) # 35 "seefmm_mix.F90"
+(   35) use parkind1,only : jpim     ,JPRBT, jprd
+(   36) use ecsort_mix
+(   37) use wts500_mod
+(   38) # 39 "seefmm_mix.F90"
+(   39) integer(kind=jpim) :: nfmm_lim=200 ! Appr. break-even limit for FMM
+(   40) integer(kind=jpim),parameter :: nquadEm14=28 ! Quadrature size for eps~=1.e-14
+(   41) integer(kind=jpim),parameter :: nquadEm10=20!  Quadrature size for eps~=1.e-10
+(   42) integer(kind=jpim),parameter :: nquadEm07=14!  Quadrature size for eps~=1.e-07
+(   43) # 44 "seefmm_mix.F90"
+(   44) type fmm_type
+(   45) integer(kind=jpim)          :: nxy    ! Total number of point "nx+ny"
+(   46) integer(kind=jpim)          :: nx     ! Number of 'x' points
+(   47) integer(kind=jpim)          :: nquad  ! Quadrature N
+(   48) integer(kind=jpim)          :: ncik   ! Number of elem. in cik
+(   49) real(kind=JPRBT)             :: rw(56) ! Quadrature weights
+(   50) real(kind=JPRBT)   , pointer :: rdexp(:,:)  ! exp(xy(i)-xy(i-1))
+(   51) integer(kind=jpim), pointer :: index(:)    ! index for sorted xy
+(   52) integer(kind=jpim), pointer :: nclose(:)   ! No of "close" points
+(   53) real(kind=JPRBT)   , pointer :: cik(:)      ! Correction term (142 in [1])
+(   54) # 55 "seefmm_mix.F90"
+(   55) end type fmm_type
+(   56) # 57 "seefmm_mix.F90"
+(   57) contains
+(   58) recursive subroutine setup_seefmm(kx,px,ky,py,ydfmm,pdiff)
+(   59) # 60 "seefmm_mix.F90"
+(   60) implicit none
+(   61) # 62 "seefmm_mix.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 12
+
+(   62) !**** *SETUP_SEEFMM*  - Setup seefmm
+(   63) # 64 "seefmm_mix.F90"
+(   64) ! Purpose - Pre-computations for applying SEEFMM
+(   65) # 66 "seefmm_mix.F90"
+(   66) ! Explicit arguments :
+(   67) ! --------------------
+(   68) ! kx - Number of x points
+(   69) ! px - x points
+(   70) ! ky - Number of y points 
+(   71) ! py - y points
+(   72) ! ydfmm - result of pre-computations
+(   73) ! pdiff - difference matrix (optional)
+(   74) # 75 "seefmm_mix.F90"
+(   75) integer(kind=jpim),intent(in)  :: kx    
+(   76) real(kind=jprd)   ,intent(in)  :: px(:)
+(   77) integer(kind=jpim),intent(in)  :: ky
+(   78) real(kind=JPRBT)   ,intent(in)  :: py(:)
+(   79) type(fmm_type)    ,intent(out) :: ydfmm
+(   80) real(kind=JPRBT),optional,intent(in)  :: pdiff(:,:)
+(   81) # 82 "seefmm_mix.F90"
+(   82) real(kind=JPRBT) :: zxy(kx+ky),zrt(56),zcik((kx+ky)*(kx+ky))
+(   83) real(kind=JPRBT) :: zr
+(   84) integer(kind=jpim) :: ixy
+(   85) !---------------------------------------------------------------------------
+(   86) ydfmm%nx=kx
+(   87) ixy=kx+ky
+(   88) ydfmm%nxy=ixy
+(   89) allocate(ydfmm%index(ixy))
+(   90) !ydfmm%nquad=nquadEm14 !Set precicion to 1.E-14
+(   91) ydfmm%nquad=nquadEm07 !Set precicion to 1.E-07
+(   92) ! Combine px and py to form xxy, compute ascending index for xxy
+(   93) call comb_xy(kx,px,ky,py,ixy,zxy,ydfmm%index)
+(   94) ! Setup quadrature, scale (see 3.1.1 in [1])
+(   95) call suquad(ixy,zxy(ydfmm%index(1))-zxy(ydfmm%index(ixy)),&
+(   96)  & ydfmm%nquad,ydfmm%rw,zrt,zr)
+(   97) allocate(ydfmm%rdexp(ydfmm%nquad,ixy))
+(   98) allocate(ydfmm%nclose(ixy))
+(   99) ! Main pre-computation
+(  100) call prepotf(kx,ixy,ydfmm%nquad,ydfmm%rw,zrt,zr,zxy,ydfmm%index,&
+(  101)  & ydfmm%rdexp,ydfmm%nclose,zcik,ydfmm%ncik,pdiff)
+(  102) ! Needed as size of cik unknown beforehand
+(  103) allocate(ydfmm%cik(ydfmm%ncik))
+(  104) ydfmm%cik(:)=zcik(1:ydfmm%ncik)
+(  105) # 106 "seefmm_mix.F90"
+(  106) end subroutine setup_seefmm
+(  107) !==========================================================================
+(  108) # 109 "seefmm_mix.F90"
+(  109) subroutine free_seefmm(ydfmm)
+(  110) implicit none
+(  111) # 112 "seefmm_mix.F90"
+(  112) !**** *FREE_SEEFMM*  - Release memory
+(  113) # 114 "seefmm_mix.F90"
+(  114) ! Purpose - Release memory used by ydfmm
+(  115) # 116 "seefmm_mix.F90"
+(  116) ! Explicit arguments :
+(  117) ! --------------------
+(  118) ! ydfmm - result of pre-computations
+(  119) type(fmm_type)    ,intent(inout) :: ydfmm
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 13
+
+(  120) # 121 "seefmm_mix.F90"
+(  121) deallocate(ydfmm%index)
+(  122) deallocate(ydfmm%rdexp)
+(  123) deallocate(ydfmm%nclose)
+(  124) deallocate(ydfmm%cik)
+(  125) # 126 "seefmm_mix.F90"
+(  126) end subroutine free_seefmm
+(  127) # 128 "seefmm_mix.F90"
+(  128) !==========================================================================
+(  129) recursive subroutine potf(kn,kx,ldxout,kquad,prw,pq,prdexp,kindex,kclosel,kcik,pcik,ptheta)
+(  130) implicit none
+(  131) # 132 "seefmm_mix.F90"
+(  132) integer(kind=jpim),intent(in)  :: kn
+(  133) integer(kind=jpim),intent(in)  :: kx
+(  134) logical           ,intent(in)  :: ldxout
+(  135) integer(kind=jpim),intent(in)  :: kquad
+(  136) real(kind=JPRBT)   ,intent(in)  :: prw(:)
+(  137) real(kind=JPRBT)   ,intent(in)  :: pq(:)
+(  138) real(kind=JPRBT)   ,intent(in)  :: prdexp(:,:)
+(  139) integer(kind=jpim),intent(in)  :: kindex(:)
+(  140) integer(kind=jpim),intent(in)  :: kclosel(:)
+(  141) integer(kind=jpim),intent(in)  :: kcik
+(  142) real(kind=JPRBT)   ,intent(in)  :: pcik(:)
+(  143) real(kind=JPRBT)   ,intent(out) :: ptheta(:)
+(  144) # 145 "seefmm_mix.F90"
+(  145) real(kind=JPRBT)    :: zalpha(kquad),zq(kn),ztheta(kn)
+(  146) integer(kind=jpim) :: j1,j2,jm,inumc,idist,iquad
+(  147) integer(kind=jpim) :: iout,iq,i1,i1p1,i1pd,ik1,ix,iy
+(  148) logical :: lxy,llxy(kn)
+(  149)  
+(  150) lxy(ik1) = (ik1 <= kx .eqv. ldxout)
+(  151) !-------------------------------------------------------------------------
+(  152) # 153 "seefmm_mix.F90"
+(  153) ztheta(:)=0.0_JPRBT
+(  154) if(ldxout) then
+(  155)   ix=0
+(  156)   iy=-kx
+(  157) else
+(  158)   ix=-kx
+(  159)   iy=0
+(  160) endif
+(  161) # 162 "seefmm_mix.F90"
+(  162) do j1=1,kn
+(  163)   i1=kindex(j1)
+(  164)   llxy(j1)=lxy(i1)
+(  165)   if(llxy(j1)) then
+(  166)     zq(j1)=pq(kindex(j1)+ix)
+(  167)   else
+(  168)     zq(j1)=0.0_JPRBT
+(  169)   endif
+(  170) enddo
+(  171) # 172 "seefmm_mix.F90"
+(  172) zalpha(:)=zq(1)
+(  173) do j1=2,kn
+(  174)   if(llxy(j1)) then
+(  175)     do jm=1,kquad
+(  176)       zalpha(jm)=zalpha(jm)*prdexp(jm,j1)+zq(j1)
+(  177)     enddo
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 14
+
+(  178)   else
+(  179)     do jm=1,kquad
+(  180)       zalpha(jm)=zalpha(jm)*prdexp(jm,j1)
+(  181)       ztheta(j1)=ztheta(j1)+prw(jm)*zalpha(jm)
+(  182)     enddo
+(  183)   endif
+(  184) enddo
+(  185) # 186 "seefmm_mix.F90"
+(  186) zalpha(1:kquad)=zq(kn)
+(  187) do j1=kn-1,1,-1
+(  188)   if(llxy(j1)) then
+(  189)     do jm=1,kquad
+(  190)       zalpha(jm)=zalpha(jm)*prdexp(jm,j1+1)+zq(j1)
+(  191)     enddo
+(  192)   else
+(  193)     do jm=1,kquad
+(  194)       zalpha(jm)=zalpha(jm)*prdexp(jm,j1+1)
+(  195)       ztheta(j1)=ztheta(j1)-prw(jm)*zalpha(jm)
+(  196)     enddo
+(  197)   endif
+(  198) enddo
+(  199) # 201 "seefmm_mix.F90"
+(  201) IF(kcik > 0) then
+(  202)   inumc=0
+(  203)   do j1=1,kn-1
+(  204)     do j2=1,kclosel(j1)
+(  205)       idist=j2
+(  206)       if(.not.llxy(j1) .and. llxy(j1+idist)) then
+(  207)         inumc=inumc+1
+(  208)         ztheta(j1)=ztheta(j1)-pcik(inumc)*zq(j1+idist)
+(  209)       elseif(llxy(j1) .and. .not.llxy(j1+idist)) then
+(  210)         inumc=inumc+1
+(  211)         ztheta(j1+idist)=ztheta(j1+idist)+pcik(inumc)*zq(j1)
+(  212)       endif
+(  213)     enddo
+(  214)   enddo
+(  215) endif
+(  216) # 217 "seefmm_mix.F90"
+(  217) do j1=1,kn
+(  218)   if(.not. llxy(j1)) then
+(  219)     i1=kindex(j1)
+(  220)     ptheta(i1+iy)=ztheta(j1)
+(  221)   endif
+(  222) enddo
+(  223) # 224 "seefmm_mix.F90"
+(  224) end subroutine potf
+(  225) !==========================================================================
+(  226) recursive subroutine seefmm_mulv(ydfmm,ldxout,pq,ptheta)
+(  227) implicit none
+(  228) # 229 "seefmm_mix.F90"
+(  229) type(fmm_type)    ,intent(in)  :: ydfmm
+(  230) logical           ,intent(in)  :: ldxout
+(  231) real(kind=JPRBT)   ,intent(in)  :: pq(:)
+(  232) real(kind=JPRBT)   ,intent(out) :: ptheta(:)
+(  233) # 234 "seefmm_mix.F90"
+(  234) !-------------------------------------------------------------------------
+(  235) call potf(ydfmm%nxy,ydfmm%nx,ldxout,ydfmm%nquad,&
+(  236)  & ydfmm%rw,pq,ydfmm%rdexp,ydfmm%index,&
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 15
+
+(  237)  & ydfmm%nclose,ydfmm%ncik,ydfmm%cik,ptheta)
+(  238) # 239 "seefmm_mix.F90"
+(  239) end subroutine seefmm_mulv
+(  240) !==========================================================================
+(  241) recursive subroutine seefmm_mulm(ydfmm,km,kskip,ldxout,pq,ptheta)
+(  242) implicit none
+(  243) # 244 "seefmm_mix.F90"
+(  244) type(fmm_type)    ,intent(in)  :: ydfmm
+(  245) integer(kind=jpim),intent(in)  :: km
+(  246) integer(kind=jpim),intent(in)  :: kskip
+(  247) logical           ,intent(in)  :: ldxout
+(  248) real(kind=JPRBT)   ,intent(in)  :: pq(:,:)
+(  249) real(kind=JPRBT)   ,intent(out) :: ptheta(:,:)
+(  250) # 251 "seefmm_mix.F90"
+(  251) !-------------------------------------------------------------------------
+(  252) call potfm(ydfmm%nxy,km,kskip,ydfmm%nx,ldxout,ydfmm%nquad,&
+(  253)  & ydfmm%rw,pq,ydfmm%rdexp,ydfmm%index,&
+(  254)  & ydfmm%nclose,ydfmm%ncik,ydfmm%cik,ptheta)
+(  255) end subroutine seefmm_mulm
+(  256) !==========================================================================
+(  257) # 258 "seefmm_mix.F90"
+(  258) recursive subroutine potfm(kn,km,kskip,kx,ldxout,kquad,prw,pq,prdexp,kindex,kclosel,kcik,pcik,ptheta)
+(  259) implicit none
+(  260) # 261 "seefmm_mix.F90"
+(  261) integer(kind=jpim),intent(in)  :: kn
+(  262) integer(kind=jpim),intent(in)  :: km
+(  263) integer(kind=jpim),intent(in)  :: kskip
+(  264) integer(kind=jpim),intent(in)  :: kx
+(  265) logical           ,intent(in)  :: ldxout
+(  266) integer(kind=jpim),intent(in)  :: kquad
+(  267) real(kind=JPRBT)   ,intent(in)  :: prw(:)
+(  268) real(kind=JPRBT)   ,intent(in)  :: pq(:,:)
+(  269) real(kind=JPRBT)   ,intent(in)  :: prdexp(:,:)
+(  270) integer(kind=jpim),intent(in)  :: kindex(:)
+(  271) integer(kind=jpim),intent(in)  :: kclosel(:)
+(  272) integer(kind=jpim),intent(in)  :: kcik
+(  273) real(kind=JPRBT)   ,intent(in)  :: pcik(:)
+(  274) real(kind=JPRBT)   ,intent(out) :: ptheta(:,:)
+(  275) # 276 "seefmm_mix.F90"
+(  276) real(kind=JPRBT) :: zalpha(kquad,km)
+(  277) integer(kind=jpim) :: j1,j2,jm,jq,inumc,idist,iquad
+(  278) integer(kind=jpim) :: iout,iq,i1,i1p1,i1pd,ik1,ix,iy
+(  279) logical :: lxy,llxy(kn)
+(  280)  
+(  281) lxy(ik1) = (ik1 <= kx .eqv. ldxout)
+(  282) !-------------------------------------------------------------------------
+(  283) # 284 "seefmm_mix.F90"
+(  284) !CALL GSTATS(209,0)
+(  285) ptheta(:,:)=0.0_JPRBT
+(  286) if(ldxout) then
+(  287)   ix=0
+(  288)   iy=-kx
+(  289) else
+(  290)   ix=-kx
+(  291)   iy=0
+(  292) endif
+(  293) do j1=1,kn
+(  294)   i1=kindex(j1)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 16
+
+(  295)   llxy(j1)=lxy(i1)
+(  296) enddo
+(  297) # 298 "seefmm_mix.F90"
+(  298) if(llxy(1)) then
+(  299)   do jm=1,km,kskip
+(  300)     zalpha(:,jm)=pq(jm,kindex(1)+ix)
+(  301)   enddo
+(  302) else
+(  303)   zalpha(:,:)=0.0_JPRBT
+(  304) endif
+(  305) !CALL GSTATS(209,1)
+(  306) !CALL GSTATS(210,0)
+(  307) do j1=2,kn
+(  308)   i1=kindex(j1)
+(  309)   if(llxy(j1) ) then
+(  310)     if( kskip==1 )then
+(  311)       do jq=1,kquad
+(  312)         do jm=1,km
+(  313)           zalpha(jq,jm)=zalpha(jq,jm)*prdexp(jq,j1)
+(  314)           zalpha(jq,jm)=zalpha(jq,jm)+pq(jm,i1+ix)
+(  315)         enddo
+(  316)       enddo
+(  317)    else
+(  318)       do jq=1,kquad
+(  319)         do jm=1,km,kskip
+(  320)           zalpha(jq,jm)=zalpha(jq,jm)*prdexp(jq,j1)
+(  321)           zalpha(jq,jm)=zalpha(jq,jm)+pq(jm,i1+ix)
+(  322)         enddo
+(  323)       enddo
+(  324)    endif
+(  325)   else
+(  326)     if( kskip==1 )then
+(  327)       do jq=1,kquad
+(  328)         do jm=1,km
+(  329)           zalpha(jq,jm)=zalpha(jq,jm)*prdexp(jq,j1)
+(  330)           ptheta(jm,i1+iy)=ptheta(jm,i1+iy)+prw(jq)*zalpha(jq,jm)
+(  331)         enddo
+(  332)       enddo
+(  333)     else
+(  334)       do jq=1,kquad
+(  335)         do jm=1,km,kskip
+(  336)           zalpha(jq,jm)=zalpha(jq,jm)*prdexp(jq,j1)
+(  337)           ptheta(jm,i1+iy)=ptheta(jm,i1+iy)+prw(jq)*zalpha(jq,jm)
+(  338)         enddo
+(  339)       enddo
+(  340)     endif
+(  341)   endif
+(  342) enddo
+(  343) !CALL GSTATS(210,1)
+(  344) # 345 "seefmm_mix.F90"
+(  345) !CALL GSTATS(211,0)
+(  346) if(llxy(kn)) then
+(  347)   do jm=1,km,kskip
+(  348)     zalpha(:,jm)=pq(jm,kindex(kn)+ix)
+(  349)   enddo
+(  350) else
+(  351)   zalpha(:,:)=0.0
+(  352) endif
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 17
+
+(  353) !CALL GSTATS(211,1)
+(  354) !CALL GSTATS(212,0)
+(  355) do j1=kn-1,1,-1
+(  356)   i1=kindex(j1)
+(  357)   i1p1=kindex(j1+1)
+(  358)   if(llxy(j1)) then
+(  359)     if( kskip==1 )then
+(  360)       do jq=1,kquad
+(  361)         do jm=1,km
+(  362)           zalpha(jq,jm)=zalpha(jq,jm)*prdexp(jq,j1+1)
+(  363)           zalpha(jq,jm)=zalpha(jq,jm)+pq(jm,i1+ix)
+(  364)         enddo
+(  365)       enddo
+(  366)     else
+(  367)       do jq=1,kquad
+(  368)         do jm=1,km,kskip
+(  369)           zalpha(jq,jm)=zalpha(jq,jm)*prdexp(jq,j1+1)
+(  370)           zalpha(jq,jm)=zalpha(jq,jm)+pq(jm,i1+ix)
+(  371)         enddo
+(  372)       enddo
+(  373)     endif
+(  374)   else
+(  375)     if( kskip==1 )then
+(  376)       do jq=1,kquad
+(  377)         do jm=1,km
+(  378)           zalpha(jq,jm)=zalpha(jq,jm)*prdexp(jq,j1+1)
+(  379)           ptheta(jm,i1+iy)=ptheta(jm,i1+iy)-prw(jq)*zalpha(jq,jm)
+(  380)         enddo
+(  381)       enddo
+(  382)     else
+(  383)       do jq=1,kquad
+(  384)         do jm=1,km,kskip
+(  385)           zalpha(jq,jm)=zalpha(jq,jm)*prdexp(jq,j1+1)
+(  386)           ptheta(jm,i1+iy)=ptheta(jm,i1+iy)-prw(jq)*zalpha(jq,jm)
+(  387)         enddo
+(  388)       enddo
+(  389)     endif
+(  390)   endif
+(  391) enddo
+(  392) !CALL GSTATS(212,1)
+(  393) # 395 "seefmm_mix.F90"
+(  395) IF(kcik > 0) then
+(  396) !  CALL GSTATS(213,0)
+(  397)   inumc=0
+(  398)   do j1=1,kn-1
+(  399)     do j2=1,kclosel(j1)
+(  400)       idist=j2
+(  401)       i1=kindex(j1)
+(  402)       i1pd=kindex(j1+idist)
+(  403)       if(.not.llxy(j1) .and. llxy(j1+idist)) then
+(  404)         inumc=inumc+1
+(  405)         do jm=1,km,kskip
+(  406)           ptheta(jm,i1+iy)=ptheta(jm,i1+iy)-pcik(inumc)*pq(jm,i1pd+ix)
+(  407)         enddo
+(  408)       elseif(llxy(j1) .and. .not.llxy(j1+idist)) then
+(  409)         inumc=inumc+1
+(  410)         do jm=1,km,kskip
+(  411)           ptheta(jm,i1pd+iy)=ptheta(jm,i1pd+iy)+pcik(inumc)*pq(jm,i1+ix)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 18
+
+(  412)         enddo
+(  413)       endif
+(  414)     enddo
+(  415)   enddo
+(  416) !  CALL GSTATS(213,1)
+(  417) endif
+(  418) # 419 "seefmm_mix.F90"
+(  419) end subroutine potfm
+(  420) !=========================================================================
+(  421) recursive subroutine suquad(kn,prange,kquad,prw,prt,pr)
+(  422) implicit none
+(  423) # 424 "seefmm_mix.F90"
+(  424) integer(kind=jpim)        ,intent(in)  :: kn
+(  425) real(kind=JPRBT),intent(in)  :: prange
+(  426) integer(kind=jpim)        ,intent(in) :: kquad
+(  427) real(kind=JPRBT),intent(out) :: prw(:)
+(  428) real(kind=JPRBT),intent(out) :: prt(:)
+(  429) real(kind=JPRBT),intent(out) :: pr
+(  430) # 431 "seefmm_mix.F90"
+(  431) real(kind=JPRBT) :: za,zb,zs
+(  432) integer(kind=jpim) :: jm
+(  433) !-------------------------------------------------------------------------
+(  434) # 435 "seefmm_mix.F90"
+(  435) za=1.0
+(  436) zb=500.0
+(  437) zs=zb/prange
+(  438) pr=za/zs
+(  439) call wts500(prt,prw,kquad)
+(  440) do jm=1,kquad
+(  441)   prw(jm)=prw(jm)*zs
+(  442)   prt(jm)=prt(jm)*zs
+(  443) enddo
+(  444) end subroutine suquad
+(  445) !==========================================================================
+(  446) # 447 "seefmm_mix.F90"
+(  447) recursive subroutine comb_xy(kx,px,ky,py,kxy,pxy,kindex)
+(  448) # 449 "seefmm_mix.F90"
+(  449) implicit none
+(  450) # 451 "seefmm_mix.F90"
+(  451) integer(kind=jpim), intent(in)  :: kx,ky
+(  452) real(kind=jprd),    intent(in)  :: px(:)
+(  453) real(kind=JPRBT),    intent(in)  :: py(:)
+(  454) integer(kind=jpim), intent(in)  :: kxy
+(  455) real(kind=JPRBT),    intent(out) :: pxy(:)
+(  456) integer(kind=jpim), intent(out) :: kindex(:)
+(  457) integer(kind=jpim) :: jxy,ix,iy,iret
+(  458) # 459 "seefmm_mix.F90"
+(  459) !-------------------------------------------------------------------------
+(  460) # 461 "seefmm_mix.F90"
+(  461) pxy(1:kx)=px(1:kx)
+(  462) pxy(kx+1:kx+ky)=py(1:ky)
+(  463) !call m01daf(pxy,1,kxy,'D',irank,ifail)
+(  464) call keysort(iret,pxy,kxy,descending=.true.,index=kindex,init=.true.)
+(  465) !!$do jxy=1,kxy
+(  466) !!$  kindex(irank(jxy))=jxy
+(  467) !!$enddo
+(  468) # 469 "seefmm_mix.F90"
+(  469) end subroutine comb_xy
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 19
+
+(  470) !==========================================================================
+(  471) recursive subroutine prepotf(kx,kxy,kquad,prw,prt,pr,pxy,kindex,prdexp,&
+(  472)  & kclosel,pcik,knocik,pdiff)
+(  473) # 474 "seefmm_mix.F90"
+(  474) implicit none
+(  475) # 476 "seefmm_mix.F90"
+(  476) integer(kind=jpim), intent(in)  :: kx
+(  477) integer(kind=jpim), intent(in)  :: kxy
+(  478) integer(kind=jpim), intent(in)  :: kquad
+(  479) real(kind=JPRBT),    intent(in)  :: pxy(:)
+(  480) real(kind=JPRBT),    intent(in)  :: prw(:)
+(  481) real(kind=JPRBT),    intent(in)  :: pr
+(  482) real(kind=JPRBT),    intent(in)  :: prt(:)
+(  483) integer(kind=jpim), intent(in)  :: kindex(:)
+(  484) real(kind=JPRBT),    intent(out) :: prdexp(:,:)
+(  485) integer(kind=jpim), intent(out) :: kclosel(:)
+(  486) real(kind=JPRBT),    intent(out) :: pcik(:)
+(  487) integer(kind=jpim), intent(out) :: knocik
+(  488) real(kind=JPRBT),optional, intent(in)  :: pdiff(:,:)
+(  489) # 490 "seefmm_mix.F90"
+(  490) real(kind=JPRBT) :: zdx
+(  491) real(kind=JPRBT) :: zsum
+(  492) real(kind=JPRBT) :: zdiff(kxy,kxy)
+(  493) integer(kind=jpim)  :: jxy,jq,isize,jdist,ixy,ixym1,i1,i1pd,j1,j2
+(  494) logical :: llexit
+(  495) !-------------------------------------------------------------------------
+(  496) if(present(pdiff)) then
+(  497)   zdiff(:,:)=pdiff(:,:)
+(  498) else
+(  499)   do j1=1,kxy
+(  500)     do j2=1,kxy
+(  501)       zdiff(j1,j2)=pxy(j1)-pxy(j2)
+(  502)     enddo
+(  503)   enddo
+(  504) endif
+(  505) do jxy=2,kxy
+(  506)   ixy=kindex(jxy)
+(  507)   ixym1=kindex(jxy-1)
+(  508)   do jq=1,kquad
+(  509)     prdexp(jq,jxy)=exp(zdiff(ixy,ixym1)*prt(jq))
+(  510)   enddo
+(  511) enddo
+(  512) kclosel(:)=0
+(  513) knocik=0
+(  514) isize=size(pcik)
+(  515) llexit=.true.
+(  516) do jxy=1,kxy-1
+(  517)   do jdist=1,kxy-jxy
+(  518)     i1=kindex(jxy)
+(  519)     i1pd=kindex(jxy+jdist)
+(  520)     zdx=zdiff(i1,i1pd)
+(  521)     if(zdx < pr) then
+(  522)       llexit=.false.
+(  523)       kclosel(jxy)=kclosel(jxy)+1
+(  524)       if((i1 > kx .and. i1pd <= kx) .or. (i1pd > kx .and.  i1 <= kx)) then
+(  525)         knocik=knocik+1
+(  526)         zsum=0.0_JPRBT
+(  527)         do jq=1,kquad
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:15      page 20
+
+(  528)           zsum=zsum+prw(jq)*exp(-zdx*prt(jq))
+(  529)         enddo
+(  530)         pcik(knocik)=1.0_JPRBT/zdx-zsum
+(  531)       endif
+(  532)     else
+(  533)       exit
+(  534)     endif
+(  535)   enddo
+(  536)   if(knocik > isize) stop ' precompfint : pcik tto small'
+(  537) enddo
+(  538) # 539 "seefmm_mix.F90"
+(  539) end subroutine prepotf
+(  540) !==========================================================================
+(  541) # 542 "seefmm_mix.F90"
+(  542) end module seefmm_mix

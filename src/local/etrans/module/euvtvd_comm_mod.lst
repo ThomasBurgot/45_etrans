@@ -1,0 +1,454 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:36      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: euvtvd_comm_mod.F90
+
+(    1) MODULE EUVTVD_COMM_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EUVTVD_COMM(KM,KMLOC,KFIELD,KFLDPTR,PU,PV,PVOR,PDIV,PSPMEANU,PSPMEANV)
+(    4) 
+(    5) !**** *EUVTVD* - Compute vor/div from u and v in spectral space
+(    6) 
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        To compute vorticity and divergence from u and v in spectral
+(   10) !       space. Input u and v from KM to NTMAX+1, output vorticity and
+(   11) !       divergence from KM to NTMAX - communication part.
+(   12) 
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !        CALL EUVTVD(KM,KFIELD,PEPSNM,PU,PV,PVOR,PDIV)
+(   16) 
+(   17) !        Explicit arguments :  KM - zonal wave-number
+(   18) !        --------------------  KFIELD - number of fields (levels)
+(   19) !                              KFLDPTR - fields pointers
+(   20) !                              PEPSNM - REPSNM for wavenumber KM
+(   21) !                              PU - u wind component for zonal
+(   22) !                                   wavenumber KM
+(   23) !                              PV - v wind component for zonal
+(   24) !                                   wavenumber KM
+(   25) !                              PVOR - vorticity for zonal
+(   26) !                                     wavenumber KM
+(   27) !                              PDIV - divergence for zonal
+(   28) !                                     wavenumber KM
+(   29) 
+(   30) !     Method.  See ref.
+(   31) !     -------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:36      page 2
+
+(   32) 
+(   33) !     Externals.  None.
+(   34) !     ----------
+(   35) 
+(   36) !     Reference.
+(   37) !     ----------
+(   38) !        ECMWF Research Department documentation of the IFS
+(   39) 
+(   40) !     Author.
+(   41) !     -------
+(   42) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   43) 
+(   44) !     Modifications.
+(   45) !     --------------
+(   46) !        Original : 91-07-01
+(   47) !        D. Giard : NTMAX instead of NSMAX
+(   48) !        01-08-27 : R. El Khatib Fix for NPROMATR /= 0
+(   49) !        03-03-03 : G. Radnoti: b-level conform mean-wind distribution
+(   50) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   51) !        F. Vana + NEC 28-Apr-2009 MPI-OpenMP fix
+(   52) !        N. Lopes & R. El Khatib 15-Jun-2012 Scalability enhancement
+(   53) !     ------------------------------------------------------------------
+(   54) 
+(   55) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   56) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   57) 
+(   58) USE TPM_DIM
+(   59) USE TPM_FIELDS
+(   60) USE TPM_DISTR
+(   61) USE TPMALD_GEO
+(   62) USE TPMALD_DISTR
+(   63) USE MPL_MODULE
+(   64) USE SET2PE_MOD
+(   65) USE ABORT_TRANS_MOD
+(   66) IMPLICIT NONE
+(   67) 
+(   68) INTEGER(KIND=JPIM), INTENT(IN) :: KFIELD, KM, KMLOC
+(   69) REAL(KIND=JPRB), INTENT(INOUT) :: PU  (:,:),PV  (:,:)
+(   70) REAL(KIND=JPRB), INTENT(IN)   :: PVOR(:,:),PDIV(:,:)
+(   71) 
+(   72) INTEGER(KIND=JPIM), OPTIONAL, INTENT(IN)  :: KFLDPTR(:)
+(   73) REAL(KIND=JPRB),    OPTIONAL, INTENT(OUT) :: PSPMEANU(:),PSPMEANV(:)
+(   74) 
+(   75) INTEGER(KIND=JPIM) :: II, IN, IR, J, JN
+(   76) 
+(   77) INTEGER(KIND=JPIM) :: ISENDREQ(NPRTRW)
+(   78) 
+(   79) REAL(KIND=JPRB) :: ZSPU(2*KFIELD)
+(   80) REAL(KIND=JPRB) :: ZIN
+(   81) INTEGER(KIND=JPIM) :: JA,ITAG,ILEN,IFLD,ISND
+(   82) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   83) 
+(   84) !     ------------------------------------------------------------------
+(   85) 
+(   86) IF (LHOOK) CALL DR_HOOK('EUVTVD_COMM_MOD:EUVTVD_COMM',0,ZHOOK_HANDLE)
+(   87) 
+(   88) !*       1.    COMPUTE U V FROM VORTICITY AND DIVERGENCE.
+(   89) !              ------------------------------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:36      page 3
+
+(   90) 
+(   91) IF (KM == 0) THEN
+(   92) !$acc data copyout (PSPMEANU, PSPMEANV) 
+(   93) !$acc data copyin (KFLDPTR) if(present (KFLDPTR))
+(   94)   IF (PRESENT(KFLDPTR)) THEN
+(   95) !$acc parallel loop present (PU, PV)
+(   96)     DO J = 1, KFIELD
+(   97)       IR = 2*J-1
+(   98)       IFLD=KFLDPTR(J)
+(   99)       PSPMEANU(IFLD)=PU(1,IR)
+(  100)       PSPMEANV(IFLD)=PV(1,IR)
+(  101)     ENDDO
+(  102) !$acc end parallel loop 
+(  103)   ELSE
+(  104) !$acc parallel loop present (PU, PV)
+(  105)     DO J = 1, KFIELD
+(  106)       IR = 2*J-1
+(  107)       PSPMEANU(J)=PU(1,IR)
+(  108)       PSPMEANV(J)=PV(1,IR)
+(  109)     ENDDO
+(  110) !$acc end parallel loop 
+(  111)   ENDIF
+(  112) !$acc end data
+(  113) !$acc end data
+(  114) ENDIF
+(  115) IF (NPRTRW > 1 .AND. KFIELD > 0) THEN
+(  116)   IF (KM == 0) THEN
+(  117)     IF (PRESENT(KFLDPTR)) THEN
+(  118)       DO J=1,KFIELD
+(  119)         IFLD=KFLDPTR(J)
+(  120)         ZSPU(J)=PSPMEANU(IFLD)
+(  121)         ZSPU(KFIELD+J)=PSPMEANV(IFLD)
+(  122)       ENDDO 
+(  123)     ELSE
+(  124)       DO J=1,KFIELD
+(  125)         ZSPU(J)=PSPMEANU(J)
+(  126)         ZSPU(KFIELD+J)=PSPMEANV(J)
+(  127)       ENDDO
+(  128)     ENDIF
+(  129)     DO JA=1,NPRTRW
+(  130)       IF (JA /= MYSETW) THEN
+(  131)         CALL SET2PE(ISND,0,0,JA,MYSETV)
+(  132)         ISND=NPRCIDS(ISND)
+(  133)         ITAG=300000+KFIELD*NPROC+ISND
+(  134)         CALL MPL_SEND(ZSPU(1:2*KFIELD),KDEST=ISND,KTAG=ITAG, &
+(  135)          &   KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(JA),CDSTRING='EUVTVD_COMM:')
+(  136)       ENDIF
+(  137)     ENDDO
+(  138)   ELSE
+(  139)     IF (KMLOC == 1) THEN
+(  140)       IF (D%NPROCM(0) /= MYSETW) THEN
+(  141)         CALL SET2PE(ISND,0,0,D%NPROCM(0),MYSETV)
+(  142)         ISND=NPRCIDS(ISND)          
+(  143)         ITAG=300000+KFIELD*NPROC+MYPROC
+(  144) 
+(  145)         CALL MPL_RECV(ZSPU(1:2*KFIELD),KSOURCE=ISND,KTAG=ITAG,KOUNT=ILEN, &
+(  146)          &   CDSTRING='EUVTVD_COMM:')
+(  147)         IF (ILEN /= 2*KFIELD) CALL ABORT_TRANS('EUVTVD_COMM: RECV INVALID RECEIVE MESSAGE LENGHT')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:36      page 4
+
+(  148)         IF (PRESENT(KFLDPTR)) THEN 
+(  149)           DO J=1,KFIELD
+(  150)             IFLD=KFLDPTR(J)
+(  151)             PSPMEANU(IFLD)=ZSPU(J)
+(  152)             PSPMEANV(IFLD)=ZSPU(KFIELD+J)
+(  153)           ENDDO
+(  154)         ELSE
+(  155)           DO J=1,KFIELD
+(  156)             PSPMEANU(J)=ZSPU(J)
+(  157)             PSPMEANV(J)=ZSPU(KFIELD+J)
+(  158)           ENDDO
+(  159)         ENDIF
+(  160)       ENDIF
+(  161)     ENDIF
+(  162)   ENDIF
+(  163) ENDIF
+(  164) IF (LHOOK) CALL DR_HOOK('EUVTVD_COMM_MOD:EUVTVD_COMM',1,ZHOOK_HANDLE)
+(  165) 
+(  166) END SUBROUTINE EUVTVD_COMM
+(  167) END MODULE EUVTVD_COMM_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:36      page 5
+
+(    1) # 1 "euvtvd_comm_mod.F90"
+(    1) MODULE EUVTVD_COMM_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EUVTVD_COMM(KM,KMLOC,KFIELD,KFLDPTR,PU,PV,PVOR,PDIV,PSPMEANU,PSPMEANV)
+(    4) # 5 "euvtvd_comm_mod.F90"
+(    5) !**** *EUVTVD* - Compute vor/div from u and v in spectral space
+(    6) # 7 "euvtvd_comm_mod.F90"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        To compute vorticity and divergence from u and v in spectral
+(   10) !       space. Input u and v from KM to NTMAX+1, output vorticity and
+(   11) !       divergence from KM to NTMAX - communication part.
+(   12) # 13 "euvtvd_comm_mod.F90"
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !        CALL EUVTVD(KM,KFIELD,PEPSNM,PU,PV,PVOR,PDIV)
+(   16) # 17 "euvtvd_comm_mod.F90"
+(   17) !        Explicit arguments :  KM - zonal wave-number
+(   18) !        --------------------  KFIELD - number of fields (levels)
+(   19) !                              KFLDPTR - fields pointers
+(   20) !                              PEPSNM - REPSNM for wavenumber KM
+(   21) !                              PU - u wind component for zonal
+(   22) !                                   wavenumber KM
+(   23) !                              PV - v wind component for zonal
+(   24) !                                   wavenumber KM
+(   25) !                              PVOR - vorticity for zonal
+(   26) !                                     wavenumber KM
+(   27) !                              PDIV - divergence for zonal
+(   28) !                                     wavenumber KM
+(   29) # 30 "euvtvd_comm_mod.F90"
+(   30) !     Method.  See ref.
+(   31) !     -------
+(   32) # 33 "euvtvd_comm_mod.F90"
+(   33) !     Externals.  None.
+(   34) !     ----------
+(   35) # 36 "euvtvd_comm_mod.F90"
+(   36) !     Reference.
+(   37) !     ----------
+(   38) !        ECMWF Research Department documentation of the IFS
+(   39) # 40 "euvtvd_comm_mod.F90"
+(   40) !     Author.
+(   41) !     -------
+(   42) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   43) # 44 "euvtvd_comm_mod.F90"
+(   44) !     Modifications.
+(   45) !     --------------
+(   46) !        Original : 91-07-01
+(   47) !        D. Giard : NTMAX instead of NSMAX
+(   48) !        01-08-27 : R. El Khatib Fix for NPROMATR /= 0
+(   49) !        03-03-03 : G. Radnoti: b-level conform mean-wind distribution
+(   50) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   51) !        F. Vana + NEC 28-Apr-2009 MPI-OpenMP fix
+(   52) !        N. Lopes & R. El Khatib 15-Jun-2012 Scalability enhancement
+(   53) !     ------------------------------------------------------------------
+(   54) # 55 "euvtvd_comm_mod.F90"
+(   55) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   56) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   57) # 58 "euvtvd_comm_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:36      page 6
+
+(   58) USE TPM_DIM
+(   59) USE TPM_FIELDS
+(   60) USE TPM_DISTR
+(   61) USE TPMALD_GEO
+(   62) USE TPMALD_DISTR
+(   63) USE MPL_MODULE
+(   64) USE SET2PE_MOD
+(   65) USE ABORT_TRANS_MOD
+(   66) IMPLICIT NONE
+(   67) # 68 "euvtvd_comm_mod.F90"
+(   68) INTEGER(KIND=JPIM), INTENT(IN) :: KFIELD, KM, KMLOC
+(   69) REAL(KIND=JPRB), INTENT(INOUT) :: PU  (:,:),PV  (:,:)
+(   70) REAL(KIND=JPRB), INTENT(IN)   :: PVOR(:,:),PDIV(:,:)
+(   71) # 72 "euvtvd_comm_mod.F90"
+(   72) INTEGER(KIND=JPIM), OPTIONAL, INTENT(IN)  :: KFLDPTR(:)
+(   73) REAL(KIND=JPRB),    OPTIONAL, INTENT(OUT) :: PSPMEANU(:),PSPMEANV(:)
+(   74) # 75 "euvtvd_comm_mod.F90"
+(   75) INTEGER(KIND=JPIM) :: II, IN, IR, J, JN
+(   76) # 77 "euvtvd_comm_mod.F90"
+(   77) INTEGER(KIND=JPIM) :: ISENDREQ(NPRTRW)
+(   78) # 79 "euvtvd_comm_mod.F90"
+(   79) REAL(KIND=JPRB) :: ZSPU(2*KFIELD)
+(   80) REAL(KIND=JPRB) :: ZIN
+(   81) INTEGER(KIND=JPIM) :: JA,ITAG,ILEN,IFLD,ISND
+(   82) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   83) # 84 "euvtvd_comm_mod.F90"
+(   84) !     ------------------------------------------------------------------
+(   85) # 86 "euvtvd_comm_mod.F90"
+(   86) IF (LHOOK) CALL DR_HOOK('EUVTVD_COMM_MOD:EUVTVD_COMM',0,ZHOOK_HANDLE)
+(   87) # 88 "euvtvd_comm_mod.F90"
+(   88) !*       1.    COMPUTE U V FROM VORTICITY AND DIVERGENCE.
+(   89) !              ------------------------------------------
+(   90) # 91 "euvtvd_comm_mod.F90"
+(   91) IF (KM == 0) THEN
+(   92) !$acc data copyout (PSPMEANU, PSPMEANV) 
+(   93) !$acc data copyin (KFLDPTR) if(present (KFLDPTR))
+(   94)   IF (PRESENT(KFLDPTR)) THEN
+(   95) !$acc parallel loop present (PU, PV)
+(   96)     DO J = 1, KFIELD
+(   97)       IR = 2*J-1
+(   98)       IFLD=KFLDPTR(J)
+(   99)       PSPMEANU(IFLD)=PU(1,IR)
+(  100)       PSPMEANV(IFLD)=PV(1,IR)
+(  101)     ENDDO
+(  102) !$acc end parallel loop 
+(  103)   ELSE
+(  104) !$acc parallel loop present (PU, PV)
+(  105)     DO J = 1, KFIELD
+(  106)       IR = 2*J-1
+(  107)       PSPMEANU(J)=PU(1,IR)
+(  108)       PSPMEANV(J)=PV(1,IR)
+(  109)     ENDDO
+(  110) !$acc end parallel loop 
+(  111)   ENDIF
+(  112) !$acc end data
+(  113) !$acc end data
+(  114) ENDIF
+(  115) IF (NPRTRW > 1 .AND. KFIELD > 0) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:36      page 7
+
+(  116)   IF (KM == 0) THEN
+(  117)     IF (PRESENT(KFLDPTR)) THEN
+(  118)       DO J=1,KFIELD
+(  119)         IFLD=KFLDPTR(J)
+(  120)         ZSPU(J)=PSPMEANU(IFLD)
+(  121)         ZSPU(KFIELD+J)=PSPMEANV(IFLD)
+(  122)       ENDDO 
+(  123)     ELSE
+(  124)       DO J=1,KFIELD
+(  125)         ZSPU(J)=PSPMEANU(J)
+(  126)         ZSPU(KFIELD+J)=PSPMEANV(J)
+(  127)       ENDDO
+(  128)     ENDIF
+(  129)     DO JA=1,NPRTRW
+(  130)       IF (JA /= MYSETW) THEN
+(  131)         CALL SET2PE(ISND,0,0,JA,MYSETV)
+(  132)         ISND=NPRCIDS(ISND)
+(  133)         ITAG=300000+KFIELD*NPROC+ISND
+(  134)         CALL MPL_SEND(ZSPU(1:2*KFIELD),KDEST=ISND,KTAG=ITAG, &
+(  135)          &   KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(JA),CDSTRING='EUVTVD_COMM:')
+(  136)       ENDIF
+(  137)     ENDDO
+(  138)   ELSE
+(  139)     IF (KMLOC == 1) THEN
+(  140)       IF (D%NPROCM(0) /= MYSETW) THEN
+(  141)         CALL SET2PE(ISND,0,0,D%NPROCM(0),MYSETV)
+(  142)         ISND=NPRCIDS(ISND)          
+(  143)         ITAG=300000+KFIELD*NPROC+MYPROC
+(  144) # 145 "euvtvd_comm_mod.F90"
+(  145)         CALL MPL_RECV(ZSPU(1:2*KFIELD),KSOURCE=ISND,KTAG=ITAG,KOUNT=ILEN, &
+(  146)          &   CDSTRING='EUVTVD_COMM:')
+(  147)         IF (ILEN /= 2*KFIELD) CALL ABORT_TRANS('EUVTVD_COMM: RECV INVALID RECEIVE MESSAGE LENGHT')
+(  148)         IF (PRESENT(KFLDPTR)) THEN 
+(  149)           DO J=1,KFIELD
+(  150)             IFLD=KFLDPTR(J)
+(  151)             PSPMEANU(IFLD)=ZSPU(J)
+(  152)             PSPMEANV(IFLD)=ZSPU(KFIELD+J)
+(  153)           ENDDO
+(  154)         ELSE
+(  155)           DO J=1,KFIELD
+(  156)             PSPMEANU(J)=ZSPU(J)
+(  157)             PSPMEANV(J)=ZSPU(KFIELD+J)
+(  158)           ENDDO
+(  159)         ENDIF
+(  160)       ENDIF
+(  161)     ENDIF
+(  162)   ENDIF
+(  163) ENDIF
+(  164) IF (LHOOK) CALL DR_HOOK('EUVTVD_COMM_MOD:EUVTVD_COMM',1,ZHOOK_HANDLE)
+(  165) # 166 "euvtvd_comm_mod.F90"
+(  166) END SUBROUTINE EUVTVD_COMM
+(  167) END MODULE EUVTVD_COMM_MOD

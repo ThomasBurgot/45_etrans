@@ -1,0 +1,308 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:11      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: edealloc_resol_mod.F90
+
+(    1) MODULE EDEALLOC_RESOL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EDEALLOC_RESOL(KRESOL)
+(    4) 
+(    5) !**** *EDEALLOC_RESOL_MOD* - Deallocations of a resolution
+(    6) 
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !     Release allocated arrays for a given resolution
+(   10) 
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !     CALL EDEALLOC_RESOL_MOD
+(   14) 
+(   15) !     Explicit arguments : KRESOL : resolution tag
+(   16) !     --------------------
+(   17) 
+(   18) !     Method.
+(   19) !     -------
+(   20) 
+(   21) !     Externals.  None
+(   22) !     ----------
+(   23) 
+(   24) !     Author.
+(   25) !     -------
+(   26) !        R. El Khatib *METEO-FRANCE*
+(   27) 
+(   28) !     Modifications.
+(   29) !     --------------
+(   30) !       Original : 09-Jul-2013 from etrans_end
+(   31) !       B. Bochenek (Apr 2015): Phasing: update
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:11      page 2
+
+(   32) !     ------------------------------------------------------------------
+(   33) 
+(   34) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   35) 
+(   36) USE TPM_GEN         ,ONLY : LENABLED, NOUT
+(   37) USE TPM_DISTR       ,ONLY : D
+(   38) USE TPM_GEOMETRY    ,ONLY : G
+(   39) USE TPM_FIELDS      ,ONLY : F
+(   40) USE TPM_FFT         ,ONLY : T
+(   41) #ifdef WITH_FFTW
+(   42) USE TPM_FFTW        ,ONLY : TW,DESTROY_PLANS_FFTW
+(   43) #endif
+(   44) USE TPM_FLT         ,ONLY : S
+(   45) 
+(   46) USE ESET_RESOL_MOD  ,ONLY : ESET_RESOL
+(   47) 
+(   48) IMPLICIT NONE
+(   49) 
+(   50) INTEGER(KIND=JPIM), INTENT(IN) :: KRESOL
+(   51) 
+(   52) !     ------------------------------------------------------------------
+(   53) 
+(   54) IF (.NOT.LENABLED(KRESOL)) THEN
+(   55) 
+(   56)   WRITE(UNIT=NOUT,FMT='('' EDEALLOC_RESOL WARNING: KRESOL = '',I3,'' ALREADY DISABLED '')') KRESOL
+(   57) 
+(   58) ELSE
+(   59) 
+(   60)   CALL ESET_RESOL(KRESOL)
+(   61) 
+(   62)   !TPM_DISTR
+(   63)   DEALLOCATE(D%NFRSTLAT,D%NLSTLAT,D%NPTRLAT,D%NPTRFRSTLAT,D%NPTRLSTLAT)
+(   64)   DEALLOCATE(D%LSPLITLAT,D%NSTA,D%NONL,D%NGPTOTL,D%NPROCA_GP)
+(   65) 
+(   66)   IF(D%LWEIGHTED_DISTR) THEN
+(   67)     DEALLOCATE(D%RWEIGHT)
+(   68)   ENDIF
+(   69) 
+(   70)   IF(.NOT.D%LGRIDONLY) THEN
+(   71) 
+(   72)     DEALLOCATE(D%MYMS,D%NUMPP,D%NPOSSP,D%NPROCM,D%NDIM0G,D%NASM0,D%NATM0)
+(   73)     DEALLOCATE(D%NLATLS,D%NLATLE,D%NPMT,D%NPMS,D%NPMG,D%NULTPP,D%NPROCL)
+(   74)     DEALLOCATE(D%NPTRLS,D%NALLMS,D%NPTRMS,D%NSTAGT0B,D%NSTAGT1B,D%NPNTGTB0)
+(   75)     DEALLOCATE(D%NPNTGTB1,D%NLTSFTB,D%NLTSGTB,D%MSTABF)
+(   76)     DEALLOCATE(D%NSTAGTF)
+(   77) 
+(   78)   !TPM_FFT
+(   79)     DEALLOCATE(T%TRIGS,T%NFAX)
+(   80) #ifdef WITH_FFTW
+(   81)   !TPM_FFTW
+(   82)     IF( TW%LFFTW )THEN
+(   83)       CALL DESTROY_PLANS_FFTW
+(   84)     ENDIF
+(   85) #endif
+(   86)   !TPM_GEOMETRY
+(   87)     DEALLOCATE(G%NMEN,G%NDGLU)
+(   88) 
+(   89)   ELSE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:11      page 3
+
+(   90) 
+(   91)     DEALLOCATE(G%NLOEN)
+(   92) 
+(   93)   ENDIF
+(   94) 
+(   95)   LENABLED(KRESOL)=.FALSE.
+(   96) 
+(   97) ENDIF
+(   98) 
+(   99) !     ------------------------------------------------------------------
+(  100) 
+(  101) END SUBROUTINE EDEALLOC_RESOL
+(  102) END MODULE EDEALLOC_RESOL_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:11      page 4
+
+(    1) # 1 "edealloc_resol_mod.F90"
+(    1) MODULE EDEALLOC_RESOL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EDEALLOC_RESOL(KRESOL)
+(    4) # 5 "edealloc_resol_mod.F90"
+(    5) !**** *EDEALLOC_RESOL_MOD* - Deallocations of a resolution
+(    6) # 7 "edealloc_resol_mod.F90"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !     Release allocated arrays for a given resolution
+(   10) # 11 "edealloc_resol_mod.F90"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !     CALL EDEALLOC_RESOL_MOD
+(   14) # 15 "edealloc_resol_mod.F90"
+(   15) !     Explicit arguments : KRESOL : resolution tag
+(   16) !     --------------------
+(   17) # 18 "edealloc_resol_mod.F90"
+(   18) !     Method.
+(   19) !     -------
+(   20) # 21 "edealloc_resol_mod.F90"
+(   21) !     Externals.  None
+(   22) !     ----------
+(   23) # 24 "edealloc_resol_mod.F90"
+(   24) !     Author.
+(   25) !     -------
+(   26) !        R. El Khatib *METEO-FRANCE*
+(   27) # 28 "edealloc_resol_mod.F90"
+(   28) !     Modifications.
+(   29) !     --------------
+(   30) !       Original : 09-Jul-2013 from etrans_end
+(   31) !       B. Bochenek (Apr 2015): Phasing: update
+(   32) !     ------------------------------------------------------------------
+(   33) # 34 "edealloc_resol_mod.F90"
+(   34) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   35) # 36 "edealloc_resol_mod.F90"
+(   36) USE TPM_GEN         ,ONLY : LENABLED, NOUT
+(   37) USE TPM_DISTR       ,ONLY : D
+(   38) USE TPM_GEOMETRY    ,ONLY : G
+(   39) USE TPM_FIELDS      ,ONLY : F
+(   40) USE TPM_FFT         ,ONLY : T
+(   41) # 44 "edealloc_resol_mod.F90"
+(   44) USE TPM_FLT         ,ONLY : S
+(   45) # 46 "edealloc_resol_mod.F90"
+(   46) USE ESET_RESOL_MOD  ,ONLY : ESET_RESOL
+(   47) # 48 "edealloc_resol_mod.F90"
+(   48) IMPLICIT NONE
+(   49) # 50 "edealloc_resol_mod.F90"
+(   50) INTEGER(KIND=JPIM), INTENT(IN) :: KRESOL
+(   51) # 52 "edealloc_resol_mod.F90"
+(   52) !     ------------------------------------------------------------------
+(   53) # 54 "edealloc_resol_mod.F90"
+(   54) IF (.NOT.LENABLED(KRESOL)) THEN
+(   55) # 56 "edealloc_resol_mod.F90"
+(   56)   WRITE(UNIT=NOUT,FMT='('' EDEALLOC_RESOL WARNING: KRESOL = '',I3,'' ALREADY DISABLED '')') KRESOL
+(   57) # 58 "edealloc_resol_mod.F90"
+(   58) ELSE
+(   59) # 60 "edealloc_resol_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:11      page 5
+
+(   60)   CALL ESET_RESOL(KRESOL)
+(   61) # 62 "edealloc_resol_mod.F90"
+(   62)   !TPM_DISTR
+(   63)   DEALLOCATE(D%NFRSTLAT,D%NLSTLAT,D%NPTRLAT,D%NPTRFRSTLAT,D%NPTRLSTLAT)
+(   64)   DEALLOCATE(D%LSPLITLAT,D%NSTA,D%NONL,D%NGPTOTL,D%NPROCA_GP)
+(   65) # 66 "edealloc_resol_mod.F90"
+(   66)   IF(D%LWEIGHTED_DISTR) THEN
+(   67)     DEALLOCATE(D%RWEIGHT)
+(   68)   ENDIF
+(   69) # 70 "edealloc_resol_mod.F90"
+(   70)   IF(.NOT.D%LGRIDONLY) THEN
+(   71) # 72 "edealloc_resol_mod.F90"
+(   72)     DEALLOCATE(D%MYMS,D%NUMPP,D%NPOSSP,D%NPROCM,D%NDIM0G,D%NASM0,D%NATM0)
+(   73)     DEALLOCATE(D%NLATLS,D%NLATLE,D%NPMT,D%NPMS,D%NPMG,D%NULTPP,D%NPROCL)
+(   74)     DEALLOCATE(D%NPTRLS,D%NALLMS,D%NPTRMS,D%NSTAGT0B,D%NSTAGT1B,D%NPNTGTB0)
+(   75)     DEALLOCATE(D%NPNTGTB1,D%NLTSFTB,D%NLTSGTB,D%MSTABF)
+(   76)     DEALLOCATE(D%NSTAGTF)
+(   77) # 78 "edealloc_resol_mod.F90"
+(   78)   !TPM_FFT
+(   79)     DEALLOCATE(T%TRIGS,T%NFAX)
+(   80) # 86 "edealloc_resol_mod.F90"
+(   86)   !TPM_GEOMETRY
+(   87)     DEALLOCATE(G%NMEN,G%NDGLU)
+(   88) # 89 "edealloc_resol_mod.F90"
+(   89)   ELSE
+(   90) # 91 "edealloc_resol_mod.F90"
+(   91)     DEALLOCATE(G%NLOEN)
+(   92) # 93 "edealloc_resol_mod.F90"
+(   93)   ENDIF
+(   94) # 95 "edealloc_resol_mod.F90"
+(   95)   LENABLED(KRESOL)=.FALSE.
+(   96) # 97 "edealloc_resol_mod.F90"
+(   97) ENDIF
+(   98) # 99 "edealloc_resol_mod.F90"
+(   99) !     ------------------------------------------------------------------
+(  100) # 101 "edealloc_resol_mod.F90"
+(  101) END SUBROUTINE EDEALLOC_RESOL
+(  102) END MODULE EDEALLOC_RESOL_MOD

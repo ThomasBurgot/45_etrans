@@ -1,0 +1,320 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:17      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: test_bytes_io.F90
+
+(    1) !
+(    2) ! Simple Test program
+(    3) !
+(    4) subroutine fail_impl(msg,line)
+(    5)   character(*) :: msg
+(    6)   integer :: line
+(    7)   write(0,'(A,I0,A)') "TEST FAILED in test_bytes_io.F90 @ line ",line," :"
+(    8)   write(0,*) msg
+(    9)   stop 1
+(   10) end subroutine
+(   11) 
+(   12) #define FAIL(msg) call fail_impl(msg,__LINE__)
+(   13) 
+(   14) program bytes_io_test
+(   15) use parkind1
+(   16) use bytes_io_mod
+(   17) use yomhook, only: lhook
+(   18) 
+(   19) implicit none
+(   20) 
+(   21) integer(jpim) :: unit, iret, ibuf, nbytes
+(   22) integer(jpim) :: nbuffer(100)
+(   23) integer(jpim), allocatable :: nrbuffer(:)
+(   24) real(JPRB) :: zbuffer(50)
+(   25) real(JPRB), allocatable :: zrbuffer(:)
+(   26) integer(jpim) :: nrsize
+(   27) 
+(   28) integer(jpim), parameter :: sizeof_int  = 4
+(   29) integer(jpim), parameter :: sizeof_real = 8
+(   30) 
+(   31) ! Turn off DRHOOK, to avoid MPI init during testing
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:17      page 2
+
+(   32) lhook = .False.
+(   33) 
+(   34) do ibuf=1,size(nbuffer)
+(   35)   nbuffer(ibuf)=ibuf
+(   36) enddo
+(   37) 
+(   38) call bytes_io_open( unit, "testfile_bytes_io", "w", iret )
+(   39) if( iret < 0 ) FAIL("open for write failed")
+(   40) 
+(   41) call bytes_io_write( unit, size(nbuffer), sizeof_int, iret  )
+(   42) if( iret < 0 ) FAIL("writing failed")
+(   43) 
+(   44) call bytes_io_write( unit, nbuffer, size(nbuffer)*sizeof_int, iret  )
+(   45) if( iret < 0 ) FAIL("writing failed")
+(   46) 
+(   47) call bytes_io_close( unit, iret )
+(   48) if( iret < 0 ) FAIL("close failed")
+(   49) 
+(   50) call bytes_io_open( unit, "testfile_bytes_io", "r", iret)
+(   51) if( iret < 0 ) FAIL("open for read failed")
+(   52) 
+(   53) call bytes_io_read( unit, nrsize, sizeof_int, iret  )
+(   54) if( iret < 0 ) FAIL("reading failed")
+(   55) 
+(   56) allocate( nrbuffer(nrsize) )
+(   57) call bytes_io_read( unit, nrbuffer, nrsize*sizeof_int, iret  )
+(   58) if( iret < 0 ) FAIL("reading failed")
+(   59) 
+(   60) call bytes_io_close( unit, iret )
+(   61) if( iret < 0 ) FAIL("close failed")
+(   62) 
+(   63) 
+(   64) do ibuf=1,size(nbuffer)
+(   65)   if( nrbuffer(ibuf) /= nbuffer(ibuf) ) then
+(   66)     FAIL("rbuffer read not equal to nbuffer written")
+(   67)   endif
+(   68) enddo
+(   69) 
+(   70) 
+(   71) !=============================
+(   72) 
+(   73) 
+(   74) do ibuf=1,size(zbuffer)
+(   75)   zbuffer(ibuf)=ibuf
+(   76) enddo
+(   77) 
+(   78) call bytes_io_open( unit, "testfile_bytes_io", "w", iret )
+(   79) if( iret < 0 ) FAIL("open for write failed")
+(   80) 
+(   81) call bytes_io_write( unit, size(zbuffer), sizeof_int, iret  )
+(   82) if( iret < 0 ) FAIL("writing failed")
+(   83) 
+(   84) call bytes_io_write( unit, zbuffer, size(zbuffer)*sizeof_real, iret  )
+(   85) if( iret < 0 ) FAIL("writing failed")
+(   86) 
+(   87) call bytes_io_close( unit, iret )
+(   88) if( iret < 0 ) FAIL("close failed")
+(   89) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:17      page 3
+
+(   90) call bytes_io_open( unit, "testfile_bytes_io", "r", iret)
+(   91) if( iret < 0 ) FAIL("open for read failed")
+(   92) 
+(   93) call bytes_io_read( unit, nrsize, sizeof_int, iret  )
+(   94) if( iret < 0 ) FAIL("reading failed")
+(   95) 
+(   96) if( nrsize /= size(zbuffer) ) FAIL("size does not match")
+(   97) 
+(   98) allocate( zrbuffer(nrsize) )
+(   99) call bytes_io_read( unit, zrbuffer, nrsize*sizeof_real, iret  )
+(  100) if( iret < 0 ) FAIL("reading failed")
+(  101) 
+(  102) call bytes_io_close( unit, iret )
+(  103) if( iret < 0 ) FAIL("close failed")
+(  104) 
+(  105) do ibuf=1,size(zbuffer)
+(  106)   if( zrbuffer(ibuf) /= zbuffer(ibuf) ) then
+(  107)     FAIL("zrbuffer read not equal to zbuffer written")
+(  108)   endif
+(  109) enddo
+(  110) 
+(  111) write(0,'(A)') "SUCCESS"
+(  112) end program
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:17      page 4
+
+(    1) # 1 "test_bytes_io.F90"
+(    1) !
+(    2) ! Simple Test program
+(    3) !
+(    4) subroutine fail_impl(msg,line)
+(    5)   character(*) :: msg
+(    6)   integer :: line
+(    7)   write(0,'(A,I0,A)') "TEST FAILED in test_bytes_io.F90 @ line ",line," :"
+(    8)   write(0,*) msg
+(    9)   stop 1
+(   10) end subroutine
+(   11) # 14 "test_bytes_io.F90"
+(   14) program bytes_io_test
+(   15) use parkind1
+(   16) use bytes_io_mod
+(   17) use yomhook, only: lhook
+(   18) # 19 "test_bytes_io.F90"
+(   19) implicit none
+(   20) # 21 "test_bytes_io.F90"
+(   21) integer(jpim) :: unit, iret, ibuf, nbytes
+(   22) integer(jpim) :: nbuffer(100)
+(   23) integer(jpim), allocatable :: nrbuffer(:)
+(   24) real(JPRB) :: zbuffer(50)
+(   25) real(JPRB), allocatable :: zrbuffer(:)
+(   26) integer(jpim) :: nrsize
+(   27) # 28 "test_bytes_io.F90"
+(   28) integer(jpim), parameter :: sizeof_int  = 4
+(   29) integer(jpim), parameter :: sizeof_real = 8
+(   30) # 31 "test_bytes_io.F90"
+(   31) ! Turn off DRHOOK, to avoid MPI init during testing
+(   32) lhook = .False.
+(   33) # 34 "test_bytes_io.F90"
+(   34) do ibuf=1,size(nbuffer)
+(   35)   nbuffer(ibuf)=ibuf
+(   36) enddo
+(   37) # 38 "test_bytes_io.F90"
+(   38) call bytes_io_open( unit, "testfile_bytes_io", "w", iret )
+(   39) if( iret < 0 ) call fail_impl("open for write failed",39)
+(   40) # 41 "test_bytes_io.F90"
+(   41) call bytes_io_write( unit, size(nbuffer), sizeof_int, iret  )
+(   42) if( iret < 0 ) call fail_impl("writing failed",42)
+(   43) # 44 "test_bytes_io.F90"
+(   44) call bytes_io_write( unit, nbuffer, size(nbuffer)*sizeof_int, iret  )
+(   45) if( iret < 0 ) call fail_impl("writing failed",45)
+(   46) # 47 "test_bytes_io.F90"
+(   47) call bytes_io_close( unit, iret )
+(   48) if( iret < 0 ) call fail_impl("close failed",48)
+(   49) # 50 "test_bytes_io.F90"
+(   50) call bytes_io_open( unit, "testfile_bytes_io", "r", iret)
+(   51) if( iret < 0 ) call fail_impl("open for read failed",51)
+(   52) # 53 "test_bytes_io.F90"
+(   53) call bytes_io_read( unit, nrsize, sizeof_int, iret  )
+(   54) if( iret < 0 ) call fail_impl("reading failed",54)
+(   55) # 56 "test_bytes_io.F90"
+(   56) allocate( nrbuffer(nrsize) )
+(   57) call bytes_io_read( unit, nrbuffer, nrsize*sizeof_int, iret  )
+(   58) if( iret < 0 ) call fail_impl("reading failed",58)
+(   59) # 60 "test_bytes_io.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:17      page 5
+
+(   60) call bytes_io_close( unit, iret )
+(   61) if( iret < 0 ) call fail_impl("close failed",61)
+(   62) # 64 "test_bytes_io.F90"
+(   64) do ibuf=1,size(nbuffer)
+(   65)   if( nrbuffer(ibuf) /= nbuffer(ibuf) ) then
+(   66)     call fail_impl("rbuffer read not equal to nbuffer written",66)
+(   67)   endif
+(   68) enddo
+(   69) # 71 "test_bytes_io.F90"
+(   71) !=============================
+(   72) # 74 "test_bytes_io.F90"
+(   74) do ibuf=1,size(zbuffer)
+(   75)   zbuffer(ibuf)=ibuf
+(   76) enddo
+(   77) # 78 "test_bytes_io.F90"
+(   78) call bytes_io_open( unit, "testfile_bytes_io", "w", iret )
+(   79) if( iret < 0 ) call fail_impl("open for write failed",79)
+(   80) # 81 "test_bytes_io.F90"
+(   81) call bytes_io_write( unit, size(zbuffer), sizeof_int, iret  )
+(   82) if( iret < 0 ) call fail_impl("writing failed",82)
+(   83) # 84 "test_bytes_io.F90"
+(   84) call bytes_io_write( unit, zbuffer, size(zbuffer)*sizeof_real, iret  )
+(   85) if( iret < 0 ) call fail_impl("writing failed",85)
+(   86) # 87 "test_bytes_io.F90"
+(   87) call bytes_io_close( unit, iret )
+(   88) if( iret < 0 ) call fail_impl("close failed",88)
+(   89) # 90 "test_bytes_io.F90"
+(   90) call bytes_io_open( unit, "testfile_bytes_io", "r", iret)
+(   91) if( iret < 0 ) call fail_impl("open for read failed",91)
+(   92) # 93 "test_bytes_io.F90"
+(   93) call bytes_io_read( unit, nrsize, sizeof_int, iret  )
+(   94) if( iret < 0 ) call fail_impl("reading failed",94)
+(   95) # 96 "test_bytes_io.F90"
+(   96) if( nrsize /= size(zbuffer) ) call fail_impl("size does not match",96)
+(   97) # 98 "test_bytes_io.F90"
+(   98) allocate( zrbuffer(nrsize) )
+(   99) call bytes_io_read( unit, zrbuffer, nrsize*sizeof_real, iret  )
+(  100) if( iret < 0 ) call fail_impl("reading failed",100)
+(  101) # 102 "test_bytes_io.F90"
+(  102) call bytes_io_close( unit, iret )
+(  103) if( iret < 0 ) call fail_impl("close failed",103)
+(  104) # 105 "test_bytes_io.F90"
+(  105) do ibuf=1,size(zbuffer)
+(  106)   if( zrbuffer(ibuf) /= zbuffer(ibuf) ) then
+(  107)     call fail_impl("zrbuffer read not equal to zbuffer written",107)
+(  108)   endif
+(  109) enddo
+(  110) # 111 "test_bytes_io.F90"
+(  111) write(0,'(A)') "SUCCESS"
+(  112) end program

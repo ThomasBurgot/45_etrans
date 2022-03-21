@@ -1,0 +1,95 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:34      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: tpmald_geo.F90
+
+(    1) MODULE TPMALD_GEO
+(    2) 
+(    3) ! Module containing data describing plane projection grid.
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) 
+(    7) IMPLICIT NONE
+(    8) 
+(    9) SAVE
+(   10) 
+(   11) TYPE ALDGEO_TYPE
+(   12) 
+(   13) ! GEOGRAPHY 
+(   14)   
+(   15) REAL(KIND=JPRB) :: EYWN       ! Y-reso 
+(   16) REAL(KIND=JPRB) :: EXWN       ! X-reso
+(   17) END TYPE ALDGEO_TYPE
+(   18) 
+(   19) TYPE(ALDGEO_TYPE),ALLOCATABLE,TARGET :: ALDGEO_RESOL(:)
+(   20) TYPE(ALDGEO_TYPE),POINTER     :: GALD
+(   21) 
+(   22) END MODULE TPMALD_GEO
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:34      page 2
+
+(    1) # 1 "tpmald_geo.F90"
+(    1) MODULE TPMALD_GEO
+(    2) # 3 "tpmald_geo.F90"
+(    3) ! Module containing data describing plane projection grid.
+(    4) # 5 "tpmald_geo.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) # 7 "tpmald_geo.F90"
+(    7) IMPLICIT NONE
+(    8) # 9 "tpmald_geo.F90"
+(    9) SAVE
+(   10) # 11 "tpmald_geo.F90"
+(   11) TYPE ALDGEO_TYPE
+(   12) # 13 "tpmald_geo.F90"
+(   13) ! GEOGRAPHY 
+(   14)   
+(   15) REAL(KIND=JPRB) :: EYWN       ! Y-reso 
+(   16) REAL(KIND=JPRB) :: EXWN       ! X-reso
+(   17) END TYPE ALDGEO_TYPE
+(   18) # 19 "tpmald_geo.F90"
+(   19) TYPE(ALDGEO_TYPE),ALLOCATABLE,TARGET :: ALDGEO_RESOL(:)
+(   20) TYPE(ALDGEO_TYPE),POINTER     :: GALD
+(   21) # 22 "tpmald_geo.F90"
+(   22) END MODULE TPMALD_GEO

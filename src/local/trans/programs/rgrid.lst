@@ -1,0 +1,2001 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: rgrid.F90
+
+(    1) PROGRAM RGRID
+(    2) 
+(    3) ! Purpose :
+(    4) ! -------
+(    5) !   A calling program to make a gaussian reduced grid from several parameters
+(    6) 
+(    7) ! Interface :
+(    8) ! ---------
+(    9) !   None
+(   10) 
+(   11) ! Externals :
+(   12) ! ---------
+(   13) !   REDUCED_GRID  - to compute the reduced grid
+(   14) 
+(   15) ! Method :
+(   16) ! ------
+(   17) 
+(   18) ! Reference :
+(   19) ! ---------
+(   20) 
+(   21) ! Author :
+(   22) ! ------
+(   23) !   12-Feb-2007 R. El Khatib  *METEO-FRANCE*
+(   24) 
+(   25) ! Modifications :
+(   26) ! -------------
+(   27) !   08-Nov 2007 R. El Khatib : Fix arguments to get_opt
+(   28) 
+(   29) ! End Modifications
+(   30) !-----------------------------------------------------------------------------
+(   31) 
+(   32) USE PARKIND1  ,ONLY : JPIM     ,JPRBT, JPRD
+(   33) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 2
+
+(   34) USE MPL_MODULE
+(   35) 
+(   36) 
+(   37) IMPLICIT NONE
+(   38) 
+(   39) 
+(   40) INTEGER(KIND=JPIM) :: IULOUT, IULERR ! stdout, stderr unit numbers
+(   41) INTEGER(KIND=JPIM) :: IULNAM ! unit number of output file containing NAMRGRI
+(   42) INTEGER(KIND=JPIM) :: IDGLG ! number of latidudes
+(   43) INTEGER(KIND=JPIM) :: IDLON ! number of longitudes
+(   44) INTEGER(KIND=JPIM) :: ISMAXG ! nominal truncation
+(   45) INTEGER(KIND=JPIM) :: IXMAX  ! truncation used in the spectral transforms,quad grid
+(   46) INTEGER(KIND=JPIM) :: INMAX  ! truncation used in the spectral transforms, lin grid
+(   47) INTEGER(KIND=JPIM) :: IALIAS ! allowed aliasing, as Log10() value
+(   48) INTEGER(KIND=JPIM) :: IORTHO ! orthogonality precision, as Log10() value
+(   49) INTEGER(KIND=JPIM) :: IODD ! Odd numbers allowed (1) or not (0)
+(   50) INTEGER(KIND=JPIM) :: IVERBOSE ! Verbosity level (0 or 1)
+(   51) INTEGER(KIND=JPIM) :: IPROC ! Number of MPI tasks
+(   52) INTEGER(KIND=JPIM) :: IMYPROC ! current MPI task
+(   53) 
+(   54) CHARACTER(LEN=64) :: CLARG
+(   55) CHARACTER(LEN=32) :: CLENV
+(   56) 
+(   57) INTEGER(KIND=JPIM) :: ICOMMAND
+(   58) LOGICAL :: LLMPI=.TRUE. ! MPI is initialized
+(   59) ! LLREAD and LLWRITE can be used for very high resolutions (>T10K)
+(   60) ! to save on expensive recomputation of ZGR when simply experimenting with a different 
+(   61) ! ALIAS value
+(   62) LOGICAL :: LLREAD=.FALSE. ! ZGR not read from file per task
+(   63) LOGICAL :: LLWRITE=.FALSE.! ZGR not written to file per task
+(   64) 
+(   65) REAL(KIND=JPRBT) :: ZALIAS, ZORTHO
+(   66) 
+(   67) REAL(KIND=JPRBT) :: ZHOOK_HANDLE
+(   68) 
+(   69) !-----------------------------------------------------------------------------
+(   70) 
+(   71) IF (LHOOK) CALL DR_HOOK('RGRID',0,ZHOOK_HANDLE)
+(   72) 
+(   73) ! Initialize message passing
+(   74) 
+(   75) CALL GET_ENVIRONMENT_VARIABLE('DR_HOOK_NOT_MPI',CLENV)
+(   76) IF (CLENV == '1' .OR. CLENV == 'true' .OR. CLENV == 'TRUE') THEN
+(   77)   CALL MPL_INIT(LDINFO=.FALSE.) ! Do not produce any output
+(   78) ENDIF
+(   79) IPROC   = MPL_NPROC()
+(   80) IMYPROC = MPL_MYRANK()
+(   81) 
+(   82) ! Default parameters
+(   83) 
+(   84) IULOUT=6
+(   85) IULNAM=6
+(   86) IULERR=0
+(   87) IDLON=64
+(   88) IDGLG=HUGE(IDLON)
+(   89) ISMAXG=21
+(   90) IALIAS=4
+(   91) !IORTHO=12
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 3
+
+(   92) IORTHO=HUGE(IALIAS)
+(   93) IODD=1
+(   94) IVERBOSE=0
+(   95) 
+(   96) ! Crack options
+(   97) 
+(   98) ICOMMAND=1
+(   99) DO
+(  100)   CALL GET_COMMAND_ARGUMENT(ICOMMAND,CLARG)
+(  101)   IF (LEN_TRIM(CLARG) == 0) EXIT
+(  102)   IF (CLARG(1:2) == '-o') THEN
+(  103) !   -o bsolute value of orthogonality exponent threshold
+(  104)     IF (LEN_TRIM(CLARG) == 2) THEN
+(  105)       ICOMMAND=ICOMMAND+1
+(  106)       CALL GET_COMMAND_ARGUMENT(ICOMMAND,CLARG)
+(  107)       READ(UNIT=CLARG,FMT='(I2)') IORTHO
+(  108)     ELSE
+(  109)       READ(UNIT=CLARG(3:),FMT='(I2)') IORTHO
+(  110)     ENDIF
+(  111)   ELSEIF (CLARG(1:2) == '-a') THEN
+(  112) !   -a absolute value of aliasing exponent
+(  113)     IF (LEN_TRIM(CLARG) == 2) THEN
+(  114)       ICOMMAND=ICOMMAND+1
+(  115)       CALL GET_COMMAND_ARGUMENT(ICOMMAND,CLARG)
+(  116)       READ(UNIT=CLARG,FMT='(I2)') IALIAS
+(  117)     ELSE
+(  118)       READ(UNIT=CLARG(3:),FMT='(I2)') IALIAS
+(  119)     ENDIF
+(  120)   ELSEIF (CLARG(1:2) == '-n') THEN
+(  121) !   - numbers allowed (odd or even)
+(  122)     IF (LEN_TRIM(CLARG) == 2) THEN
+(  123)       ICOMMAND=ICOMMAND+1
+(  124)       CALL GET_COMMAND_ARGUMENT(ICOMMAND,CLARG)
+(  125)       READ(UNIT=CLARG,FMT='(I2)') IODD 
+(  126)     ELSE
+(  127)       READ(UNIT=CLARG(3:),FMT='(I2)') IODD
+(  128)     ENDIF
+(  129)     IODD=MAX(0,MIN(1,IODD))
+(  130)   ELSEIF (CLARG(1:2) == '-t') THEN
+(  131) !   -t nominal truncation
+(  132)     IF (LEN_TRIM(CLARG) == 2) THEN
+(  133)       ICOMMAND=ICOMMAND+1
+(  134)       CALL GET_COMMAND_ARGUMENT(ICOMMAND,CLARG)
+(  135)       READ(UNIT=CLARG,FMT='(I5)') ISMAXG 
+(  136)     ELSE
+(  137)       READ(UNIT=CLARG(3:),FMT='(I5)') ISMAXG
+(  138)     ENDIF
+(  139)   ELSEIF (CLARG(1:2) == '-l') THEN
+(  140) !   -l number of longitudes
+(  141)     IF (LEN_TRIM(CLARG) == 2) THEN
+(  142)       ICOMMAND=ICOMMAND+1
+(  143)       CALL GET_COMMAND_ARGUMENT(ICOMMAND,CLARG)
+(  144)       READ(UNIT=CLARG,FMT='(I5)') IDLON 
+(  145)     ELSE
+(  146)       READ(UNIT=CLARG(3:),FMT='(I5)') IDLON
+(  147)     ENDIF
+(  148)   ELSEIF (CLARG(1:2) == '-g') THEN
+(  149) !   -g number of Gaussian latitudes
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 4
+
+(  150)     IF (LEN_TRIM(CLARG) == 2) THEN
+(  151)       ICOMMAND=ICOMMAND+1
+(  152)       CALL GET_COMMAND_ARGUMENT(ICOMMAND,CLARG)
+(  153)       READ(UNIT=CLARG,FMT='(I5)') IDGLG
+(  154)     ELSE
+(  155)       READ(UNIT=CLARG(3:),FMT='(I5)') IDGLG
+(  156)     ENDIF
+(  157)   ELSEIF (CLARG(1:2) == '-v') THEN
+(  158) !   -v verbosity
+(  159)     IF (LEN_TRIM(CLARG) == 2) THEN
+(  160)       ICOMMAND=ICOMMAND+1
+(  161)       CALL GET_COMMAND_ARGUMENT(ICOMMAND,CLARG)
+(  162)       READ(UNIT=CLARG,FMT='(I4)') IVERBOSE
+(  163)     ELSE
+(  164)       READ(UNIT=CLARG(3:),FMT='(I2)') IVERBOSE
+(  165)     ENDIF
+(  166)     IVERBOSE=MAX(0,MIN(1,IVERBOSE))
+(  167)   ELSEIF (CLARG(1:2) == '-f') THEN
+(  168) !   -f unit number of namelist file NAMRGRI
+(  169)     IF (LEN_TRIM(CLARG) == 2) THEN
+(  170)       ICOMMAND=ICOMMAND+1
+(  171)       CALL GET_COMMAND_ARGUMENT(ICOMMAND,CLARG)
+(  172)       READ(UNIT=CLARG,FMT='(I4)') IULNAM
+(  173)     ELSE
+(  174)       READ(UNIT=CLARG(3:),FMT='(I4)') IULNAM
+(  175)     ENDIF
+(  176)     IULNAM=MAX(0,IULNAM)
+(  177)   ELSEIF (CLARG(1:2) == '-r') THEN
+(  178) !   -r read ZGR from file (i.e. do not compute ZGR)
+(  179)     LLREAD=.TRUE.
+(  180)   ELSEIF (CLARG(1:2) == '-w') THEN
+(  181) !   -w write ZGR to file (i.e. so that we can read it on a subsequent run)
+(  182)     LLWRITE=.TRUE.
+(  183)   ELSE
+(  184)     IF (IMYPROC == 1) THEN
+(  185)       PRINT*, ' USAGE:'
+(  186)       PRINT*, ' -t nominal truncation                        [',ISMAXG,']'
+(  187)       PRINT*, ' -l number of longitudes                      [',IDLON,']'
+(  188)       PRINT*, ' -g number of Gaussian latitudes              (self-determined if not specified)'
+(  189)       PRINT*, ' -o orthogonality precision, as Log10() value (self-determined if not specified)'
+(  190)       PRINT*, ' -a allowed aliasing, as a Log10() value      [',IALIAS,']'
+(  191)       PRINT*, ' -n odd numbers allowed (1) or not (0)        [',IODD,']'
+(  192)       PRINT*, ' -v verbosity (0 or 1)                        [',IVERBOSE,']'
+(  193)       PRINT*, ' -f unit number of namelist file NAMRGRI      [',IULNAM,']'
+(  194)       PRINT*, ' -r read ZGR from file per task               [',LLREAD,']'
+(  195)       PRINT*, ' -w write ZGR to file per task                [',LLWRITE,']'
+(  196)       PRINT*, ' -h displays options and arguments'
+(  197)     ENDIF
+(  198)     IF (CLARG(1:2) == '-h') THEN
+(  199)       CALL MPL_END
+(  200)       IF (LHOOK) CALL DR_HOOK('RGRID',1,ZHOOK_HANDLE)
+(  201)       STOP
+(  202)     ELSE
+(  203)       CALL ABOR1('RGRID : ERROR IN COMMAND LINE ARGUMENTS')
+(  204)     ENDIF
+(  205)   ENDIF
+(  206)   ICOMMAND=ICOMMAND+1
+(  207) ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 5
+
+(  208) 
+(  209) CALL MPL_BARRIER(CDSTRING='RGRID:')
+(  210) 
+(  211) IF (LLREAD.AND.LLWRITE) CALL ABOR1('RGRID : LLREAD AND LLWRITE ARE EXCLUSIVE')
+(  212) 
+(  213) ZALIAS=10._JPRBT**(-REAL(IALIAS,KIND=JPRBT))
+(  214) IF (IORTHO==HUGE(IALIAS)) THEN
+(  215)   ZORTHO=1000._JPRBT*EPSILON(ZALIAS)
+(  216) ELSE
+(  217)   ZORTHO=10._JPRBT**(-REAL(IORTHO,KIND=JPRBT))
+(  218) ENDIF
+(  219) 
+(  220) IF (IDGLG==HUGE(IDLON)) THEN
+(  221)   IDGLG=(IDLON+1)/2
+(  222) ENDIF
+(  223) 
+(  224) IF (ISMAXG > (IDLON+3)/3) THEN
+(  225) ! Linear grid : reproduce ECMWF code :
+(  226)   IXMAX=ISMAXG
+(  227)   INMAX=MIN((IDLON-1)/3,ISMAXG)
+(  228) ELSE
+(  229) ! Quadratic grid : reproduce Meteo-France code :
+(  230)   IXMAX=2*ISMAXG
+(  231)   INMAX=MIN((IDLON-1)/3,IXMAX)
+(  232) ENDIF
+(  233) 
+(  234) ! Computation
+(  235) 
+(  236) CALL REDUCED_GRID(IULOUT,IULERR,IDGLG,IDLON,ISMAXG,IXMAX,INMAX,ZORTHO,ZALIAS, &
+(  237)  & IODD,IPROC,IMYPROC,IVERBOSE,IULNAM,LLREAD,LLWRITE)
+(  238) 
+(  239) ! Finalize
+(  240) 
+(  241) CALL MPL_END()
+(  242) 
+(  243) IF (LHOOK) CALL DR_HOOK('RGRID',1,ZHOOK_HANDLE)
+(  244) 
+(  245) STOP
+(  246) 
+(  247) CONTAINS
+(  248) 
+(  249) SUBROUTINE REDUCED_GRID(KULOUT,KULERR,KDGLG,KDLON,KSMAXG,KXMAX,KNMAX,PORTHO,PALIAS, &
+(  250)  & KODD,KPROC,KMYPROC,KVERBOSE,KULNAM,LDREAD,LDWRITE)
+(  251) 
+(  252) ! Purpose :
+(  253) ! -------
+(  254) !   *REDUCED_GRID* Compute a global reduced grid, from a given truncation and
+(  255) !   maximum aliasing rate.
+(  256) 
+(  257) ! Interface :
+(  258) ! ---------
+(  259) !   KULOUT : standard output unit number
+(  260) !   KULERR : standard error unit number
+(  261) !   KDGLG  : total number of latitude
+(  262) !   KDLON  : maximum number of longitude
+(  263) !   KSMAXG : spectral truncation
+(  264) !   PORTHO : Orthogonality threshold (abs. exponent)
+(  265) !   PALIAS : maximum allowed aliasing rate (exponent)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 6
+
+(  266) !   KPROC  : number of MPI tasks
+(  267) !   KMYPROC : current MPI task
+(  268) !   KVERBOSE : verbosity option
+(  269) !   KULNAM : unit number for writing rtable file
+(  270) !   LDREAD : F - (default) compute ZGR, 
+(  271) !          : T - do not compute ZGR, read from save file per task
+(  272) !   LDWRITE: F - (default) do not write ZGR, 
+(  273) !          : T - write ZGR to a separate file per task
+(  274) 
+(  275) ! Externals :
+(  276) ! ---------
+(  277) !   SETUP_TRANS0 - basic initialization
+(  278) !   SETUP_TRANS  - resolution dependent initialization
+(  279) 
+(  280) ! Method :
+(  281) ! ------
+(  282) 
+(  283) ! Use the spectral transform package to compute the Legendre polynomials at
+(  284) ! twice the given truncation.
+(  285) ! Check orthogonality of polynomials up to IOMAX with those within KNMAX
+(  286) ! IOMAX=KXMAX ==> quadratic grid if KXMAX=KNMAX*1.5 (oversized KXMAX)
+(  287) ! IOMAX=KNMAX ==> linear grid
+(  288) ! No need for quadruple precision from cycle 37 onwards, thanks to the Swartztrauber algorithm
+(  289) 
+(  290) ! Recommended values :
+(  291) !   For orthogonality : 
+(  292) !     1.E-12 
+(  293) !     but the best (and default) value is now 1000*EPSILON(Z) from cycle 37 onwards.
+(  294) !   For Aliasing : 
+(  295) !     1.E-4 at Meteo-France
+(  296) !     1.E-2 at ECMWF, except at T7999 (1.E-1)
+(  297) 
+(  298) ! Notice : Fast Legendre Transforms not working yet.
+(  299) 
+(  300) ! Reference :
+(  301) ! ---------
+(  302) !   Courtier and Naughton (1994)  *ECMWF/METEO-FRANCE*
+(  303) 
+(  304) ! Author :
+(  305) ! ------
+(  306) !   12-Feb-2007 R. El Khatib  *METEO-FRANCE*
+(  307) 
+(  308) ! Modifications :
+(  309) ! -------------
+(  310) !   R. El Khatib 30-Nov-2012 Optimization, OPEN-MP parallelization, cleanings.
+(  311) !   R. El Khatib 29-Apr-2013 More cleanings and distribution, merge with ECMWF
+(  312) !   G. Mozdzynski Jan 2014   Optimization for reducing memory requirement
+(  313) !   G. Mozdzynski Jan 2014   Options -w and -r to tune the orthogonality
+(  314) !                            threshold without recomputing ZGR
+(  315) !   R. El Khatib 15-Feb-2016 Merge and finalization of G. Mozdzynski's mods
+(  316) 
+(  317) ! End Modifications
+(  318) !-----------------------------------------------------------------------------
+(  319) 
+(  320) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(  321) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(  322) 
+(  323) IMPLICIT NONE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 7
+
+(  324) 
+(  325) INTEGER(KIND=JPIM), INTENT(IN)  :: KULOUT, KULERR, KDGLG, KSMAXG, KXMAX, KNMAX, KDLON
+(  326) REAL(KIND=JPRBT),    INTENT(IN)  :: PORTHO, PALIAS
+(  327) INTEGER(KIND=JPIM), INTENT(IN)  :: KODD, KPROC, KMYPROC, KVERBOSE, KULNAM
+(  328) LOGICAL,            INTENT(IN)  :: LDREAD, LDWRITE
+(  329) 
+(  330) INTEGER(KIND=JPIM) :: IOMAX, IDGNH, INUMP, IM, IPRTRV
+(  331) INTEGER(KIND=JPIM) :: JOR, JM, JN1, JN2, JGL, J, IGPTOT, IGPTOTS
+(  332) INTEGER(KIND=JPIM) :: IPRGPNS, IPRGPEW, IPRTRW, IPROC, ITAG1, ITAG2, JROC, IMSGLEN
+(  333) 
+(  334) REAL(KIND=JPRBT) :: ZMAX(KDGLG)
+(  335) REAL(KIND=JPRBT) :: ZGW(KDGLG) ! Gaussian weights & sines of latitudes
+(  336) REAL(KIND=JPRD) :: ZMU(KDGLG) 
+(  337) REAL(KIND=JPRBT) :: Z2GW(KDGLG) ! Gaussian weights *2
+(  338) REAL(KIND=JPRBT) :: ZUNITY(0:MAX(KXMAX,KNMAX)+MOD(MAX(KXMAX,KNMAX)+1,2))
+(  339) REAL(KIND=JPRBT) :: ZORTH(0:MAX(KXMAX,KNMAX)+MOD(MAX(KXMAX,KNMAX)+1,2))
+(  340) 
+(  341) REAL(KIND=JPRBT), ALLOCATABLE :: ZPNMT(:,:)  ! transposed Legendre polynomials
+(  342) REAL(KIND=JPRBT), ALLOCATABLE :: ZGR(:,:,:)
+(  343) 
+(  344) INTEGER(KIND=JPIM) :: IFFTP0(KDLON), IPRCIDS(KPROC)
+(  345) INTEGER(KIND=JPIM), ALLOCATABLE :: ILOENG(:) ! number of longitudes for each latitude (global)
+(  346) INTEGER(KIND=JPIM), ALLOCATABLE :: ILOENS(:)
+(  347) INTEGER(KIND=JPIM), ALLOCATABLE :: IILOEN(:) ! number of longitudes for each latitude (local contrib)
+(  348) INTEGER(KIND=JPIM), ALLOCATABLE :: IMYMS(:) ! wave numbers on local task
+(  349) 
+(  350) INTEGER(KIND=JPIM) :: ILEI3    ! First dimension of Legendre polynomials
+(  351) INTEGER(KIND=JPIM) :: ISPOLEG  ! Second dimension of Legendre polynomials
+(  352) INTEGER(KIND=JPIM) :: IULZGR   ! Logical unit number for ZGR
+(  353)  
+(  354) CHARACTER(LEN=5) :: CLMODE
+(  355) CHARACTER(LEN=13) :: CFILE
+(  356) 
+(  357) LOGICAL :: LLODD, LLINEAR
+(  358) 
+(  359) REAL(KIND=JPRBT) :: ZHOOK_HANDLE0
+(  360) REAL(KIND=JPRBT) :: ZHOOK_HANDLE1
+(  361) REAL(KIND=JPRBT) :: ZHOOK_HANDLE2
+(  362) 
+(  363) 
+(  364) #include "setup_trans0.h"
+(  365) #include "setup_trans.h"
+(  366) #include "trans_inq.h"
+(  367) #include "trans_pnm.h"
+(  368) 
+(  369) #include "sufftp.h"
+(  370) 
+(  371) !-----------------------------------------------------------------------------
+(  372) 
+(  373) IF (LHOOK) CALL DR_HOOK('RGRID:REDUCED_GRID',0,ZHOOK_HANDLE0)
+(  374) 
+(  375) ! 1. Setup
+(  376) !    -----
+(  377) 
+(  378) IDGNH=(KDGLG+1)/2
+(  379) LLINEAR=(KXMAX==KSMAXG)
+(  380) 
+(  381) ! Provisional "A distribution" only :
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 8
+
+(  382) IPROC=KPROC
+(  383) IPRTRV=1
+(  384) IPRGPNS=IPROC/IPRTRV
+(  385) IPRGPEW=IPRTRV
+(  386) IPRTRW=IPROC/IPRTRV
+(  387) 
+(  388) ITAG1=2000
+(  389) ITAG2=2001
+(  390) DO JROC=1,IPRTRW
+(  391)   IPRCIDS(JROC)=JROC
+(  392) ENDDO
+(  393) 
+(  394) IULZGR=44
+(  395) IF (LDREAD .OR. LDWRITE) WRITE(CFILE,'("ZGR.TASK",I5.5)') KMYPROC
+(  396) IF (LDWRITE) OPEN(UNIT=IULZGR,FILE=CFILE,FORM='UNFORMATTED',STATUS='NEW')
+(  397) IF (LDREAD) OPEN(IULZGR,FILE=CFILE,FORM='UNFORMATTED',STATUS='OLD')
+(  398) 
+(  399) ! 2. Compute Legendre polynomials
+(  400) !    ----------------------------
+(  401) 
+(  402) CALL SETUP_TRANS0(KOUT=KULOUT,KERR=KULERR,LDMPOFF=.FALSE., &
+(  403)  & KPRGPNS=IPRGPNS,KPRGPEW=IPRTRV,KPRTRW=IPRTRW)
+(  404) CALL SETUP_TRANS(KSMAX=KXMAX,KDGL=KDGLG,LDUSEFLT=.FALSE.,LDUSERPNM=.FALSE., &
+(  405)  & LDKEEPRPNM=.FALSE.,LDPNMONLY=.TRUE.)
+(  406) 
+(  407) CALL TRANS_INQ(KLEI3=ILEI3,KSPOLEGL=ISPOLEG,KNUMP=INUMP)
+(  408) 
+(  409) IF (KMYPROC == 1) THEN
+(  410)   WRITE(KULOUT,*) 'dimensions: IPROC, ILEI3, ISPOLEG, INUMP, KXMAX, KNMAX, IDGNH '
+(  411)   WRITE(KULOUT,*) IPROC, ILEI3, ISPOLEG, INUMP, KXMAX, KNMAX, IDGNH
+(  412) ENDIF
+(  413) 
+(  414) ALLOCATE(IMYMS(INUMP)) 
+(  415) CALL TRANS_INQ(KMYMS=IMYMS)
+(  416) ALLOCATE(ZGR(INUMP,IDGNH,2))
+(  417) 
+(  418) IF( .NOT. LDREAD ) THEN
+(  419) 
+(  420)   CALL TRANS_INQ(PGW=ZGW,PMU=ZMU)
+(  421)   DO JGL=1,IDGNH
+(  422)     Z2GW(JGL)=2._JPRBT*ZGW(JGL)
+(  423)   ENDDO
+(  424)   IF (KVERBOSE == 1 .AND. KMYPROC == 1) THEN
+(  425)     WRITE(KULERR,'(A,E10.3)') ' Error in the sum of weights:',0.5_JPRBT-SUM(ZGW(1:IDGNH))
+(  426)     DO JGL=IDGNH,1,-1
+(  427)       WRITE(KULERR,*) ' Gaussian weight: ', JGL, ZGW(JGL)
+(  428)       WRITE(KULERR,*) ' Gaussian latitude (degrees): ', JGL, (180._JPRBT/3.14159_JPRBT)*ASIN(ZMU(JGL))
+(  429)     ENDDO
+(  430)     WRITE(KULOUT,*) ' STARTING COMPUTATIONS '
+(  431)   ENDIF
+(  432) 
+(  433) ! 3. Control the polynomials orthogonality
+(  434) !    -------------------------------------
+(  435) 
+(  436)   ALLOCATE(ZPNMT(KXMAX+3,ILEI3))
+(  437)   IF (LHOOK) CALL DR_HOOK('RGRID:REDUCED_GRID>LOOP1',0,ZHOOK_HANDLE1)
+(  438)   DO JM=1,INUMP
+(  439)     IM=IMYMS(JM)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 9
+
+(  440)     CALL TRANS_PNM(KM=IM,PRPNM=ZPNMT,LDTRANSPOSE=.TRUE.,LDCHEAP=.TRUE.)
+(  441)     IF (.NOT.LLINEAR .OR. IM <= KNMAX) THEN
+(  442)       DO JOR=1,2
+(  443)         IF (JOR == 1) THEN
+(  444)           IOMAX=KXMAX
+(  445)         ELSE
+(  446)           IOMAX=KNMAX
+(  447)         ENDIF
+(  448)         DO JGL=1,IDGNH
+(  449)           ZMAX(JGL)=-1._JPRBT
+(  450)         ENDDO
+(  451) !$OMP PARALLEL PRIVATE(JN1,JN2,JGL,ZORTH,ZUNITY,ZHOOK_HANDLE2)
+(  452)         IF (LHOOK) CALL DR_HOOK('RGRID:REDUCED_GRID>LOOP2',0,ZHOOK_HANDLE2)
+(  453) !$OMP DO SCHEDULE(DYNAMIC,1)
+(  454)         DO JN1=IM,KNMAX
+(  455)           ZORTH(IM:IOMAX)=0._JPRBT
+(  456)           ZUNITY(IM:IOMAX)=0._JPRBT
+(  457)           DO JN2=IM,IOMAX
+(  458)             IF (JN2==JN1) THEN
+(  459)               ZUNITY(JN2)=1._JPRBT
+(  460)             ENDIF
+(  461)           ENDDO
+(  462)           DO JGL=IDGNH,1,-1
+(  463)             IF (MOD(JN1-IM,2) == 0) THEN
+(  464)               DO JN2=IM,IOMAX,2
+(  465)                 ZORTH(JN2)=ZORTH(JN2)+ZPNMT(KXMAX+2-JN1,JGL)*ZPNMT(KXMAX+2-JN2,JGL)*Z2GW(JGL)
+(  466)                 ZMAX(JGL)=MAX(ZMAX(JGL),ABS(ZORTH(JN2)-ZUNITY(JN2)))
+(  467)               ENDDO
+(  468)             ELSE
+(  469)               DO JN2=IM+1,IOMAX,2
+(  470)                 ZORTH(JN2)=ZORTH(JN2)+ZPNMT(KXMAX+2-JN1,JGL)*ZPNMT(KXMAX+2-JN2,JGL)*Z2GW(JGL)
+(  471)                 ZMAX(JGL)=MAX(ZMAX(JGL),ABS(ZORTH(JN2)-ZUNITY(JN2)))
+(  472)               ENDDO
+(  473)             ENDIF
+(  474)           ENDDO
+(  475)         ENDDO
+(  476) !$OMP END DO
+(  477)         IF (LHOOK) CALL DR_HOOK('RGRID:REDUCED_GRID>LOOP2',1,ZHOOK_HANDLE2)
+(  478) !$OMP END PARALLEL
+(  479)         DO JGL=1,IDGNH
+(  480)           ZGR(JM,JGL,JOR)=ZMAX(JGL)
+(  481)         ENDDO
+(  482)         IF (KVERBOSE == 1) THEN
+(  483)           IF(JOR == 2)THEN
+(  484)             WRITE(KULERR,*) 'Filling ZGR JGL==1 IM=', IM, JM, ZGR(JM,1,JOR)
+(  485)             WRITE(KULERR,*) 'Filling ZGR JGL==IDGNH/2 IM=', IM, JM, ZGR(JM,IDGNH/2,JOR)
+(  486)           ENDIF
+(  487)         ENDIF
+(  488)       ENDDO
+(  489)     ENDIF
+(  490)   ENDDO
+(  491)   IF (LHOOK) CALL DR_HOOK('RGRID:REDUCED_GRID>LOOP1',1,ZHOOK_HANDLE1)
+(  492)   DEALLOCATE(ZPNMT)
+(  493)   IF (LDWRITE) WRITE(IULZGR) ZGR(:,:,:)
+(  494) 
+(  495) ENDIF ! .NOT. LDREAD
+(  496) 
+(  497) CLMODE='FINAL'
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 10
+
+(  498) CALL TRANS_END(CLMODE)
+(  499) 
+(  500) 
+(  501) ! 4. Compute the reduced grid
+(  502) !    ------------------------
+(  503) 
+(  504) IF (KVERBOSE == 1) THEN
+(  505)   IF (KMYPROC == 1) THEN
+(  506)     WRITE(KULERR,*) ' start checking ffts '
+(  507)   ENDIF
+(  508) ENDIF
+(  509) 
+(  510) IF( LDREAD ) READ(IULZGR) ZGR(:,:,:)
+(  511) 
+(  512) LLODD=(KODD==1)
+(  513) CALL SUFFTP(KDLON,IFFTP0,LLODD)
+(  514) ALLOCATE(ILOENG(KDGLG))
+(  515) ALLOCATE(ILOENS(KDGLG))
+(  516) ILOENG(:)=0
+(  517) ILOENS(:)=0
+(  518) 
+(  519) DO JGL=1,IDGNH
+(  520)   DO JM=INUMP,1,-1
+(  521)     IM=IMYMS(JM)
+(  522)     IF (.NOT.LLINEAR .OR. IM <= KNMAX) THEN
+(  523)       IF ((ZGR(JM,MIN(IDGNH,JGL+1),2)) >= PORTHO) THEN
+(  524)         ILOENG(JGL)=2*MIN(IM+1,KNMAX)+1
+(  525)         IF (KVERBOSE == 1) THEN
+(  526)           WRITE(KULERR,*) 'decision1 ILOEN JGL IM', ILOENG(JGL), JGL, IM, ZGR(JM,MIN(IDGNH,JGL+1),2)
+(  527)         ENDIF
+(  528)         EXIT
+(  529)       ENDIF
+(  530)     ENDIF
+(  531)   ENDDO
+(  532) ! fft compatibility :
+(  533)   DO J=ILOENG(JGL),KDLON
+(  534)     IF (IFFTP0(J) == 0)THEN
+(  535)       ILOENS(JGL)=J
+(  536)       EXIT
+(  537)     ENDIF
+(  538)   ENDDO
+(  539)   DO JM=INUMP,1,-1
+(  540)     IM=IMYMS(JM)
+(  541)     IF (.NOT.LLINEAR .OR. IM <= KNMAX) THEN
+(  542)       IF ((ZGR(JM,MIN(IDGNH,JGL+1),1)) >= PALIAS) THEN
+(  543)         ILOENG(JGL)=MAX(ILOENG(JGL),3*MIN(IM+1,KNMAX)+1)
+(  544)         IF (KVERBOSE == 1) THEN
+(  545)           WRITE(KULERR,*) 'decision2 ILOEN JGL IM', ILOENG(JGL), JGL, IM, ZGR(JM,MIN(IDGNH,JGL+1),1)
+(  546)         ENDIF
+(  547)         EXIT
+(  548)       ENDIF
+(  549)     ENDIF
+(  550)   ENDDO
+(  551) ! fft compatibility :
+(  552)   DO J=ILOENG(JGL),KDLON
+(  553)     IF (IFFTP0(J) == 0)THEN
+(  554)       ILOENG(JGL)=J
+(  555)       EXIT
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 11
+
+(  556)     ENDIF
+(  557)   ENDDO
+(  558) ENDDO
+(  559) 
+(  560) DEALLOCATE(ZGR)
+(  561) DEALLOCATE(IMYMS)
+(  562) 
+(  563) ! 5. Gather contributions to task #1 and find the maximum per latitude
+(  564) !    -----------------------------------------------------------------
+(  565) 
+(  566) IF (KMYPROC /= 1) THEN
+(  567) 
+(  568)   CALL MPL_SEND(ILOENG(1:IDGNH),KDEST=IPRCIDS(1),KTAG=ITAG1,CDSTRING='RGRID:')
+(  569)   CALL MPL_SEND(ILOENS(1:IDGNH),KDEST=IPRCIDS(1),KTAG=ITAG2,CDSTRING='RGRID:')
+(  570) 
+(  571) ELSE
+(  572) 
+(  573)   ALLOCATE(IILOEN(IDGNH))
+(  574)   DO JROC=1,IPRTRW-1
+(  575)     CALL MPL_RECV(IILOEN,KTAG=ITAG1,KOUNT=IMSGLEN,CDSTRING='RGRID:')
+(  576)     IF (IMSGLEN /= IDGNH) THEN
+(  577)       CALL ABOR1('RGRID : RECEIVED MESSAGE LENGTH OF WRONG SIZE')
+(  578)     ENDIF
+(  579)     DO J=1,IDGNH
+(  580)       ILOENG(J)=MAX(IILOEN(J),ILOENG(J))
+(  581)     ENDDO
+(  582)     CALL MPL_RECV(IILOEN,KTAG=ITAG2,KOUNT=IMSGLEN,CDSTRING='RGRID:')
+(  583)     IF (IMSGLEN /= IDGNH) THEN
+(  584)       CALL ABOR1('RGRID : RECEIVED MESSAGE LENGTH OF WRONG SIZE')
+(  585)     ENDIF
+(  586)     DO J=1,IDGNH
+(  587)       ILOENS(J)=MAX(IILOEN(J),ILOENS(J))
+(  588)     ENDDO
+(  589)   ENDDO
+(  590)   DEALLOCATE(IILOEN)
+(  591) 
+(  592)   DO J=1,KDGLG/2
+(  593)     ILOENG(KDGLG+1-J)=ILOENG(J)
+(  594)     ILOENS(KDGLG+1-J)=ILOENS(J)
+(  595)   ENDDO
+(  596)   IGPTOT=SUM(ILOENG)
+(  597)   IGPTOTS=SUM(ILOENS)
+(  598)   IF (KVERBOSE == 1) THEN
+(  599)     DO JGL=1,IDGNH
+(  600)       WRITE(KULOUT,FMT='(''   ILOEN('',I5,'')='',2I5)') JGL,ILOENG(JGL),ILOENS(JGL)
+(  601)     ENDDO
+(  602)   ENDIF
+(  603)   WRITE(KULOUT,FMT='('' REDUCED GRID FOR NSMAX = '', I5, '' NDLON = '', I5, &
+(  604)    & '' NDGL = '',I5,  '' IODD = '',I1)') KSMAXG,KDLON,KDGLG,KODD
+(  605)   WRITE(KULOUT,FMT='('' ORTHOGONALITY = '',E16.9, '' ALIASING = '',E16.9)') PORTHO, PALIAS
+(  606)   WRITE(KULOUT,FMT='('' IGPTOT = '',I8,'' IGPTOTS = '',I8)') IGPTOT, IGPTOTS
+(  607)   WRITE(KULOUT,FMT='('' REDUCTION from a full grid = '',F4.1,''%'')') (1-REAL(IGPTOT,JPRBT)/(KDGLG*KDLON))*100
+(  608)   WRITE(KULOUT,FMT='('' KULNAM = '',I2)') KULNAM
+(  609) 
+(  610)   IF (KULNAM /= KULOUT .AND. KULNAM /= KULERR) OPEN(KULNAM,FORM="FORMATTED")
+(  611)   WRITE(KULNAM,'('' &NAMRGRI'')')
+(  612)   IF (KDLON.LE.99) THEN
+(  613)     DO JGL=1,KDGLG
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 12
+
+(  614)       WRITE(KULNAM,FMT='(''   NRGRI('',I2,'')='',I2,'','')') JGL,ILOENG(JGL)
+(  615)     ENDDO
+(  616)   ELSEIF (KDLON.LE.999) THEN
+(  617)     DO JGL=1,KDGLG
+(  618)       WRITE(KULNAM,FMT='(''   NRGRI('',I3,'')='',I3,'','')') JGL,ILOENG(JGL)
+(  619)     ENDDO
+(  620)   ELSEIF (KDLON.LE.9999) THEN 
+(  621)     DO JGL=1,KDGLG
+(  622)       WRITE(KULNAM,FMT='(''   NRGRI('',I4,'')='',I4,'','')') JGL,ILOENG(JGL)
+(  623)     ENDDO
+(  624)   ELSE
+(  625)     DO JGL=1,KDGLG
+(  626)       WRITE(KULNAM,FMT='(''   NRGRI('',I5,'')='',I5,'','')') JGL,ILOENG(JGL)
+(  627)     ENDDO
+(  628)   ENDIF
+(  629)   WRITE(KULNAM,'('' /'')')
+(  630)   IF (KULNAM /= KULOUT .AND. KULNAM /= KULERR) CLOSE(KULNAM)
+(  631) ENDIF
+(  632) 
+(  633) DEALLOCATE(ILOENG)
+(  634) DEALLOCATE(ILOENS)
+(  635) 
+(  636) IF (LDREAD .OR. LDWRITE) CLOSE(IULZGR)
+(  637) 
+(  638) !-----------------------------------------------------------------------------
+(  639) 
+(  640) IF (LHOOK) CALL DR_HOOK('RGRID:REDUCED_GRID',1,ZHOOK_HANDLE0)
+(  641) END SUBROUTINE REDUCED_GRID
+(  642) 
+(  643) END PROGRAM RGRID
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 13
+
+(    1) # 1 "rgrid.F90"
+(    1) PROGRAM RGRID
+(    2) # 3 "rgrid.F90"
+(    3) ! Purpose :
+(    4) ! -------
+(    5) !   A calling program to make a gaussian reduced grid from several parameters
+(    6) # 7 "rgrid.F90"
+(    7) ! Interface :
+(    8) ! ---------
+(    9) !   None
+(   10) # 11 "rgrid.F90"
+(   11) ! Externals :
+(   12) ! ---------
+(   13) !   REDUCED_GRID  - to compute the reduced grid
+(   14) # 15 "rgrid.F90"
+(   15) ! Method :
+(   16) ! ------
+(   17) # 18 "rgrid.F90"
+(   18) ! Reference :
+(   19) ! ---------
+(   20) # 21 "rgrid.F90"
+(   21) ! Author :
+(   22) ! ------
+(   23) !   12-Feb-2007 R. El Khatib  *METEO-FRANCE*
+(   24) # 25 "rgrid.F90"
+(   25) ! Modifications :
+(   26) ! -------------
+(   27) !   08-Nov 2007 R. El Khatib : Fix arguments to get_opt
+(   28) # 29 "rgrid.F90"
+(   29) ! End Modifications
+(   30) !-----------------------------------------------------------------------------
+(   31) # 32 "rgrid.F90"
+(   32) USE PARKIND1  ,ONLY : JPIM     ,JPRBT, JPRD
+(   33) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   34) USE MPL_MODULE
+(   35) # 37 "rgrid.F90"
+(   37) IMPLICIT NONE
+(   38) # 40 "rgrid.F90"
+(   40) INTEGER(KIND=JPIM) :: IULOUT, IULERR ! stdout, stderr unit numbers
+(   41) INTEGER(KIND=JPIM) :: IULNAM ! unit number of output file containing NAMRGRI
+(   42) INTEGER(KIND=JPIM) :: IDGLG ! number of latidudes
+(   43) INTEGER(KIND=JPIM) :: IDLON ! number of longitudes
+(   44) INTEGER(KIND=JPIM) :: ISMAXG ! nominal truncation
+(   45) INTEGER(KIND=JPIM) :: IXMAX  ! truncation used in the spectral transforms,quad grid
+(   46) INTEGER(KIND=JPIM) :: INMAX  ! truncation used in the spectral transforms, lin grid
+(   47) INTEGER(KIND=JPIM) :: IALIAS ! allowed aliasing, as Log10() value
+(   48) INTEGER(KIND=JPIM) :: IORTHO ! orthogonality precision, as Log10() value
+(   49) INTEGER(KIND=JPIM) :: IODD ! Odd numbers allowed (1) or not (0)
+(   50) INTEGER(KIND=JPIM) :: IVERBOSE ! Verbosity level (0 or 1)
+(   51) INTEGER(KIND=JPIM) :: IPROC ! Number of MPI tasks
+(   52) INTEGER(KIND=JPIM) :: IMYPROC ! current MPI task
+(   53) # 54 "rgrid.F90"
+(   54) CHARACTER(LEN=64) :: CLARG
+(   55) CHARACTER(LEN=32) :: CLENV
+(   56) # 57 "rgrid.F90"
+(   57) INTEGER(KIND=JPIM) :: ICOMMAND
+(   58) LOGICAL :: LLMPI=.TRUE. ! MPI is initialized
+(   59) ! LLREAD and LLWRITE can be used for very high resolutions (>T10K)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 14
+
+(   60) ! to save on expensive recomputation of ZGR when simply experimenting with a different 
+(   61) ! ALIAS value
+(   62) LOGICAL :: LLREAD=.FALSE. ! ZGR not read from file per task
+(   63) LOGICAL :: LLWRITE=.FALSE.! ZGR not written to file per task
+(   64) # 65 "rgrid.F90"
+(   65) REAL(KIND=JPRBT) :: ZALIAS, ZORTHO
+(   66) # 67 "rgrid.F90"
+(   67) REAL(KIND=JPRBT) :: ZHOOK_HANDLE
+(   68) # 69 "rgrid.F90"
+(   69) !-----------------------------------------------------------------------------
+(   70) # 71 "rgrid.F90"
+(   71) IF (LHOOK) CALL DR_HOOK('RGRID',0,ZHOOK_HANDLE)
+(   72) # 73 "rgrid.F90"
+(   73) ! Initialize message passing
+(   74) # 75 "rgrid.F90"
+(   75) CALL GET_ENVIRONMENT_VARIABLE('DR_HOOK_NOT_MPI',CLENV)
+(   76) IF (CLENV == '1' .OR. CLENV == 'true' .OR. CLENV == 'TRUE') THEN
+(   77)   CALL MPL_INIT(LDINFO=.FALSE.) ! Do not produce any output
+(   78) ENDIF
+(   79) IPROC   = MPL_NPROC()
+(   80) IMYPROC = MPL_MYRANK()
+(   81) # 82 "rgrid.F90"
+(   82) ! Default parameters
+(   83) # 84 "rgrid.F90"
+(   84) IULOUT=6
+(   85) IULNAM=6
+(   86) IULERR=0
+(   87) IDLON=64
+(   88) IDGLG=HUGE(IDLON)
+(   89) ISMAXG=21
+(   90) IALIAS=4
+(   91) !IORTHO=12
+(   92) IORTHO=HUGE(IALIAS)
+(   93) IODD=1
+(   94) IVERBOSE=0
+(   95) # 96 "rgrid.F90"
+(   96) ! Crack options
+(   97) # 98 "rgrid.F90"
+(   98) ICOMMAND=1
+(   99) DO
+(  100)   CALL GET_COMMAND_ARGUMENT(ICOMMAND,CLARG)
+(  101)   IF (LEN_TRIM(CLARG) == 0) EXIT
+(  102)   IF (CLARG(1:2) == '-o') THEN
+(  103) !   -o bsolute value of orthogonality exponent threshold
+(  104)     IF (LEN_TRIM(CLARG) == 2) THEN
+(  105)       ICOMMAND=ICOMMAND+1
+(  106)       CALL GET_COMMAND_ARGUMENT(ICOMMAND,CLARG)
+(  107)       READ(UNIT=CLARG,FMT='(I2)') IORTHO
+(  108)     ELSE
+(  109)       READ(UNIT=CLARG(3:),FMT='(I2)') IORTHO
+(  110)     ENDIF
+(  111)   ELSEIF (CLARG(1:2) == '-a') THEN
+(  112) !   -a absolute value of aliasing exponent
+(  113)     IF (LEN_TRIM(CLARG) == 2) THEN
+(  114)       ICOMMAND=ICOMMAND+1
+(  115)       CALL GET_COMMAND_ARGUMENT(ICOMMAND,CLARG)
+(  116)       READ(UNIT=CLARG,FMT='(I2)') IALIAS
+(  117)     ELSE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 15
+
+(  118)       READ(UNIT=CLARG(3:),FMT='(I2)') IALIAS
+(  119)     ENDIF
+(  120)   ELSEIF (CLARG(1:2) == '-n') THEN
+(  121) !   - numbers allowed (odd or even)
+(  122)     IF (LEN_TRIM(CLARG) == 2) THEN
+(  123)       ICOMMAND=ICOMMAND+1
+(  124)       CALL GET_COMMAND_ARGUMENT(ICOMMAND,CLARG)
+(  125)       READ(UNIT=CLARG,FMT='(I2)') IODD 
+(  126)     ELSE
+(  127)       READ(UNIT=CLARG(3:),FMT='(I2)') IODD
+(  128)     ENDIF
+(  129)     IODD=MAX(0,MIN(1,IODD))
+(  130)   ELSEIF (CLARG(1:2) == '-t') THEN
+(  131) !   -t nominal truncation
+(  132)     IF (LEN_TRIM(CLARG) == 2) THEN
+(  133)       ICOMMAND=ICOMMAND+1
+(  134)       CALL GET_COMMAND_ARGUMENT(ICOMMAND,CLARG)
+(  135)       READ(UNIT=CLARG,FMT='(I5)') ISMAXG 
+(  136)     ELSE
+(  137)       READ(UNIT=CLARG(3:),FMT='(I5)') ISMAXG
+(  138)     ENDIF
+(  139)   ELSEIF (CLARG(1:2) == '-l') THEN
+(  140) !   -l number of longitudes
+(  141)     IF (LEN_TRIM(CLARG) == 2) THEN
+(  142)       ICOMMAND=ICOMMAND+1
+(  143)       CALL GET_COMMAND_ARGUMENT(ICOMMAND,CLARG)
+(  144)       READ(UNIT=CLARG,FMT='(I5)') IDLON 
+(  145)     ELSE
+(  146)       READ(UNIT=CLARG(3:),FMT='(I5)') IDLON
+(  147)     ENDIF
+(  148)   ELSEIF (CLARG(1:2) == '-g') THEN
+(  149) !   -g number of Gaussian latitudes
+(  150)     IF (LEN_TRIM(CLARG) == 2) THEN
+(  151)       ICOMMAND=ICOMMAND+1
+(  152)       CALL GET_COMMAND_ARGUMENT(ICOMMAND,CLARG)
+(  153)       READ(UNIT=CLARG,FMT='(I5)') IDGLG
+(  154)     ELSE
+(  155)       READ(UNIT=CLARG(3:),FMT='(I5)') IDGLG
+(  156)     ENDIF
+(  157)   ELSEIF (CLARG(1:2) == '-v') THEN
+(  158) !   -v verbosity
+(  159)     IF (LEN_TRIM(CLARG) == 2) THEN
+(  160)       ICOMMAND=ICOMMAND+1
+(  161)       CALL GET_COMMAND_ARGUMENT(ICOMMAND,CLARG)
+(  162)       READ(UNIT=CLARG,FMT='(I4)') IVERBOSE
+(  163)     ELSE
+(  164)       READ(UNIT=CLARG(3:),FMT='(I2)') IVERBOSE
+(  165)     ENDIF
+(  166)     IVERBOSE=MAX(0,MIN(1,IVERBOSE))
+(  167)   ELSEIF (CLARG(1:2) == '-f') THEN
+(  168) !   -f unit number of namelist file NAMRGRI
+(  169)     IF (LEN_TRIM(CLARG) == 2) THEN
+(  170)       ICOMMAND=ICOMMAND+1
+(  171)       CALL GET_COMMAND_ARGUMENT(ICOMMAND,CLARG)
+(  172)       READ(UNIT=CLARG,FMT='(I4)') IULNAM
+(  173)     ELSE
+(  174)       READ(UNIT=CLARG(3:),FMT='(I4)') IULNAM
+(  175)     ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 16
+
+(  176)     IULNAM=MAX(0,IULNAM)
+(  177)   ELSEIF (CLARG(1:2) == '-r') THEN
+(  178) !   -r read ZGR from file (i.e. do not compute ZGR)
+(  179)     LLREAD=.TRUE.
+(  180)   ELSEIF (CLARG(1:2) == '-w') THEN
+(  181) !   -w write ZGR to file (i.e. so that we can read it on a subsequent run)
+(  182)     LLWRITE=.TRUE.
+(  183)   ELSE
+(  184)     IF (IMYPROC == 1) THEN
+(  185)       PRINT*, ' USAGE:'
+(  186)       PRINT*, ' -t nominal truncation                        [',ISMAXG,']'
+(  187)       PRINT*, ' -l number of longitudes                      [',IDLON,']'
+(  188)       PRINT*, ' -g number of Gaussian latitudes              (self-determined if not specified)'
+(  189)       PRINT*, ' -o orthogonality precision, as Log10() value (self-determined if not specified)'
+(  190)       PRINT*, ' -a allowed aliasing, as a Log10() value      [',IALIAS,']'
+(  191)       PRINT*, ' -n odd numbers allowed (1) or not (0)        [',IODD,']'
+(  192)       PRINT*, ' -v verbosity (0 or 1)                        [',IVERBOSE,']'
+(  193)       PRINT*, ' -f unit number of namelist file NAMRGRI      [',IULNAM,']'
+(  194)       PRINT*, ' -r read ZGR from file per task               [',LLREAD,']'
+(  195)       PRINT*, ' -w write ZGR to file per task                [',LLWRITE,']'
+(  196)       PRINT*, ' -h displays options and arguments'
+(  197)     ENDIF
+(  198)     IF (CLARG(1:2) == '-h') THEN
+(  199)       CALL MPL_END
+(  200)       IF (LHOOK) CALL DR_HOOK('RGRID',1,ZHOOK_HANDLE)
+(  201)       STOP
+(  202)     ELSE
+(  203)       CALL ABOR1('RGRID : ERROR IN COMMAND LINE ARGUMENTS')
+(  204)     ENDIF
+(  205)   ENDIF
+(  206)   ICOMMAND=ICOMMAND+1
+(  207) ENDDO
+(  208) # 209 "rgrid.F90"
+(  209) CALL MPL_BARRIER(CDSTRING='RGRID:')
+(  210) # 211 "rgrid.F90"
+(  211) IF (LLREAD.AND.LLWRITE) CALL ABOR1('RGRID : LLREAD AND LLWRITE ARE EXCLUSIVE')
+(  212) # 213 "rgrid.F90"
+(  213) ZALIAS=10._JPRBT**(-REAL(IALIAS,KIND=JPRBT))
+(  214) IF (IORTHO==HUGE(IALIAS)) THEN
+(  215)   ZORTHO=1000._JPRBT*EPSILON(ZALIAS)
+(  216) ELSE
+(  217)   ZORTHO=10._JPRBT**(-REAL(IORTHO,KIND=JPRBT))
+(  218) ENDIF
+(  219) # 220 "rgrid.F90"
+(  220) IF (IDGLG==HUGE(IDLON)) THEN
+(  221)   IDGLG=(IDLON+1)/2
+(  222) ENDIF
+(  223) # 224 "rgrid.F90"
+(  224) IF (ISMAXG > (IDLON+3)/3) THEN
+(  225) ! Linear grid : reproduce ECMWF code :
+(  226)   IXMAX=ISMAXG
+(  227)   INMAX=MIN((IDLON-1)/3,ISMAXG)
+(  228) ELSE
+(  229) ! Quadratic grid : reproduce Meteo-France code :
+(  230)   IXMAX=2*ISMAXG
+(  231)   INMAX=MIN((IDLON-1)/3,IXMAX)
+(  232) ENDIF
+(  233) # 234 "rgrid.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 17
+
+(  234) ! Computation
+(  235) # 236 "rgrid.F90"
+(  236) CALL REDUCED_GRID(IULOUT,IULERR,IDGLG,IDLON,ISMAXG,IXMAX,INMAX,ZORTHO,ZALIAS, &
+(  237)  & IODD,IPROC,IMYPROC,IVERBOSE,IULNAM,LLREAD,LLWRITE)
+(  238) # 239 "rgrid.F90"
+(  239) ! Finalize
+(  240) # 241 "rgrid.F90"
+(  241) CALL MPL_END()
+(  242) # 243 "rgrid.F90"
+(  243) IF (LHOOK) CALL DR_HOOK('RGRID',1,ZHOOK_HANDLE)
+(  244) # 245 "rgrid.F90"
+(  245) STOP
+(  246) # 247 "rgrid.F90"
+(  247) CONTAINS
+(  248) # 249 "rgrid.F90"
+(  249) SUBROUTINE REDUCED_GRID(KULOUT,KULERR,KDGLG,KDLON,KSMAXG,KXMAX,KNMAX,PORTHO,PALIAS, &
+(  250)  & KODD,KPROC,KMYPROC,KVERBOSE,KULNAM,LDREAD,LDWRITE)
+(  251) # 252 "rgrid.F90"
+(  252) ! Purpose :
+(  253) ! -------
+(  254) !   *REDUCED_GRID* Compute a global reduced grid, from a given truncation and
+(  255) !   maximum aliasing rate.
+(  256) # 257 "rgrid.F90"
+(  257) ! Interface :
+(  258) ! ---------
+(  259) !   KULOUT : standard output unit number
+(  260) !   KULERR : standard error unit number
+(  261) !   KDGLG  : total number of latitude
+(  262) !   KDLON  : maximum number of longitude
+(  263) !   KSMAXG : spectral truncation
+(  264) !   PORTHO : Orthogonality threshold (abs. exponent)
+(  265) !   PALIAS : maximum allowed aliasing rate (exponent)
+(  266) !   KPROC  : number of MPI tasks
+(  267) !   KMYPROC : current MPI task
+(  268) !   KVERBOSE : verbosity option
+(  269) !   KULNAM : unit number for writing rtable file
+(  270) !   LDREAD : F - (default) compute ZGR, 
+(  271) !          : T - do not compute ZGR, read from save file per task
+(  272) !   LDWRITE: F - (default) do not write ZGR, 
+(  273) !          : T - write ZGR to a separate file per task
+(  274) # 275 "rgrid.F90"
+(  275) ! Externals :
+(  276) ! ---------
+(  277) !   SETUP_TRANS0 - basic initialization
+(  278) !   SETUP_TRANS  - resolution dependent initialization
+(  279) # 280 "rgrid.F90"
+(  280) ! Method :
+(  281) ! ------
+(  282) # 283 "rgrid.F90"
+(  283) ! Use the spectral transform package to compute the Legendre polynomials at
+(  284) ! twice the given truncation.
+(  285) ! Check orthogonality of polynomials up to IOMAX with those within KNMAX
+(  286) ! IOMAX=KXMAX ==> quadratic grid if KXMAX=KNMAX*1.5 (oversized KXMAX)
+(  287) ! IOMAX=KNMAX ==> linear grid
+(  288) ! No need for quadruple precision from cycle 37 onwards, thanks to the Swartztrauber algorithm
+(  289) # 290 "rgrid.F90"
+(  290) ! Recommended values :
+(  291) !   For orthogonality : 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 18
+
+(  292) !     1.E-12 
+(  293) !     but the best (and default) value is now 1000*EPSILON(Z) from cycle 37 onwards.
+(  294) !   For Aliasing : 
+(  295) !     1.E-4 at Meteo-France
+(  296) !     1.E-2 at ECMWF, except at T7999 (1.E-1)
+(  297) # 298 "rgrid.F90"
+(  298) ! Notice : Fast Legendre Transforms not working yet.
+(  299) # 300 "rgrid.F90"
+(  300) ! Reference :
+(  301) ! ---------
+(  302) !   Courtier and Naughton (1994)  *ECMWF/METEO-FRANCE*
+(  303) # 304 "rgrid.F90"
+(  304) ! Author :
+(  305) ! ------
+(  306) !   12-Feb-2007 R. El Khatib  *METEO-FRANCE*
+(  307) # 308 "rgrid.F90"
+(  308) ! Modifications :
+(  309) ! -------------
+(  310) !   R. El Khatib 30-Nov-2012 Optimization, OPEN-MP parallelization, cleanings.
+(  311) !   R. El Khatib 29-Apr-2013 More cleanings and distribution, merge with ECMWF
+(  312) !   G. Mozdzynski Jan 2014   Optimization for reducing memory requirement
+(  313) !   G. Mozdzynski Jan 2014   Options -w and -r to tune the orthogonality
+(  314) !                            threshold without recomputing ZGR
+(  315) !   R. El Khatib 15-Feb-2016 Merge and finalization of G. Mozdzynski's mods
+(  316) # 317 "rgrid.F90"
+(  317) ! End Modifications
+(  318) !-----------------------------------------------------------------------------
+(  319) # 320 "rgrid.F90"
+(  320) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(  321) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(  322) # 323 "rgrid.F90"
+(  323) IMPLICIT NONE
+(  324) # 325 "rgrid.F90"
+(  325) INTEGER(KIND=JPIM), INTENT(IN)  :: KULOUT, KULERR, KDGLG, KSMAXG, KXMAX, KNMAX, KDLON
+(  326) REAL(KIND=JPRBT),    INTENT(IN)  :: PORTHO, PALIAS
+(  327) INTEGER(KIND=JPIM), INTENT(IN)  :: KODD, KPROC, KMYPROC, KVERBOSE, KULNAM
+(  328) LOGICAL,            INTENT(IN)  :: LDREAD, LDWRITE
+(  329) # 330 "rgrid.F90"
+(  330) INTEGER(KIND=JPIM) :: IOMAX, IDGNH, INUMP, IM, IPRTRV
+(  331) INTEGER(KIND=JPIM) :: JOR, JM, JN1, JN2, JGL, J, IGPTOT, IGPTOTS
+(  332) INTEGER(KIND=JPIM) :: IPRGPNS, IPRGPEW, IPRTRW, IPROC, ITAG1, ITAG2, JROC, IMSGLEN
+(  333) # 334 "rgrid.F90"
+(  334) REAL(KIND=JPRBT) :: ZMAX(KDGLG)
+(  335) REAL(KIND=JPRBT) :: ZGW(KDGLG) ! Gaussian weights & sines of latitudes
+(  336) REAL(KIND=JPRD) :: ZMU(KDGLG) 
+(  337) REAL(KIND=JPRBT) :: Z2GW(KDGLG) ! Gaussian weights *2
+(  338) REAL(KIND=JPRBT) :: ZUNITY(0:MAX(KXMAX,KNMAX)+MOD(MAX(KXMAX,KNMAX)+1,2))
+(  339) REAL(KIND=JPRBT) :: ZORTH(0:MAX(KXMAX,KNMAX)+MOD(MAX(KXMAX,KNMAX)+1,2))
+(  340) # 341 "rgrid.F90"
+(  341) REAL(KIND=JPRBT), ALLOCATABLE :: ZPNMT(:,:)  ! transposed Legendre polynomials
+(  342) REAL(KIND=JPRBT), ALLOCATABLE :: ZGR(:,:,:)
+(  343) # 344 "rgrid.F90"
+(  344) INTEGER(KIND=JPIM) :: IFFTP0(KDLON), IPRCIDS(KPROC)
+(  345) INTEGER(KIND=JPIM), ALLOCATABLE :: ILOENG(:) ! number of longitudes for each latitude (global)
+(  346) INTEGER(KIND=JPIM), ALLOCATABLE :: ILOENS(:)
+(  347) INTEGER(KIND=JPIM), ALLOCATABLE :: IILOEN(:) ! number of longitudes for each latitude (local contrib)
+(  348) INTEGER(KIND=JPIM), ALLOCATABLE :: IMYMS(:) ! wave numbers on local task
+(  349) # 350 "rgrid.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 19
+
+(  350) INTEGER(KIND=JPIM) :: ILEI3    ! First dimension of Legendre polynomials
+(  351) INTEGER(KIND=JPIM) :: ISPOLEG  ! Second dimension of Legendre polynomials
+(  352) INTEGER(KIND=JPIM) :: IULZGR   ! Logical unit number for ZGR
+(  353)  
+(  354) CHARACTER(LEN=5) :: CLMODE
+(  355) CHARACTER(LEN=13) :: CFILE
+(  356) # 357 "rgrid.F90"
+(  357) LOGICAL :: LLODD, LLINEAR
+(  358) # 359 "rgrid.F90"
+(  359) REAL(KIND=JPRBT) :: ZHOOK_HANDLE0
+(  360) REAL(KIND=JPRBT) :: ZHOOK_HANDLE1
+(  361) REAL(KIND=JPRBT) :: ZHOOK_HANDLE2
+(  362) # 364 "rgrid.F90"
+(  364) # 1 ".D[8]/setup_trans0.h"
+(    1) INTERFACE
+(    2) SUBROUTINE SETUP_TRANS0(KOUT,KERR,KPRINTLEV,KMAX_RESOL,KPROMATR,&
+(    3) &                       KPRGPNS,KPRGPEW,KPRTRW,KCOMBFLEN,&
+(    4) &                       LDMPOFF,LDSYNC_TRANS,KTRANS_SYNC_LEVEL,&
+(    5) &                       LDEQ_REGIONS,K_REGIONS_NS,K_REGIONS_EW,K_REGIONS,&
+(    6) &                       PRAD,LDALLOPERM,LDALLOPERM2)
+(    7) # 8 ".D[8]/setup_trans0.h"
+(    8) !**** *SETUP_TRANS0* - General setup routine for transform package
+(    9) # 10 ".D[8]/setup_trans0.h"
+(   10) !     Purpose.
+(   11) !     --------
+(   12) !     Resolution independent part of setup of transform package
+(   13) !     Has to be called BEFORE SETUP_TRANS
+(   14) # 15 ".D[8]/setup_trans0.h"
+(   15) !**   Interface.
+(   16) !     ----------
+(   17) !     CALL SETUP_TRANS0(...)
+(   18) # 19 ".D[8]/setup_trans0.h"
+(   19) !     Explicit arguments : All arguments are optional, [..] default value
+(   20) !     -------------------
+(   21) !     KOUT - Unit number for listing output [6]
+(   22) !     KERR - Unit number for error messages [0]
+(   23) !     KPRINTLEV - level of output to KOUT, 0->no output,1->normal,2->debug [0]
+(   24) !     KMAX_RESOL - maximum number of different resolutions for this run [1]
+(   25) !     KPRGPNS - splitting level in N-S direction in grid-point space [1]
+(   26) !     KPRGPEW - splitting level in E-W direction in grid-point space [1]
+(   27) !     KPRTRW  - splitting level in wave direction in spectral space [1]
+(   28) !     KCOMBFLEN - Size of communication buffer [1800000 (*8bytes) ]
+(   29) !     LDMPOFF - switch off message passing [false]
+(   30) !     LDSYNC_TRANS - switch to activate barrier before transforms [false]
+(   31) !     KTRANS_SYNC_LEVEL - use of synchronization/blocking [0]
+(   32) !     LDEQ_REGIONS - true if new eq_regions partitioning [false]
+(   33) !     K_REGIONS    - Number of regions (1D or 2D partitioning)
+(   34) !     K_REGIONS_NS - Maximum number of NS partitions
+(   35) !     K_REGIONS_EW - Maximum number of EW partitions
+(   36) !     PRAD         - Radius of the planet
+(   37) !     LDALLOPERM  - Allocate certain arrays permanently
+(   38) # 39 ".D[8]/setup_trans0.h"
+(   39) !     The total number of (MPI)-processors has to be equal to KPRGPNS*KPRGPEW
+(   40) # 41 ".D[8]/setup_trans0.h"
+(   41) !     Method.
+(   42) !     -------
+(   43) # 44 ".D[8]/setup_trans0.h"
+(   44) !     Externals.  SUMP_TRANS0 - initial setup routine
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 20
+
+(   45) !     ----------
+(   46) # 47 ".D[8]/setup_trans0.h"
+(   47) !     Author.
+(   48) !     -------
+(   49) !        Mats Hamrud *ECMWF*
+(   50) # 51 ".D[8]/setup_trans0.h"
+(   51) !     Modifications.
+(   52) !     --------------
+(   53) !        Original : 00-03-03
+(   54) !        R. El Khatib 03-01-24 LDMPOFF
+(   55) !        G. Mozdzynski 2006-09-13 LDEQ_REGIONS
+(   56) !        N. Wedi  2009-11-30 add radius
+(   57) # 58 ".D[8]/setup_trans0.h"
+(   58) !     ------------------------------------------------------------------
+(   59) # 60 ".D[8]/setup_trans0.h"
+(   60) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   61) # 62 ".D[8]/setup_trans0.h"
+(   62) IMPLICIT NONE
+(   63) # 64 ".D[8]/setup_trans0.h"
+(   64) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN)  :: KOUT,KERR,KPRINTLEV,KMAX_RESOL,KPROMATR
+(   65) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN)  :: KPRGPNS,KPRGPEW,KPRTRW,KCOMBFLEN
+(   66) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDMPOFF
+(   67) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDSYNC_TRANS
+(   68) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN)  :: KTRANS_SYNC_LEVEL
+(   69) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDEQ_REGIONS
+(   70) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDALLOPERM
+(   71) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDALLOPERM2
+(   72) REAL(KIND=JPRB)    ,OPTIONAL,INTENT(IN)  :: PRAD
+(   73) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT) :: K_REGIONS(:)
+(   74) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT) :: K_REGIONS_NS
+(   75) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT) :: K_REGIONS_EW
+(   76) # 77 ".D[8]/setup_trans0.h"
+(   77) END SUBROUTINE SETUP_TRANS0
+(   78) # 81 ".D[8]/setup_trans0.h"
+(   81) END INTERFACE
+(   82) # 365 "rgrid.F90"
+(  365) # 365 "rgrid.F90"
+(  365) # 1 ".D[16]/setup_trans.h"
+(    1) INTERFACE
+(    2) SUBROUTINE SETUP_TRANS(KSMAX,KDGL,KDLON,KLOEN,LDSPLIT,PSTRET,&
+(    3) &KFLEV,KTMAX,KRESOL,PWEIGHT,LDGRIDONLY,LDUSERPNM,LDKEEPRPNM,LDUSEFLT,&
+(    4) &LDSPSETUPONLY,LDPNMONLY,LDUSEFFTW,&
+(    5) &LDLL,LDSHIFTLL,CDIO_LEGPOL,CDLEGPOLFNAME,KLEGPOLPTR,KLEGPOLPTR_LEN)
+(    6) # 7 ".D[16]/setup_trans.h"
+(    7) !**** *SETUP_TRANS* - Setup transform package for specific resolution
+(    8) # 9 ".D[16]/setup_trans.h"
+(    9) !     Purpose.
+(   10) !     --------
+(   11) !     To setup for making spectral transforms. Each call to this routine
+(   12) !     creates a new resolution up to a maximum of NMAX_RESOL set up in
+(   13) !     SETUP_TRANS0. You need to call SETUP_TRANS0 before this routine can
+(   14) !     be called.
+(   15) # 16 ".D[16]/setup_trans.h"
+(   16) !**   Interface.
+(   17) !     ----------
+(   18) !     CALL SETUP_TRANS(...)
+(   19) # 20 ".D[16]/setup_trans.h"
+(   20) !     Explicit arguments : KLOEN,LDSPLIT are optional arguments
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 21
+
+(   21) !     -------------------- 
+(   22) !     KSMAX - spectral truncation required
+(   23) !     KDGL  - number of Gaussian latitudes
+(   24) !     KDLON - number of points on each latitude [2*KDGL]
+(   25) !     KLOEN(:) - number of points on each Gaussian latitude [2*KDGL]
+(   26) !     LDSPLIT - true if split latitudes in grid-point space [false]
+(   27) !     KTMAX - truncation order for tendencies?
+(   28) !     KRESOL - the resolution identifier
+(   29) !     PWEIGHT - the weight per grid-point (for a weighted distribution)
+(   30) !     LDGRIDONLY - true if only grid space is required
+(   31) # 32 ".D[16]/setup_trans.h"
+(   32) !     KSMAX,KDGL,KTMAX and KLOEN are GLOBAL variables desribing the resolution
+(   33) !     in spectral and grid-point space
+(   34) # 35 ".D[16]/setup_trans.h"
+(   35) !     LDSPLIT describe the distribution among processors of grid-point data and
+(   36) !     has no relevance if you are using a single processor
+(   37) # 38 ".D[16]/setup_trans.h"
+(   38) !     LDUSEFLT   - use Fast Legandre Transform (Butterfly algorithm)
+(   39) !     LDUSERPNM  - Use Belusov to compute legendre pol. (else new alg.)
+(   40) !     LDKEEPRPNM - Keep Legendre Polynomials (only applicable when using
+(   41) !                  FLT, otherwise always kept)
+(   42) !     LDPNMONLY  - Compute the Legendre polynomialsonly, not the FFTs.
+(   43) !     LDUSEFFTW   - Use FFTW for FFTs
+(   44) !     LDLL                 - Setup second set of input/output latitudes
+(   45) !                                 the number of input/output latitudes to transform is equal KDGL 
+(   46) !                                 or KDGL+2 in the case that includes poles + equator
+(   47) !                                 the number of input/output longitudes to transform is 2*KDGL
+(   48) !     LDSHIFTLL       - Shift output lon/lat data by 0.5*dx and 0.5*dy
+(   49)  
+(   50) !     Method.
+(   51) !     -------
+(   52) # 53 ".D[16]/setup_trans.h"
+(   53) !     Externals.  SET_RESOL   - set resolution
+(   54) !     ----------  SETUP_DIMS  - setup distribution independent dimensions
+(   55) !                 SUMP_TRANS_PRELEG - first part of setup of distr. environment
+(   56) !                 SULEG - Compute Legandre polonomial and Gaussian 
+(   57) !                         Latitudes and Weights
+(   58) !                 SUMP_TRANS - Second part of setup of distributed environment
+(   59) !                 SUFFT - setup for FFT
+(   60) # 61 ".D[16]/setup_trans.h"
+(   61) !     Author.
+(   62) !     -------
+(   63) !        Mats Hamrud *ECMWF*
+(   64) # 65 ".D[16]/setup_trans.h"
+(   65) !     Modifications.
+(   66) !     --------------
+(   67) !        Original : 00-03-03
+(   68) # 69 ".D[16]/setup_trans.h"
+(   69) !     ------------------------------------------------------------------
+(   70) # 71 ".D[16]/setup_trans.h"
+(   71) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   72)     USE, INTRINSIC :: ISO_C_BINDING, ONLY:  C_PTR, C_INT,C_ASSOCIATED,C_SIZE_T
+(   73) # 75 ".D[16]/setup_trans.h"
+(   75) IMPLICIT NONE
+(   76) # 77 ".D[16]/setup_trans.h"
+(   77) ! Dummy arguments
+(   78) # 79 ".D[16]/setup_trans.h"
+(   79) INTEGER(KIND=JPIM) ,INTENT(IN) :: KSMAX,KDGL
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 22
+
+(   80) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KDLON
+(   81) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KLOEN(:)
+(   82) LOGICAL   ,OPTIONAL,INTENT(IN) :: LDSPLIT
+(   83) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KTMAX
+(   84) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT):: KRESOL
+(   85) REAL(KIND=JPRB)    ,OPTIONAL,INTENT(IN) :: PWEIGHT(:)
+(   86) REAL(KIND=JPRB)    ,OPTIONAL,INTENT(IN) :: PSTRET
+(   87) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KFLEV
+(   88) LOGICAL   ,OPTIONAL,INTENT(IN):: LDGRIDONLY
+(   89) LOGICAL   ,OPTIONAL,INTENT(IN):: LDUSEFLT
+(   90) LOGICAL   ,OPTIONAL,INTENT(IN):: LDUSERPNM
+(   91) LOGICAL   ,OPTIONAL,INTENT(IN):: LDKEEPRPNM
+(   92) LOGICAL   ,OPTIONAL,INTENT(IN):: LDPNMONLY
+(   93) LOGICAL   ,OPTIONAL,INTENT(IN):: LDSPSETUPONLY
+(   94) LOGICAL   ,OPTIONAL,INTENT(IN):: LDUSEFFTW
+(   95) LOGICAL   ,OPTIONAL,INTENT(IN):: LDLL
+(   96) LOGICAL   ,OPTIONAL,INTENT(IN):: LDSHIFTLL
+(   97) CHARACTER(LEN=*),OPTIONAL,INTENT(IN):: CDIO_LEGPOL
+(   98) CHARACTER(LEN=*),OPTIONAL,INTENT(IN):: CDLEGPOLFNAME
+(   99) TYPE(C_PTR) ,OPTIONAL,INTENT(IN) :: KLEGPOLPTR
+(  100) INTEGER(C_SIZE_T) ,OPTIONAL,INTENT(IN) :: KLEGPOLPTR_LEN
+(  101) # 103 ".D[16]/setup_trans.h"
+(  103) END SUBROUTINE SETUP_TRANS
+(  104) # 106 ".D[16]/setup_trans.h"
+(  106) END INTERFACE
+(  107) # 366 "rgrid.F90"
+(  366) # 366 "rgrid.F90"
+(  366) # 1 ".D[16]/trans_inq.h"
+(    1) INTERFACE
+(    2) SUBROUTINE TRANS_INQ(KRESOL,KSPEC,KSPEC2,KSPEC2G,KSPEC2MX,KNUMP,&
+(    3)                     &KGPTOT,KGPTOTG,KGPTOTMX,KGPTOTL,&
+(    4)                     &KMYMS,KASM0,KUMPP,KPOSSP,KPTRMS,KALLMS,KDIM0G,&
+(    5)                     &KFRSTLAT,KLSTLAT,KFRSTLOFF,KPTRLAT,&
+(    6)                     &KPTRFRSTLAT,KPTRLSTLAT,KPTRFLOFF,KSTA,KONL,&
+(    7)                     &KULTPP,KPTRLS,KNMENG,&
+(    8)                     &KPRTRW,KMYSETW,KMYSETV,KMY_REGION_NS,KMY_REGION_EW,&
+(    9)                     &LDSPLITLAT,&
+(   10)                     &KSMAX,PLAPIN,KNVALUE,KDEF_RESOL,LDLAM,&
+(   11)                     &PMU,PGW,PRPNM,KLEI3,KSPOLEGL,KPMS,KDGLU)
+(   12) # 13 ".D[16]/trans_inq.h"
+(   13) !**** *TRANS_INQ* - Extract information from the transform package
+(   14) # 15 ".D[16]/trans_inq.h"
+(   15) !     Purpose.
+(   16) !     --------
+(   17) !     Interface routine for extracting information from the T.P.
+(   18) # 19 ".D[16]/trans_inq.h"
+(   19) !**   Interface.
+(   20) !     ----------
+(   21) !     CALL TRANS_INQ(...)
+(   22) !     Explicit arguments : All arguments are optional.
+(   23) !     -------------------- 
+(   24) !     KRESOL   - resolution tag for which info is required ,default is the
+(   25) !                first defined resulution (input)
+(   26) # 27 ".D[16]/trans_inq.h"
+(   27) !                   MULTI-TRANSFORMS MANAGEMENT
+(   28) !     KDEF_RESOL - number or resolutions defined
+(   29) !     LDLAM      - .T. if the corresponding resolution is LAM, .F. if it is global
+(   30) # 31 ".D[16]/trans_inq.h"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 23
+
+(   31) !                   SPECTRAL SPACE
+(   32) !     KSPEC    - number of complex spectral coefficients on this PE
+(   33) !     KSPEC2   - 2*KSPEC 
+(   34) !     KSPEC2G  - global KSPEC2
+(   35) !     KSPEC2MX - maximun KSPEC2 among all PEs
+(   36) !     KNUMP    - Number of spectral waves handled by this PE
+(   37) !     KGPTOT   - Total number of grid columns on this PE
+(   38) !     KGPTOTG  - Total number of grid columns on the Globe
+(   39) !     KGPTOTMX - Maximum number of grid columns on any of the PEs
+(   40) !     KGPTOTL  - Number of grid columns one each PE (dimension N_REGIONS_NS:N_REGIONS_EW)
+(   41) !     KMYMS    - This PEs spectral zonal wavenumbers
+(   42) !     KASM0    - Address in a spectral array of (m, n=m)
+(   43) !     KUMPP    - No. of wave numbers each wave set is responsible for
+(   44) !     KPOSSP   - Defines partitioning of global spectral fields among PEs
+(   45) !     KPTRMS   - Pointer to the first wave number of a given a-set
+(   46) !     KALLMS   - Wave numbers for all wave-set concatenated together 
+(   47) !                to give all wave numbers in wave-set order
+(   48) !     KDIM0G   - Defines partitioning of global spectral fields among PEs
+(   49) !     KSMAX    - spectral truncation
+(   50) !     KNVALUE  - n value for each KSPEC2 spectral coeffient
+(   51) # 52 ".D[16]/trans_inq.h"
+(   52) !                 GRIDPOINT SPACE                  
+(   53) !     KFRSTLAT    - First latitude of each a-set in grid-point space
+(   54) !     KLSTTLAT    - Last latitude of each a-set in grid-point space
+(   55) !     KFRSTLOFF   - Offset for first lat of own a-set in grid-point space
+(   56) !     KPTRLAT     - Pointer to the start of each latitude
+(   57) !     KPTRFRSTLAT - Pointer to the first latitude of each a-set in 
+(   58) !                   NSTA and NONL arrays
+(   59) !     KPTRLSTLAT  - Pointer to the last latitude of each a-set in
+(   60) !                   NSTA and NONL arrays
+(   61) !     KPTRFLOFF   - Offset for pointer to the first latitude of own a-set
+(   62) !                   NSTA and NONL arrays, i.e. nptrfrstlat(myseta)-1
+(   63) !     KSTA        - Position of first grid column for the latitudes on a 
+(   64) !                   processor. The information is available for all processors.
+(   65) !                   The b-sets are distinguished by the last dimension of 
+(   66) !                   nsta().The latitude band for each a-set is addressed by 
+(   67) !                   nptrfrstlat(jaset),nptrlstlat(jaset), and 
+(   68) !                   nptrfloff=nptrfrstlat(myseta) on this processors a-set.
+(   69) !                   Each split latitude has two entries in nsta(,:) which 
+(   70) !                   necessitates the rather complex addressing of nsta(,:)
+(   71) !                   and the overdimensioning of nsta by N_REGIONS_NS.
+(   72) !     KONL        - Number of grid columns for the latitudes on a processor.
+(   73) !                   Similar to nsta() in data structure.
+(   74) !     LDSPLITLAT  - TRUE if latitude is split in grid point space over 
+(   75) !                   two a-sets
+(   76) # 77 ".D[16]/trans_inq.h"
+(   77) !                FOURIER SPACE
+(   78) !     KULTPP   - number of latitudes for which each a-set is calculating 
+(   79) !                the FFT's.
+(   80) !     KPTRLS   - pointer to first global latitude of each a-set for which
+(   81) !                it performs the Fourier calculations
+(   82) !     KNMENG   - associated (with NLOENG) cut-off zonal wavenumber
+(   83) # 84 ".D[16]/trans_inq.h"
+(   84) !                 LEGENDRE
+(   85) !     PMU      - sin(Gaussian latitudes)
+(   86) !     PGW      - Gaussian weights
+(   87) !     PRPNM    - Legendre polynomials
+(   88) !     KLEI3    - First dimension of Legendre polynomials
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 24
+
+(   89) !     KSPOLEGL - Second dimension of Legendre polynomials
+(   90) !     KPMS     - Adress for legendre polynomial for given M (NSMAX)
+(   91) !     PLAPIN   - Eigen-values of the inverse Laplace operator
+(   92) !     KDGLU    - Number of active points in an hemisphere for a given wavenumber "m"
+(   93) # 94 ".D[16]/trans_inq.h"
+(   94) !     Method.
+(   95) !     -------
+(   96) # 97 ".D[16]/trans_inq.h"
+(   97) !     Externals.  SET_RESOL - set resolution
+(   98) !     ----------  
+(   99) # 100 ".D[16]/trans_inq.h"
+(  100) !     Author.
+(  101) !     -------
+(  102) !        Mats Hamrud *ECMWF*
+(  103) # 104 ".D[16]/trans_inq.h"
+(  104) !     Modifications.
+(  105) !     --------------
+(  106) !        Original : 00-03-03
+(  107) !        M. Hortal : 2001-03-05 Dimensions of the Legendre polynomials
+(  108) !        R. El Khatib 08-Aug-2012 KSMAX,PLAPIN,KNVALUE,LDLAM,KDEF_RESOL
+(  109) # 110 ".D[16]/trans_inq.h"
+(  110) !     ------------------------------------------------------------------
+(  111) # 112 ".D[16]/trans_inq.h"
+(  112) USE PARKIND1  ,ONLY : JPIM     ,JPRB, JPRD
+(  113) # 115 ".D[16]/trans_inq.h"
+(  115) IMPLICIT NONE
+(  116) # 117 ".D[16]/trans_inq.h"
+(  117) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(  118) # 119 ".D[16]/trans_inq.h"
+(  119) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KSPEC
+(  120) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KSPEC2
+(  121) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KSPEC2G
+(  122) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KSPEC2MX
+(  123) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KNUMP
+(  124) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KGPTOT
+(  125) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KGPTOTG
+(  126) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KGPTOTMX
+(  127) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KGPTOTL(:,:)
+(  128) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KFRSTLOFF
+(  129) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPTRFLOFF
+(  130) # 131 ".D[16]/trans_inq.h"
+(  131) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KMYMS(:)
+(  132) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KASM0(0:)
+(  133) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KUMPP(:)
+(  134) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPOSSP(:)
+(  135) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPTRMS(:)
+(  136) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KALLMS(:)
+(  137) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KDIM0G(0:)
+(  138) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KFRSTLAT(:)
+(  139) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KLSTLAT(:)
+(  140) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPTRLAT(:)
+(  141) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPTRFRSTLAT(:)
+(  142) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPTRLSTLAT(:)
+(  143) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KSTA(:,:)
+(  144) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KONL(:,:)
+(  145) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPRTRW
+(  146) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KMYSETW
+(  147) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KMYSETV
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 25
+
+(  148) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KMY_REGION_NS
+(  149) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KMY_REGION_EW
+(  150) LOGICAL   ,OPTIONAL, INTENT(OUT) :: LDSPLITLAT(:)
+(  151) # 152 ".D[16]/trans_inq.h"
+(  152) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KULTPP(:)
+(  153) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPTRLS(:)
+(  154) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KNMENG(:)
+(  155) # 156 ".D[16]/trans_inq.h"
+(  156) REAL(KIND=JPRD)    ,OPTIONAL, INTENT(OUT) :: PMU(:)
+(  157) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PGW(:)
+(  158) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PRPNM(:,:)
+(  159) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KLEI3
+(  160) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KSPOLEGL
+(  161) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KPMS(0:)
+(  162) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KDGLU(0:)
+(  163) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PLAPIN(-1:)
+(  164) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KSMAX
+(  165) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KNVALUE(:)
+(  166) # 167 ".D[16]/trans_inq.h"
+(  167) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(OUT) :: KDEF_RESOL
+(  168) LOGICAL           ,OPTIONAL,INTENT(OUT)   :: LDLAM
+(  169) # 170 ".D[16]/trans_inq.h"
+(  170) END SUBROUTINE TRANS_INQ
+(  171) # 177 ".D[16]/trans_inq.h"
+(  177) END INTERFACE
+(  178) # 367 "rgrid.F90"
+(  367) # 367 "rgrid.F90"
+(  367) # 1 ".D[16]/trans_pnm.h"
+(    1) INTERFACE
+(    2) SUBROUTINE TRANS_PNM(KRESOL,KM,PRPNM,LDTRANSPOSE,LDCHEAP)
+(    3) # 4 ".D[16]/trans_pnm.h"
+(    4) !**** *TRANS_PNM* - Compute Legendre polynomials for a given wavenember
+(    5) # 6 ".D[16]/trans_pnm.h"
+(    6) !     Purpose.
+(    7) !     --------
+(    8) !     Interface routine for computing Legendre polynomials for a given wavenember
+(    9) # 10 ".D[16]/trans_pnm.h"
+(   10) !**   Interface.
+(   11) !     ----------
+(   12) !     CALL TRANS_PNM(...)
+(   13) # 14 ".D[16]/trans_pnm.h"
+(   14) !     Explicit arguments : All arguments are optional.
+(   15) !     --------------------
+(   16) !     KRESOL   - resolution tag for which info is required ,default is the
+(   17) !                first defined resulution (input)
+(   18) !     KM       - wave number
+(   19) !     PRPNM    - Legendre polynomials
+(   20) !     LDTRANSPOSE - Legendre polynomials array is transposed
+(   21) !     LDCHEAP   - cheapest but less accurate computation
+(   22) # 23 ".D[16]/trans_pnm.h"
+(   23) !     Method.
+(   24) !     -------
+(   25) # 26 ".D[16]/trans_pnm.h"
+(   26) !     Externals.  SET_RESOL - set resolution
+(   27) !     ----------
+(   28) # 29 ".D[16]/trans_pnm.h"
+(   29) !     Author.
+(   30) !     -------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 26
+
+(   31) !        R. El Khatib *METEO-FRANCE*
+(   32) # 33 ".D[16]/trans_pnm.h"
+(   33) !     Modifications.
+(   34) !     --------------
+(   35) !        Original : 22-Jan-2016
+(   36) # 37 ".D[16]/trans_pnm.h"
+(   37) !     ------------------------------------------------------------------
+(   38) # 39 ".D[16]/trans_pnm.h"
+(   39) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   40) # 41 ".D[16]/trans_pnm.h"
+(   41) IMPLICIT NONE
+(   42) # 43 ".D[16]/trans_pnm.h"
+(   43) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   44) INTEGER(KIND=JPIM) ,INTENT(IN)  :: KM
+(   45) REAL(KIND=JPRB)    ,INTENT(OUT) :: PRPNM(:,:)
+(   46) LOGICAL, OPTIONAL, INTENT(IN) :: LDTRANSPOSE
+(   47) LOGICAL, OPTIONAL, INTENT(IN) :: LDCHEAP
+(   48) # 49 ".D[16]/trans_pnm.h"
+(   49) END SUBROUTINE TRANS_PNM
+(   50) END INTERFACE
+(   51) # 368 "rgrid.F90"
+(  368) # 369 "rgrid.F90"
+(  369) # 1 ".D[15]/sufftp.h"
+(    1) INTERFACE
+(    2) SUBROUTINE SUFFTP(KDLON,KFFTP0,LDODD)
+(    3) USE PARKIND1 ,ONLY : JPIM ,JPRBT
+(    4) INTEGER(KIND=JPIM), INTENT(IN) :: KDLON
+(    5) INTEGER(KIND=JPIM), INTENT(OUT) :: KFFTP0(KDLON)
+(    6) LOGICAL, INTENT(IN) :: LDODD
+(    7) END SUBROUTINE SUFFTP
+(    8) END INTERFACE
+(    9) # 370 "rgrid.F90"
+(  370) # 371 "rgrid.F90"
+(  371) !-----------------------------------------------------------------------------
+(  372) # 373 "rgrid.F90"
+(  373) IF (LHOOK) CALL DR_HOOK('RGRID:REDUCED_GRID',0,ZHOOK_HANDLE0)
+(  374) # 375 "rgrid.F90"
+(  375) ! 1. Setup
+(  376) !    -----
+(  377) # 378 "rgrid.F90"
+(  378) IDGNH=(KDGLG+1)/2
+(  379) LLINEAR=(KXMAX==KSMAXG)
+(  380) # 381 "rgrid.F90"
+(  381) ! Provisional "A distribution" only :
+(  382) IPROC=KPROC
+(  383) IPRTRV=1
+(  384) IPRGPNS=IPROC/IPRTRV
+(  385) IPRGPEW=IPRTRV
+(  386) IPRTRW=IPROC/IPRTRV
+(  387) # 388 "rgrid.F90"
+(  388) ITAG1=2000
+(  389) ITAG2=2001
+(  390) DO JROC=1,IPRTRW
+(  391)   IPRCIDS(JROC)=JROC
+(  392) ENDDO
+(  393) # 394 "rgrid.F90"
+(  394) IULZGR=44
+(  395) IF (LDREAD .OR. LDWRITE) WRITE(CFILE,'("ZGR.TASK",I5.5)') KMYPROC
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 27
+
+(  396) IF (LDWRITE) OPEN(UNIT=IULZGR,FILE=CFILE,FORM='UNFORMATTED',STATUS='NEW')
+(  397) IF (LDREAD) OPEN(IULZGR,FILE=CFILE,FORM='UNFORMATTED',STATUS='OLD')
+(  398) # 399 "rgrid.F90"
+(  399) ! 2. Compute Legendre polynomials
+(  400) !    ----------------------------
+(  401) # 402 "rgrid.F90"
+(  402) CALL SETUP_TRANS0(KOUT=KULOUT,KERR=KULERR,LDMPOFF=.FALSE., &
+(  403)  & KPRGPNS=IPRGPNS,KPRGPEW=IPRTRV,KPRTRW=IPRTRW)
+(  404) CALL SETUP_TRANS(KSMAX=KXMAX,KDGL=KDGLG,LDUSEFLT=.FALSE.,LDUSERPNM=.FALSE., &
+(  405)  & LDKEEPRPNM=.FALSE.,LDPNMONLY=.TRUE.)
+(  406) # 407 "rgrid.F90"
+(  407) CALL TRANS_INQ(KLEI3=ILEI3,KSPOLEGL=ISPOLEG,KNUMP=INUMP)
+(  408) # 409 "rgrid.F90"
+(  409) IF (KMYPROC == 1) THEN
+(  410)   WRITE(KULOUT,*) 'dimensions: IPROC, ILEI3, ISPOLEG, INUMP, KXMAX, KNMAX, IDGNH '
+(  411)   WRITE(KULOUT,*) IPROC, ILEI3, ISPOLEG, INUMP, KXMAX, KNMAX, IDGNH
+(  412) ENDIF
+(  413) # 414 "rgrid.F90"
+(  414) ALLOCATE(IMYMS(INUMP)) 
+(  415) CALL TRANS_INQ(KMYMS=IMYMS)
+(  416) ALLOCATE(ZGR(INUMP,IDGNH,2))
+(  417) # 418 "rgrid.F90"
+(  418) IF( .NOT. LDREAD ) THEN
+(  419) # 420 "rgrid.F90"
+(  420)   CALL TRANS_INQ(PGW=ZGW,PMU=ZMU)
+(  421)   DO JGL=1,IDGNH
+(  422)     Z2GW(JGL)=2._JPRBT*ZGW(JGL)
+(  423)   ENDDO
+(  424)   IF (KVERBOSE == 1 .AND. KMYPROC == 1) THEN
+(  425)     WRITE(KULERR,'(A,E10.3)') ' Error in the sum of weights:',0.5_JPRBT-SUM(ZGW(1:IDGNH))
+(  426)     DO JGL=IDGNH,1,-1
+(  427)       WRITE(KULERR,*) ' Gaussian weight: ', JGL, ZGW(JGL)
+(  428)       WRITE(KULERR,*) ' Gaussian latitude (degrees): ', JGL, (180._JPRBT/3.14159_JPRBT)*ASIN(ZMU(JGL))
+(  429)     ENDDO
+(  430)     WRITE(KULOUT,*) ' STARTING COMPUTATIONS '
+(  431)   ENDIF
+(  432) # 433 "rgrid.F90"
+(  433) ! 3. Control the polynomials orthogonality
+(  434) !    -------------------------------------
+(  435) # 436 "rgrid.F90"
+(  436)   ALLOCATE(ZPNMT(KXMAX+3,ILEI3))
+(  437)   IF (LHOOK) CALL DR_HOOK('RGRID:REDUCED_GRID>LOOP1',0,ZHOOK_HANDLE1)
+(  438)   DO JM=1,INUMP
+(  439)     IM=IMYMS(JM)
+(  440)     CALL TRANS_PNM(KM=IM,PRPNM=ZPNMT,LDTRANSPOSE=.TRUE.,LDCHEAP=.TRUE.)
+(  441)     IF (.NOT.LLINEAR .OR. IM <= KNMAX) THEN
+(  442)       DO JOR=1,2
+(  443)         IF (JOR == 1) THEN
+(  444)           IOMAX=KXMAX
+(  445)         ELSE
+(  446)           IOMAX=KNMAX
+(  447)         ENDIF
+(  448)         DO JGL=1,IDGNH
+(  449)           ZMAX(JGL)=-1._JPRBT
+(  450)         ENDDO
+(  451) !$OMP PARALLEL PRIVATE(JN1,JN2,JGL,ZORTH,ZUNITY,ZHOOK_HANDLE2)
+(  452)         IF (LHOOK) CALL DR_HOOK('RGRID:REDUCED_GRID>LOOP2',0,ZHOOK_HANDLE2)
+(  453) !$OMP DO SCHEDULE(DYNAMIC,1)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 28
+
+(  454)         DO JN1=IM,KNMAX
+(  455)           ZORTH(IM:IOMAX)=0._JPRBT
+(  456)           ZUNITY(IM:IOMAX)=0._JPRBT
+(  457)           DO JN2=IM,IOMAX
+(  458)             IF (JN2==JN1) THEN
+(  459)               ZUNITY(JN2)=1._JPRBT
+(  460)             ENDIF
+(  461)           ENDDO
+(  462)           DO JGL=IDGNH,1,-1
+(  463)             IF (MOD(JN1-IM,2) == 0) THEN
+(  464)               DO JN2=IM,IOMAX,2
+(  465)                 ZORTH(JN2)=ZORTH(JN2)+ZPNMT(KXMAX+2-JN1,JGL)*ZPNMT(KXMAX+2-JN2,JGL)*Z2GW(JGL)
+(  466)                 ZMAX(JGL)=MAX(ZMAX(JGL),ABS(ZORTH(JN2)-ZUNITY(JN2)))
+(  467)               ENDDO
+(  468)             ELSE
+(  469)               DO JN2=IM+1,IOMAX,2
+(  470)                 ZORTH(JN2)=ZORTH(JN2)+ZPNMT(KXMAX+2-JN1,JGL)*ZPNMT(KXMAX+2-JN2,JGL)*Z2GW(JGL)
+(  471)                 ZMAX(JGL)=MAX(ZMAX(JGL),ABS(ZORTH(JN2)-ZUNITY(JN2)))
+(  472)               ENDDO
+(  473)             ENDIF
+(  474)           ENDDO
+(  475)         ENDDO
+(  476) !$OMP END DO
+(  477)         IF (LHOOK) CALL DR_HOOK('RGRID:REDUCED_GRID>LOOP2',1,ZHOOK_HANDLE2)
+(  478) !$OMP END PARALLEL
+(  479)         DO JGL=1,IDGNH
+(  480)           ZGR(JM,JGL,JOR)=ZMAX(JGL)
+(  481)         ENDDO
+(  482)         IF (KVERBOSE == 1) THEN
+(  483)           IF(JOR == 2)THEN
+(  484)             WRITE(KULERR,*) 'Filling ZGR JGL==1 IM=', IM, JM, ZGR(JM,1,JOR)
+(  485)             WRITE(KULERR,*) 'Filling ZGR JGL==IDGNH/2 IM=', IM, JM, ZGR(JM,IDGNH/2,JOR)
+(  486)           ENDIF
+(  487)         ENDIF
+(  488)       ENDDO
+(  489)     ENDIF
+(  490)   ENDDO
+(  491)   IF (LHOOK) CALL DR_HOOK('RGRID:REDUCED_GRID>LOOP1',1,ZHOOK_HANDLE1)
+(  492)   DEALLOCATE(ZPNMT)
+(  493)   IF (LDWRITE) WRITE(IULZGR) ZGR(:,:,:)
+(  494) # 495 "rgrid.F90"
+(  495) ENDIF ! .NOT. LDREAD
+(  496) # 497 "rgrid.F90"
+(  497) CLMODE='FINAL'
+(  498) CALL TRANS_END(CLMODE)
+(  499) # 501 "rgrid.F90"
+(  501) ! 4. Compute the reduced grid
+(  502) !    ------------------------
+(  503) # 504 "rgrid.F90"
+(  504) IF (KVERBOSE == 1) THEN
+(  505)   IF (KMYPROC == 1) THEN
+(  506)     WRITE(KULERR,*) ' start checking ffts '
+(  507)   ENDIF
+(  508) ENDIF
+(  509) # 510 "rgrid.F90"
+(  510) IF( LDREAD ) READ(IULZGR) ZGR(:,:,:)
+(  511) # 512 "rgrid.F90"
+(  512) LLODD=(KODD==1)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 29
+
+(  513) CALL SUFFTP(KDLON,IFFTP0,LLODD)
+(  514) ALLOCATE(ILOENG(KDGLG))
+(  515) ALLOCATE(ILOENS(KDGLG))
+(  516) ILOENG(:)=0
+(  517) ILOENS(:)=0
+(  518) # 519 "rgrid.F90"
+(  519) DO JGL=1,IDGNH
+(  520)   DO JM=INUMP,1,-1
+(  521)     IM=IMYMS(JM)
+(  522)     IF (.NOT.LLINEAR .OR. IM <= KNMAX) THEN
+(  523)       IF ((ZGR(JM,MIN(IDGNH,JGL+1),2)) >= PORTHO) THEN
+(  524)         ILOENG(JGL)=2*MIN(IM+1,KNMAX)+1
+(  525)         IF (KVERBOSE == 1) THEN
+(  526)           WRITE(KULERR,*) 'decision1 ILOEN JGL IM', ILOENG(JGL), JGL, IM, ZGR(JM,MIN(IDGNH,JGL+1),2)
+(  527)         ENDIF
+(  528)         EXIT
+(  529)       ENDIF
+(  530)     ENDIF
+(  531)   ENDDO
+(  532) ! fft compatibility :
+(  533)   DO J=ILOENG(JGL),KDLON
+(  534)     IF (IFFTP0(J) == 0)THEN
+(  535)       ILOENS(JGL)=J
+(  536)       EXIT
+(  537)     ENDIF
+(  538)   ENDDO
+(  539)   DO JM=INUMP,1,-1
+(  540)     IM=IMYMS(JM)
+(  541)     IF (.NOT.LLINEAR .OR. IM <= KNMAX) THEN
+(  542)       IF ((ZGR(JM,MIN(IDGNH,JGL+1),1)) >= PALIAS) THEN
+(  543)         ILOENG(JGL)=MAX(ILOENG(JGL),3*MIN(IM+1,KNMAX)+1)
+(  544)         IF (KVERBOSE == 1) THEN
+(  545)           WRITE(KULERR,*) 'decision2 ILOEN JGL IM', ILOENG(JGL), JGL, IM, ZGR(JM,MIN(IDGNH,JGL+1),1)
+(  546)         ENDIF
+(  547)         EXIT
+(  548)       ENDIF
+(  549)     ENDIF
+(  550)   ENDDO
+(  551) ! fft compatibility :
+(  552)   DO J=ILOENG(JGL),KDLON
+(  553)     IF (IFFTP0(J) == 0)THEN
+(  554)       ILOENG(JGL)=J
+(  555)       EXIT
+(  556)     ENDIF
+(  557)   ENDDO
+(  558) ENDDO
+(  559) # 560 "rgrid.F90"
+(  560) DEALLOCATE(ZGR)
+(  561) DEALLOCATE(IMYMS)
+(  562) # 563 "rgrid.F90"
+(  563) ! 5. Gather contributions to task #1 and find the maximum per latitude
+(  564) !    -----------------------------------------------------------------
+(  565) # 566 "rgrid.F90"
+(  566) IF (KMYPROC /= 1) THEN
+(  567) # 568 "rgrid.F90"
+(  568)   CALL MPL_SEND(ILOENG(1:IDGNH),KDEST=IPRCIDS(1),KTAG=ITAG1,CDSTRING='RGRID:')
+(  569)   CALL MPL_SEND(ILOENS(1:IDGNH),KDEST=IPRCIDS(1),KTAG=ITAG2,CDSTRING='RGRID:')
+(  570) # 571 "rgrid.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 30
+
+(  571) ELSE
+(  572) # 573 "rgrid.F90"
+(  573)   ALLOCATE(IILOEN(IDGNH))
+(  574)   DO JROC=1,IPRTRW-1
+(  575)     CALL MPL_RECV(IILOEN,KTAG=ITAG1,KOUNT=IMSGLEN,CDSTRING='RGRID:')
+(  576)     IF (IMSGLEN /= IDGNH) THEN
+(  577)       CALL ABOR1('RGRID : RECEIVED MESSAGE LENGTH OF WRONG SIZE')
+(  578)     ENDIF
+(  579)     DO J=1,IDGNH
+(  580)       ILOENG(J)=MAX(IILOEN(J),ILOENG(J))
+(  581)     ENDDO
+(  582)     CALL MPL_RECV(IILOEN,KTAG=ITAG2,KOUNT=IMSGLEN,CDSTRING='RGRID:')
+(  583)     IF (IMSGLEN /= IDGNH) THEN
+(  584)       CALL ABOR1('RGRID : RECEIVED MESSAGE LENGTH OF WRONG SIZE')
+(  585)     ENDIF
+(  586)     DO J=1,IDGNH
+(  587)       ILOENS(J)=MAX(IILOEN(J),ILOENS(J))
+(  588)     ENDDO
+(  589)   ENDDO
+(  590)   DEALLOCATE(IILOEN)
+(  591) # 592 "rgrid.F90"
+(  592)   DO J=1,KDGLG/2
+(  593)     ILOENG(KDGLG+1-J)=ILOENG(J)
+(  594)     ILOENS(KDGLG+1-J)=ILOENS(J)
+(  595)   ENDDO
+(  596)   IGPTOT=SUM(ILOENG)
+(  597)   IGPTOTS=SUM(ILOENS)
+(  598)   IF (KVERBOSE == 1) THEN
+(  599)     DO JGL=1,IDGNH
+(  600)       WRITE(KULOUT,FMT='(''   ILOEN('',I5,'')='',2I5)') JGL,ILOENG(JGL),ILOENS(JGL)
+(  601)     ENDDO
+(  602)   ENDIF
+(  603)   WRITE(KULOUT,FMT='('' REDUCED GRID FOR NSMAX = '', I5, '' NDLON = '', I5, &
+(  604)    & '' NDGL = '',I5,  '' IODD = '',I1)') KSMAXG,KDLON,KDGLG,KODD
+(  605)   WRITE(KULOUT,FMT='('' ORTHOGONALITY = '',E16.9, '' ALIASING = '',E16.9)') PORTHO, PALIAS
+(  606)   WRITE(KULOUT,FMT='('' IGPTOT = '',I8,'' IGPTOTS = '',I8)') IGPTOT, IGPTOTS
+(  607)   WRITE(KULOUT,FMT='('' REDUCTION from a full grid = '',F4.1,''%'')') (1-REAL(IGPTOT,JPRBT)/(KDGLG*KDLON))*100
+(  608)   WRITE(KULOUT,FMT='('' KULNAM = '',I2)') KULNAM
+(  609) # 610 "rgrid.F90"
+(  610)   IF (KULNAM /= KULOUT .AND. KULNAM /= KULERR) OPEN(KULNAM,FORM="FORMATTED")
+(  611)   WRITE(KULNAM,'('' &NAMRGRI'')')
+(  612)   IF (KDLON.LE.99) THEN
+(  613)     DO JGL=1,KDGLG
+(  614)       WRITE(KULNAM,FMT='(''   NRGRI('',I2,'')='',I2,'','')') JGL,ILOENG(JGL)
+(  615)     ENDDO
+(  616)   ELSEIF (KDLON.LE.999) THEN
+(  617)     DO JGL=1,KDGLG
+(  618)       WRITE(KULNAM,FMT='(''   NRGRI('',I3,'')='',I3,'','')') JGL,ILOENG(JGL)
+(  619)     ENDDO
+(  620)   ELSEIF (KDLON.LE.9999) THEN 
+(  621)     DO JGL=1,KDGLG
+(  622)       WRITE(KULNAM,FMT='(''   NRGRI('',I4,'')='',I4,'','')') JGL,ILOENG(JGL)
+(  623)     ENDDO
+(  624)   ELSE
+(  625)     DO JGL=1,KDGLG
+(  626)       WRITE(KULNAM,FMT='(''   NRGRI('',I5,'')='',I5,'','')') JGL,ILOENG(JGL)
+(  627)     ENDDO
+(  628)   ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:54      page 31
+
+(  629)   WRITE(KULNAM,'('' /'')')
+(  630)   IF (KULNAM /= KULOUT .AND. KULNAM /= KULERR) CLOSE(KULNAM)
+(  631) ENDIF
+(  632) # 633 "rgrid.F90"
+(  633) DEALLOCATE(ILOENG)
+(  634) DEALLOCATE(ILOENS)
+(  635) # 636 "rgrid.F90"
+(  636) IF (LDREAD .OR. LDWRITE) CLOSE(IULZGR)
+(  637) # 638 "rgrid.F90"
+(  638) !-----------------------------------------------------------------------------
+(  639) # 640 "rgrid.F90"
+(  640) IF (LHOOK) CALL DR_HOOK('RGRID:REDUCED_GRID',1,ZHOOK_HANDLE0)
+(  641) END SUBROUTINE REDUCED_GRID
+(  642) # 643 "rgrid.F90"
+(  643) END PROGRAM RGRID

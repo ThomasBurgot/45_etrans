@@ -1,0 +1,228 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:36      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: getheapstat.F90
+
+(    1) SUBROUTINE GETHEAPSTAT(KOUT, CDLABEL)
+(    2) 
+(    3) USE PARKIND1  ,ONLY : JPIM     ,JPRB     ,JPIB
+(    4) 
+(    5) USE MPL_MODULE
+(    6) 
+(    7) #ifdef NAG
+(    8) USE F90_UNIX_ENV, ONLY: GETENV
+(    9) #endif
+(   10) 
+(   11) IMPLICIT NONE
+(   12) 
+(   13) INTEGER(KIND=JPIM), INTENT(IN) :: KOUT
+(   14) CHARACTER(LEN=*), INTENT(IN) :: CDLABEL
+(   15) INTEGER(KIND=JPIM) :: I, IMYPROC, INPROC, IRET, IOFFSET, II
+(   16) INTEGER(KIND=JPIM), PARAMETER :: JP_NPROFILE = 9 ! pls. consult ifsaux/utilities/getcurheap.c
+(   17) INTEGER(KIND=JPIM), PARAMETER :: ISIZE = JP_NPROFILE+1
+(   18) INTEGER(KIND=JPIB) ILIMIT(ISIZE)
+(   19) INTEGER(KIND=JPIB) ICNT(ISIZE)
+(   20) REAL(KIND=JPRB), ALLOCATABLE :: ZSEND(:), ZRECV(:)
+(   21) INTEGER(KIND=JPIM), ALLOCATABLE :: ICOUNTS(:)
+(   22) CHARACTER(LEN=1) CLENV
+(   23) CHARACTER(LEN=80) CLTEXT(0:4)
+(   24) 
+(   25) CALL GET_ENVIRONMENT_VARIABLE("EC_PROFILE_HEAP", CLENV) ! turn OFF by export EC_PROFILE_HEAP=0
+(   26) 
+(   27) IF (KOUT >= 0 .AND. CLENV /= '0') THEN
+(   28)   IMYPROC = MPL_MYRANK()
+(   29)   INPROC  = MPL_NPROC()
+(   30) 
+(   31)   DO I=1,ISIZE
+(   32)     ILIMIT(I) = I ! power of 10's ; pls. consult ifsaux/utilities/getcurheap.c
+(   33)   ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:36      page 2
+
+(   34) 
+(   35)   ALLOCATE(ZSEND(ISIZE))
+(   36)   ALLOCATE(ZRECV(ISIZE * INPROC))
+(   37)   ALLOCATE(ICOUNTS(INPROC))
+(   38) 
+(   39)   CLTEXT(0) = "free()/DEALLOCATE -hits per byte range"
+(   40)   CLTEXT(1) = "malloc()/ALLOCATE -hits per byte range"
+(   41)   CLTEXT(2) = "Outstanding malloc()/ALLOCATE -hits per byte range"
+(   42)   CLTEXT(3) = "Outstanding amount of malloc()/ALLOCATE -bytes per byte range"
+(   43)   CLTEXT(4) = "Average amount of outstanding malloc()/ALLOCATE -bytes per byte range"
+(   44) 
+(   45)   DO II=0,4
+(   46)     ICNT(:) = 0
+(   47)     CALL PROFILE_HEAP_GET(ICNT, ISIZE, II, IRET)
+(   48) 
+(   49)     ZSEND(:) = 0
+(   50)     DO I=1,IRET
+(   51)       ZSEND(I) = ICNT(I)
+(   52)     ENDDO
+(   53)     ZRECV(:) = -1
+(   54) 
+(   55)     ICOUNTS(:) = ISIZE
+(   56)     CALL MPL_GATHERV(ZSEND(:), KROOT=1, KRECVCOUNTS=ICOUNTS(:), &
+(   57)                     &PRECVBUF=ZRECV, CDSTRING='GETHEAPSTAT:')
+(   58) 
+(   59)     IF (IMYPROC == 1) THEN
+(   60) !     Not more than 132 columns, please :-)
+(   61)       WRITE(KOUT,9000) TRIM(CLTEXT(II)),TRIM(CDLABEL), "Node", &
+(   62)                      & (ILIMIT(I),I=1,MIN(JP_NPROFILE,9)), "Larger"
+(   63) 9000  FORMAT(/,"Heap Utilization Profile (",A,"): ",A,&
+(   64)             &/,126("="),&
+(   65)             &//,(A4,2X,9(:,2X,4X,"< 10^",I1),:,2X,A10))
+(   66)       WRITE(KOUT,9001)
+(   67) 9001  FORMAT(4("="),2X,10(2X,10("="))/)
+(   68)       IOFFSET = 0
+(   69)       DO I=1,INPROC
+(   70)         ICNT(:) = ZRECV(IOFFSET+1:IOFFSET+ISIZE)
+(   71)         WRITE(KOUT,'(i4,2x,(10(:,2x,i10)))') I,ICNT(:)
+(   72)         IOFFSET = IOFFSET + ISIZE
+(   73)       ENDDO
+(   74)     ENDIF
+(   75)   ENDDO
+(   76) 
+(   77)   IF (IMYPROC == 1) THEN
+(   78)     WRITE(KOUT,'(/,a,/)') 'End of Heap Utilization Profile'
+(   79)   ENDIF
+(   80) 
+(   81)   DEALLOCATE(ZSEND)
+(   82)   DEALLOCATE(ZRECV)
+(   83)   DEALLOCATE(ICOUNTS)
+(   84) ENDIF
+(   85) END SUBROUTINE GETHEAPSTAT
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:36      page 3
+
+(    1) # 1 "getheapstat.F90"
+(    1) SUBROUTINE GETHEAPSTAT(KOUT, CDLABEL)
+(    2) # 3 "getheapstat.F90"
+(    3) USE PARKIND1  ,ONLY : JPIM     ,JPRB     ,JPIB
+(    4) # 5 "getheapstat.F90"
+(    5) USE MPL_MODULE
+(    6) # 11 "getheapstat.F90"
+(   11) IMPLICIT NONE
+(   12) # 13 "getheapstat.F90"
+(   13) INTEGER(KIND=JPIM), INTENT(IN) :: KOUT
+(   14) CHARACTER(LEN=*), INTENT(IN) :: CDLABEL
+(   15) INTEGER(KIND=JPIM) :: I, IMYPROC, INPROC, IRET, IOFFSET, II
+(   16) INTEGER(KIND=JPIM), PARAMETER :: JP_NPROFILE = 9 ! pls. consult ifsaux/utilities/getcurheap.c
+(   17) INTEGER(KIND=JPIM), PARAMETER :: ISIZE = JP_NPROFILE+1
+(   18) INTEGER(KIND=JPIB) ILIMIT(ISIZE)
+(   19) INTEGER(KIND=JPIB) ICNT(ISIZE)
+(   20) REAL(KIND=JPRB), ALLOCATABLE :: ZSEND(:), ZRECV(:)
+(   21) INTEGER(KIND=JPIM), ALLOCATABLE :: ICOUNTS(:)
+(   22) CHARACTER(LEN=1) CLENV
+(   23) CHARACTER(LEN=80) CLTEXT(0:4)
+(   24) # 25 "getheapstat.F90"
+(   25) CALL GET_ENVIRONMENT_VARIABLE("EC_PROFILE_HEAP", CLENV) ! turn OFF by export EC_PROFILE_HEAP=0
+(   26) # 27 "getheapstat.F90"
+(   27) IF (KOUT >= 0 .AND. CLENV /= '0') THEN
+(   28)   IMYPROC = MPL_MYRANK()
+(   29)   INPROC  = MPL_NPROC()
+(   30) # 31 "getheapstat.F90"
+(   31)   DO I=1,ISIZE
+(   32)     ILIMIT(I) = I ! power of 10's ; pls. consult ifsaux/utilities/getcurheap.c
+(   33)   ENDDO
+(   34) # 35 "getheapstat.F90"
+(   35)   ALLOCATE(ZSEND(ISIZE))
+(   36)   ALLOCATE(ZRECV(ISIZE * INPROC))
+(   37)   ALLOCATE(ICOUNTS(INPROC))
+(   38) # 39 "getheapstat.F90"
+(   39)   CLTEXT(0) = "free()/DEALLOCATE -hits per byte range"
+(   40)   CLTEXT(1) = "malloc()/ALLOCATE -hits per byte range"
+(   41)   CLTEXT(2) = "Outstanding malloc()/ALLOCATE -hits per byte range"
+(   42)   CLTEXT(3) = "Outstanding amount of malloc()/ALLOCATE -bytes per byte range"
+(   43)   CLTEXT(4) = "Average amount of outstanding malloc()/ALLOCATE -bytes per byte range"
+(   44) # 45 "getheapstat.F90"
+(   45)   DO II=0,4
+(   46)     ICNT(:) = 0
+(   47)     CALL PROFILE_HEAP_GET(ICNT, ISIZE, II, IRET)
+(   48) # 49 "getheapstat.F90"
+(   49)     ZSEND(:) = 0
+(   50)     DO I=1,IRET
+(   51)       ZSEND(I) = ICNT(I)
+(   52)     ENDDO
+(   53)     ZRECV(:) = -1
+(   54) # 55 "getheapstat.F90"
+(   55)     ICOUNTS(:) = ISIZE
+(   56)     CALL MPL_GATHERV(ZSEND(:), KROOT=1, KRECVCOUNTS=ICOUNTS(:), &
+(   57)                     &PRECVBUF=ZRECV, CDSTRING='GETHEAPSTAT:')
+(   58) # 59 "getheapstat.F90"
+(   59)     IF (IMYPROC == 1) THEN
+(   60) !     Not more than 132 columns, please :-)
+(   61)       WRITE(KOUT,9000) TRIM(CLTEXT(II)),TRIM(CDLABEL), "Node", &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:36      page 4
+
+(   62)                      & (ILIMIT(I),I=1,MIN(JP_NPROFILE,9)), "Larger"
+(   63) 9000  FORMAT(/,"Heap Utilization Profile (",A,"): ",A,&
+(   64)             &/,126("="),&
+(   65)             &//,(A4,2X,9(:,2X,4X,"< 10^",I1),:,2X,A10))
+(   66)       WRITE(KOUT,9001)
+(   67) 9001  FORMAT(4("="),2X,10(2X,10("="))/)
+(   68)       IOFFSET = 0
+(   69)       DO I=1,INPROC
+(   70)         ICNT(:) = ZRECV(IOFFSET+1:IOFFSET+ISIZE)
+(   71)         WRITE(KOUT,'(i4,2x,(10(:,2x,i10)))') I,ICNT(:)
+(   72)         IOFFSET = IOFFSET + ISIZE
+(   73)       ENDDO
+(   74)     ENDIF
+(   75)   ENDDO
+(   76) # 77 "getheapstat.F90"
+(   77)   IF (IMYPROC == 1) THEN
+(   78)     WRITE(KOUT,'(/,a,/)') 'End of Heap Utilization Profile'
+(   79)   ENDIF
+(   80) # 81 "getheapstat.F90"
+(   81)   DEALLOCATE(ZSEND)
+(   82)   DEALLOCATE(ZRECV)
+(   83)   DEALLOCATE(ICOUNTS)
+(   84) ENDIF
+(   85) END SUBROUTINE GETHEAPSTAT

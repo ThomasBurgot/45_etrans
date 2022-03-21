@@ -1,0 +1,322 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:20      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: ltinv_ctlad_mod.F90
+
+(    1) MODULE LTINV_CTLAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE LTINV_CTLAD(KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS,&
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2,&
+(    6)  & KFLDPTRUV,KFLDPTRSC,FSPGL_PROC)
+(    7) 
+(    8) !**** *LTINV_CTLAD* - Control routine for inverse Legandre transform - adj.
+(    9) 
+(   10) !     Purpose.
+(   11) !     --------
+(   12) !     Control routine for the inverse LEGENDRE transform
+(   13) 
+(   14) !**   Interface.
+(   15) !     ----------
+(   16) !     CALL INV_TRANS_CTL(...)
+(   17) !     KF_OUT_LT    - number of fields coming out from inverse LT
+(   18) !     KF_UV        - local number of spectral u-v fields
+(   19) !     KF_SCALARS   - local number of scalar spectral fields
+(   20) !     KF_SCDERS    - local number of derivatives of scalar spectral fields
+(   21) !     PSPVOR(:,:)  - spectral vorticity (input)
+(   22) !     PSPDIV(:,:)  - spectral divergence (input)
+(   23) !     PSPSCALAR(:,:) - spectral scalarvalued fields (input)
+(   24) !     KFLDPTRUV(:) - field pointer array for vor./div.
+(   25) !     KFLDPTRSC(:) - field pointer array for PSPSCALAR
+(   26) !     FSPGL_PROC  - external procedure to be executed in fourier space
+(   27) !                   before transposition
+(   28) 
+(   29) !     Method.
+(   30) !     -------
+(   31) 
+(   32) !     Externals.
+(   33) !     ----------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:20      page 2
+
+(   34) !
+(   35) 
+(   36) !     Author.
+(   37) !     -------
+(   38) !        Mats Hamrud *ECMWF*
+(   39) 
+(   40) !     Modifications.
+(   41) !     --------------
+(   42) !        Original : 00-06-03
+(   43) 
+(   44) !     ------------------------------------------------------------------
+(   45) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   46) 
+(   47) USE TPM_GEN         ,ONLY : LALLOPERM
+(   48) !USE TPM_DIM
+(   49) USE TPM_TRANS       ,ONLY : FOUBUF, FOUBUF_IN
+(   50) USE TPM_DISTR       ,ONLY : D
+(   51) USE LTINVAD_MOD     ,ONLY : LTINVAD
+(   52) USE TRLTOM_MOD      ,ONLY : TRLTOM
+(   53) 
+(   54) IMPLICIT NONE
+(   55) 
+(   56) INTEGER(KIND=JPIM),INTENT(IN) :: KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS
+(   57) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPVOR(:,:)
+(   58) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPDIV(:,:)
+(   59) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPSCALAR(:,:)
+(   60) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT)  :: PSPSC3A(:,:,:)
+(   61) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT)  :: PSPSC3B(:,:,:)
+(   62) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT)  :: PSPSC2(:,:)
+(   63) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN) :: KFLDPTRUV(:)
+(   64) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN) :: KFLDPTRSC(:)
+(   65) EXTERNAL  FSPGL_PROC
+(   66) OPTIONAL  FSPGL_PROC
+(   67) 
+(   68) INTEGER(KIND=JPIM) :: JM,IM,IBLEN,ILEI2,IDIM1
+(   69) 
+(   70) !     ------------------------------------------------------------------
+(   71) 
+(   72) ILEI2 = 8*KF_UV + 2*KF_SCALARS + 2*KF_SCDERS
+(   73) IDIM1 = 2*KF_OUT_LT
+(   74) IBLEN = D%NLENGT0B*2*KF_OUT_LT
+(   75) IF (ALLOCATED(FOUBUF_IN)) THEN
+(   76)   IF (MAX(1,IBLEN) > SIZE(FOUBUF_IN)) THEN
+(   77)     DEALLOCATE(FOUBUF_IN)
+(   78)     ALLOCATE(FOUBUF_IN(MAX(1,IBLEN)))
+(   79)   ENDIF
+(   80) ELSE
+(   81)   ALLOCATE(FOUBUF_IN(MAX(1,IBLEN)))
+(   82) ENDIF
+(   83) CALL GSTATS(180,0)
+(   84) CALL TRLTOM(FOUBUF,FOUBUF_IN,2*KF_OUT_LT)
+(   85) CALL GSTATS(180,1)
+(   86) IF (.NOT.LALLOPERM) DEALLOCATE(FOUBUF)
+(   87) 
+(   88) CALL GSTATS(104,0)
+(   89) CALL GSTATS(1648,0)
+(   90) IF(KF_OUT_LT > 0) THEN
+(   91) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JM,IM)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:20      page 3
+
+(   92)   DO JM=1,D%NUMP
+(   93)     IM = D%MYMS(JM)
+(   94)     CALL LTINVAD(IM,JM,KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS,ILEI2,IDIM1,&
+(   95)      & PSPVOR,PSPDIV,PSPSCALAR,&
+(   96)      & PSPSC3A,PSPSC3B,PSPSC2 , &
+(   97)      & KFLDPTRUV,KFLDPTRSC,FSPGL_PROC)
+(   98)   ENDDO
+(   99) !$OMP END PARALLEL DO
+(  100) ENDIF
+(  101) CALL GSTATS(1648,1)
+(  102) 
+(  103) IF (.NOT.LALLOPERM) DEALLOCATE(FOUBUF_IN)
+(  104) CALL GSTATS(104,1)
+(  105) 
+(  106) !     ------------------------------------------------------------------
+(  107) 
+(  108) END SUBROUTINE LTINV_CTLAD
+(  109) END MODULE LTINV_CTLAD_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:20      page 4
+
+(    1) # 1 "ltinv_ctlad_mod.F90"
+(    1) MODULE LTINV_CTLAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE LTINV_CTLAD(KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS,&
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2,&
+(    6)  & KFLDPTRUV,KFLDPTRSC,FSPGL_PROC)
+(    7) # 8 "ltinv_ctlad_mod.F90"
+(    8) !**** *LTINV_CTLAD* - Control routine for inverse Legandre transform - adj.
+(    9) # 10 "ltinv_ctlad_mod.F90"
+(   10) !     Purpose.
+(   11) !     --------
+(   12) !     Control routine for the inverse LEGENDRE transform
+(   13) # 14 "ltinv_ctlad_mod.F90"
+(   14) !**   Interface.
+(   15) !     ----------
+(   16) !     CALL INV_TRANS_CTL(...)
+(   17) !     KF_OUT_LT    - number of fields coming out from inverse LT
+(   18) !     KF_UV        - local number of spectral u-v fields
+(   19) !     KF_SCALARS   - local number of scalar spectral fields
+(   20) !     KF_SCDERS    - local number of derivatives of scalar spectral fields
+(   21) !     PSPVOR(:,:)  - spectral vorticity (input)
+(   22) !     PSPDIV(:,:)  - spectral divergence (input)
+(   23) !     PSPSCALAR(:,:) - spectral scalarvalued fields (input)
+(   24) !     KFLDPTRUV(:) - field pointer array for vor./div.
+(   25) !     KFLDPTRSC(:) - field pointer array for PSPSCALAR
+(   26) !     FSPGL_PROC  - external procedure to be executed in fourier space
+(   27) !                   before transposition
+(   28) # 29 "ltinv_ctlad_mod.F90"
+(   29) !     Method.
+(   30) !     -------
+(   31) # 32 "ltinv_ctlad_mod.F90"
+(   32) !     Externals.
+(   33) !     ----------
+(   34) !
+(   35) # 36 "ltinv_ctlad_mod.F90"
+(   36) !     Author.
+(   37) !     -------
+(   38) !        Mats Hamrud *ECMWF*
+(   39) # 40 "ltinv_ctlad_mod.F90"
+(   40) !     Modifications.
+(   41) !     --------------
+(   42) !        Original : 00-06-03
+(   43) # 44 "ltinv_ctlad_mod.F90"
+(   44) !     ------------------------------------------------------------------
+(   45) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   46) # 47 "ltinv_ctlad_mod.F90"
+(   47) USE TPM_GEN         ,ONLY : LALLOPERM
+(   48) !USE TPM_DIM
+(   49) USE TPM_TRANS       ,ONLY : FOUBUF, FOUBUF_IN
+(   50) USE TPM_DISTR       ,ONLY : D
+(   51) USE LTINVAD_MOD     ,ONLY : LTINVAD
+(   52) USE TRLTOM_MOD      ,ONLY : TRLTOM
+(   53) # 54 "ltinv_ctlad_mod.F90"
+(   54) IMPLICIT NONE
+(   55) # 56 "ltinv_ctlad_mod.F90"
+(   56) INTEGER(KIND=JPIM),INTENT(IN) :: KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS
+(   57) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPVOR(:,:)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:20      page 5
+
+(   58) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPDIV(:,:)
+(   59) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPSCALAR(:,:)
+(   60) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT)  :: PSPSC3A(:,:,:)
+(   61) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT)  :: PSPSC3B(:,:,:)
+(   62) REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT)  :: PSPSC2(:,:)
+(   63) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN) :: KFLDPTRUV(:)
+(   64) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN) :: KFLDPTRSC(:)
+(   65) EXTERNAL  FSPGL_PROC
+(   66) OPTIONAL  FSPGL_PROC
+(   67) # 68 "ltinv_ctlad_mod.F90"
+(   68) INTEGER(KIND=JPIM) :: JM,IM,IBLEN,ILEI2,IDIM1
+(   69) # 70 "ltinv_ctlad_mod.F90"
+(   70) !     ------------------------------------------------------------------
+(   71) # 72 "ltinv_ctlad_mod.F90"
+(   72) ILEI2 = 8*KF_UV + 2*KF_SCALARS + 2*KF_SCDERS
+(   73) IDIM1 = 2*KF_OUT_LT
+(   74) IBLEN = D%NLENGT0B*2*KF_OUT_LT
+(   75) IF (ALLOCATED(FOUBUF_IN)) THEN
+(   76)   IF (MAX(1,IBLEN) > SIZE(FOUBUF_IN)) THEN
+(   77)     DEALLOCATE(FOUBUF_IN)
+(   78)     ALLOCATE(FOUBUF_IN(MAX(1,IBLEN)))
+(   79)   ENDIF
+(   80) ELSE
+(   81)   ALLOCATE(FOUBUF_IN(MAX(1,IBLEN)))
+(   82) ENDIF
+(   83) CALL GSTATS(180,0)
+(   84) CALL TRLTOM(FOUBUF,FOUBUF_IN,2*KF_OUT_LT)
+(   85) CALL GSTATS(180,1)
+(   86) IF (.NOT.LALLOPERM) DEALLOCATE(FOUBUF)
+(   87) # 88 "ltinv_ctlad_mod.F90"
+(   88) CALL GSTATS(104,0)
+(   89) CALL GSTATS(1648,0)
+(   90) IF(KF_OUT_LT > 0) THEN
+(   91) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JM,IM)
+(   92)   DO JM=1,D%NUMP
+(   93)     IM = D%MYMS(JM)
+(   94)     CALL LTINVAD(IM,JM,KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS,ILEI2,IDIM1,&
+(   95)      & PSPVOR,PSPDIV,PSPSCALAR,&
+(   96)      & PSPSC3A,PSPSC3B,PSPSC2 , &
+(   97)      & KFLDPTRUV,KFLDPTRSC,FSPGL_PROC)
+(   98)   ENDDO
+(   99) !$OMP END PARALLEL DO
+(  100) ENDIF
+(  101) CALL GSTATS(1648,1)
+(  102) # 103 "ltinv_ctlad_mod.F90"
+(  103) IF (.NOT.LALLOPERM) DEALLOCATE(FOUBUF_IN)
+(  104) CALL GSTATS(104,1)
+(  105) # 106 "ltinv_ctlad_mod.F90"
+(  106) !     ------------------------------------------------------------------
+(  107) # 108 "ltinv_ctlad_mod.F90"
+(  108) END SUBROUTINE LTINV_CTLAD
+(  109) END MODULE LTINV_CTLAD_MOD

@@ -1,0 +1,2986 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: order_independent_summation_mod.F90
+
+(    1) MODULE ORDER_INDEPENDENT_SUMMATION_MOD
+(    2) 
+(    3) !**** ORDER_INDEPENDENT_SUMMATION_MOD
+(    4) 
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !     Functions to perform global (over all processors) and 
+(    8) !     local (per-processor) order-independent accurate summation
+(    9) !     and order-independent inner products.
+(   10) 
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) 
+(   14) !        result = ORDER_INDEP_GLOBAL_SUM (P1)
+(   15) !        result = ORDER_INDEP_LOCAL_SUM (P1)
+(   16) !        result = ORDER_INDEP_DOT_PRODUCT (P1,P2,PW)
+(   17) 
+(   18) !        Input required arguments :
+(   19) !        -------------------------
+(   20) !           P1       -  A 1d array of KIND=JPRB reals
+(   21) !           P2       -  A 1d array of KIND=JPRB reals. Same length as P1.
+(   22) 
+(   23) !        Input optional arguments :
+(   24) !        -------------------------
+(   25) !           PW       -  A 1d array of KIND=JPRB reals. Same length as P1.
+(   26) !                       If specified. ORDER_INDEP_DOT_PRODUCT returns
+(   27) !                       a weighted inner product. PW defines the weights.
+(   28) !                       If not specified, ORDER_INDEP_DOT_PRODUCT returns
+(   29) !                       an unweighted dot product of P and P2.
+(   30) !
+(   31) !           KNG (global sum only) - Global length of input array.
+(   32) !
+(   33) !           LD_ABORT_IFNOT_REPROD - Abort if results are not guaranteed
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 2
+
+(   34) !                                   to be bit-reproducible. (Default=T)
+(   35) !
+(   36) !           LD_OPENMP             - .TRUE. => use openMP (Default is
+(   37) !                                   .TRUE. for global sum, .FALSE. for
+(   38) !                                   local sum.)
+(   39) 
+(   40) !        Output required arguments :
+(   41) !        -------------------------
+(   42) !           none
+(   43) 
+(   44) !     Author.
+(   45) !     -------
+(   46) !        Mike Fisher  ECMWF
+(   47) 
+(   48) !     Modifications.
+(   49) !     --------------
+(   50) !        Original: 2006-20-22
+(   51) 
+(   52) !     ------------------------------------------------------------------
+(   53) 
+(   54) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   55) USE COMPENSATED_SUMMATION_MOD, ONLY : COMPENSATED_SUM, COMPENSATED_SUM_OMP, &
+(   56)                                 & COMPENSATED_DOT_PRODUCT, &
+(   57)                                 & COMPENSATED_DOT_PRODUCT_OMP
+(   58) USE MPL_MODULE, ONLY : MPL_ALLREDUCE, MPL_ALLGATHERV, MPL_MYRANK, MPL_NPROC, &
+(   59)                      & MPL_MESSAGE, MPL_SEND, MPL_RECV, MPL_WAIT, &
+(   60)                      & JP_NON_BLOCKING_STANDARD
+(   61) USE YOMHOOK   , ONLY : LHOOK,   DR_HOOK
+(   62) 
+(   63) SAVE
+(   64) PRIVATE
+(   65) PUBLIC ORDER_INDEP_LOCAL_SUM, &
+(   66)      & ORDER_INDEP_GLOBAL_SUM, &
+(   67)      & ORDER_INDEP_GLOBAL_SUM2, &
+(   68)      & ORDER_INDEP_ALLREDUCE, &
+(   69)      & ORDER_INDEP_DOT_PRODUCT
+(   70) 
+(   71) INTERFACE ORDER_INDEP_LOCAL_SUM
+(   72)   MODULE PROCEDURE ORDER_INDEP_LOCAL_SUM
+(   73) END INTERFACE
+(   74) 
+(   75) INTERFACE ORDER_INDEP_GLOBAL_SUM
+(   76)   MODULE PROCEDURE ORDER_INDEP_GLOBAL_SUM
+(   77) END INTERFACE
+(   78) 
+(   79) INTERFACE ORDER_INDEP_GLOBAL_SUM2
+(   80)   MODULE PROCEDURE ORDER_INDEP_GLOBAL_SUM2
+(   81) END INTERFACE
+(   82) 
+(   83) INTERFACE ORDER_INDEP_ALLREDUCE
+(   84)   MODULE PROCEDURE ORDER_INDEP_ALLREDUCE
+(   85) END INTERFACE
+(   86) 
+(   87) INTERFACE ORDER_INDEP_DOT_PRODUCT
+(   88)   MODULE PROCEDURE ORDER_INDEP_DOT_PRODUCT
+(   89) END INTERFACE
+(   90) 
+(   91) CONTAINS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 3
+
+(   92) 
+(   93) FUNCTION ORDER_INDEP_LOCAL_SUM (PIN,LD_ABORT_IFNOT_REPROD,LD_OPENMP)
+(   94) 
+(   95) !-----------------------------------------------------------------
+(   96) !  Returns an accurate local (i.e. on a single processor) sum of
+(   97) !  the elements of PIN. The sum is bit-reproducible for any
+(   98) !  ordering of the elements of PIN.
+(   99) !
+(  100) !  NB: PIN is unmodified on return
+(  101) !
+(  102) ! Algorithm:
+(  103) ! ----------
+(  104) !
+(  105) !  The algorithm is based on Ogita et al. (2005) SIAM J. Sci. Computing,
+(  106) !  Vol.26, No.6, pp1955-1988. This is based in turn on an algorithm
+(  107) !  by Knuth (1969, seminumerical algorithms).
+(  108) !
+(  109) !  This version iterates the compensated sum algorithm until the
+(  110) !  result is guaranteed to be within 4*eps of the true sum. It
+(  111) !  then rounds the result to the nearest floating-point number
+(  112) !  whose last three bits are zero, thereby guaranteeing an
+(  113) !  order-independent result.
+(  114) !
+(  115) !  Author: Mike Fisher ECMWF 2006/02/08
+(  116) !
+(  117) !-----------------------------------------------------------------
+(  118) 
+(  119) IMPLICIT NONE
+(  120) 
+(  121) REAL(KIND=JPRB) :: ORDER_INDEP_LOCAL_SUM
+(  122) REAL(KIND=JPRB), INTENT(IN) :: PIN(:)
+(  123) LOGICAL,OPTIONAL,INTENT(IN) :: LD_ABORT_IFNOT_REPROD, LD_OPENMP
+(  124) 
+(  125) INTEGER(KIND=JPIM) :: IN
+(  126) REAL(KIND=JPRB) :: ZCORR,ZERR,ZOLDERR,ZBETA,ZRES
+(  127) REAL(KIND=JPRB), ALLOCATABLE :: ZP(:)
+(  128) LOGICAL :: LLABORT, LL_OPENMP
+(  129) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  130) 
+(  131) INTEGER(KIND=JPIM), SAVE :: INMSG=0
+(  132) 
+(  133) INTEGER(KIND=JPIM), EXTERNAL :: N_PRECISION
+(  134) 
+(  135) IF (LHOOK) CALL DR_HOOK ('ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_LOCAL_SUM', &
+(  136)                       &  0,ZHOOK_HANDLE)
+(  137) 
+(  138) IF (PRESENT(LD_ABORT_IFNOT_REPROD)) THEN
+(  139)   LLABORT = LD_ABORT_IFNOT_REPROD
+(  140) ELSE
+(  141)   LLABORT = .TRUE.
+(  142) ENDIF
+(  143) 
+(  144) IF (PRESENT(LD_OPENMP)) THEN
+(  145)   LL_OPENMP = LD_OPENMP
+(  146) ELSE
+(  147)   LL_OPENMP = .FALSE.
+(  148) ENDIF
+(  149) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 4
+
+(  150) IN = SIZE(PIN)
+(  151) 
+(  152) IF (REAL(2*IN,JPRB)*EPSILON(ZRES) >= 1.0) THEN
+(  153)   CALL MPL_MESSAGE (CDMESSAGE='n is too large to guarantee error bounds', &
+(  154)                     & CDSTRING='ORDER_INDEP_LOCAL_SUM',LDABORT=.TRUE.)
+(  155) ENDIF
+(  156) 
+(  157) TEST_ARRAY_LENGTH: IF (IN>0) THEN
+(  158)   ZOLDERR = HUGE(ZERR)
+(  159) 
+(  160) !--- Copy the input array. This avoids some tricky indexing, at the
+(  161) !--- expense of some inefficency.
+(  162) 
+(  163)   ALLOCATE (ZP(IN))
+(  164)   ZP(:) = PIN(:)
+(  165) 
+(  166)   K_LOOP: DO
+(  167) 
+(  168) !--- transform local arrays
+(  169) 
+(  170)     IF (LL_OPENMP) THEN
+(  171)       CALL COMPENSATED_SUM_OMP (ZP,IN,ZCORR,ZERR)
+(  172)     ELSE
+(  173)       CALL COMPENSATED_SUM (ZP,IN,ZCORR,ZERR)
+(  174)     ENDIF
+(  175) 
+(  176) !--- Calculate final result
+(  177) 
+(  178)     ZRES = ZP(IN) + ZCORR
+(  179) 
+(  180) !--- Calculate error bound. This is corollary 4.7 from Ogita et al. (2005)
+(  181) 
+(  182)     ZBETA = ZERR*(REAL(2*IN,JPRB)*EPSILON(ZRES)) &
+(  183)          & /(1.0_JPRB - REAL(2*IN,JPRB)*EPSILON(ZRES))
+(  184) 
+(  185)     ZERR = EPSILON(ZRES)*ABS(ZRES) &
+(  186)        & +(ZBETA + ( 2.0_JPRB*EPSILON(ZRES)*EPSILON(ZRES)*ABS(ZRES) &
+(  187)        &            +3.0_JPRB*TINY(ZRES)))
+(  188) 
+(  189) !--- exit if the error is small enough
+(  190) 
+(  191)     IF (ZERR<4.0_JPRB*SPACING(ZRES)) EXIT K_LOOP
+(  192) 
+(  193) !--- Take appropriate action if ZRES cannot be sufficiently refined.
+(  194) 
+(  195)     IF (ZERR >= ZOLDERR) THEN
+(  196)       INMSG=INMSG+1
+(  197) 
+(  198)       IF (INMSG<=100) THEN
+(  199)         CALL MPL_MESSAGE ( &
+(  200)             & CDMESSAGE= 'ORDER_INDEP_LOCAL_SUM: FALIED TO REFINE SUM', &
+(  201)             & CDSTRING='ORDER_INDEP_LOCAL_SUM')
+(  202)         CALL MPL_MESSAGE ( &
+(  203)             & CDMESSAGE='WARNING: POSSIBLITY OF NON-REPRODUCIBLE RESULTS',&
+(  204)             & CDSTRING='ORDER_INDEP_LOCAL_SUM')
+(  205)       ENDIF
+(  206) 
+(  207)       IF (INMSG==100) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 5
+
+(  208)         CALL MPL_MESSAGE ( &
+(  209)             & CDMESSAGE='ORDER_INDEP_LOCAL_SUM: INMSG>100. OUTPUT SUPPRESSED',&
+(  210)             & CDSTRING='ORDER_INDEP_LOCAL_SUM')
+(  211)       ENDIF
+(  212) 
+(  213)       IF (LLABORT) THEN
+(  214)         CALL MPL_MESSAGE (CDMESSAGE= &
+(  215)                         & 'ABORT BECAUSE LD_ABORT_IFNOT_REPROD WAS SET', &
+(  216)                         & CDSTRING='ORDER_INDEP_LOCAL_SUM',LDABORT=.TRUE.)
+(  217)       ENDIF
+(  218)     ENDIF
+(  219) 
+(  220)     ZOLDERR = ZERR
+(  221) 
+(  222)   ENDDO K_LOOP
+(  223) 
+(  224) !--- At this stage, we have guaranteed that ZRES is less than 4*EPS
+(  225) !--- away from the exact sum. There are only eight floating point
+(  226) !--- numbers in this range. So, if we find the nearest number that
+(  227) !--- has its last three bits zero, then we have a reproducible result.
+(  228) 
+(  229)   ORDER_INDEP_LOCAL_SUM = ROUND (ZRES)
+(  230) 
+(  231)   DEALLOCATE (ZP)
+(  232) ELSE TEST_ARRAY_LENGTH
+(  233) 
+(  234)   ORDER_INDEP_LOCAL_SUM = 0.0_JPRB
+(  235) 
+(  236) ENDIF TEST_ARRAY_LENGTH
+(  237) 
+(  238) IF (LHOOK) CALL DR_HOOK ('ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_LOCAL_SUM', &
+(  239)                       &  1,ZHOOK_HANDLE)
+(  240) 
+(  241) END FUNCTION ORDER_INDEP_LOCAL_SUM
+(  242) 
+(  243) FUNCTION ORDER_INDEP_GLOBAL_SUM (PIN,KNG,LD_ABORT_IFNOT_REPROD, LD_OPENMP)
+(  244) 
+(  245) !-----------------------------------------------------------------
+(  246) !
+(  247) !  Returns an accurate global sum of the elements of PIN. The
+(  248) !  sum is bit-reproducible for any distribution of PIN over
+(  249) !  threads and tasks, and is independent of the ordering of the
+(  250) !  elements of PIN.
+(  251) !
+(  252) !  NB: PIN is unmodified on return
+(  253) !
+(  254) ! Arguments:
+(  255) ! ----------
+(  256) !
+(  257) ! Required:
+(  258) !
+(  259) !   PIN                  - INTENT(IN) - The array to be summed.
+(  260) !
+(  261) !
+(  262) ! Optional:
+(  263) !
+(  264) !   KNG                  - INTENT(IN) - Global length of array.
+(  265) !                 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 6
+
+(  266) !   LD_ABORT_IFNOT_REPROD - INTENT(IN) - Defines behaviour in case
+(  267) !                                        a reproducible result cannot
+(  268) !                                        be guaranteed.
+(  269) !
+(  270) !   LD_OPENMP            - INTENT(IN) - Use OpenMP parallelization.
+(  271) !              
+(  272) !
+(  273) ! Algorithm:
+(  274) ! ----------
+(  275) !
+(  276) !  The algorithm is based on Ogita et al. (2005) SIAM J. Sci. Computing,
+(  277) !  Vol.26, No.6, pp1955-1988. This is based in turn on an algorithm
+(  278) !  by Knuth (1969, seminumerical algorithms).
+(  279) !
+(  280) !  This version adds a second layer of parallelism on top of that
+(  281) !  provided by COMPENSATED_SUM_OMP. It iterates the compensated 
+(  282) !  summation until the result is guaranteed to be within 4*eps
+(  283) !  of the true sum. It then rounds the result to the nearest
+(  284) !  floating-point number whose last three bits are zero, thereby
+(  285) !  guaranteeing an order-independent result.
+(  286) !
+(  287) !  Author: Mike Fisher ECMWF 2006/02/08
+(  288) !
+(  289) !-----------------------------------------------------------------
+(  290) 
+(  291) IMPLICIT NONE
+(  292) 
+(  293) REAL(KIND=JPRB) :: ORDER_INDEP_GLOBAL_SUM
+(  294) 
+(  295) REAL(KIND=JPRB),             INTENT(IN) :: PIN(:)
+(  296) INTEGER(KIND=JPIM),OPTIONAL, INTENT(IN) :: KNG
+(  297) LOGICAL,           OPTIONAL, INTENT(IN) :: LD_ABORT_IFNOT_REPROD, LD_OPENMP
+(  298) 
+(  299) INTEGER(KIND=JPIM) :: J,IN,ING,INPROC
+(  300) REAL(KIND=JPRB) :: ZCORR,ZERR,ZOLDERR,ZBUFFL(3),ZBETA,ZRES
+(  301) REAL(KIND=JPRB), ALLOCATABLE :: ZPSUMS(:),ZPERRS(:),ZPCORS(:), &
+(  302)                               & ZBUFFG(:),ZP(:)
+(  303) INTEGER(KIND=JPIM), ALLOCATABLE :: IRECVCOUNTS(:)
+(  304) LOGICAL :: LLABORT, LL_OPENMP
+(  305) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  306) 
+(  307) INTEGER(KIND=JPIM), SAVE :: INMSG=0
+(  308) 
+(  309) INTEGER(KIND=JPIM), EXTERNAL :: N_PRECISION
+(  310) 
+(  311) IF (LHOOK) CALL DR_HOOK ('ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_GLOBAL_SUM', &
+(  312)                       &  0,ZHOOK_HANDLE)
+(  313) 
+(  314) INPROC = MPL_NPROC()
+(  315) 
+(  316) IF (PRESENT(LD_ABORT_IFNOT_REPROD)) THEN
+(  317)   LLABORT = LD_ABORT_IFNOT_REPROD
+(  318) ELSE
+(  319)   LLABORT = .TRUE.
+(  320) ENDIF
+(  321) 
+(  322) IF (PRESENT(LD_OPENMP)) THEN
+(  323)   LL_OPENMP = LD_OPENMP
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 7
+
+(  324) ELSE
+(  325)   LL_OPENMP = .TRUE.
+(  326) ENDIF
+(  327) 
+(  328) IN = SIZE(PIN)
+(  329) 
+(  330) !--- global length of vector (needed for error bound calculation)
+(  331) 
+(  332) IF (.NOT.PRESENT(KNG)) THEN
+(  333)   ING = IN
+(  334)   IF (INPROC>1) THEN
+(  335)     CALL MPL_ALLREDUCE (ING,'SUM',CDSTRING='ORDER_INDEP_GLOBAL_SUM')
+(  336)   ENDIF
+(  337) ELSE
+(  338)   ING = KNG
+(  339)   IF (KNG<IN) THEN
+(  340)     CALL MPL_MESSAGE (CDMESSAGE='Specified KNG < SIZE(PIN)', &
+(  341)                     & CDSTRING='ORDER_INDEP_GLOBAL_SUM',LDABORT=.TRUE.)
+(  342)   ENDIF
+(  343) ENDIF
+(  344) 
+(  345) IF (REAL(2*ING,JPRB)*EPSILON(ZRES) >= 1.0) THEN
+(  346)   CALL MPL_MESSAGE (CDMESSAGE='n is too large to guarantee error bounds', &
+(  347)                   & CDSTRING='ORDER_INDEP_GLOBAL_SUM',LDABORT=.TRUE.)
+(  348) ENDIF
+(  349) 
+(  350) ALLOCATE (ZP(MAX(IN,1_JPIM)))
+(  351) ALLOCATE (ZBUFFG(INPROC*SIZE(ZBUFFL)))
+(  352) ALLOCATE (ZPSUMS(INPROC))
+(  353) ALLOCATE (ZPERRS(INPROC))
+(  354) ALLOCATE (ZPCORS(INPROC))
+(  355) ALLOCATE (IRECVCOUNTS(INPROC))
+(  356) 
+(  357) ZOLDERR = HUGE(ZERR)
+(  358) 
+(  359) !--- Copy the input array. This avoids some tricky indexing, at the
+(  360) !--- expense of some inefficency.
+(  361) 
+(  362) IF (IN>0) THEN
+(  363)   ZP(:) = PIN(:)
+(  364) ELSE
+(  365)   ZP(1) = 0.0_JPRB
+(  366) ENDIF
+(  367) 
+(  368) K_LOOP: DO
+(  369) 
+(  370) !--- transform local arrays
+(  371) 
+(  372)   IF (IN>0) THEN
+(  373)     IF (LL_OPENMP) THEN
+(  374)       CALL COMPENSATED_SUM_OMP (ZP,IN,ZCORR,ZERR)
+(  375)     ELSE
+(  376)       CALL COMPENSATED_SUM (ZP,IN,ZCORR,ZERR)
+(  377)     ENDIF
+(  378)   ENDIF
+(  379) 
+(  380) !--- gather partial sums and error bounds to all processors
+(  381) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 8
+
+(  382)   ZBUFFL(1) = ZP(MAX(IN,1_JPIM))
+(  383) 
+(  384)   IF (IN>0) THEN
+(  385)     ZBUFFL(2) = ZERR
+(  386)     ZBUFFL(3) = ZCORR
+(  387)   ELSE
+(  388)     ZBUFFL(2) = 0.0_JPRB
+(  389)     ZBUFFL(3) = 0.0_JPRB
+(  390)   ENDIF
+(  391) 
+(  392)   IF (INPROC>1) THEN
+(  393) !-- could use MPL_ALLGATHER here, if it existed!
+(  394) 
+(  395)     IRECVCOUNTS(:) = SIZE(ZBUFFL)
+(  396) 
+(  397)     CALL MPL_ALLGATHERV (ZBUFFL,ZBUFFG,IRECVCOUNTS, &
+(  398)                        & CDSTRING='ORDER_INDEP_GLOBAL_SUM')
+(  399) 
+(  400)     DO J=1,INPROC
+(  401)       ZPSUMS(J) = ZBUFFG(1+(J-1)*SIZE(ZBUFFL))
+(  402)       ZPERRS(J) = ZBUFFG(2+(J-1)*SIZE(ZBUFFL))
+(  403)       ZPCORS(J) = ZBUFFG(3+(J-1)*SIZE(ZBUFFL))
+(  404)     ENDDO
+(  405)   ELSE
+(  406)     ZPSUMS(1) = ZBUFFL(1)
+(  407)     ZPERRS(1) = ZBUFFL(2)
+(  408)     ZPCORS(1) = ZBUFFL(3)
+(  409)   ENDIF
+(  410) 
+(  411) !--- transform partial sums
+(  412) 
+(  413)   CALL COMPENSATED_SUM (ZPSUMS,INPROC,ZCORR,ZERR)
+(  414)   ZERR  = ZERR  + SUM(ZPERRS)
+(  415)   ZCORR = ZCORR + SUM(ZPCORS)
+(  416) 
+(  417) !--- Calculate final result
+(  418) 
+(  419)   ZRES = ZPSUMS(INPROC) + ZCORR
+(  420) 
+(  421) !--- Calculate error bound. This is corollary 4.7 from Ogita et al. (2005)
+(  422) 
+(  423)   ZBETA = ZERR*(REAL(2*ING,JPRB)*EPSILON(ZRES)) &
+(  424)        & /(1.0_JPRB - REAL(2*ING,JPRB)*EPSILON(ZRES))
+(  425) 
+(  426)   ZERR = EPSILON(ZRES)*ABS(ZRES) &
+(  427)      & +(ZBETA + ( 2.0_JPRB*EPSILON(ZRES)*EPSILON(ZRES)*ABS(ZRES) &
+(  428)      &            +3.0_JPRB*TINY(ZRES)))
+(  429) 
+(  430) !--- update the last element of the local array
+(  431) 
+(  432)   ZP(MAX(IN,1_JPIM)) = ZPSUMS(MPL_MYRANK())
+(  433) 
+(  434) !--- exit if the global error is small enough
+(  435) 
+(  436)   IF (ZERR<4.0_JPRB*SPACING(ZRES)) EXIT K_LOOP
+(  437) 
+(  438) !--- Take appropriate action if ZRES cannot be sufficiently refined.
+(  439) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 9
+
+(  440)   IF (ZERR >= ZOLDERR) THEN
+(  441)     INMSG=INMSG+1
+(  442) 
+(  443)     IF (INMSG<=100) THEN
+(  444)       CALL MPL_MESSAGE ( &
+(  445)           & CDMESSAGE= 'ORDER_INDEP_GLOBAL_SUM: FALIED TO REFINE SUM', &
+(  446)           & CDSTRING='ORDER_INDEP_GLOBAL_SUM')
+(  447)       CALL MPL_MESSAGE ( &
+(  448)           & CDMESSAGE='WARNING: POSSIBLITY OF NON-REPRODUCIBLE RESULTS',&
+(  449)           & CDSTRING='ORDER_INDEP_GLOBAL_SUM')
+(  450)     ENDIF
+(  451) 
+(  452)     IF (INMSG==100) THEN
+(  453)       CALL MPL_MESSAGE ( &
+(  454)           & CDMESSAGE='ORDER_INDEP_GLOBAL_SUM: INMSG>100. OUTPUT SUPPRESSED',&
+(  455)           & CDSTRING='ORDER_INDEP_GLOBAL_SUM')
+(  456)     ENDIF
+(  457) 
+(  458)     IF (LLABORT) THEN
+(  459)       CALL MPL_MESSAGE (CDMESSAGE= &
+(  460)                       & 'ABORT BECAUSE LD_ABORT_IFNOT_REPROD WAS SET', &
+(  461)                       & CDSTRING='ORDER_INDEP_GLOBAL_SUM',LDABORT=.TRUE.)
+(  462)     ENDIF
+(  463)   ENDIF
+(  464) 
+(  465)   ZOLDERR = ZERR
+(  466) 
+(  467) ENDDO K_LOOP
+(  468) 
+(  469) !--- At this stage, we have guaranteed that ZRES less than 4*EPS
+(  470) !--- away from the exact sum. There are only four floating point
+(  471) !--- numbers in this range. So, if we find the nearest number that
+(  472) !--- has its last three bits zero, then we have a reproducible result.
+(  473) 
+(  474) ORDER_INDEP_GLOBAL_SUM = ROUND (ZRES)
+(  475) 
+(  476) DEALLOCATE (IRECVCOUNTS)
+(  477) DEALLOCATE (ZPCORS)
+(  478) DEALLOCATE (ZPERRS)
+(  479) DEALLOCATE (ZPSUMS)
+(  480) DEALLOCATE (ZBUFFG)
+(  481) DEALLOCATE (ZP)
+(  482) 
+(  483) IF (LHOOK) CALL DR_HOOK ('ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_GLOBAL_SUM', &
+(  484)                       &  1,ZHOOK_HANDLE)
+(  485) 
+(  486) END FUNCTION ORDER_INDEP_GLOBAL_SUM
+(  487) 
+(  488) SUBROUTINE ORDER_INDEP_GLOBAL_SUM2 (PIN,POUT,KNVEC,KDIM,KNL,LD_ABORT_IFNOT_REPROD,LD_OPENMP)
+(  489) 
+(  490) !-----------------------------------------------------------------
+(  491) !
+(  492) !  This is a vector version of ORDER_INDEP_GLOBAL_SUM, which 
+(  493) !  returns a vector of accurate global sums of the elements of matrix
+(  494) !  PIN along dimension KDIM. The  sum is bit-reproducible for any
+(  495) !  distribution of PIN over  threads and tasks, and is independent of
+(  496) !  the ordering of the elements of PIN.
+(  497) !
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 10
+
+(  498) !  NB: PIN is unmodified on return
+(  499) !
+(  500) ! Arguments:
+(  501) ! ----------
+(  502) !
+(  503) ! Required:
+(  504) !
+(  505) !   PIN                  - INTENT(IN)  - The array to be summed.
+(  506) !
+(  507) !   POUT                 - INTENT(OUT) - The vector with sums
+(  508) !
+(  509) !   KDIM                 - INTENT(IN)  - The dimension to sum along.
+(  510) !
+(  511) !   KNL                  - INTENT(IN)  - Local lengths of vectors.
+(  512) !                 
+(  513) !
+(  514) ! Optional:
+(  515) !
+(  516) !   LD_ABORT_IFNOT_REPROD - INTENT(IN) - Defines behaviour in case
+(  517) !                                        a reproducible result cannot
+(  518) !                                        be guaranteed.
+(  519) !
+(  520) !   LD_OPENMP            - INTENT(IN)  - Use OpenMP parallelization.
+(  521) !              
+(  522) !
+(  523) ! Algorithm:
+(  524) ! ----------
+(  525) !
+(  526) !  The algorithm is based on Ogita et al. (2005) SIAM J. Sci. Computing,
+(  527) !  Vol.26, No.6, pp1955-1988. This is based in turn on an algorithm
+(  528) !  by Knuth (1969, seminumerical algorithms).
+(  529) !
+(  530) !  This version adds a second layer of parallelism on top of that
+(  531) !  provided by COMPENSATED_SUM_OMP. It iterates the compensated 
+(  532) !  summation until the result is guaranteed to be within 4*eps
+(  533) !  of the true sum. It then rounds the result to the nearest
+(  534) !  floating-point number whose last three bits are zero, thereby
+(  535) !  guaranteeing an order-independent result.
+(  536) !
+(  537) !  Author: Tomas Wilhelmsson ECMWF 2010/03/30
+(  538) !
+(  539) !-----------------------------------------------------------------
+(  540) 
+(  541) IMPLICIT NONE
+(  542) 
+(  543) INTEGER(KIND=JPIM),           INTENT(IN)  :: KNVEC
+(  544) REAL(KIND=JPRB),              INTENT(IN)  :: PIN(:,:)
+(  545) REAL(KIND=JPRB),              INTENT(OUT) :: POUT(KNVEC)
+(  546) INTEGER(KIND=JPIM),           INTENT(IN)  :: KDIM
+(  547) INTEGER(KIND=JPIM),           INTENT(IN)  :: KNL(KNVEC)
+(  548) LOGICAL,            OPTIONAL, INTENT(IN)  :: LD_ABORT_IFNOT_REPROD, LD_OPENMP
+(  549) 
+(  550) INTEGER(KIND=JPIM) :: J,JL,JP,IBUFLEN,INVEC,INPROC,ING(KNVEC)
+(  551) REAL(KIND=JPRB), DIMENSION(KNVEC) :: ZCORR,ZERR,ZOLDERR,ZBETA,ZRES
+(  552) REAL(KIND=JPRB), ALLOCATABLE :: ZPSUMS(:,:),ZPERRS(:,:),ZPCORS(:,:), &
+(  553)                               & ZBUFFL(:),ZBUFFG(:),ZP(:,:)
+(  554) INTEGER(KIND=JPIM), ALLOCATABLE :: IRECVCOUNTS(:)
+(  555) LOGICAL :: LLABORT, LL_OPENMP, LLDONE(KNVEC)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 11
+
+(  556) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  557) 
+(  558) INTEGER(KIND=JPIM), SAVE :: INMSG=0
+(  559) 
+(  560) INTEGER(KIND=JPIM), EXTERNAL :: N_PRECISION
+(  561) 
+(  562) IF (LHOOK) CALL DR_HOOK ('ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_GLOBAL_SUM2', &
+(  563)                       &  0,ZHOOK_HANDLE)
+(  564) 
+(  565) IF (KDIM<1 .OR. KDIM>2) THEN
+(  566)   CALL MPL_MESSAGE (CDMESSAGE='Invalid KDIM value', &
+(  567)                   & CDSTRING='ORDER_INDEP_GLOBAL_SUM2',LDABORT=.TRUE.)
+(  568) ENDIF
+(  569) 
+(  570) INPROC = MPL_NPROC()
+(  571) 
+(  572) IF (PRESENT(LD_ABORT_IFNOT_REPROD)) THEN
+(  573)   LLABORT = LD_ABORT_IFNOT_REPROD
+(  574) ELSE
+(  575)   LLABORT = .TRUE.
+(  576) ENDIF
+(  577) 
+(  578) IF (PRESENT(LD_OPENMP)) THEN
+(  579)   LL_OPENMP = LD_OPENMP
+(  580) ELSE
+(  581)   LL_OPENMP = .TRUE.
+(  582) ENDIF
+(  583) 
+(  584) !--- global lengths of vectors (needed for error bound calculation)
+(  585) 
+(  586) ING(:) = KNL(:)
+(  587) IF (INPROC>1) THEN
+(  588)   CALL MPL_ALLREDUCE (ING,'SUM',CDSTRING='ORDER_INDEP_GLOBAL_SUM2')
+(  589) ENDIF
+(  590) 
+(  591) IF (ANY(REAL(2*ING(:),JPRB)*EPSILON(ZRES) >= 1.0)) THEN
+(  592)   CALL MPL_MESSAGE (CDMESSAGE='n is too large to guarantee error bounds', &
+(  593)                   & CDSTRING='ORDER_INDEP_GLOBAL_SUM2',LDABORT=.TRUE.)
+(  594) ENDIF
+(  595) 
+(  596) IBUFLEN=3
+(  597) 
+(  598) ALLOCATE (ZP(MAX(MAXVAL(KNL),1_JPIM),KNVEC))
+(  599) ALLOCATE (ZBUFFL(IBUFLEN*KNVEC))
+(  600) ALLOCATE (ZBUFFG(INPROC*IBUFLEN*KNVEC))
+(  601) ALLOCATE (ZPSUMS(INPROC,KNVEC))
+(  602) ALLOCATE (ZPERRS(INPROC,KNVEC))
+(  603) ALLOCATE (ZPCORS(INPROC,KNVEC))
+(  604) ALLOCATE (IRECVCOUNTS(INPROC))
+(  605) 
+(  606) ZOLDERR(:) = HUGE(ZERR)
+(  607) LLDONE(:)  = .FALSE. 
+(  608) 
+(  609) !--- Copy the input array. This avoids some tricky indexing, at the
+(  610) !--- expense of some inefficency.
+(  611) 
+(  612) 
+(  613) DO J=1,KNVEC
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 12
+
+(  614)   IF (KNL(J)>0) THEN
+(  615)     IF (KDIM==1) ZP(1:KNL(J),J) = PIN(1:KNL(J),J) 
+(  616)     IF (KDIM==2) ZP(1:KNL(J),J) = PIN(J,1:KNL(J)) 
+(  617)   ELSE
+(  618)     ZP(1,J) = 0.0_JPRB
+(  619)   ENDIF
+(  620) ENDDO
+(  621)   
+(  622) K_LOOP: DO
+(  623) 
+(  624) !--- transform local arrays
+(  625) 
+(  626)   JL=0
+(  627)   DO J=1,KNVEC
+(  628)     IF (KNL(J)>0 .AND. .NOT. LLDONE(J)) THEN
+(  629)       IF (LL_OPENMP) THEN
+(  630)         CALL COMPENSATED_SUM_OMP (ZP(:,J),KNL(J),ZCORR(J),ZERR(J))
+(  631)       ELSE
+(  632)         CALL COMPENSATED_SUM     (ZP(:,J),KNL(J),ZCORR(J),ZERR(J))
+(  633)       ENDIF
+(  634)     ENDIF
+(  635) 
+(  636) !--- gather partial sums and error bounds to all processors
+(  637) 
+(  638)     ZBUFFL(JL+1) = ZP(MAX(KNL(J),1_JPIM),J)
+(  639) 
+(  640)     IF (KNL(J)>0) THEN
+(  641)       ZBUFFL(JL+2) = ZERR(J)
+(  642)       ZBUFFL(JL+3) = ZCORR(J)
+(  643)     ELSE
+(  644)       ZBUFFL(JL+2) = 0.0_JPRB
+(  645)       ZBUFFL(JL+3) = 0.0_JPRB
+(  646)     ENDIF
+(  647)     JL = JL + IBUFLEN
+(  648)   ENDDO
+(  649) 
+(  650)   IF (INPROC>1) THEN
+(  651) !-- could use MPL_ALLGATHER here, if it existed!
+(  652) 
+(  653)     IRECVCOUNTS(:) = SIZE(ZBUFFL)
+(  654) 
+(  655)     CALL MPL_ALLGATHERV (ZBUFFL,ZBUFFG,IRECVCOUNTS, &
+(  656)                        & CDSTRING='ORDER_INDEP_GLOBAL_SUM2')
+(  657) 
+(  658)     DO JP=1,INPROC
+(  659)       JL = 0
+(  660)       DO J = 1,KNVEC
+(  661)         ZPSUMS(JP,J) = ZBUFFG(JL+1+(JP-1)*SIZE(ZBUFFL))
+(  662)         ZPERRS(JP,J) = ZBUFFG(JL+2+(JP-1)*SIZE(ZBUFFL))
+(  663)         ZPCORS(JP,J) = ZBUFFG(JL+3+(JP-1)*SIZE(ZBUFFL))
+(  664)         JL = JL + IBUFLEN
+(  665)       ENDDO
+(  666)     ENDDO
+(  667)   ELSE
+(  668)     JL = 0
+(  669)     DO J = 1,KNVEC
+(  670)       ZPSUMS(1,J) = ZBUFFL(JL+1)
+(  671)       ZPERRS(1,J) = ZBUFFL(JL+2)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 13
+
+(  672)       ZPCORS(1,J) = ZBUFFL(JL+3)
+(  673)     ENDDO
+(  674)   ENDIF
+(  675) 
+(  676) !--- transform partial sums
+(  677) 
+(  678)   DO J = 1,KNVEC
+(  679)     IF (LLDONE(J)) CYCLE
+(  680) 
+(  681)     CALL COMPENSATED_SUM (ZPSUMS(:,J),INPROC,ZCORR(J),ZERR(J))
+(  682)     ZERR(J)  = ZERR(J)  + SUM(ZPERRS(:,J))
+(  683)     ZCORR(J) = ZCORR(J) + SUM(ZPCORS(:,J))
+(  684)     
+(  685) !--- Calculate final result
+(  686) 
+(  687)     ZRES(J) = ZPSUMS(INPROC,J) + ZCORR(J)
+(  688) 
+(  689) !--- Calculate error bound. This is corollary 4.7 from Ogita et al. (2005)
+(  690) 
+(  691)     ZBETA(J) = ZERR(J)*(REAL(2*ING(J),JPRB)*EPSILON(ZRES(J))) &
+(  692)        & /(1.0_JPRB - REAL(2*ING(J),JPRB)*EPSILON(ZRES(J)))
+(  693) 
+(  694)     ZERR(J) = EPSILON(ZRES(J))*ABS(ZRES(J)) &
+(  695)      & +(ZBETA(J) + ( 2.0_JPRB*EPSILON(ZRES(J))*EPSILON(ZRES(J))*ABS(ZRES(J)) &
+(  696)      &            +3.0_JPRB*TINY(ZRES(J))))
+(  697) 
+(  698) !--- update the last element of the local array
+(  699) 
+(  700)     ZP(MAX(KNL(J),1_JPIM),J) = ZPSUMS(MPL_MYRANK(),J)
+(  701)   ENDDO
+(  702) 
+(  703) !--- exit if the global error is small enough
+(  704) 
+(  705)   LLDONE(:) = (ZERR(:)<4.0_JPRB*SPACING(ZRES(:))) .OR. LLDONE(:)
+(  706) 
+(  707)   IF (ALL(LLDONE(:))) EXIT K_LOOP
+(  708) 
+(  709) !--- Take appropriate action if ZRES cannot be sufficiently refined.
+(  710) 
+(  711)   DO J = 1,KNVEC
+(  712)     IF (ZERR(J) >= ZOLDERR(J) .AND. .NOT. LLDONE(J)) THEN
+(  713)       INMSG=INMSG+1
+(  714) 
+(  715)       IF (INMSG<=100) THEN
+(  716)         CALL MPL_MESSAGE ( &
+(  717)           & CDMESSAGE= 'ORDER_INDEP_GLOBAL_SUM2: FALIED TO REFINE SUM', &
+(  718)           & CDSTRING='ORDER_INDEP_GLOBAL_SUM2')
+(  719)         CALL MPL_MESSAGE ( &
+(  720)           & CDMESSAGE='WARNING: POSSIBLITY OF NON-REPRODUCIBLE RESULTS',&
+(  721)           & CDSTRING='ORDER_INDEP_GLOBAL_SUM2')
+(  722)       ENDIF
+(  723)       
+(  724)       IF (INMSG==100) THEN
+(  725)         CALL MPL_MESSAGE ( &
+(  726)           & CDMESSAGE='ORDER_INDEP_GLOBAL_SUM2: INMSG>100. OUTPUT SUPPRESSED',&
+(  727)           & CDSTRING='ORDER_INDEP_GLOBAL_SUM2')
+(  728)       ENDIF
+(  729) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 14
+
+(  730)       IF (LLABORT) THEN
+(  731)         CALL MPL_MESSAGE (CDMESSAGE= &
+(  732)           & 'ABORT BECAUSE LD_ABORT_IFNOT_REPROD WAS SET', &
+(  733)           & CDSTRING='ORDER_INDEP_GLOBAL_SUM2',LDABORT=.TRUE.)
+(  734)       ENDIF
+(  735)     ENDIF
+(  736) 
+(  737)     ZOLDERR(J) = ZERR(J)
+(  738)   ENDDO
+(  739) 
+(  740) ENDDO K_LOOP
+(  741) 
+(  742) !--- At this stage, we have guaranteed that ZRES less than 4*EPS
+(  743) !--- away from the exact sum. There are only four floating point
+(  744) !--- numbers in this range. So, if we find the nearest number that
+(  745) !--- has its last three bits zero, then we have a reproducible result.
+(  746) 
+(  747) DO J=1,KNVEC
+(  748)   POUT(J) = ROUND (ZRES(J))
+(  749) ENDDO
+(  750) 
+(  751) DEALLOCATE (IRECVCOUNTS)
+(  752) DEALLOCATE (ZPCORS)
+(  753) DEALLOCATE (ZPERRS)
+(  754) DEALLOCATE (ZPSUMS)
+(  755) DEALLOCATE (ZBUFFG)
+(  756) DEALLOCATE (ZBUFFL)
+(  757) DEALLOCATE (ZP)
+(  758) 
+(  759) IF (LHOOK) CALL DR_HOOK ('ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_GLOBAL_SUM2', &
+(  760)                       &  1,ZHOOK_HANDLE)
+(  761) 
+(  762) END SUBROUTINE ORDER_INDEP_GLOBAL_SUM2
+(  763) 
+(  764) SUBROUTINE ORDER_INDEP_ALLREDUCE (PIN,POUT,LD_ABORT_IFNOT_REPROD,LD_OPENMP)
+(  765) 
+(  766) !-----------------------------------------------------------------
+(  767) !
+(  768) !  Returns in POUT an accurate global sum of the elements of PIN across tasks. 
+(  769) !  This has a similar functionality to MPL_allreduce where an array is supplied
+(  770) !  and we want the individual elements of the array to be summed across tasks.
+(  771) !  This is different to ORDER_INDEP_GLOBAL_SUM where PIN is considered part of
+(  772) !  a global array.
+(  773) !
+(  774) ! Arguments:
+(  775) ! ----------
+(  776) !
+(  777) ! Required:
+(  778) !
+(  779) !   PIN                  - INTENT(IN) - input array to be summed.
+(  780) !   POUT                 - INTENT(OUT) - output array of same size
+(  781) !
+(  782) !
+(  783) ! Optional:
+(  784) !
+(  785) !   LD_ABORT_IFNOT_REPROD - INTENT(IN) - Defines behaviour in case
+(  786) !                                        a reproducible result cannot
+(  787) !                                        be guaranteed.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 15
+
+(  788) !
+(  789) !   LD_OPENMP            - INTENT(IN) - Use OpenMP parallelization.
+(  790) !              
+(  791) !
+(  792) !  Author: George Mozdzynski ECMWF June 2009
+(  793) !
+(  794) !-----------------------------------------------------------------
+(  795) 
+(  796) IMPLICIT NONE
+(  797)   
+(  798) REAL(KIND=JPRB) :: ORDER_INDEP_GLOBAL_SUM
+(  799)   
+(  800) REAL(KIND=JPRB),             INTENT(IN) :: PIN(:)
+(  801) REAL(KIND=JPRB),             INTENT(OUT):: POUT(:)
+(  802) LOGICAL,           OPTIONAL, INTENT(IN) :: LD_ABORT_IFNOT_REPROD, LD_OPENMP
+(  803) 
+(  804) INTEGER(KIND=JPIM) :: INPROC,MYPROC,IN,ITAG,I,J,IR
+(  805) INTEGER(KIND=JPIM), ALLOCATABLE :: ICOUNT(:),IND(:),IREQ(:)
+(  806) REAL(KIND=JPRB), ALLOCATABLE :: ZBUFF(:),ZIN(:),ZOUT(:)
+(  807) 
+(  808) LOGICAL :: LLABORT, LL_OPENMP
+(  809) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  810) 
+(  811) IF (LHOOK) CALL DR_HOOK ('ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_ALLREDUCE', &
+(  812)                       &  0,ZHOOK_HANDLE) 
+(  813) 
+(  814) INPROC = MPL_NPROC()
+(  815) 
+(  816) IF (PRESENT(LD_ABORT_IFNOT_REPROD)) THEN
+(  817)   LLABORT = LD_ABORT_IFNOT_REPROD
+(  818) ELSE
+(  819)   LLABORT = .TRUE.
+(  820) ENDIF
+(  821) 
+(  822) IF (PRESENT(LD_OPENMP)) THEN
+(  823)   LL_OPENMP = LD_OPENMP
+(  824) ELSE
+(  825)   LL_OPENMP = .TRUE.
+(  826) ENDIF
+(  827) 
+(  828) IF( SIZE(PIN) /= SIZE(POUT) )THEN
+(  829)   CALL MPL_MESSAGE (CDMESSAGE='SIZE(PIN) /= SIZE(POUT)', &
+(  830)                   & CDSTRING='ORDER_INDEP_ALLREDUCE',LDABORT=.TRUE.)
+(  831) ENDIF
+(  832) 
+(  833) IN = SIZE(PIN)
+(  834) 
+(  835) IF (INPROC==1) THEN
+(  836)   POUT(:)=PIN(:)
+(  837) ELSE
+(  838)   ITAG=1234
+(  839)   ALLOCATE(ICOUNT(INPROC))
+(  840)   ICOUNT(:) = 0
+(  841) 
+(  842) ! Determine distribution of input array over tasks
+(  843) 
+(  844)   DO J=1,IN
+(  845)     I=MOD(J-1,INPROC)+1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 16
+
+(  846)     ICOUNT(I)=ICOUNT(I)+1
+(  847)   ENDDO
+(  848)   ALLOCATE(IND(INPROC))
+(  849)   IND(:)=0
+(  850)   IND(1)=1
+(  851)   DO J=2,INPROC
+(  852)     IND(J)=IND(J-1)+ICOUNT(J-1)
+(  853)   ENDDO
+(  854)   MYPROC = MPL_MYRANK()
+(  855)   ALLOCATE(ZBUFF(ICOUNT(MYPROC)*INPROC))
+(  856)   ALLOCATE(IREQ(2*INPROC))
+(  857)   ALLOCATE(ZIN(INPROC))
+(  858) 
+(  859) ! Distribute input array over tasks
+(  860) 
+(  861)   IR=0
+(  862)   IF(ICOUNT(MYPROC) /= 0)THEN
+(  863)     DO J=1,INPROC
+(  864)       IR=IR+1
+(  865)       CALL MPL_RECV (ZBUFF((J-1)*ICOUNT(MYPROC)+1:J*ICOUNT(MYPROC)),&
+(  866)                     &KSOURCE=J,&
+(  867)                     &KTAG=ITAG,&
+(  868)                     &KMP_TYPE=JP_NON_BLOCKING_STANDARD,&
+(  869)                     &KREQUEST=IREQ(IR),&
+(  870)                     &CDSTRING='ORDER_INDEP_ALLREDUCE')
+(  871)     ENDDO
+(  872)   ENDIF
+(  873)   DO J=1,INPROC
+(  874)     IF(ICOUNT(J) /= 0)THEN
+(  875)       IR=IR+1
+(  876)       CALL MPL_SEND(PIN(IND(J):IND(J)+ICOUNT(J)-1),&
+(  877)                    &KDEST=J,&
+(  878)                    &KTAG=ITAG,&
+(  879)                    &KMP_TYPE=JP_NON_BLOCKING_STANDARD,&
+(  880)                    &KREQUEST=IREQ(IR),&
+(  881)                    &CDSTRING='ORDER_INDEP_ALLREDUCE')
+(  882)     ENDIF
+(  883)   ENDDO
+(  884)   IF(IR > 0)THEN
+(  885)     CALL MPL_WAIT(KREQUEST=IREQ(1:IR),&
+(  886)                  &CDSTRING='ORDER_INDEP_ALLREDUCE')
+(  887)   ENDIF
+(  888) 
+(  889) ! Perform local order independent sums for myproc's part of input array
+(  890) 
+(  891)   ALLOCATE(ZOUT(IN))
+(  892)   DO J=1,ICOUNT(MYPROC)
+(  893)     DO I=1,INPROC
+(  894)       ZIN(I)=ZBUFF((I-1)*ICOUNT(MYPROC)+J)
+(  895)     ENDDO
+(  896)     ZOUT(J)=ORDER_INDEP_LOCAL_SUM(ZIN,LLABORT,LL_OPENMP)
+(  897)   ENDDO
+(  898) 
+(  899) ! Gather results of order independent sums over tasks
+(  900) 
+(  901)   CALL MPL_ALLGATHERV (ZOUT(1:ICOUNT(MYPROC)),POUT,ICOUNT, &
+(  902)                      & CDSTRING='ORDER_INDEP_ALLREDUCE')
+(  903) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 17
+
+(  904)   DEALLOCATE (ICOUNT)
+(  905)   DEALLOCATE (IND)
+(  906)   DEALLOCATE (IREQ)
+(  907)   DEALLOCATE (ZBUFF)
+(  908)   DEALLOCATE (ZIN)
+(  909)   DEALLOCATE (ZOUT)
+(  910) 
+(  911) ENDIF
+(  912) 
+(  913) IF (LHOOK) CALL DR_HOOK ('ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_ALLREDUCE', &
+(  914)                       &  1,ZHOOK_HANDLE)
+(  915) 
+(  916) END SUBROUTINE ORDER_INDEP_ALLREDUCE
+(  917) 
+(  918) FUNCTION ORDER_INDEP_DOT_PRODUCT (P1,P2,PW,KNG,LD_ABORT_IFNOT_REPROD, &
+(  919)                                 & LD_OPENMP)
+(  920) 
+(  921) !-----------------------------------------------------------------
+(  922) !
+(  923) !  Returns an accurate global sum of the elements of P1*P2, or
+(  924) !  P1*P2*PW. The result is identical to the result that would be
+(  925) !  obtained by the following:
+(  926) !
+(  927) !  IF (PRESENT(PW)) THEN
+(  928) !    PTEMP(:) = P1(:)*P2(:)*PW(:)
+(  929) !  ELSE
+(  930) !    PTEMP(:) = P1(:)*P2(:)
+(  931) !  ENDIF
+(  932) !  CALL ORDER_INDEP_GLOBAL_SUM (PTEMP,KNG,LD_ABORT_IFNOT_REPROD, &
+(  933) !                              & LD_OPENMP)
+(  934) !
+(  935) !   This routine is provided only because the above is not very
+(  936) !   cache-friendly.
+(  937) !
+(  938) !  NB: P1, P2 and PW are unmodified on return
+(  939) !
+(  940) ! Arguments:
+(  941) ! ----------
+(  942) !
+(  943) ! Required:
+(  944) !
+(  945) !   P1,P2                - INTENT(IN) - Arrays whose inner product is
+(  946) !                                       to be calculated
+(  947) !
+(  948) !
+(  949) ! Optional:
+(  950) !
+(  951) !   PW                   - INTENT(IN) - Weight array defining the
+(  952) !                                       metric for the inner product.
+(  953) !
+(  954) !   KNG                  - INTENT(IN) - Global length of array.
+(  955) !                 
+(  956) !   LD_ABORT_IFNOT_REPRO - INTENT(IN) - Defines behaviour in case
+(  957) !                                       a reproducible result cannot
+(  958) !                                       be guaranteed.
+(  959) !
+(  960) !   LD_OPENMP            - INTENT(IN) - Use OpenMP parallelization.
+(  961) !              
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 18
+
+(  962) !
+(  963) ! Algorithm:
+(  964) ! ----------
+(  965) !
+(  966) !  The algorithm is based on Ogita et al. (2005) SIAM J. Sci. Computing,
+(  967) !  Vol.26, No.6, pp1955-1988. This is based in turn on an algorithm
+(  968) !  by Knuth (1969, seminumerical algorithms).
+(  969) !
+(  970) !  This version adds a second layer of parallelism on top of that
+(  971) !  provided by COMPENSATED_SUM_OMP. It iterates the compensated 
+(  972) !  summation until the result is guaranteed to be within 4*eps
+(  973) !  of the true sum. It then rounds the result to the nearest
+(  974) !  floating-point number whose last three bits are zero, thereby
+(  975) !  guaranteeing an order-independent result.
+(  976) !
+(  977) !  Author: Mike Fisher ECMWF 2006/02/08
+(  978) !
+(  979) !-----------------------------------------------------------------
+(  980) 
+(  981) IMPLICIT NONE
+(  982) 
+(  983) REAL(KIND=JPRB) :: ORDER_INDEP_DOT_PRODUCT
+(  984) 
+(  985) REAL(KIND=JPRB),             INTENT(IN) :: P1(:), P2(:)
+(  986) REAL(KIND=JPRB),   OPTIONAL, INTENT(IN) :: PW(:)
+(  987) INTEGER(KIND=JPIM),OPTIONAL, INTENT(IN) :: KNG
+(  988) LOGICAL,           OPTIONAL, INTENT(IN) :: LD_ABORT_IFNOT_REPROD, LD_OPENMP
+(  989) 
+(  990) INTEGER(KIND=JPIM) :: J,IN,ING,INPROC
+(  991) REAL(KIND=JPRB) :: ZCORR,ZERR,ZOLDERR,ZBUFFL(3),ZBETA,ZRES
+(  992) REAL(KIND=JPRB), ALLOCATABLE :: ZPSUMS(:),ZPERRS(:),ZPCORS(:), &
+(  993)                               & ZBUFFG(:),ZP(:)
+(  994) INTEGER(KIND=JPIM), ALLOCATABLE :: IRECVCOUNTS(:)
+(  995) LOGICAL :: LLABORT, LL_OPENMP, LL_FIRST_ITER
+(  996) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  997) 
+(  998) INTEGER(KIND=JPIM), SAVE :: INMSG=0
+(  999) 
+( 1000) INTEGER(KIND=JPIM), EXTERNAL :: N_PRECISION
+( 1001) 
+( 1002) IF (LHOOK) CALL DR_HOOK ( &
+( 1003)               &'ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_DOT_PRODUCT', &
+( 1004)               &  0,ZHOOK_HANDLE)
+( 1005) 
+( 1006) INPROC = MPL_NPROC()
+( 1007) 
+( 1008) IF (PRESENT(LD_ABORT_IFNOT_REPROD)) THEN
+( 1009)   LLABORT = LD_ABORT_IFNOT_REPROD
+( 1010) ELSE
+( 1011)   LLABORT = .TRUE.
+( 1012) ENDIF
+( 1013) 
+( 1014) IF (PRESENT(LD_OPENMP)) THEN
+( 1015)   LL_OPENMP = LD_OPENMP
+( 1016) ELSE
+( 1017)   LL_OPENMP = .TRUE.
+( 1018) ENDIF
+( 1019) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 19
+
+( 1020) IN = SIZE(P1)
+( 1021) 
+( 1022) IF (SIZE(P2)/=IN) THEN
+( 1023)   CALL MPL_MESSAGE (CDMESSAGE='SIZE(P2)/=SIZE(P1)', &
+( 1024)                   & CDSTRING='ORDER_INDEP_DOT_PRODUCT',LDABORT=.TRUE.)
+( 1025) ENDIF
+( 1026) 
+( 1027) IF (PRESENT(PW)) THEN
+( 1028)   IF (SIZE(PW)/=IN) THEN
+( 1029)     CALL MPL_MESSAGE (CDMESSAGE='SIZE(PW)/=SIZE(P1)', &
+( 1030)                     & CDSTRING='ORDER_INDEP_DOT_PRODUCT',LDABORT=.TRUE.)
+( 1031)   ENDIF
+( 1032) ENDIF
+( 1033) 
+( 1034) !--- global length of vector (needed for error bound calculation)
+( 1035) 
+( 1036) IF (.NOT.PRESENT(KNG)) THEN
+( 1037)   ING = IN
+( 1038)   IF (INPROC>1) THEN
+( 1039)     CALL MPL_ALLREDUCE (ING,'SUM',CDSTRING='ORDER_INDEP_DOT_PRODUCT')
+( 1040)   ENDIF
+( 1041) ELSE
+( 1042)   ING = KNG
+( 1043)   IF (KNG<IN) THEN
+( 1044)     CALL MPL_MESSAGE (CDMESSAGE='Specified KNG < SIZE(PIN)', &
+( 1045)                     & CDSTRING='ORDER_INDEP_DOT_PRODUCT',LDABORT=.TRUE.)
+( 1046)   ENDIF
+( 1047) ENDIF
+( 1048) 
+( 1049) IF (REAL(2*ING,JPRB)*EPSILON(ZRES) >= 1.0) THEN
+( 1050)   CALL MPL_MESSAGE (CDMESSAGE='n is too large to guarantee error bounds', &
+( 1051)                   & CDSTRING='ORDER_INDEP_DOT_PRODUCT',LDABORT=.TRUE.)
+( 1052) ENDIF
+( 1053) 
+( 1054) ALLOCATE (ZP(MAX(IN,1_JPIM)))
+( 1055) ALLOCATE (ZBUFFG(INPROC*SIZE(ZBUFFL)))
+( 1056) ALLOCATE (ZPSUMS(INPROC))
+( 1057) ALLOCATE (ZPERRS(INPROC))
+( 1058) ALLOCATE (ZPCORS(INPROC))
+( 1059) ALLOCATE (IRECVCOUNTS(INPROC))
+( 1060) 
+( 1061) ZOLDERR = HUGE(ZERR)
+( 1062) 
+( 1063) !--- Copy the input array. This avoids some tricky indexing, at the
+( 1064) !--- expense of some inefficency.
+( 1065) 
+( 1066) IF (IN==0) THEN
+( 1067)   ZP(1) = 0.0_JPRB
+( 1068) ENDIF
+( 1069) 
+( 1070) LL_FIRST_ITER = .TRUE.
+( 1071) 
+( 1072) K_LOOP: DO
+( 1073) 
+( 1074) !--- transform local arrays
+( 1075) 
+( 1076)   IF (IN>0) THEN
+( 1077)     IF (LL_FIRST_ITER) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 20
+
+( 1078)       IF (PRESENT(PW)) THEN
+( 1079)         IF (LL_OPENMP) THEN
+( 1080)           CALL COMPENSATED_DOT_PRODUCT_OMP (P1,P2,PW,ZP,IN,ZCORR,ZERR)
+( 1081)         ELSE
+( 1082)           CALL COMPENSATED_DOT_PRODUCT     (P1,P2,PW,ZP,IN,ZCORR,ZERR)
+( 1083)         ENDIF
+( 1084)       ELSE
+( 1085)         IF (LL_OPENMP) THEN
+( 1086)           CALL COMPENSATED_DOT_PRODUCT_OMP (P1=P1,P2=P2,POUT=ZP, &
+( 1087)                                           & KN=IN,PCORR=ZCORR,PERR=ZERR)
+( 1088)         ELSE
+( 1089)           CALL COMPENSATED_DOT_PRODUCT     (P1=P1,P2=P2,POUT=ZP, &
+( 1090)                                           & KN=IN,PCORR=ZCORR,PERR=ZERR)
+( 1091)         ENDIF
+( 1092)       ENDIF
+( 1093)     ELSE
+( 1094)       IF (LL_OPENMP) THEN
+( 1095)         CALL COMPENSATED_SUM_OMP (ZP,IN,ZCORR,ZERR)
+( 1096)       ELSE
+( 1097)         CALL COMPENSATED_SUM     (ZP,IN,ZCORR,ZERR)
+( 1098)       ENDIF
+( 1099)     ENDIF
+( 1100)   ENDIF
+( 1101) 
+( 1102) !--- gather partial sums and error bounds to all processors
+( 1103) 
+( 1104)   ZBUFFL(1) = ZP(MAX(IN,1_JPIM))
+( 1105) 
+( 1106)   IF (IN>0) THEN
+( 1107)     ZBUFFL(2) = ZERR
+( 1108)     ZBUFFL(3) = ZCORR
+( 1109)   ELSE
+( 1110)     ZBUFFL(2) = 0.0_JPRB
+( 1111)     ZBUFFL(3) = 0.0_JPRB
+( 1112)   ENDIF
+( 1113) 
+( 1114)   IF (INPROC>1) THEN
+( 1115) !-- could use MPL_ALLGATHER here, if it existed!
+( 1116) 
+( 1117)     IRECVCOUNTS(:) = SIZE(ZBUFFL)
+( 1118) 
+( 1119)     CALL MPL_ALLGATHERV (ZBUFFL,ZBUFFG,IRECVCOUNTS, &
+( 1120)                        & CDSTRING='ORDER_INDEP_DOT_PRODUCT')
+( 1121) 
+( 1122)     DO J=1,INPROC
+( 1123)       ZPSUMS(J) = ZBUFFG(1+(J-1)*SIZE(ZBUFFL))
+( 1124)       ZPERRS(J) = ZBUFFG(2+(J-1)*SIZE(ZBUFFL))
+( 1125)       ZPCORS(J) = ZBUFFG(3+(J-1)*SIZE(ZBUFFL))
+( 1126)     ENDDO
+( 1127)   ELSE
+( 1128)     ZPSUMS(1) = ZBUFFL(1)
+( 1129)     ZPERRS(1) = ZBUFFL(2)
+( 1130)     ZPCORS(1) = ZBUFFL(3)
+( 1131)   ENDIF
+( 1132) 
+( 1133) !--- transform partial sums
+( 1134) 
+( 1135)   CALL COMPENSATED_SUM (ZPSUMS,INPROC,ZCORR,ZERR)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 21
+
+( 1136)   ZERR  = ZERR  + SUM(ZPERRS)
+( 1137)   ZCORR = ZCORR + SUM(ZPCORS)
+( 1138) 
+( 1139) !--- Calculate final result
+( 1140) 
+( 1141)   ZRES = ZPSUMS(INPROC) + ZCORR
+( 1142) 
+( 1143) !--- Calculate error bound. This is corollary 4.7 from Ogita et al. (2005)
+( 1144) 
+( 1145)   ZBETA = ZERR*(REAL(2*ING,JPRB)*EPSILON(ZRES)) &
+( 1146)        & /(1.0_JPRB - REAL(2*ING,JPRB)*EPSILON(ZRES))
+( 1147) 
+( 1148)   ZERR = EPSILON(ZRES)*ABS(ZRES) &
+( 1149)      & +(ZBETA + ( 2.0_JPRB*EPSILON(ZRES)*EPSILON(ZRES)*ABS(ZRES) &
+( 1150)      &            +3.0_JPRB*TINY(ZRES)))
+( 1151) 
+( 1152) !--- update the last element of the local array
+( 1153) 
+( 1154)   ZP(MAX(IN,1_JPIM)) = ZPSUMS(MPL_MYRANK())
+( 1155) 
+( 1156) !--- exit if the global error is small enough
+( 1157) 
+( 1158)   IF (ZERR<4.0_JPRB*SPACING(ZRES)) EXIT K_LOOP
+( 1159) 
+( 1160) !--- Take appropriate action if ZRES cannot be sufficiently refined.
+( 1161) 
+( 1162)   IF (ZERR >= ZOLDERR) THEN
+( 1163)     INMSG=INMSG+1
+( 1164) 
+( 1165)     IF (INMSG<=100) THEN
+( 1166)       CALL MPL_MESSAGE ( &
+( 1167)           & CDMESSAGE= 'ORDER_INDEP_DOT_PRODUCT: FALIED TO REFINE SUM', &
+( 1168)           & CDSTRING='ORDER_INDEP_DOT_PRODUCT')
+( 1169)       CALL MPL_MESSAGE ( &
+( 1170)           & CDMESSAGE='WARNING: POSSIBLITY OF NON-REPRODUCIBLE RESULTS',&
+( 1171)           & CDSTRING='ORDER_INDEP_DOT_PRODUCT')
+( 1172)     ENDIF
+( 1173) 
+( 1174)     IF (INMSG==100) THEN
+( 1175)       CALL MPL_MESSAGE ( &
+( 1176)        & CDMESSAGE='ORDER_INDEP_DOT_PRODUCT: INMSG>100. OUTPUT SUPPRESSED',&
+( 1177)        & CDSTRING='ORDER_INDEP_DOT_PRODUCT')
+( 1178)     ENDIF
+( 1179) 
+( 1180)     IF (LLABORT) THEN
+( 1181)       CALL MPL_MESSAGE (CDMESSAGE= &
+( 1182)                       & 'ABORT BECAUSE LD_ABORT_IFNOT_REPROD WAS SET', &
+( 1183)                       & CDSTRING='ORDER_INDEP_DOT_PRODUCT',LDABORT=.TRUE.)
+( 1184)     ENDIF
+( 1185)   ENDIF
+( 1186) 
+( 1187)   ZOLDERR = ZERR
+( 1188) 
+( 1189)   LL_FIRST_ITER = .FALSE.
+( 1190) ENDDO K_LOOP
+( 1191) 
+( 1192) !--- At this stage, we have guaranteed that ZRES less than 4*EPS
+( 1193) !--- away from the exact sum. There are only four floating point
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 22
+
+( 1194) !--- numbers in this range. So, if we find the nearest number that
+( 1195) !--- has its last three bits zero, then we have a reproducible result.
+( 1196) 
+( 1197) ORDER_INDEP_DOT_PRODUCT = ROUND (ZRES)
+( 1198) 
+( 1199) DEALLOCATE (IRECVCOUNTS)
+( 1200) DEALLOCATE (ZPCORS)
+( 1201) DEALLOCATE (ZPERRS)
+( 1202) DEALLOCATE (ZPSUMS)
+( 1203) DEALLOCATE (ZBUFFG)
+( 1204) DEALLOCATE (ZP)
+( 1205) 
+( 1206) IF (LHOOK) CALL DR_HOOK ( &
+( 1207)          &'ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_DOT_PRODUCT', &
+( 1208)          &  1,ZHOOK_HANDLE)
+( 1209) 
+( 1210) END FUNCTION ORDER_INDEP_DOT_PRODUCT
+( 1211) 
+( 1212) FUNCTION ROUND (PRES)
+( 1213) 
+( 1214) !-----------------------------------------------------------------
+( 1215) !
+( 1216) !  Returns the value of PRES rounded to the nearest floating-point
+( 1217) !  number that has its last three bits zero
+( 1218) 
+( 1219) !  The code to do this in Fortran is not nice, because Fortran
+( 1220) !  does not proved access to the binary representation for REALs.
+( 1221) !  Perhaps we should code it in c?
+( 1222) 
+( 1223) !  This works on big-endian and little-endian machines.
+( 1224)  
+( 1225) !  Author: Mike Fisher ECMWF 2006/02/08
+( 1226) !
+( 1227) !-----------------------------------------------------------------
+( 1228) 
+( 1229) IMPLICIT NONE
+( 1230) 
+( 1231) REAL(KIND=JPRB), INTENT(IN) :: PRES
+( 1232) REAL(KIND=JPRB) :: ROUND
+( 1233) 
+( 1234) INTEGER(KIND=JPIM) :: II(2),IEQUIV(8),INTS_PER_REAL,J,I_LOW_WORD
+( 1235) REAL(KIND=JPRB)    :: ZZ(2),ZUP,ZDOWN
+( 1236) 
+( 1237) INTEGER(KIND=JPIM), EXTERNAL :: N_PRECISION
+( 1238) 
+( 1239) 
+( 1240) II(:)=1
+( 1241) ZZ(:)=1.0_JPRB
+( 1242) INTS_PER_REAL=N_PRECISION(ZZ)/N_PRECISION(II)
+( 1243) 
+( 1244) IF (INTS_PER_REAL>SIZE(IEQUIV)) THEN
+( 1245)   CALL MPL_MESSAGE (CDMESSAGE='INTS_PER_REAL>SIZE(IEQUIV)', &
+( 1246)                     & CDSTRING='ORDER_INDEP_GLOBAL_SUM',LDABORT=.TRUE.)
+( 1247) ENDIF
+( 1248) 
+( 1249) !--- Test whether big-endian or little-endian
+( 1250) 
+( 1251) ZUP = -1.0_JPRB
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 23
+
+( 1252) IEQUIV(1:INTS_PER_REAL) = TRANSFER(ZUP,IEQUIV(1:INTS_PER_REAL))
+( 1253) 
+( 1254) IF (IEQUIV(1)==0) THEN
+( 1255)   I_LOW_WORD = 1                ! Little-endian
+( 1256) ELSE
+( 1257)   I_LOW_WORD = INTS_PER_REAL    ! Big-endian
+( 1258) ENDIF
+( 1259) 
+( 1260) !--- Find the nearest number with all 3 lowest-order bits zeroed
+( 1261) 
+( 1262) IEQUIV(1:INTS_PER_REAL) = TRANSFER(PRES,IEQUIV(1:INTS_PER_REAL))
+( 1263) ZUP    = PRES
+( 1264) ZDOWN  = PRES
+( 1265) 
+( 1266) IF (IBITS(IEQUIV(I_LOW_WORD),0,3)/=0) THEN
+( 1267)   DO J=1,4
+( 1268)     ZUP=NEAREST(ZUP,1.0_JPRB)
+( 1269)     IEQUIV(1:INTS_PER_REAL) = TRANSFER(ZUP,IEQUIV(1:INTS_PER_REAL))
+( 1270)     IF (IBITS(IEQUIV(I_LOW_WORD),0,3)==0) EXIT
+( 1271) 
+( 1272)     ZDOWN=NEAREST(ZDOWN,-1.0_JPRB)
+( 1273)     IEQUIV(1:INTS_PER_REAL) = TRANSFER(ZDOWN,IEQUIV(1:INTS_PER_REAL))
+( 1274)     IF (IBITS(IEQUIV(I_LOW_WORD),0,3)==0) EXIT
+( 1275)   ENDDO
+( 1276) 
+( 1277)   IF (IBITS(IEQUIV(I_LOW_WORD),0,3)/=0) THEN
+( 1278)     CALL MPL_MESSAGE (CDMESSAGE='THIS IS NOT POSSIBLE', &
+( 1279)                     & CDSTRING='ORDER_INDEP_GLOBAL_SUM',LDABORT=.TRUE.)
+( 1280)   ENDIF
+( 1281) ENDIF
+( 1282) 
+( 1283) ROUND = TRANSFER(IEQUIV(1:INTS_PER_REAL),PRES)
+( 1284) 
+( 1285) END FUNCTION ROUND
+( 1286) 
+( 1287) END MODULE ORDER_INDEPENDENT_SUMMATION_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 24
+
+(    1) # 1 "order_independent_summation_mod.F90"
+(    1) MODULE ORDER_INDEPENDENT_SUMMATION_MOD
+(    2) # 3 "order_independent_summation_mod.F90"
+(    3) !**** ORDER_INDEPENDENT_SUMMATION_MOD
+(    4) # 5 "order_independent_summation_mod.F90"
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !     Functions to perform global (over all processors) and 
+(    8) !     local (per-processor) order-independent accurate summation
+(    9) !     and order-independent inner products.
+(   10) # 11 "order_independent_summation_mod.F90"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) # 14 "order_independent_summation_mod.F90"
+(   14) !        result = ORDER_INDEP_GLOBAL_SUM (P1)
+(   15) !        result = ORDER_INDEP_LOCAL_SUM (P1)
+(   16) !        result = ORDER_INDEP_DOT_PRODUCT (P1,P2,PW)
+(   17) # 18 "order_independent_summation_mod.F90"
+(   18) !        Input required arguments :
+(   19) !        -------------------------
+(   20) !           P1       -  A 1d array of KIND=JPRB reals
+(   21) !           P2       -  A 1d array of KIND=JPRB reals. Same length as P1.
+(   22) # 23 "order_independent_summation_mod.F90"
+(   23) !        Input optional arguments :
+(   24) !        -------------------------
+(   25) !           PW       -  A 1d array of KIND=JPRB reals. Same length as P1.
+(   26) !                       If specified. ORDER_INDEP_DOT_PRODUCT returns
+(   27) !                       a weighted inner product. PW defines the weights.
+(   28) !                       If not specified, ORDER_INDEP_DOT_PRODUCT returns
+(   29) !                       an unweighted dot product of P and P2.
+(   30) !
+(   31) !           KNG (global sum only) - Global length of input array.
+(   32) !
+(   33) !           LD_ABORT_IFNOT_REPROD - Abort if results are not guaranteed
+(   34) !                                   to be bit-reproducible. (Default=T)
+(   35) !
+(   36) !           LD_OPENMP             - .TRUE. => use openMP (Default is
+(   37) !                                   .TRUE. for global sum, .FALSE. for
+(   38) !                                   local sum.)
+(   39) # 40 "order_independent_summation_mod.F90"
+(   40) !        Output required arguments :
+(   41) !        -------------------------
+(   42) !           none
+(   43) # 44 "order_independent_summation_mod.F90"
+(   44) !     Author.
+(   45) !     -------
+(   46) !        Mike Fisher  ECMWF
+(   47) # 48 "order_independent_summation_mod.F90"
+(   48) !     Modifications.
+(   49) !     --------------
+(   50) !        Original: 2006-20-22
+(   51) # 52 "order_independent_summation_mod.F90"
+(   52) !     ------------------------------------------------------------------
+(   53) # 54 "order_independent_summation_mod.F90"
+(   54) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   55) USE COMPENSATED_SUMMATION_MOD, ONLY : COMPENSATED_SUM, COMPENSATED_SUM_OMP, &
+(   56)                                 & COMPENSATED_DOT_PRODUCT, &
+(   57)                                 & COMPENSATED_DOT_PRODUCT_OMP
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 25
+
+(   58) USE MPL_MODULE, ONLY : MPL_ALLREDUCE, MPL_ALLGATHERV, MPL_MYRANK, MPL_NPROC, &
+(   59)                      & MPL_MESSAGE, MPL_SEND, MPL_RECV, MPL_WAIT, &
+(   60)                      & JP_NON_BLOCKING_STANDARD
+(   61) USE YOMHOOK   , ONLY : LHOOK,   DR_HOOK
+(   62) # 63 "order_independent_summation_mod.F90"
+(   63) SAVE
+(   64) PRIVATE
+(   65) PUBLIC ORDER_INDEP_LOCAL_SUM, &
+(   66)      & ORDER_INDEP_GLOBAL_SUM, &
+(   67)      & ORDER_INDEP_GLOBAL_SUM2, &
+(   68)      & ORDER_INDEP_ALLREDUCE, &
+(   69)      & ORDER_INDEP_DOT_PRODUCT
+(   70) # 71 "order_independent_summation_mod.F90"
+(   71) INTERFACE ORDER_INDEP_LOCAL_SUM
+(   72)   MODULE PROCEDURE ORDER_INDEP_LOCAL_SUM
+(   73) END INTERFACE
+(   74) # 75 "order_independent_summation_mod.F90"
+(   75) INTERFACE ORDER_INDEP_GLOBAL_SUM
+(   76)   MODULE PROCEDURE ORDER_INDEP_GLOBAL_SUM
+(   77) END INTERFACE
+(   78) # 79 "order_independent_summation_mod.F90"
+(   79) INTERFACE ORDER_INDEP_GLOBAL_SUM2
+(   80)   MODULE PROCEDURE ORDER_INDEP_GLOBAL_SUM2
+(   81) END INTERFACE
+(   82) # 83 "order_independent_summation_mod.F90"
+(   83) INTERFACE ORDER_INDEP_ALLREDUCE
+(   84)   MODULE PROCEDURE ORDER_INDEP_ALLREDUCE
+(   85) END INTERFACE
+(   86) # 87 "order_independent_summation_mod.F90"
+(   87) INTERFACE ORDER_INDEP_DOT_PRODUCT
+(   88)   MODULE PROCEDURE ORDER_INDEP_DOT_PRODUCT
+(   89) END INTERFACE
+(   90) # 91 "order_independent_summation_mod.F90"
+(   91) CONTAINS
+(   92) # 93 "order_independent_summation_mod.F90"
+(   93) FUNCTION ORDER_INDEP_LOCAL_SUM (PIN,LD_ABORT_IFNOT_REPROD,LD_OPENMP)
+(   94) # 95 "order_independent_summation_mod.F90"
+(   95) !-----------------------------------------------------------------
+(   96) !  Returns an accurate local (i.e. on a single processor) sum of
+(   97) !  the elements of PIN. The sum is bit-reproducible for any
+(   98) !  ordering of the elements of PIN.
+(   99) !
+(  100) !  NB: PIN is unmodified on return
+(  101) !
+(  102) ! Algorithm:
+(  103) ! ----------
+(  104) !
+(  105) !  The algorithm is based on Ogita et al. (2005) SIAM J. Sci. Computing,
+(  106) !  Vol.26, No.6, pp1955-1988. This is based in turn on an algorithm
+(  107) !  by Knuth (1969, seminumerical algorithms).
+(  108) !
+(  109) !  This version iterates the compensated sum algorithm until the
+(  110) !  result is guaranteed to be within 4*eps of the true sum. It
+(  111) !  then rounds the result to the nearest floating-point number
+(  112) !  whose last three bits are zero, thereby guaranteeing an
+(  113) !  order-independent result.
+(  114) !
+(  115) !  Author: Mike Fisher ECMWF 2006/02/08
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 26
+
+(  116) !
+(  117) !-----------------------------------------------------------------
+(  118) # 119 "order_independent_summation_mod.F90"
+(  119) IMPLICIT NONE
+(  120) # 121 "order_independent_summation_mod.F90"
+(  121) REAL(KIND=JPRB) :: ORDER_INDEP_LOCAL_SUM
+(  122) REAL(KIND=JPRB), INTENT(IN) :: PIN(:)
+(  123) LOGICAL,OPTIONAL,INTENT(IN) :: LD_ABORT_IFNOT_REPROD, LD_OPENMP
+(  124) # 125 "order_independent_summation_mod.F90"
+(  125) INTEGER(KIND=JPIM) :: IN
+(  126) REAL(KIND=JPRB) :: ZCORR,ZERR,ZOLDERR,ZBETA,ZRES
+(  127) REAL(KIND=JPRB), ALLOCATABLE :: ZP(:)
+(  128) LOGICAL :: LLABORT, LL_OPENMP
+(  129) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  130) # 131 "order_independent_summation_mod.F90"
+(  131) INTEGER(KIND=JPIM), SAVE :: INMSG=0
+(  132) # 133 "order_independent_summation_mod.F90"
+(  133) INTEGER(KIND=JPIM), EXTERNAL :: N_PRECISION
+(  134) # 135 "order_independent_summation_mod.F90"
+(  135) IF (LHOOK) CALL DR_HOOK ('ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_LOCAL_SUM', &
+(  136)                       &  0,ZHOOK_HANDLE)
+(  137) # 138 "order_independent_summation_mod.F90"
+(  138) IF (PRESENT(LD_ABORT_IFNOT_REPROD)) THEN
+(  139)   LLABORT = LD_ABORT_IFNOT_REPROD
+(  140) ELSE
+(  141)   LLABORT = .TRUE.
+(  142) ENDIF
+(  143) # 144 "order_independent_summation_mod.F90"
+(  144) IF (PRESENT(LD_OPENMP)) THEN
+(  145)   LL_OPENMP = LD_OPENMP
+(  146) ELSE
+(  147)   LL_OPENMP = .FALSE.
+(  148) ENDIF
+(  149) # 150 "order_independent_summation_mod.F90"
+(  150) IN = SIZE(PIN)
+(  151) # 152 "order_independent_summation_mod.F90"
+(  152) IF (REAL(2*IN,JPRB)*EPSILON(ZRES) >= 1.0) THEN
+(  153)   CALL MPL_MESSAGE (CDMESSAGE='n is too large to guarantee error bounds', &
+(  154)                     & CDSTRING='ORDER_INDEP_LOCAL_SUM',LDABORT=.TRUE.)
+(  155) ENDIF
+(  156) # 157 "order_independent_summation_mod.F90"
+(  157) TEST_ARRAY_LENGTH: IF (IN>0) THEN
+(  158)   ZOLDERR = HUGE(ZERR)
+(  159) # 160 "order_independent_summation_mod.F90"
+(  160) !--- Copy the input array. This avoids some tricky indexing, at the
+(  161) !--- expense of some inefficency.
+(  162) # 163 "order_independent_summation_mod.F90"
+(  163)   ALLOCATE (ZP(IN))
+(  164)   ZP(:) = PIN(:)
+(  165) # 166 "order_independent_summation_mod.F90"
+(  166)   K_LOOP: DO
+(  167) # 168 "order_independent_summation_mod.F90"
+(  168) !--- transform local arrays
+(  169) # 170 "order_independent_summation_mod.F90"
+(  170)     IF (LL_OPENMP) THEN
+(  171)       CALL COMPENSATED_SUM_OMP (ZP,IN,ZCORR,ZERR)
+(  172)     ELSE
+(  173)       CALL COMPENSATED_SUM (ZP,IN,ZCORR,ZERR)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 27
+
+(  174)     ENDIF
+(  175) # 176 "order_independent_summation_mod.F90"
+(  176) !--- Calculate final result
+(  177) # 178 "order_independent_summation_mod.F90"
+(  178)     ZRES = ZP(IN) + ZCORR
+(  179) # 180 "order_independent_summation_mod.F90"
+(  180) !--- Calculate error bound. This is corollary 4.7 from Ogita et al. (2005)
+(  181) # 182 "order_independent_summation_mod.F90"
+(  182)     ZBETA = ZERR*(REAL(2*IN,JPRB)*EPSILON(ZRES)) &
+(  183)          & /(1.0_JPRB - REAL(2*IN,JPRB)*EPSILON(ZRES))
+(  184) # 185 "order_independent_summation_mod.F90"
+(  185)     ZERR = EPSILON(ZRES)*ABS(ZRES) &
+(  186)        & +(ZBETA + ( 2.0_JPRB*EPSILON(ZRES)*EPSILON(ZRES)*ABS(ZRES) &
+(  187)        &            +3.0_JPRB*TINY(ZRES)))
+(  188) # 189 "order_independent_summation_mod.F90"
+(  189) !--- exit if the error is small enough
+(  190) # 191 "order_independent_summation_mod.F90"
+(  191)     IF (ZERR<4.0_JPRB*SPACING(ZRES)) EXIT K_LOOP
+(  192) # 193 "order_independent_summation_mod.F90"
+(  193) !--- Take appropriate action if ZRES cannot be sufficiently refined.
+(  194) # 195 "order_independent_summation_mod.F90"
+(  195)     IF (ZERR >= ZOLDERR) THEN
+(  196)       INMSG=INMSG+1
+(  197) # 198 "order_independent_summation_mod.F90"
+(  198)       IF (INMSG<=100) THEN
+(  199)         CALL MPL_MESSAGE ( &
+(  200)             & CDMESSAGE= 'ORDER_INDEP_LOCAL_SUM: FALIED TO REFINE SUM', &
+(  201)             & CDSTRING='ORDER_INDEP_LOCAL_SUM')
+(  202)         CALL MPL_MESSAGE ( &
+(  203)             & CDMESSAGE='WARNING: POSSIBLITY OF NON-REPRODUCIBLE RESULTS',&
+(  204)             & CDSTRING='ORDER_INDEP_LOCAL_SUM')
+(  205)       ENDIF
+(  206) # 207 "order_independent_summation_mod.F90"
+(  207)       IF (INMSG==100) THEN
+(  208)         CALL MPL_MESSAGE ( &
+(  209)             & CDMESSAGE='ORDER_INDEP_LOCAL_SUM: INMSG>100. OUTPUT SUPPRESSED',&
+(  210)             & CDSTRING='ORDER_INDEP_LOCAL_SUM')
+(  211)       ENDIF
+(  212) # 213 "order_independent_summation_mod.F90"
+(  213)       IF (LLABORT) THEN
+(  214)         CALL MPL_MESSAGE (CDMESSAGE= &
+(  215)                         & 'ABORT BECAUSE LD_ABORT_IFNOT_REPROD WAS SET', &
+(  216)                         & CDSTRING='ORDER_INDEP_LOCAL_SUM',LDABORT=.TRUE.)
+(  217)       ENDIF
+(  218)     ENDIF
+(  219) # 220 "order_independent_summation_mod.F90"
+(  220)     ZOLDERR = ZERR
+(  221) # 222 "order_independent_summation_mod.F90"
+(  222)   ENDDO K_LOOP
+(  223) # 224 "order_independent_summation_mod.F90"
+(  224) !--- At this stage, we have guaranteed that ZRES is less than 4*EPS
+(  225) !--- away from the exact sum. There are only eight floating point
+(  226) !--- numbers in this range. So, if we find the nearest number that
+(  227) !--- has its last three bits zero, then we have a reproducible result.
+(  228) # 229 "order_independent_summation_mod.F90"
+(  229)   ORDER_INDEP_LOCAL_SUM = ROUND (ZRES)
+(  230) # 231 "order_independent_summation_mod.F90"
+(  231)   DEALLOCATE (ZP)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 28
+
+(  232) ELSE TEST_ARRAY_LENGTH
+(  233) # 234 "order_independent_summation_mod.F90"
+(  234)   ORDER_INDEP_LOCAL_SUM = 0.0_JPRB
+(  235) # 236 "order_independent_summation_mod.F90"
+(  236) ENDIF TEST_ARRAY_LENGTH
+(  237) # 238 "order_independent_summation_mod.F90"
+(  238) IF (LHOOK) CALL DR_HOOK ('ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_LOCAL_SUM', &
+(  239)                       &  1,ZHOOK_HANDLE)
+(  240) # 241 "order_independent_summation_mod.F90"
+(  241) END FUNCTION ORDER_INDEP_LOCAL_SUM
+(  242) # 243 "order_independent_summation_mod.F90"
+(  243) FUNCTION ORDER_INDEP_GLOBAL_SUM (PIN,KNG,LD_ABORT_IFNOT_REPROD, LD_OPENMP)
+(  244) # 245 "order_independent_summation_mod.F90"
+(  245) !-----------------------------------------------------------------
+(  246) !
+(  247) !  Returns an accurate global sum of the elements of PIN. The
+(  248) !  sum is bit-reproducible for any distribution of PIN over
+(  249) !  threads and tasks, and is independent of the ordering of the
+(  250) !  elements of PIN.
+(  251) !
+(  252) !  NB: PIN is unmodified on return
+(  253) !
+(  254) ! Arguments:
+(  255) ! ----------
+(  256) !
+(  257) ! Required:
+(  258) !
+(  259) !   PIN                  - INTENT(IN) - The array to be summed.
+(  260) !
+(  261) !
+(  262) ! Optional:
+(  263) !
+(  264) !   KNG                  - INTENT(IN) - Global length of array.
+(  265) !                 
+(  266) !   LD_ABORT_IFNOT_REPROD - INTENT(IN) - Defines behaviour in case
+(  267) !                                        a reproducible result cannot
+(  268) !                                        be guaranteed.
+(  269) !
+(  270) !   LD_OPENMP            - INTENT(IN) - Use OpenMP parallelization.
+(  271) !              
+(  272) !
+(  273) ! Algorithm:
+(  274) ! ----------
+(  275) !
+(  276) !  The algorithm is based on Ogita et al. (2005) SIAM J. Sci. Computing,
+(  277) !  Vol.26, No.6, pp1955-1988. This is based in turn on an algorithm
+(  278) !  by Knuth (1969, seminumerical algorithms).
+(  279) !
+(  280) !  This version adds a second layer of parallelism on top of that
+(  281) !  provided by COMPENSATED_SUM_OMP. It iterates the compensated 
+(  282) !  summation until the result is guaranteed to be within 4*eps
+(  283) !  of the true sum. It then rounds the result to the nearest
+(  284) !  floating-point number whose last three bits are zero, thereby
+(  285) !  guaranteeing an order-independent result.
+(  286) !
+(  287) !  Author: Mike Fisher ECMWF 2006/02/08
+(  288) !
+(  289) !-----------------------------------------------------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 29
+
+(  290) # 291 "order_independent_summation_mod.F90"
+(  291) IMPLICIT NONE
+(  292) # 293 "order_independent_summation_mod.F90"
+(  293) REAL(KIND=JPRB) :: ORDER_INDEP_GLOBAL_SUM
+(  294) # 295 "order_independent_summation_mod.F90"
+(  295) REAL(KIND=JPRB),             INTENT(IN) :: PIN(:)
+(  296) INTEGER(KIND=JPIM),OPTIONAL, INTENT(IN) :: KNG
+(  297) LOGICAL,           OPTIONAL, INTENT(IN) :: LD_ABORT_IFNOT_REPROD, LD_OPENMP
+(  298) # 299 "order_independent_summation_mod.F90"
+(  299) INTEGER(KIND=JPIM) :: J,IN,ING,INPROC
+(  300) REAL(KIND=JPRB) :: ZCORR,ZERR,ZOLDERR,ZBUFFL(3),ZBETA,ZRES
+(  301) REAL(KIND=JPRB), ALLOCATABLE :: ZPSUMS(:),ZPERRS(:),ZPCORS(:), &
+(  302)                               & ZBUFFG(:),ZP(:)
+(  303) INTEGER(KIND=JPIM), ALLOCATABLE :: IRECVCOUNTS(:)
+(  304) LOGICAL :: LLABORT, LL_OPENMP
+(  305) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  306) # 307 "order_independent_summation_mod.F90"
+(  307) INTEGER(KIND=JPIM), SAVE :: INMSG=0
+(  308) # 309 "order_independent_summation_mod.F90"
+(  309) INTEGER(KIND=JPIM), EXTERNAL :: N_PRECISION
+(  310) # 311 "order_independent_summation_mod.F90"
+(  311) IF (LHOOK) CALL DR_HOOK ('ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_GLOBAL_SUM', &
+(  312)                       &  0,ZHOOK_HANDLE)
+(  313) # 314 "order_independent_summation_mod.F90"
+(  314) INPROC = MPL_NPROC()
+(  315) # 316 "order_independent_summation_mod.F90"
+(  316) IF (PRESENT(LD_ABORT_IFNOT_REPROD)) THEN
+(  317)   LLABORT = LD_ABORT_IFNOT_REPROD
+(  318) ELSE
+(  319)   LLABORT = .TRUE.
+(  320) ENDIF
+(  321) # 322 "order_independent_summation_mod.F90"
+(  322) IF (PRESENT(LD_OPENMP)) THEN
+(  323)   LL_OPENMP = LD_OPENMP
+(  324) ELSE
+(  325)   LL_OPENMP = .TRUE.
+(  326) ENDIF
+(  327) # 328 "order_independent_summation_mod.F90"
+(  328) IN = SIZE(PIN)
+(  329) # 330 "order_independent_summation_mod.F90"
+(  330) !--- global length of vector (needed for error bound calculation)
+(  331) # 332 "order_independent_summation_mod.F90"
+(  332) IF (.NOT.PRESENT(KNG)) THEN
+(  333)   ING = IN
+(  334)   IF (INPROC>1) THEN
+(  335)     CALL MPL_ALLREDUCE (ING,'SUM',CDSTRING='ORDER_INDEP_GLOBAL_SUM')
+(  336)   ENDIF
+(  337) ELSE
+(  338)   ING = KNG
+(  339)   IF (KNG<IN) THEN
+(  340)     CALL MPL_MESSAGE (CDMESSAGE='Specified KNG < SIZE(PIN)', &
+(  341)                     & CDSTRING='ORDER_INDEP_GLOBAL_SUM',LDABORT=.TRUE.)
+(  342)   ENDIF
+(  343) ENDIF
+(  344) # 345 "order_independent_summation_mod.F90"
+(  345) IF (REAL(2*ING,JPRB)*EPSILON(ZRES) >= 1.0) THEN
+(  346)   CALL MPL_MESSAGE (CDMESSAGE='n is too large to guarantee error bounds', &
+(  347)                   & CDSTRING='ORDER_INDEP_GLOBAL_SUM',LDABORT=.TRUE.)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 30
+
+(  348) ENDIF
+(  349) # 350 "order_independent_summation_mod.F90"
+(  350) ALLOCATE (ZP(MAX(IN,1_JPIM)))
+(  351) ALLOCATE (ZBUFFG(INPROC*SIZE(ZBUFFL)))
+(  352) ALLOCATE (ZPSUMS(INPROC))
+(  353) ALLOCATE (ZPERRS(INPROC))
+(  354) ALLOCATE (ZPCORS(INPROC))
+(  355) ALLOCATE (IRECVCOUNTS(INPROC))
+(  356) # 357 "order_independent_summation_mod.F90"
+(  357) ZOLDERR = HUGE(ZERR)
+(  358) # 359 "order_independent_summation_mod.F90"
+(  359) !--- Copy the input array. This avoids some tricky indexing, at the
+(  360) !--- expense of some inefficency.
+(  361) # 362 "order_independent_summation_mod.F90"
+(  362) IF (IN>0) THEN
+(  363)   ZP(:) = PIN(:)
+(  364) ELSE
+(  365)   ZP(1) = 0.0_JPRB
+(  366) ENDIF
+(  367) # 368 "order_independent_summation_mod.F90"
+(  368) K_LOOP: DO
+(  369) # 370 "order_independent_summation_mod.F90"
+(  370) !--- transform local arrays
+(  371) # 372 "order_independent_summation_mod.F90"
+(  372)   IF (IN>0) THEN
+(  373)     IF (LL_OPENMP) THEN
+(  374)       CALL COMPENSATED_SUM_OMP (ZP,IN,ZCORR,ZERR)
+(  375)     ELSE
+(  376)       CALL COMPENSATED_SUM (ZP,IN,ZCORR,ZERR)
+(  377)     ENDIF
+(  378)   ENDIF
+(  379) # 380 "order_independent_summation_mod.F90"
+(  380) !--- gather partial sums and error bounds to all processors
+(  381) # 382 "order_independent_summation_mod.F90"
+(  382)   ZBUFFL(1) = ZP(MAX(IN,1_JPIM))
+(  383) # 384 "order_independent_summation_mod.F90"
+(  384)   IF (IN>0) THEN
+(  385)     ZBUFFL(2) = ZERR
+(  386)     ZBUFFL(3) = ZCORR
+(  387)   ELSE
+(  388)     ZBUFFL(2) = 0.0_JPRB
+(  389)     ZBUFFL(3) = 0.0_JPRB
+(  390)   ENDIF
+(  391) # 392 "order_independent_summation_mod.F90"
+(  392)   IF (INPROC>1) THEN
+(  393) !-- could use MPL_ALLGATHER here, if it existed!
+(  394) # 395 "order_independent_summation_mod.F90"
+(  395)     IRECVCOUNTS(:) = SIZE(ZBUFFL)
+(  396) # 397 "order_independent_summation_mod.F90"
+(  397)     CALL MPL_ALLGATHERV (ZBUFFL,ZBUFFG,IRECVCOUNTS, &
+(  398)                        & CDSTRING='ORDER_INDEP_GLOBAL_SUM')
+(  399) # 400 "order_independent_summation_mod.F90"
+(  400)     DO J=1,INPROC
+(  401)       ZPSUMS(J) = ZBUFFG(1+(J-1)*SIZE(ZBUFFL))
+(  402)       ZPERRS(J) = ZBUFFG(2+(J-1)*SIZE(ZBUFFL))
+(  403)       ZPCORS(J) = ZBUFFG(3+(J-1)*SIZE(ZBUFFL))
+(  404)     ENDDO
+(  405)   ELSE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 31
+
+(  406)     ZPSUMS(1) = ZBUFFL(1)
+(  407)     ZPERRS(1) = ZBUFFL(2)
+(  408)     ZPCORS(1) = ZBUFFL(3)
+(  409)   ENDIF
+(  410) # 411 "order_independent_summation_mod.F90"
+(  411) !--- transform partial sums
+(  412) # 413 "order_independent_summation_mod.F90"
+(  413)   CALL COMPENSATED_SUM (ZPSUMS,INPROC,ZCORR,ZERR)
+(  414)   ZERR  = ZERR  + SUM(ZPERRS)
+(  415)   ZCORR = ZCORR + SUM(ZPCORS)
+(  416) # 417 "order_independent_summation_mod.F90"
+(  417) !--- Calculate final result
+(  418) # 419 "order_independent_summation_mod.F90"
+(  419)   ZRES = ZPSUMS(INPROC) + ZCORR
+(  420) # 421 "order_independent_summation_mod.F90"
+(  421) !--- Calculate error bound. This is corollary 4.7 from Ogita et al. (2005)
+(  422) # 423 "order_independent_summation_mod.F90"
+(  423)   ZBETA = ZERR*(REAL(2*ING,JPRB)*EPSILON(ZRES)) &
+(  424)        & /(1.0_JPRB - REAL(2*ING,JPRB)*EPSILON(ZRES))
+(  425) # 426 "order_independent_summation_mod.F90"
+(  426)   ZERR = EPSILON(ZRES)*ABS(ZRES) &
+(  427)      & +(ZBETA + ( 2.0_JPRB*EPSILON(ZRES)*EPSILON(ZRES)*ABS(ZRES) &
+(  428)      &            +3.0_JPRB*TINY(ZRES)))
+(  429) # 430 "order_independent_summation_mod.F90"
+(  430) !--- update the last element of the local array
+(  431) # 432 "order_independent_summation_mod.F90"
+(  432)   ZP(MAX(IN,1_JPIM)) = ZPSUMS(MPL_MYRANK())
+(  433) # 434 "order_independent_summation_mod.F90"
+(  434) !--- exit if the global error is small enough
+(  435) # 436 "order_independent_summation_mod.F90"
+(  436)   IF (ZERR<4.0_JPRB*SPACING(ZRES)) EXIT K_LOOP
+(  437) # 438 "order_independent_summation_mod.F90"
+(  438) !--- Take appropriate action if ZRES cannot be sufficiently refined.
+(  439) # 440 "order_independent_summation_mod.F90"
+(  440)   IF (ZERR >= ZOLDERR) THEN
+(  441)     INMSG=INMSG+1
+(  442) # 443 "order_independent_summation_mod.F90"
+(  443)     IF (INMSG<=100) THEN
+(  444)       CALL MPL_MESSAGE ( &
+(  445)           & CDMESSAGE= 'ORDER_INDEP_GLOBAL_SUM: FALIED TO REFINE SUM', &
+(  446)           & CDSTRING='ORDER_INDEP_GLOBAL_SUM')
+(  447)       CALL MPL_MESSAGE ( &
+(  448)           & CDMESSAGE='WARNING: POSSIBLITY OF NON-REPRODUCIBLE RESULTS',&
+(  449)           & CDSTRING='ORDER_INDEP_GLOBAL_SUM')
+(  450)     ENDIF
+(  451) # 452 "order_independent_summation_mod.F90"
+(  452)     IF (INMSG==100) THEN
+(  453)       CALL MPL_MESSAGE ( &
+(  454)           & CDMESSAGE='ORDER_INDEP_GLOBAL_SUM: INMSG>100. OUTPUT SUPPRESSED',&
+(  455)           & CDSTRING='ORDER_INDEP_GLOBAL_SUM')
+(  456)     ENDIF
+(  457) # 458 "order_independent_summation_mod.F90"
+(  458)     IF (LLABORT) THEN
+(  459)       CALL MPL_MESSAGE (CDMESSAGE= &
+(  460)                       & 'ABORT BECAUSE LD_ABORT_IFNOT_REPROD WAS SET', &
+(  461)                       & CDSTRING='ORDER_INDEP_GLOBAL_SUM',LDABORT=.TRUE.)
+(  462)     ENDIF
+(  463)   ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 32
+
+(  464) # 465 "order_independent_summation_mod.F90"
+(  465)   ZOLDERR = ZERR
+(  466) # 467 "order_independent_summation_mod.F90"
+(  467) ENDDO K_LOOP
+(  468) # 469 "order_independent_summation_mod.F90"
+(  469) !--- At this stage, we have guaranteed that ZRES less than 4*EPS
+(  470) !--- away from the exact sum. There are only four floating point
+(  471) !--- numbers in this range. So, if we find the nearest number that
+(  472) !--- has its last three bits zero, then we have a reproducible result.
+(  473) # 474 "order_independent_summation_mod.F90"
+(  474) ORDER_INDEP_GLOBAL_SUM = ROUND (ZRES)
+(  475) # 476 "order_independent_summation_mod.F90"
+(  476) DEALLOCATE (IRECVCOUNTS)
+(  477) DEALLOCATE (ZPCORS)
+(  478) DEALLOCATE (ZPERRS)
+(  479) DEALLOCATE (ZPSUMS)
+(  480) DEALLOCATE (ZBUFFG)
+(  481) DEALLOCATE (ZP)
+(  482) # 483 "order_independent_summation_mod.F90"
+(  483) IF (LHOOK) CALL DR_HOOK ('ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_GLOBAL_SUM', &
+(  484)                       &  1,ZHOOK_HANDLE)
+(  485) # 486 "order_independent_summation_mod.F90"
+(  486) END FUNCTION ORDER_INDEP_GLOBAL_SUM
+(  487) # 488 "order_independent_summation_mod.F90"
+(  488) SUBROUTINE ORDER_INDEP_GLOBAL_SUM2 (PIN,POUT,KNVEC,KDIM,KNL,LD_ABORT_IFNOT_REPROD,LD_OPENMP)
+(  489) # 490 "order_independent_summation_mod.F90"
+(  490) !-----------------------------------------------------------------
+(  491) !
+(  492) !  This is a vector version of ORDER_INDEP_GLOBAL_SUM, which 
+(  493) !  returns a vector of accurate global sums of the elements of matrix
+(  494) !  PIN along dimension KDIM. The  sum is bit-reproducible for any
+(  495) !  distribution of PIN over  threads and tasks, and is independent of
+(  496) !  the ordering of the elements of PIN.
+(  497) !
+(  498) !  NB: PIN is unmodified on return
+(  499) !
+(  500) ! Arguments:
+(  501) ! ----------
+(  502) !
+(  503) ! Required:
+(  504) !
+(  505) !   PIN                  - INTENT(IN)  - The array to be summed.
+(  506) !
+(  507) !   POUT                 - INTENT(OUT) - The vector with sums
+(  508) !
+(  509) !   KDIM                 - INTENT(IN)  - The dimension to sum along.
+(  510) !
+(  511) !   KNL                  - INTENT(IN)  - Local lengths of vectors.
+(  512) !                 
+(  513) !
+(  514) ! Optional:
+(  515) !
+(  516) !   LD_ABORT_IFNOT_REPROD - INTENT(IN) - Defines behaviour in case
+(  517) !                                        a reproducible result cannot
+(  518) !                                        be guaranteed.
+(  519) !
+(  520) !   LD_OPENMP            - INTENT(IN)  - Use OpenMP parallelization.
+(  521) !              
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 33
+
+(  522) !
+(  523) ! Algorithm:
+(  524) ! ----------
+(  525) !
+(  526) !  The algorithm is based on Ogita et al. (2005) SIAM J. Sci. Computing,
+(  527) !  Vol.26, No.6, pp1955-1988. This is based in turn on an algorithm
+(  528) !  by Knuth (1969, seminumerical algorithms).
+(  529) !
+(  530) !  This version adds a second layer of parallelism on top of that
+(  531) !  provided by COMPENSATED_SUM_OMP. It iterates the compensated 
+(  532) !  summation until the result is guaranteed to be within 4*eps
+(  533) !  of the true sum. It then rounds the result to the nearest
+(  534) !  floating-point number whose last three bits are zero, thereby
+(  535) !  guaranteeing an order-independent result.
+(  536) !
+(  537) !  Author: Tomas Wilhelmsson ECMWF 2010/03/30
+(  538) !
+(  539) !-----------------------------------------------------------------
+(  540) # 541 "order_independent_summation_mod.F90"
+(  541) IMPLICIT NONE
+(  542) # 543 "order_independent_summation_mod.F90"
+(  543) INTEGER(KIND=JPIM),           INTENT(IN)  :: KNVEC
+(  544) REAL(KIND=JPRB),              INTENT(IN)  :: PIN(:,:)
+(  545) REAL(KIND=JPRB),              INTENT(OUT) :: POUT(KNVEC)
+(  546) INTEGER(KIND=JPIM),           INTENT(IN)  :: KDIM
+(  547) INTEGER(KIND=JPIM),           INTENT(IN)  :: KNL(KNVEC)
+(  548) LOGICAL,            OPTIONAL, INTENT(IN)  :: LD_ABORT_IFNOT_REPROD, LD_OPENMP
+(  549) # 550 "order_independent_summation_mod.F90"
+(  550) INTEGER(KIND=JPIM) :: J,JL,JP,IBUFLEN,INVEC,INPROC,ING(KNVEC)
+(  551) REAL(KIND=JPRB), DIMENSION(KNVEC) :: ZCORR,ZERR,ZOLDERR,ZBETA,ZRES
+(  552) REAL(KIND=JPRB), ALLOCATABLE :: ZPSUMS(:,:),ZPERRS(:,:),ZPCORS(:,:), &
+(  553)                               & ZBUFFL(:),ZBUFFG(:),ZP(:,:)
+(  554) INTEGER(KIND=JPIM), ALLOCATABLE :: IRECVCOUNTS(:)
+(  555) LOGICAL :: LLABORT, LL_OPENMP, LLDONE(KNVEC)
+(  556) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  557) # 558 "order_independent_summation_mod.F90"
+(  558) INTEGER(KIND=JPIM), SAVE :: INMSG=0
+(  559) # 560 "order_independent_summation_mod.F90"
+(  560) INTEGER(KIND=JPIM), EXTERNAL :: N_PRECISION
+(  561) # 562 "order_independent_summation_mod.F90"
+(  562) IF (LHOOK) CALL DR_HOOK ('ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_GLOBAL_SUM2', &
+(  563)                       &  0,ZHOOK_HANDLE)
+(  564) # 565 "order_independent_summation_mod.F90"
+(  565) IF (KDIM<1 .OR. KDIM>2) THEN
+(  566)   CALL MPL_MESSAGE (CDMESSAGE='Invalid KDIM value', &
+(  567)                   & CDSTRING='ORDER_INDEP_GLOBAL_SUM2',LDABORT=.TRUE.)
+(  568) ENDIF
+(  569) # 570 "order_independent_summation_mod.F90"
+(  570) INPROC = MPL_NPROC()
+(  571) # 572 "order_independent_summation_mod.F90"
+(  572) IF (PRESENT(LD_ABORT_IFNOT_REPROD)) THEN
+(  573)   LLABORT = LD_ABORT_IFNOT_REPROD
+(  574) ELSE
+(  575)   LLABORT = .TRUE.
+(  576) ENDIF
+(  577) # 578 "order_independent_summation_mod.F90"
+(  578) IF (PRESENT(LD_OPENMP)) THEN
+(  579)   LL_OPENMP = LD_OPENMP
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 34
+
+(  580) ELSE
+(  581)   LL_OPENMP = .TRUE.
+(  582) ENDIF
+(  583) # 584 "order_independent_summation_mod.F90"
+(  584) !--- global lengths of vectors (needed for error bound calculation)
+(  585) # 586 "order_independent_summation_mod.F90"
+(  586) ING(:) = KNL(:)
+(  587) IF (INPROC>1) THEN
+(  588)   CALL MPL_ALLREDUCE (ING,'SUM',CDSTRING='ORDER_INDEP_GLOBAL_SUM2')
+(  589) ENDIF
+(  590) # 591 "order_independent_summation_mod.F90"
+(  591) IF (ANY(REAL(2*ING(:),JPRB)*EPSILON(ZRES) >= 1.0)) THEN
+(  592)   CALL MPL_MESSAGE (CDMESSAGE='n is too large to guarantee error bounds', &
+(  593)                   & CDSTRING='ORDER_INDEP_GLOBAL_SUM2',LDABORT=.TRUE.)
+(  594) ENDIF
+(  595) # 596 "order_independent_summation_mod.F90"
+(  596) IBUFLEN=3
+(  597) # 598 "order_independent_summation_mod.F90"
+(  598) ALLOCATE (ZP(MAX(MAXVAL(KNL),1_JPIM),KNVEC))
+(  599) ALLOCATE (ZBUFFL(IBUFLEN*KNVEC))
+(  600) ALLOCATE (ZBUFFG(INPROC*IBUFLEN*KNVEC))
+(  601) ALLOCATE (ZPSUMS(INPROC,KNVEC))
+(  602) ALLOCATE (ZPERRS(INPROC,KNVEC))
+(  603) ALLOCATE (ZPCORS(INPROC,KNVEC))
+(  604) ALLOCATE (IRECVCOUNTS(INPROC))
+(  605) # 606 "order_independent_summation_mod.F90"
+(  606) ZOLDERR(:) = HUGE(ZERR)
+(  607) LLDONE(:)  = .FALSE. 
+(  608) # 609 "order_independent_summation_mod.F90"
+(  609) !--- Copy the input array. This avoids some tricky indexing, at the
+(  610) !--- expense of some inefficency.
+(  611) # 613 "order_independent_summation_mod.F90"
+(  613) DO J=1,KNVEC
+(  614)   IF (KNL(J)>0) THEN
+(  615)     IF (KDIM==1) ZP(1:KNL(J),J) = PIN(1:KNL(J),J) 
+(  616)     IF (KDIM==2) ZP(1:KNL(J),J) = PIN(J,1:KNL(J)) 
+(  617)   ELSE
+(  618)     ZP(1,J) = 0.0_JPRB
+(  619)   ENDIF
+(  620) ENDDO
+(  621)   
+(  622) K_LOOP: DO
+(  623) # 624 "order_independent_summation_mod.F90"
+(  624) !--- transform local arrays
+(  625) # 626 "order_independent_summation_mod.F90"
+(  626)   JL=0
+(  627)   DO J=1,KNVEC
+(  628)     IF (KNL(J)>0 .AND. .NOT. LLDONE(J)) THEN
+(  629)       IF (LL_OPENMP) THEN
+(  630)         CALL COMPENSATED_SUM_OMP (ZP(:,J),KNL(J),ZCORR(J),ZERR(J))
+(  631)       ELSE
+(  632)         CALL COMPENSATED_SUM     (ZP(:,J),KNL(J),ZCORR(J),ZERR(J))
+(  633)       ENDIF
+(  634)     ENDIF
+(  635) # 636 "order_independent_summation_mod.F90"
+(  636) !--- gather partial sums and error bounds to all processors
+(  637) # 638 "order_independent_summation_mod.F90"
+(  638)     ZBUFFL(JL+1) = ZP(MAX(KNL(J),1_JPIM),J)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 35
+
+(  639) # 640 "order_independent_summation_mod.F90"
+(  640)     IF (KNL(J)>0) THEN
+(  641)       ZBUFFL(JL+2) = ZERR(J)
+(  642)       ZBUFFL(JL+3) = ZCORR(J)
+(  643)     ELSE
+(  644)       ZBUFFL(JL+2) = 0.0_JPRB
+(  645)       ZBUFFL(JL+3) = 0.0_JPRB
+(  646)     ENDIF
+(  647)     JL = JL + IBUFLEN
+(  648)   ENDDO
+(  649) # 650 "order_independent_summation_mod.F90"
+(  650)   IF (INPROC>1) THEN
+(  651) !-- could use MPL_ALLGATHER here, if it existed!
+(  652) # 653 "order_independent_summation_mod.F90"
+(  653)     IRECVCOUNTS(:) = SIZE(ZBUFFL)
+(  654) # 655 "order_independent_summation_mod.F90"
+(  655)     CALL MPL_ALLGATHERV (ZBUFFL,ZBUFFG,IRECVCOUNTS, &
+(  656)                        & CDSTRING='ORDER_INDEP_GLOBAL_SUM2')
+(  657) # 658 "order_independent_summation_mod.F90"
+(  658)     DO JP=1,INPROC
+(  659)       JL = 0
+(  660)       DO J = 1,KNVEC
+(  661)         ZPSUMS(JP,J) = ZBUFFG(JL+1+(JP-1)*SIZE(ZBUFFL))
+(  662)         ZPERRS(JP,J) = ZBUFFG(JL+2+(JP-1)*SIZE(ZBUFFL))
+(  663)         ZPCORS(JP,J) = ZBUFFG(JL+3+(JP-1)*SIZE(ZBUFFL))
+(  664)         JL = JL + IBUFLEN
+(  665)       ENDDO
+(  666)     ENDDO
+(  667)   ELSE
+(  668)     JL = 0
+(  669)     DO J = 1,KNVEC
+(  670)       ZPSUMS(1,J) = ZBUFFL(JL+1)
+(  671)       ZPERRS(1,J) = ZBUFFL(JL+2)
+(  672)       ZPCORS(1,J) = ZBUFFL(JL+3)
+(  673)     ENDDO
+(  674)   ENDIF
+(  675) # 676 "order_independent_summation_mod.F90"
+(  676) !--- transform partial sums
+(  677) # 678 "order_independent_summation_mod.F90"
+(  678)   DO J = 1,KNVEC
+(  679)     IF (LLDONE(J)) CYCLE
+(  680) # 681 "order_independent_summation_mod.F90"
+(  681)     CALL COMPENSATED_SUM (ZPSUMS(:,J),INPROC,ZCORR(J),ZERR(J))
+(  682)     ZERR(J)  = ZERR(J)  + SUM(ZPERRS(:,J))
+(  683)     ZCORR(J) = ZCORR(J) + SUM(ZPCORS(:,J))
+(  684)     
+(  685) !--- Calculate final result
+(  686) # 687 "order_independent_summation_mod.F90"
+(  687)     ZRES(J) = ZPSUMS(INPROC,J) + ZCORR(J)
+(  688) # 689 "order_independent_summation_mod.F90"
+(  689) !--- Calculate error bound. This is corollary 4.7 from Ogita et al. (2005)
+(  690) # 691 "order_independent_summation_mod.F90"
+(  691)     ZBETA(J) = ZERR(J)*(REAL(2*ING(J),JPRB)*EPSILON(ZRES(J))) &
+(  692)        & /(1.0_JPRB - REAL(2*ING(J),JPRB)*EPSILON(ZRES(J)))
+(  693) # 694 "order_independent_summation_mod.F90"
+(  694)     ZERR(J) = EPSILON(ZRES(J))*ABS(ZRES(J)) &
+(  695)      & +(ZBETA(J) + ( 2.0_JPRB*EPSILON(ZRES(J))*EPSILON(ZRES(J))*ABS(ZRES(J)) &
+(  696)      &            +3.0_JPRB*TINY(ZRES(J))))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 36
+
+(  697) # 698 "order_independent_summation_mod.F90"
+(  698) !--- update the last element of the local array
+(  699) # 700 "order_independent_summation_mod.F90"
+(  700)     ZP(MAX(KNL(J),1_JPIM),J) = ZPSUMS(MPL_MYRANK(),J)
+(  701)   ENDDO
+(  702) # 703 "order_independent_summation_mod.F90"
+(  703) !--- exit if the global error is small enough
+(  704) # 705 "order_independent_summation_mod.F90"
+(  705)   LLDONE(:) = (ZERR(:)<4.0_JPRB*SPACING(ZRES(:))) .OR. LLDONE(:)
+(  706) # 707 "order_independent_summation_mod.F90"
+(  707)   IF (ALL(LLDONE(:))) EXIT K_LOOP
+(  708) # 709 "order_independent_summation_mod.F90"
+(  709) !--- Take appropriate action if ZRES cannot be sufficiently refined.
+(  710) # 711 "order_independent_summation_mod.F90"
+(  711)   DO J = 1,KNVEC
+(  712)     IF (ZERR(J) >= ZOLDERR(J) .AND. .NOT. LLDONE(J)) THEN
+(  713)       INMSG=INMSG+1
+(  714) # 715 "order_independent_summation_mod.F90"
+(  715)       IF (INMSG<=100) THEN
+(  716)         CALL MPL_MESSAGE ( &
+(  717)           & CDMESSAGE= 'ORDER_INDEP_GLOBAL_SUM2: FALIED TO REFINE SUM', &
+(  718)           & CDSTRING='ORDER_INDEP_GLOBAL_SUM2')
+(  719)         CALL MPL_MESSAGE ( &
+(  720)           & CDMESSAGE='WARNING: POSSIBLITY OF NON-REPRODUCIBLE RESULTS',&
+(  721)           & CDSTRING='ORDER_INDEP_GLOBAL_SUM2')
+(  722)       ENDIF
+(  723)       
+(  724)       IF (INMSG==100) THEN
+(  725)         CALL MPL_MESSAGE ( &
+(  726)           & CDMESSAGE='ORDER_INDEP_GLOBAL_SUM2: INMSG>100. OUTPUT SUPPRESSED',&
+(  727)           & CDSTRING='ORDER_INDEP_GLOBAL_SUM2')
+(  728)       ENDIF
+(  729) # 730 "order_independent_summation_mod.F90"
+(  730)       IF (LLABORT) THEN
+(  731)         CALL MPL_MESSAGE (CDMESSAGE= &
+(  732)           & 'ABORT BECAUSE LD_ABORT_IFNOT_REPROD WAS SET', &
+(  733)           & CDSTRING='ORDER_INDEP_GLOBAL_SUM2',LDABORT=.TRUE.)
+(  734)       ENDIF
+(  735)     ENDIF
+(  736) # 737 "order_independent_summation_mod.F90"
+(  737)     ZOLDERR(J) = ZERR(J)
+(  738)   ENDDO
+(  739) # 740 "order_independent_summation_mod.F90"
+(  740) ENDDO K_LOOP
+(  741) # 742 "order_independent_summation_mod.F90"
+(  742) !--- At this stage, we have guaranteed that ZRES less than 4*EPS
+(  743) !--- away from the exact sum. There are only four floating point
+(  744) !--- numbers in this range. So, if we find the nearest number that
+(  745) !--- has its last three bits zero, then we have a reproducible result.
+(  746) # 747 "order_independent_summation_mod.F90"
+(  747) DO J=1,KNVEC
+(  748)   POUT(J) = ROUND (ZRES(J))
+(  749) ENDDO
+(  750) # 751 "order_independent_summation_mod.F90"
+(  751) DEALLOCATE (IRECVCOUNTS)
+(  752) DEALLOCATE (ZPCORS)
+(  753) DEALLOCATE (ZPERRS)
+(  754) DEALLOCATE (ZPSUMS)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 37
+
+(  755) DEALLOCATE (ZBUFFG)
+(  756) DEALLOCATE (ZBUFFL)
+(  757) DEALLOCATE (ZP)
+(  758) # 759 "order_independent_summation_mod.F90"
+(  759) IF (LHOOK) CALL DR_HOOK ('ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_GLOBAL_SUM2', &
+(  760)                       &  1,ZHOOK_HANDLE)
+(  761) # 762 "order_independent_summation_mod.F90"
+(  762) END SUBROUTINE ORDER_INDEP_GLOBAL_SUM2
+(  763) # 764 "order_independent_summation_mod.F90"
+(  764) SUBROUTINE ORDER_INDEP_ALLREDUCE (PIN,POUT,LD_ABORT_IFNOT_REPROD,LD_OPENMP)
+(  765) # 766 "order_independent_summation_mod.F90"
+(  766) !-----------------------------------------------------------------
+(  767) !
+(  768) !  Returns in POUT an accurate global sum of the elements of PIN across tasks. 
+(  769) !  This has a similar functionality to MPL_allreduce where an array is supplied
+(  770) !  and we want the individual elements of the array to be summed across tasks.
+(  771) !  This is different to ORDER_INDEP_GLOBAL_SUM where PIN is considered part of
+(  772) !  a global array.
+(  773) !
+(  774) ! Arguments:
+(  775) ! ----------
+(  776) !
+(  777) ! Required:
+(  778) !
+(  779) !   PIN                  - INTENT(IN) - input array to be summed.
+(  780) !   POUT                 - INTENT(OUT) - output array of same size
+(  781) !
+(  782) !
+(  783) ! Optional:
+(  784) !
+(  785) !   LD_ABORT_IFNOT_REPROD - INTENT(IN) - Defines behaviour in case
+(  786) !                                        a reproducible result cannot
+(  787) !                                        be guaranteed.
+(  788) !
+(  789) !   LD_OPENMP            - INTENT(IN) - Use OpenMP parallelization.
+(  790) !              
+(  791) !
+(  792) !  Author: George Mozdzynski ECMWF June 2009
+(  793) !
+(  794) !-----------------------------------------------------------------
+(  795) # 796 "order_independent_summation_mod.F90"
+(  796) IMPLICIT NONE
+(  797)   
+(  798) REAL(KIND=JPRB) :: ORDER_INDEP_GLOBAL_SUM
+(  799)   
+(  800) REAL(KIND=JPRB),             INTENT(IN) :: PIN(:)
+(  801) REAL(KIND=JPRB),             INTENT(OUT):: POUT(:)
+(  802) LOGICAL,           OPTIONAL, INTENT(IN) :: LD_ABORT_IFNOT_REPROD, LD_OPENMP
+(  803) # 804 "order_independent_summation_mod.F90"
+(  804) INTEGER(KIND=JPIM) :: INPROC,MYPROC,IN,ITAG,I,J,IR
+(  805) INTEGER(KIND=JPIM), ALLOCATABLE :: ICOUNT(:),IND(:),IREQ(:)
+(  806) REAL(KIND=JPRB), ALLOCATABLE :: ZBUFF(:),ZIN(:),ZOUT(:)
+(  807) # 808 "order_independent_summation_mod.F90"
+(  808) LOGICAL :: LLABORT, LL_OPENMP
+(  809) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  810) # 811 "order_independent_summation_mod.F90"
+(  811) IF (LHOOK) CALL DR_HOOK ('ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_ALLREDUCE', &
+(  812)                       &  0,ZHOOK_HANDLE) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 38
+
+(  813) # 814 "order_independent_summation_mod.F90"
+(  814) INPROC = MPL_NPROC()
+(  815) # 816 "order_independent_summation_mod.F90"
+(  816) IF (PRESENT(LD_ABORT_IFNOT_REPROD)) THEN
+(  817)   LLABORT = LD_ABORT_IFNOT_REPROD
+(  818) ELSE
+(  819)   LLABORT = .TRUE.
+(  820) ENDIF
+(  821) # 822 "order_independent_summation_mod.F90"
+(  822) IF (PRESENT(LD_OPENMP)) THEN
+(  823)   LL_OPENMP = LD_OPENMP
+(  824) ELSE
+(  825)   LL_OPENMP = .TRUE.
+(  826) ENDIF
+(  827) # 828 "order_independent_summation_mod.F90"
+(  828) IF( SIZE(PIN) /= SIZE(POUT) )THEN
+(  829)   CALL MPL_MESSAGE (CDMESSAGE='SIZE(PIN) /= SIZE(POUT)', &
+(  830)                   & CDSTRING='ORDER_INDEP_ALLREDUCE',LDABORT=.TRUE.)
+(  831) ENDIF
+(  832) # 833 "order_independent_summation_mod.F90"
+(  833) IN = SIZE(PIN)
+(  834) # 835 "order_independent_summation_mod.F90"
+(  835) IF (INPROC==1) THEN
+(  836)   POUT(:)=PIN(:)
+(  837) ELSE
+(  838)   ITAG=1234
+(  839)   ALLOCATE(ICOUNT(INPROC))
+(  840)   ICOUNT(:) = 0
+(  841) # 842 "order_independent_summation_mod.F90"
+(  842) ! Determine distribution of input array over tasks
+(  843) # 844 "order_independent_summation_mod.F90"
+(  844)   DO J=1,IN
+(  845)     I=MOD(J-1,INPROC)+1
+(  846)     ICOUNT(I)=ICOUNT(I)+1
+(  847)   ENDDO
+(  848)   ALLOCATE(IND(INPROC))
+(  849)   IND(:)=0
+(  850)   IND(1)=1
+(  851)   DO J=2,INPROC
+(  852)     IND(J)=IND(J-1)+ICOUNT(J-1)
+(  853)   ENDDO
+(  854)   MYPROC = MPL_MYRANK()
+(  855)   ALLOCATE(ZBUFF(ICOUNT(MYPROC)*INPROC))
+(  856)   ALLOCATE(IREQ(2*INPROC))
+(  857)   ALLOCATE(ZIN(INPROC))
+(  858) # 859 "order_independent_summation_mod.F90"
+(  859) ! Distribute input array over tasks
+(  860) # 861 "order_independent_summation_mod.F90"
+(  861)   IR=0
+(  862)   IF(ICOUNT(MYPROC) /= 0)THEN
+(  863)     DO J=1,INPROC
+(  864)       IR=IR+1
+(  865)       CALL MPL_RECV (ZBUFF((J-1)*ICOUNT(MYPROC)+1:J*ICOUNT(MYPROC)),&
+(  866)                     &KSOURCE=J,&
+(  867)                     &KTAG=ITAG,&
+(  868)                     &KMP_TYPE=JP_NON_BLOCKING_STANDARD,&
+(  869)                     &KREQUEST=IREQ(IR),&
+(  870)                     &CDSTRING='ORDER_INDEP_ALLREDUCE')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 39
+
+(  871)     ENDDO
+(  872)   ENDIF
+(  873)   DO J=1,INPROC
+(  874)     IF(ICOUNT(J) /= 0)THEN
+(  875)       IR=IR+1
+(  876)       CALL MPL_SEND(PIN(IND(J):IND(J)+ICOUNT(J)-1),&
+(  877)                    &KDEST=J,&
+(  878)                    &KTAG=ITAG,&
+(  879)                    &KMP_TYPE=JP_NON_BLOCKING_STANDARD,&
+(  880)                    &KREQUEST=IREQ(IR),&
+(  881)                    &CDSTRING='ORDER_INDEP_ALLREDUCE')
+(  882)     ENDIF
+(  883)   ENDDO
+(  884)   IF(IR > 0)THEN
+(  885)     CALL MPL_WAIT(KREQUEST=IREQ(1:IR),&
+(  886)                  &CDSTRING='ORDER_INDEP_ALLREDUCE')
+(  887)   ENDIF
+(  888) # 889 "order_independent_summation_mod.F90"
+(  889) ! Perform local order independent sums for myproc's part of input array
+(  890) # 891 "order_independent_summation_mod.F90"
+(  891)   ALLOCATE(ZOUT(IN))
+(  892)   DO J=1,ICOUNT(MYPROC)
+(  893)     DO I=1,INPROC
+(  894)       ZIN(I)=ZBUFF((I-1)*ICOUNT(MYPROC)+J)
+(  895)     ENDDO
+(  896)     ZOUT(J)=ORDER_INDEP_LOCAL_SUM(ZIN,LLABORT,LL_OPENMP)
+(  897)   ENDDO
+(  898) # 899 "order_independent_summation_mod.F90"
+(  899) ! Gather results of order independent sums over tasks
+(  900) # 901 "order_independent_summation_mod.F90"
+(  901)   CALL MPL_ALLGATHERV (ZOUT(1:ICOUNT(MYPROC)),POUT,ICOUNT, &
+(  902)                      & CDSTRING='ORDER_INDEP_ALLREDUCE')
+(  903) # 904 "order_independent_summation_mod.F90"
+(  904)   DEALLOCATE (ICOUNT)
+(  905)   DEALLOCATE (IND)
+(  906)   DEALLOCATE (IREQ)
+(  907)   DEALLOCATE (ZBUFF)
+(  908)   DEALLOCATE (ZIN)
+(  909)   DEALLOCATE (ZOUT)
+(  910) # 911 "order_independent_summation_mod.F90"
+(  911) ENDIF
+(  912) # 913 "order_independent_summation_mod.F90"
+(  913) IF (LHOOK) CALL DR_HOOK ('ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_ALLREDUCE', &
+(  914)                       &  1,ZHOOK_HANDLE)
+(  915) # 916 "order_independent_summation_mod.F90"
+(  916) END SUBROUTINE ORDER_INDEP_ALLREDUCE
+(  917) # 918 "order_independent_summation_mod.F90"
+(  918) FUNCTION ORDER_INDEP_DOT_PRODUCT (P1,P2,PW,KNG,LD_ABORT_IFNOT_REPROD, &
+(  919)                                 & LD_OPENMP)
+(  920) # 921 "order_independent_summation_mod.F90"
+(  921) !-----------------------------------------------------------------
+(  922) !
+(  923) !  Returns an accurate global sum of the elements of P1*P2, or
+(  924) !  P1*P2*PW. The result is identical to the result that would be
+(  925) !  obtained by the following:
+(  926) !
+(  927) !  IF (PRESENT(PW)) THEN
+(  928) !    PTEMP(:) = P1(:)*P2(:)*PW(:)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 40
+
+(  929) !  ELSE
+(  930) !    PTEMP(:) = P1(:)*P2(:)
+(  931) !  ENDIF
+(  932) !  CALL ORDER_INDEP_GLOBAL_SUM (PTEMP,KNG,LD_ABORT_IFNOT_REPROD, &
+(  933) !                              & LD_OPENMP)
+(  934) !
+(  935) !   This routine is provided only because the above is not very
+(  936) !   cache-friendly.
+(  937) !
+(  938) !  NB: P1, P2 and PW are unmodified on return
+(  939) !
+(  940) ! Arguments:
+(  941) ! ----------
+(  942) !
+(  943) ! Required:
+(  944) !
+(  945) !   P1,P2                - INTENT(IN) - Arrays whose inner product is
+(  946) !                                       to be calculated
+(  947) !
+(  948) !
+(  949) ! Optional:
+(  950) !
+(  951) !   PW                   - INTENT(IN) - Weight array defining the
+(  952) !                                       metric for the inner product.
+(  953) !
+(  954) !   KNG                  - INTENT(IN) - Global length of array.
+(  955) !                 
+(  956) !   LD_ABORT_IFNOT_REPRO - INTENT(IN) - Defines behaviour in case
+(  957) !                                       a reproducible result cannot
+(  958) !                                       be guaranteed.
+(  959) !
+(  960) !   LD_OPENMP            - INTENT(IN) - Use OpenMP parallelization.
+(  961) !              
+(  962) !
+(  963) ! Algorithm:
+(  964) ! ----------
+(  965) !
+(  966) !  The algorithm is based on Ogita et al. (2005) SIAM J. Sci. Computing,
+(  967) !  Vol.26, No.6, pp1955-1988. This is based in turn on an algorithm
+(  968) !  by Knuth (1969, seminumerical algorithms).
+(  969) !
+(  970) !  This version adds a second layer of parallelism on top of that
+(  971) !  provided by COMPENSATED_SUM_OMP. It iterates the compensated 
+(  972) !  summation until the result is guaranteed to be within 4*eps
+(  973) !  of the true sum. It then rounds the result to the nearest
+(  974) !  floating-point number whose last three bits are zero, thereby
+(  975) !  guaranteeing an order-independent result.
+(  976) !
+(  977) !  Author: Mike Fisher ECMWF 2006/02/08
+(  978) !
+(  979) !-----------------------------------------------------------------
+(  980) # 981 "order_independent_summation_mod.F90"
+(  981) IMPLICIT NONE
+(  982) # 983 "order_independent_summation_mod.F90"
+(  983) REAL(KIND=JPRB) :: ORDER_INDEP_DOT_PRODUCT
+(  984) # 985 "order_independent_summation_mod.F90"
+(  985) REAL(KIND=JPRB),             INTENT(IN) :: P1(:), P2(:)
+(  986) REAL(KIND=JPRB),   OPTIONAL, INTENT(IN) :: PW(:)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 41
+
+(  987) INTEGER(KIND=JPIM),OPTIONAL, INTENT(IN) :: KNG
+(  988) LOGICAL,           OPTIONAL, INTENT(IN) :: LD_ABORT_IFNOT_REPROD, LD_OPENMP
+(  989) # 990 "order_independent_summation_mod.F90"
+(  990) INTEGER(KIND=JPIM) :: J,IN,ING,INPROC
+(  991) REAL(KIND=JPRB) :: ZCORR,ZERR,ZOLDERR,ZBUFFL(3),ZBETA,ZRES
+(  992) REAL(KIND=JPRB), ALLOCATABLE :: ZPSUMS(:),ZPERRS(:),ZPCORS(:), &
+(  993)                               & ZBUFFG(:),ZP(:)
+(  994) INTEGER(KIND=JPIM), ALLOCATABLE :: IRECVCOUNTS(:)
+(  995) LOGICAL :: LLABORT, LL_OPENMP, LL_FIRST_ITER
+(  996) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  997) # 998 "order_independent_summation_mod.F90"
+(  998) INTEGER(KIND=JPIM), SAVE :: INMSG=0
+(  999) # 1000 "order_independent_summation_mod.F90"
+( 1000) INTEGER(KIND=JPIM), EXTERNAL :: N_PRECISION
+( 1001) # 1002 "order_independent_summation_mod.F90"
+( 1002) IF (LHOOK) CALL DR_HOOK ( &
+( 1003)               &'ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_DOT_PRODUCT', &
+( 1004)               &  0,ZHOOK_HANDLE)
+( 1005) # 1006 "order_independent_summation_mod.F90"
+( 1006) INPROC = MPL_NPROC()
+( 1007) # 1008 "order_independent_summation_mod.F90"
+( 1008) IF (PRESENT(LD_ABORT_IFNOT_REPROD)) THEN
+( 1009)   LLABORT = LD_ABORT_IFNOT_REPROD
+( 1010) ELSE
+( 1011)   LLABORT = .TRUE.
+( 1012) ENDIF
+( 1013) # 1014 "order_independent_summation_mod.F90"
+( 1014) IF (PRESENT(LD_OPENMP)) THEN
+( 1015)   LL_OPENMP = LD_OPENMP
+( 1016) ELSE
+( 1017)   LL_OPENMP = .TRUE.
+( 1018) ENDIF
+( 1019) # 1020 "order_independent_summation_mod.F90"
+( 1020) IN = SIZE(P1)
+( 1021) # 1022 "order_independent_summation_mod.F90"
+( 1022) IF (SIZE(P2)/=IN) THEN
+( 1023)   CALL MPL_MESSAGE (CDMESSAGE='SIZE(P2)/=SIZE(P1)', &
+( 1024)                   & CDSTRING='ORDER_INDEP_DOT_PRODUCT',LDABORT=.TRUE.)
+( 1025) ENDIF
+( 1026) # 1027 "order_independent_summation_mod.F90"
+( 1027) IF (PRESENT(PW)) THEN
+( 1028)   IF (SIZE(PW)/=IN) THEN
+( 1029)     CALL MPL_MESSAGE (CDMESSAGE='SIZE(PW)/=SIZE(P1)', &
+( 1030)                     & CDSTRING='ORDER_INDEP_DOT_PRODUCT',LDABORT=.TRUE.)
+( 1031)   ENDIF
+( 1032) ENDIF
+( 1033) # 1034 "order_independent_summation_mod.F90"
+( 1034) !--- global length of vector (needed for error bound calculation)
+( 1035) # 1036 "order_independent_summation_mod.F90"
+( 1036) IF (.NOT.PRESENT(KNG)) THEN
+( 1037)   ING = IN
+( 1038)   IF (INPROC>1) THEN
+( 1039)     CALL MPL_ALLREDUCE (ING,'SUM',CDSTRING='ORDER_INDEP_DOT_PRODUCT')
+( 1040)   ENDIF
+( 1041) ELSE
+( 1042)   ING = KNG
+( 1043)   IF (KNG<IN) THEN
+( 1044)     CALL MPL_MESSAGE (CDMESSAGE='Specified KNG < SIZE(PIN)', &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 42
+
+( 1045)                     & CDSTRING='ORDER_INDEP_DOT_PRODUCT',LDABORT=.TRUE.)
+( 1046)   ENDIF
+( 1047) ENDIF
+( 1048) # 1049 "order_independent_summation_mod.F90"
+( 1049) IF (REAL(2*ING,JPRB)*EPSILON(ZRES) >= 1.0) THEN
+( 1050)   CALL MPL_MESSAGE (CDMESSAGE='n is too large to guarantee error bounds', &
+( 1051)                   & CDSTRING='ORDER_INDEP_DOT_PRODUCT',LDABORT=.TRUE.)
+( 1052) ENDIF
+( 1053) # 1054 "order_independent_summation_mod.F90"
+( 1054) ALLOCATE (ZP(MAX(IN,1_JPIM)))
+( 1055) ALLOCATE (ZBUFFG(INPROC*SIZE(ZBUFFL)))
+( 1056) ALLOCATE (ZPSUMS(INPROC))
+( 1057) ALLOCATE (ZPERRS(INPROC))
+( 1058) ALLOCATE (ZPCORS(INPROC))
+( 1059) ALLOCATE (IRECVCOUNTS(INPROC))
+( 1060) # 1061 "order_independent_summation_mod.F90"
+( 1061) ZOLDERR = HUGE(ZERR)
+( 1062) # 1063 "order_independent_summation_mod.F90"
+( 1063) !--- Copy the input array. This avoids some tricky indexing, at the
+( 1064) !--- expense of some inefficency.
+( 1065) # 1066 "order_independent_summation_mod.F90"
+( 1066) IF (IN==0) THEN
+( 1067)   ZP(1) = 0.0_JPRB
+( 1068) ENDIF
+( 1069) # 1070 "order_independent_summation_mod.F90"
+( 1070) LL_FIRST_ITER = .TRUE.
+( 1071) # 1072 "order_independent_summation_mod.F90"
+( 1072) K_LOOP: DO
+( 1073) # 1074 "order_independent_summation_mod.F90"
+( 1074) !--- transform local arrays
+( 1075) # 1076 "order_independent_summation_mod.F90"
+( 1076)   IF (IN>0) THEN
+( 1077)     IF (LL_FIRST_ITER) THEN
+( 1078)       IF (PRESENT(PW)) THEN
+( 1079)         IF (LL_OPENMP) THEN
+( 1080)           CALL COMPENSATED_DOT_PRODUCT_OMP (P1,P2,PW,ZP,IN,ZCORR,ZERR)
+( 1081)         ELSE
+( 1082)           CALL COMPENSATED_DOT_PRODUCT     (P1,P2,PW,ZP,IN,ZCORR,ZERR)
+( 1083)         ENDIF
+( 1084)       ELSE
+( 1085)         IF (LL_OPENMP) THEN
+( 1086)           CALL COMPENSATED_DOT_PRODUCT_OMP (P1=P1,P2=P2,POUT=ZP, &
+( 1087)                                           & KN=IN,PCORR=ZCORR,PERR=ZERR)
+( 1088)         ELSE
+( 1089)           CALL COMPENSATED_DOT_PRODUCT     (P1=P1,P2=P2,POUT=ZP, &
+( 1090)                                           & KN=IN,PCORR=ZCORR,PERR=ZERR)
+( 1091)         ENDIF
+( 1092)       ENDIF
+( 1093)     ELSE
+( 1094)       IF (LL_OPENMP) THEN
+( 1095)         CALL COMPENSATED_SUM_OMP (ZP,IN,ZCORR,ZERR)
+( 1096)       ELSE
+( 1097)         CALL COMPENSATED_SUM     (ZP,IN,ZCORR,ZERR)
+( 1098)       ENDIF
+( 1099)     ENDIF
+( 1100)   ENDIF
+( 1101) # 1102 "order_independent_summation_mod.F90"
+( 1102) !--- gather partial sums and error bounds to all processors
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 43
+
+( 1103) # 1104 "order_independent_summation_mod.F90"
+( 1104)   ZBUFFL(1) = ZP(MAX(IN,1_JPIM))
+( 1105) # 1106 "order_independent_summation_mod.F90"
+( 1106)   IF (IN>0) THEN
+( 1107)     ZBUFFL(2) = ZERR
+( 1108)     ZBUFFL(3) = ZCORR
+( 1109)   ELSE
+( 1110)     ZBUFFL(2) = 0.0_JPRB
+( 1111)     ZBUFFL(3) = 0.0_JPRB
+( 1112)   ENDIF
+( 1113) # 1114 "order_independent_summation_mod.F90"
+( 1114)   IF (INPROC>1) THEN
+( 1115) !-- could use MPL_ALLGATHER here, if it existed!
+( 1116) # 1117 "order_independent_summation_mod.F90"
+( 1117)     IRECVCOUNTS(:) = SIZE(ZBUFFL)
+( 1118) # 1119 "order_independent_summation_mod.F90"
+( 1119)     CALL MPL_ALLGATHERV (ZBUFFL,ZBUFFG,IRECVCOUNTS, &
+( 1120)                        & CDSTRING='ORDER_INDEP_DOT_PRODUCT')
+( 1121) # 1122 "order_independent_summation_mod.F90"
+( 1122)     DO J=1,INPROC
+( 1123)       ZPSUMS(J) = ZBUFFG(1+(J-1)*SIZE(ZBUFFL))
+( 1124)       ZPERRS(J) = ZBUFFG(2+(J-1)*SIZE(ZBUFFL))
+( 1125)       ZPCORS(J) = ZBUFFG(3+(J-1)*SIZE(ZBUFFL))
+( 1126)     ENDDO
+( 1127)   ELSE
+( 1128)     ZPSUMS(1) = ZBUFFL(1)
+( 1129)     ZPERRS(1) = ZBUFFL(2)
+( 1130)     ZPCORS(1) = ZBUFFL(3)
+( 1131)   ENDIF
+( 1132) # 1133 "order_independent_summation_mod.F90"
+( 1133) !--- transform partial sums
+( 1134) # 1135 "order_independent_summation_mod.F90"
+( 1135)   CALL COMPENSATED_SUM (ZPSUMS,INPROC,ZCORR,ZERR)
+( 1136)   ZERR  = ZERR  + SUM(ZPERRS)
+( 1137)   ZCORR = ZCORR + SUM(ZPCORS)
+( 1138) # 1139 "order_independent_summation_mod.F90"
+( 1139) !--- Calculate final result
+( 1140) # 1141 "order_independent_summation_mod.F90"
+( 1141)   ZRES = ZPSUMS(INPROC) + ZCORR
+( 1142) # 1143 "order_independent_summation_mod.F90"
+( 1143) !--- Calculate error bound. This is corollary 4.7 from Ogita et al. (2005)
+( 1144) # 1145 "order_independent_summation_mod.F90"
+( 1145)   ZBETA = ZERR*(REAL(2*ING,JPRB)*EPSILON(ZRES)) &
+( 1146)        & /(1.0_JPRB - REAL(2*ING,JPRB)*EPSILON(ZRES))
+( 1147) # 1148 "order_independent_summation_mod.F90"
+( 1148)   ZERR = EPSILON(ZRES)*ABS(ZRES) &
+( 1149)      & +(ZBETA + ( 2.0_JPRB*EPSILON(ZRES)*EPSILON(ZRES)*ABS(ZRES) &
+( 1150)      &            +3.0_JPRB*TINY(ZRES)))
+( 1151) # 1152 "order_independent_summation_mod.F90"
+( 1152) !--- update the last element of the local array
+( 1153) # 1154 "order_independent_summation_mod.F90"
+( 1154)   ZP(MAX(IN,1_JPIM)) = ZPSUMS(MPL_MYRANK())
+( 1155) # 1156 "order_independent_summation_mod.F90"
+( 1156) !--- exit if the global error is small enough
+( 1157) # 1158 "order_independent_summation_mod.F90"
+( 1158)   IF (ZERR<4.0_JPRB*SPACING(ZRES)) EXIT K_LOOP
+( 1159) # 1160 "order_independent_summation_mod.F90"
+( 1160) !--- Take appropriate action if ZRES cannot be sufficiently refined.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 44
+
+( 1161) # 1162 "order_independent_summation_mod.F90"
+( 1162)   IF (ZERR >= ZOLDERR) THEN
+( 1163)     INMSG=INMSG+1
+( 1164) # 1165 "order_independent_summation_mod.F90"
+( 1165)     IF (INMSG<=100) THEN
+( 1166)       CALL MPL_MESSAGE ( &
+( 1167)           & CDMESSAGE= 'ORDER_INDEP_DOT_PRODUCT: FALIED TO REFINE SUM', &
+( 1168)           & CDSTRING='ORDER_INDEP_DOT_PRODUCT')
+( 1169)       CALL MPL_MESSAGE ( &
+( 1170)           & CDMESSAGE='WARNING: POSSIBLITY OF NON-REPRODUCIBLE RESULTS',&
+( 1171)           & CDSTRING='ORDER_INDEP_DOT_PRODUCT')
+( 1172)     ENDIF
+( 1173) # 1174 "order_independent_summation_mod.F90"
+( 1174)     IF (INMSG==100) THEN
+( 1175)       CALL MPL_MESSAGE ( &
+( 1176)        & CDMESSAGE='ORDER_INDEP_DOT_PRODUCT: INMSG>100. OUTPUT SUPPRESSED',&
+( 1177)        & CDSTRING='ORDER_INDEP_DOT_PRODUCT')
+( 1178)     ENDIF
+( 1179) # 1180 "order_independent_summation_mod.F90"
+( 1180)     IF (LLABORT) THEN
+( 1181)       CALL MPL_MESSAGE (CDMESSAGE= &
+( 1182)                       & 'ABORT BECAUSE LD_ABORT_IFNOT_REPROD WAS SET', &
+( 1183)                       & CDSTRING='ORDER_INDEP_DOT_PRODUCT',LDABORT=.TRUE.)
+( 1184)     ENDIF
+( 1185)   ENDIF
+( 1186) # 1187 "order_independent_summation_mod.F90"
+( 1187)   ZOLDERR = ZERR
+( 1188) # 1189 "order_independent_summation_mod.F90"
+( 1189)   LL_FIRST_ITER = .FALSE.
+( 1190) ENDDO K_LOOP
+( 1191) # 1192 "order_independent_summation_mod.F90"
+( 1192) !--- At this stage, we have guaranteed that ZRES less than 4*EPS
+( 1193) !--- away from the exact sum. There are only four floating point
+( 1194) !--- numbers in this range. So, if we find the nearest number that
+( 1195) !--- has its last three bits zero, then we have a reproducible result.
+( 1196) # 1197 "order_independent_summation_mod.F90"
+( 1197) ORDER_INDEP_DOT_PRODUCT = ROUND (ZRES)
+( 1198) # 1199 "order_independent_summation_mod.F90"
+( 1199) DEALLOCATE (IRECVCOUNTS)
+( 1200) DEALLOCATE (ZPCORS)
+( 1201) DEALLOCATE (ZPERRS)
+( 1202) DEALLOCATE (ZPSUMS)
+( 1203) DEALLOCATE (ZBUFFG)
+( 1204) DEALLOCATE (ZP)
+( 1205) # 1206 "order_independent_summation_mod.F90"
+( 1206) IF (LHOOK) CALL DR_HOOK ( &
+( 1207)          &'ORDER_INDEPENDENT_SUMMATION_MOD:ORDER_INDEP_DOT_PRODUCT', &
+( 1208)          &  1,ZHOOK_HANDLE)
+( 1209) # 1210 "order_independent_summation_mod.F90"
+( 1210) END FUNCTION ORDER_INDEP_DOT_PRODUCT
+( 1211) # 1212 "order_independent_summation_mod.F90"
+( 1212) FUNCTION ROUND (PRES)
+( 1213) # 1214 "order_independent_summation_mod.F90"
+( 1214) !-----------------------------------------------------------------
+( 1215) !
+( 1216) !  Returns the value of PRES rounded to the nearest floating-point
+( 1217) !  number that has its last three bits zero
+( 1218) # 1219 "order_independent_summation_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 45
+
+( 1219) !  The code to do this in Fortran is not nice, because Fortran
+( 1220) !  does not proved access to the binary representation for REALs.
+( 1221) !  Perhaps we should code it in c?
+( 1222) # 1223 "order_independent_summation_mod.F90"
+( 1223) !  This works on big-endian and little-endian machines.
+( 1224)  
+( 1225) !  Author: Mike Fisher ECMWF 2006/02/08
+( 1226) !
+( 1227) !-----------------------------------------------------------------
+( 1228) # 1229 "order_independent_summation_mod.F90"
+( 1229) IMPLICIT NONE
+( 1230) # 1231 "order_independent_summation_mod.F90"
+( 1231) REAL(KIND=JPRB), INTENT(IN) :: PRES
+( 1232) REAL(KIND=JPRB) :: ROUND
+( 1233) # 1234 "order_independent_summation_mod.F90"
+( 1234) INTEGER(KIND=JPIM) :: II(2),IEQUIV(8),INTS_PER_REAL,J,I_LOW_WORD
+( 1235) REAL(KIND=JPRB)    :: ZZ(2),ZUP,ZDOWN
+( 1236) # 1237 "order_independent_summation_mod.F90"
+( 1237) INTEGER(KIND=JPIM), EXTERNAL :: N_PRECISION
+( 1238) # 1240 "order_independent_summation_mod.F90"
+( 1240) II(:)=1
+( 1241) ZZ(:)=1.0_JPRB
+( 1242) INTS_PER_REAL=N_PRECISION(ZZ)/N_PRECISION(II)
+( 1243) # 1244 "order_independent_summation_mod.F90"
+( 1244) IF (INTS_PER_REAL>SIZE(IEQUIV)) THEN
+( 1245)   CALL MPL_MESSAGE (CDMESSAGE='INTS_PER_REAL>SIZE(IEQUIV)', &
+( 1246)                     & CDSTRING='ORDER_INDEP_GLOBAL_SUM',LDABORT=.TRUE.)
+( 1247) ENDIF
+( 1248) # 1249 "order_independent_summation_mod.F90"
+( 1249) !--- Test whether big-endian or little-endian
+( 1250) # 1251 "order_independent_summation_mod.F90"
+( 1251) ZUP = -1.0_JPRB
+( 1252) IEQUIV(1:INTS_PER_REAL) = TRANSFER(ZUP,IEQUIV(1:INTS_PER_REAL))
+( 1253) # 1254 "order_independent_summation_mod.F90"
+( 1254) IF (IEQUIV(1)==0) THEN
+( 1255)   I_LOW_WORD = 1                ! Little-endian
+( 1256) ELSE
+( 1257)   I_LOW_WORD = INTS_PER_REAL    ! Big-endian
+( 1258) ENDIF
+( 1259) # 1260 "order_independent_summation_mod.F90"
+( 1260) !--- Find the nearest number with all 3 lowest-order bits zeroed
+( 1261) # 1262 "order_independent_summation_mod.F90"
+( 1262) IEQUIV(1:INTS_PER_REAL) = TRANSFER(PRES,IEQUIV(1:INTS_PER_REAL))
+( 1263) ZUP    = PRES
+( 1264) ZDOWN  = PRES
+( 1265) # 1266 "order_independent_summation_mod.F90"
+( 1266) IF (IBITS(IEQUIV(I_LOW_WORD),0,3)/=0) THEN
+( 1267)   DO J=1,4
+( 1268)     ZUP=NEAREST(ZUP,1.0_JPRB)
+( 1269)     IEQUIV(1:INTS_PER_REAL) = TRANSFER(ZUP,IEQUIV(1:INTS_PER_REAL))
+( 1270)     IF (IBITS(IEQUIV(I_LOW_WORD),0,3)==0) EXIT
+( 1271) # 1272 "order_independent_summation_mod.F90"
+( 1272)     ZDOWN=NEAREST(ZDOWN,-1.0_JPRB)
+( 1273)     IEQUIV(1:INTS_PER_REAL) = TRANSFER(ZDOWN,IEQUIV(1:INTS_PER_REAL))
+( 1274)     IF (IBITS(IEQUIV(I_LOW_WORD),0,3)==0) EXIT
+( 1275)   ENDDO
+( 1276) # 1277 "order_independent_summation_mod.F90"
+( 1277)   IF (IBITS(IEQUIV(I_LOW_WORD),0,3)/=0) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:46      page 46
+
+( 1278)     CALL MPL_MESSAGE (CDMESSAGE='THIS IS NOT POSSIBLE', &
+( 1279)                     & CDSTRING='ORDER_INDEP_GLOBAL_SUM',LDABORT=.TRUE.)
+( 1280)   ENDIF
+( 1281) ENDIF
+( 1282) # 1283 "order_independent_summation_mod.F90"
+( 1283) ROUND = TRANSFER(IEQUIV(1:INTS_PER_REAL),PRES)
+( 1284) # 1285 "order_independent_summation_mod.F90"
+( 1285) END FUNCTION ROUND
+( 1286) # 1287 "order_independent_summation_mod.F90"
+( 1287) END MODULE ORDER_INDEPENDENT_SUMMATION_MOD

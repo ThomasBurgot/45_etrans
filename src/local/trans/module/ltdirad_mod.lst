@@ -1,0 +1,457 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:59      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: ltdirad_mod.F90
+
+(    1) MODULE LTDIRAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE LTDIRAD(KM,KMLOC,KF_FS,KF_UV,KF_SCALARS,KLED2,&
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2 , &
+(    6)  & KFLDPTRUV,KFLDPTRSC)
+(    7) 
+(    8) 
+(    9) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   10) 
+(   11) USE TPM_DIM         ,ONLY : R
+(   12) USE TPM_GEOMETRY
+(   13) 
+(   14) USE PREPSNM_MOD     ,ONLY : PREPSNM
+(   15) USE PRFI2AD_MOD     ,ONLY : PRFI2AD
+(   16) USE LDFOU2AD_MOD    ,ONLY : LDFOU2AD
+(   17) USE LEDIRAD_MOD     ,ONLY : LEDIRAD
+(   18) USE UVTVDAD_MOD
+(   19) USE UPDSPAD_MOD     ,ONLY : UPDSPAD
+(   20)  
+(   21) 
+(   22) !**** *LTDIRAD* - Control of Direct Legendre transform step - adjoint
+(   23) 
+(   24) !     Purpose.
+(   25) !     --------
+(   26) !        Tranform from Fourier space to spectral space, compute
+(   27) !        vorticity and divergence.
+(   28) 
+(   29) !**   Interface.
+(   30) !     ----------
+(   31) !        *CALL* *LTDIRAD(...)*
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:59      page 2
+
+(   32) 
+(   33) !        Explicit arguments :
+(   34) !        --------------------  KM     - zonal wavenumber
+(   35) !                              KMLOC  - local zonal wavenumber
+(   36) !                              PSPVOR - spectral vorticity
+(   37) !                              PSPDIV - spectral divergence
+(   38) !                              PSPSCALAR - spectral scalar variables
+(   39) 
+(   40) !        Implicit arguments :  None
+(   41) !        --------------------
+(   42) 
+(   43) !     Method.
+(   44) !     -------
+(   45) 
+(   46) !     Externals.
+(   47) !     ----------
+(   48) !         PREPSNM  - prepare REPSNM for wavenumber KM
+(   49) !         PRFI2AD  - prepares the Fourier work arrays for model variables.
+(   50) !         LDFOU2AD - computations in Fourier space
+(   51) !         LEDIRAD  - direct Legendre transform
+(   52) !         UVTVDAD  -
+(   53) !         UPDSPAD  - updating of spectral arrays (fields)
+(   54) 
+(   55) !     Reference.
+(   56) !     ----------
+(   57) !        ECMWF Research Department documentation of the IFS
+(   58) 
+(   59) !     Author.
+(   60) !     -------
+(   61) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   62) 
+(   63) !     Modifications.
+(   64) !     --------------
+(   65) !        Original : 87-11-24
+(   66) !        Modified : 91-07-01 Philippe Courtier/Mats Hamrud - Rewrite
+(   67) !                            for uv formulation
+(   68) !        Modified 93-03-19 D. Giard - CDCONF='T' for tendencies
+(   69) !        Modified 93-11-18 M. Hamrud - use only one Fourier buffer
+(   70) !        Modified 94-04-06 R. El khatib Full-POS implementation
+(   71) !        M.Hamrud  : 94-11-01 New conf 'G' - vor,div->vor,div
+(   72) !                             instead of u,v->vor,div
+(   73) !        MPP Group : 95-10-01 Support for Distributed Memory version
+(   74) !        K. YESSAD (AUGUST 1996):
+(   75) !               - Legendre transforms for transmission coefficients.
+(   76) !        Modified : 04/06/99 D.Salmond : change order of AIA and SIA
+(   77) !        R. El Khatib 12-Jul-2012 LDSPC2AD replaced by UVTVDAD
+(   78) !     ------------------------------------------------------------------
+(   79) 
+(   80) IMPLICIT NONE
+(   81) 
+(   82) 
+(   83) !     DUMMY INTEGER SCALARS
+(   84) INTEGER(KIND=JPIM), INTENT(IN)  :: KM
+(   85) INTEGER(KIND=JPIM), INTENT(IN)  :: KMLOC
+(   86) INTEGER(KIND=JPIM),INTENT(IN)   :: KF_FS,KF_UV,KF_SCALARS,KLED2
+(   87) 
+(   88) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPVOR(:,:)
+(   89) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPDIV(:,:)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:59      page 3
+
+(   90) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPSCALAR(:,:)
+(   91) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PSPSC2(:,:)
+(   92) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PSPSC3A(:,:,:)
+(   93) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PSPSC3B(:,:,:)
+(   94) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRUV(:)
+(   95) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRSC(:)
+(   96) 
+(   97) 
+(   98) !     LOCAL INTEGER SCALARS
+(   99) INTEGER(KIND=JPIM) :: IFC, IIFC, IDGLU
+(  100) INTEGER(KIND=JPIM) :: IUS, IUE, IVS, IVE, IVORS, IVORE, IDIVS, IDIVE
+(  101) 
+(  102) !     LOCAL REALS
+(  103) REAL(KIND=JPRBT) :: ZSIA(KLED2,R%NDGNH),       ZAIA(KLED2,R%NDGNH)
+(  104) REAL(KIND=JPRBT) :: ZEPSNM(0:R%NTMAX+2)
+(  105) REAL(KIND=JPRBT) :: ZOA1(R%NLED4,KLED2),         ZOA2(R%NLED4,MAX(4*KF_UV,1))
+(  106) 
+(  107) 
+(  108) !     ------------------------------------------------------------------
+(  109) 
+(  110) !*       1.    PREPARE LEGENDRE POLONOMIALS AND EPSNM
+(  111) !              --------------------------------------
+(  112) 
+(  113) 
+(  114) 
+(  115) 
+(  116) !     ------------------------------------------------------------------
+(  117) 
+(  118) !*       6.    UPDATE SPECTRAL ARRAYS.
+(  119) !              -----------------------
+(  120) 
+(  121) CALL UPDSPAD(KM,KF_UV,KF_SCALARS,ZOA1,ZOA2, &
+(  122)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(  123)  & PSPSC3A,PSPSC3B,PSPSC2 , &
+(  124)  & KFLDPTRUV,KFLDPTRSC)
+(  125) 
+(  126) !     ------------------------------------------------------------------
+(  127) 
+(  128) !*       5.    COMPUTE VORTICITY AND DIVERGENCE.
+(  129) !              ---------------------------------
+(  130) 
+(  131) IF( KF_UV > 0 ) THEN
+(  132)   stop 'Error: code path not (yet) supported in GPU version'
+(  133)   !CALL PREPSNM(KM,KMLOC,ZEPSNM)
+(  134)   IUS = 1
+(  135)   IUE = 2*KF_UV
+(  136)   IVS = 2*KF_UV+1
+(  137)   IVE = 4*KF_UV
+(  138)   IVORS = 1
+(  139)   IVORE = 2*KF_UV
+(  140)   IDIVS = 2*KF_UV+1
+(  141)   IDIVE = 4*KF_UV
+(  142) ! SET PART OF ZOA1 CONTAINING U AND V TO 0.
+(  143)   ZOA1(:,IUS:IVE) = 0.0_JPRBT
+(  144)   CALL UVTVDAD(KM,KF_UV,ZEPSNM,ZOA1(:,IUS:IUE),ZOA1(:,IVS:IVE),&
+(  145)    & ZOA2(:,IVORS:IVORE),ZOA2(:,IDIVS:IDIVE))
+(  146) ENDIF
+(  147) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:59      page 4
+
+(  148) !     ------------------------------------------------------------------
+(  149) 
+(  150) !*       4.    DIRECT LEGENDRE TRANSFORM.
+(  151) !              --------------------------
+(  152) IFC = 2*KF_FS
+(  153) IDGLU = MIN(R%NDGNH,G%NDGLU(KM))
+(  154) IIFC = IFC
+(  155) IF(KM == 0)THEN
+(  156)   IIFC = IFC/2
+(  157) ENDIF
+(  158) CALL LEDIRAD(KM,KMLOC,IFC,IIFC,IDGLU,KLED2,ZAIA,ZSIA,ZOA1)
+(  159) 
+(  160) !     ------------------------------------------------------------------
+(  161) 
+(  162) !*       3.    FOURIER SPACE COMPUTATIONS.
+(  163) !              ---------------------------
+(  164) 
+(  165) CALL LDFOU2AD(KM,KF_UV,ZAIA,ZSIA)
+(  166) 
+(  167) !     ------------------------------------------------------------------
+(  168) 
+(  169) !*       2.    PREPARE WORK ARRAYS.
+(  170) !              --------------------
+(  171) 
+(  172) CALL PRFI2AD(KM,KMLOC,KF_FS,ZAIA,ZSIA)
+(  173) 
+(  174) 
+(  175) !     ------------------------------------------------------------------
+(  176) 
+(  177) END SUBROUTINE LTDIRAD
+(  178) END MODULE LTDIRAD_MOD
+(  179) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:59      page 5
+
+(    1) # 1 "ltdirad_mod.F90"
+(    1) MODULE LTDIRAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE LTDIRAD(KM,KMLOC,KF_FS,KF_UV,KF_SCALARS,KLED2,&
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,&
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2 , &
+(    6)  & KFLDPTRUV,KFLDPTRSC)
+(    7) # 9 "ltdirad_mod.F90"
+(    9) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   10) # 11 "ltdirad_mod.F90"
+(   11) USE TPM_DIM         ,ONLY : R
+(   12) USE TPM_GEOMETRY
+(   13) # 14 "ltdirad_mod.F90"
+(   14) USE PREPSNM_MOD     ,ONLY : PREPSNM
+(   15) USE PRFI2AD_MOD     ,ONLY : PRFI2AD
+(   16) USE LDFOU2AD_MOD    ,ONLY : LDFOU2AD
+(   17) USE LEDIRAD_MOD     ,ONLY : LEDIRAD
+(   18) USE UVTVDAD_MOD
+(   19) USE UPDSPAD_MOD     ,ONLY : UPDSPAD
+(   20)  
+(   21) # 22 "ltdirad_mod.F90"
+(   22) !**** *LTDIRAD* - Control of Direct Legendre transform step - adjoint
+(   23) # 24 "ltdirad_mod.F90"
+(   24) !     Purpose.
+(   25) !     --------
+(   26) !        Tranform from Fourier space to spectral space, compute
+(   27) !        vorticity and divergence.
+(   28) # 29 "ltdirad_mod.F90"
+(   29) !**   Interface.
+(   30) !     ----------
+(   31) !        *CALL* *LTDIRAD(...)*
+(   32) # 33 "ltdirad_mod.F90"
+(   33) !        Explicit arguments :
+(   34) !        --------------------  KM     - zonal wavenumber
+(   35) !                              KMLOC  - local zonal wavenumber
+(   36) !                              PSPVOR - spectral vorticity
+(   37) !                              PSPDIV - spectral divergence
+(   38) !                              PSPSCALAR - spectral scalar variables
+(   39) # 40 "ltdirad_mod.F90"
+(   40) !        Implicit arguments :  None
+(   41) !        --------------------
+(   42) # 43 "ltdirad_mod.F90"
+(   43) !     Method.
+(   44) !     -------
+(   45) # 46 "ltdirad_mod.F90"
+(   46) !     Externals.
+(   47) !     ----------
+(   48) !         PREPSNM  - prepare REPSNM for wavenumber KM
+(   49) !         PRFI2AD  - prepares the Fourier work arrays for model variables.
+(   50) !         LDFOU2AD - computations in Fourier space
+(   51) !         LEDIRAD  - direct Legendre transform
+(   52) !         UVTVDAD  -
+(   53) !         UPDSPAD  - updating of spectral arrays (fields)
+(   54) # 55 "ltdirad_mod.F90"
+(   55) !     Reference.
+(   56) !     ----------
+(   57) !        ECMWF Research Department documentation of the IFS
+(   58) # 59 "ltdirad_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:59      page 6
+
+(   59) !     Author.
+(   60) !     -------
+(   61) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   62) # 63 "ltdirad_mod.F90"
+(   63) !     Modifications.
+(   64) !     --------------
+(   65) !        Original : 87-11-24
+(   66) !        Modified : 91-07-01 Philippe Courtier/Mats Hamrud - Rewrite
+(   67) !                            for uv formulation
+(   68) !        Modified 93-03-19 D. Giard - CDCONF='T' for tendencies
+(   69) !        Modified 93-11-18 M. Hamrud - use only one Fourier buffer
+(   70) !        Modified 94-04-06 R. El khatib Full-POS implementation
+(   71) !        M.Hamrud  : 94-11-01 New conf 'G' - vor,div->vor,div
+(   72) !                             instead of u,v->vor,div
+(   73) !        MPP Group : 95-10-01 Support for Distributed Memory version
+(   74) !        K. YESSAD (AUGUST 1996):
+(   75) !               - Legendre transforms for transmission coefficients.
+(   76) !        Modified : 04/06/99 D.Salmond : change order of AIA and SIA
+(   77) !        R. El Khatib 12-Jul-2012 LDSPC2AD replaced by UVTVDAD
+(   78) !     ------------------------------------------------------------------
+(   79) # 80 "ltdirad_mod.F90"
+(   80) IMPLICIT NONE
+(   81) # 83 "ltdirad_mod.F90"
+(   83) !     DUMMY INTEGER SCALARS
+(   84) INTEGER(KIND=JPIM), INTENT(IN)  :: KM
+(   85) INTEGER(KIND=JPIM), INTENT(IN)  :: KMLOC
+(   86) INTEGER(KIND=JPIM),INTENT(IN)   :: KF_FS,KF_UV,KF_SCALARS,KLED2
+(   87) # 88 "ltdirad_mod.F90"
+(   88) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPVOR(:,:)
+(   89) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPDIV(:,:)
+(   90) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPSCALAR(:,:)
+(   91) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PSPSC2(:,:)
+(   92) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PSPSC3A(:,:,:)
+(   93) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(INOUT) :: PSPSC3B(:,:,:)
+(   94) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRUV(:)
+(   95) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRSC(:)
+(   96) # 98 "ltdirad_mod.F90"
+(   98) !     LOCAL INTEGER SCALARS
+(   99) INTEGER(KIND=JPIM) :: IFC, IIFC, IDGLU
+(  100) INTEGER(KIND=JPIM) :: IUS, IUE, IVS, IVE, IVORS, IVORE, IDIVS, IDIVE
+(  101) # 102 "ltdirad_mod.F90"
+(  102) !     LOCAL REALS
+(  103) REAL(KIND=JPRBT) :: ZSIA(KLED2,R%NDGNH),       ZAIA(KLED2,R%NDGNH)
+(  104) REAL(KIND=JPRBT) :: ZEPSNM(0:R%NTMAX+2)
+(  105) REAL(KIND=JPRBT) :: ZOA1(R%NLED4,KLED2),         ZOA2(R%NLED4,MAX(4*KF_UV,1))
+(  106) # 108 "ltdirad_mod.F90"
+(  108) !     ------------------------------------------------------------------
+(  109) # 110 "ltdirad_mod.F90"
+(  110) !*       1.    PREPARE LEGENDRE POLONOMIALS AND EPSNM
+(  111) !              --------------------------------------
+(  112) # 116 "ltdirad_mod.F90"
+(  116) !     ------------------------------------------------------------------
+(  117) # 118 "ltdirad_mod.F90"
+(  118) !*       6.    UPDATE SPECTRAL ARRAYS.
+(  119) !              -----------------------
+(  120) # 121 "ltdirad_mod.F90"
+(  121) CALL UPDSPAD(KM,KF_UV,KF_SCALARS,ZOA1,ZOA2, &
+(  122)  & PSPVOR,PSPDIV,PSPSCALAR,&
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:59      page 7
+
+(  123)  & PSPSC3A,PSPSC3B,PSPSC2 , &
+(  124)  & KFLDPTRUV,KFLDPTRSC)
+(  125) # 126 "ltdirad_mod.F90"
+(  126) !     ------------------------------------------------------------------
+(  127) # 128 "ltdirad_mod.F90"
+(  128) !*       5.    COMPUTE VORTICITY AND DIVERGENCE.
+(  129) !              ---------------------------------
+(  130) # 131 "ltdirad_mod.F90"
+(  131) IF( KF_UV > 0 ) THEN
+(  132)   stop 'Error: code path not (yet) supported in GPU version'
+(  133)   !CALL PREPSNM(KM,KMLOC,ZEPSNM)
+(  134)   IUS = 1
+(  135)   IUE = 2*KF_UV
+(  136)   IVS = 2*KF_UV+1
+(  137)   IVE = 4*KF_UV
+(  138)   IVORS = 1
+(  139)   IVORE = 2*KF_UV
+(  140)   IDIVS = 2*KF_UV+1
+(  141)   IDIVE = 4*KF_UV
+(  142) ! SET PART OF ZOA1 CONTAINING U AND V TO 0.
+(  143)   ZOA1(:,IUS:IVE) = 0.0_JPRBT
+(  144)   CALL UVTVDAD(KM,KF_UV,ZEPSNM,ZOA1(:,IUS:IUE),ZOA1(:,IVS:IVE),&
+(  145)    & ZOA2(:,IVORS:IVORE),ZOA2(:,IDIVS:IDIVE))
+(  146) ENDIF
+(  147) # 148 "ltdirad_mod.F90"
+(  148) !     ------------------------------------------------------------------
+(  149) # 150 "ltdirad_mod.F90"
+(  150) !*       4.    DIRECT LEGENDRE TRANSFORM.
+(  151) !              --------------------------
+(  152) IFC = 2*KF_FS
+(  153) IDGLU = MIN(R%NDGNH,G%NDGLU(KM))
+(  154) IIFC = IFC
+(  155) IF(KM == 0)THEN
+(  156)   IIFC = IFC/2
+(  157) ENDIF
+(  158) CALL LEDIRAD(KM,KMLOC,IFC,IIFC,IDGLU,KLED2,ZAIA,ZSIA,ZOA1)
+(  159) # 160 "ltdirad_mod.F90"
+(  160) !     ------------------------------------------------------------------
+(  161) # 162 "ltdirad_mod.F90"
+(  162) !*       3.    FOURIER SPACE COMPUTATIONS.
+(  163) !              ---------------------------
+(  164) # 165 "ltdirad_mod.F90"
+(  165) CALL LDFOU2AD(KM,KF_UV,ZAIA,ZSIA)
+(  166) # 167 "ltdirad_mod.F90"
+(  167) !     ------------------------------------------------------------------
+(  168) # 169 "ltdirad_mod.F90"
+(  169) !*       2.    PREPARE WORK ARRAYS.
+(  170) !              --------------------
+(  171) # 172 "ltdirad_mod.F90"
+(  172) CALL PRFI2AD(KM,KMLOC,KF_FS,ZAIA,ZSIA)
+(  173) # 175 "ltdirad_mod.F90"
+(  175) !     ------------------------------------------------------------------
+(  176) # 177 "ltdirad_mod.F90"
+(  177) END SUBROUTINE LTDIRAD
+(  178) END MODULE LTDIRAD_MOD

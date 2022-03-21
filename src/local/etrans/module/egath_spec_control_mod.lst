@@ -1,0 +1,496 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:41      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: egath_spec_control_mod.F90
+
+(    1) MODULE EGATH_SPEC_CONTROL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EGATH_SPEC_CONTROL(PSPECG,KFGATHG,KTO,KVSET,PSPEC,LDIM1_IS_FLD,&
+(    4)  & KMSMAX,KSPEC2,KSPEC2_G,KPOSSP,KDIM0G,KCPL2M,LDZA0IP)
+(    5) 
+(    6) !**** *EGATH_SPEC_CONTROL* - Gather global spectral array from processors
+(    7) 
+(    8) !     Purpose.
+(    9) !     --------
+(   10) !        Routine for gathering spectral array
+(   11) 
+(   12) !**   Interface.
+(   13) !     ----------
+(   14) !     CALL EGATH_SPEC_CONTROL(...)
+(   15) 
+(   16) !     Explicit arguments :
+(   17) !     --------------------
+(   18) !     PSPECG(:,:) - Global spectral array
+(   19) !     KFGATHG     - Global number of fields to be distributed
+(   20) !     KTO(:)    - Processor responsible for distributing each field
+(   21) !     KVSET(:)    - "B-Set" for each field
+(   22) !     PSPEC(:,:)  - Local spectral array
+(   23) !     LDZA0IP     - Set to zero unused spectral coefficients
+(   24) 
+(   25) !     ------------------------------------------------------------------
+(   26) 
+(   27) 
+(   28) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   29) USE MPL_MODULE  ,ONLY : MPL_RECV, MPL_SEND, MPL_BARRIER, MPL_WAIT, &
+(   30)      &                  JP_NON_BLOCKING_STANDARD, JP_BLOCKING_STANDARD
+(   31) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:41      page 2
+
+(   32) !USE TPM_GEN
+(   33) !USE TPM_DIM
+(   34) USE TPM_DISTR       ,ONLY : MTAGDISTSP, NPRCIDS, NPRTRW, MYSETV, MYPROC, NPROC
+(   35) 
+(   36) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   37) USE SET2PE_MOD      ,ONLY : SET2PE
+(   38) USE SUWAVEDI_MOD
+(   39) 
+(   40) IMPLICIT NONE
+(   41) 
+(   42) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT)  :: PSPECG(:,:)
+(   43) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFGATHG
+(   44) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KTO(:)
+(   45) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KVSET(:)
+(   46) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPEC(:,:)
+(   47) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDIM1_IS_FLD
+(   48) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KMSMAX
+(   49) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KSPEC2
+(   50) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KSPEC2_G
+(   51) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KPOSSP(:)
+(   52) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KDIM0G(0:)
+(   53) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KCPL2M(0:)
+(   54) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDZA0IP
+(   55) 
+(   56) REAL(KIND=JPRB)    :: ZFLD(KSPEC2,KFGATHG)
+(   57) REAL(KIND=JPRB),ALLOCATABLE :: ZRECV(:,:)
+(   58) INTEGER(KIND=JPIM) :: JM,JN,II,IFLDR,IFLDS,JFLD,ITAG,IBSET,ILEN,JA,ISND
+(   59) INTEGER(KIND=JPIM) :: IRCV,ISP,ILENR,ISTA,ISTP,ISENDREQ(KFGATHG),IPOS0,JNM
+(   60) INTEGER(KIND=JPIM) :: IDIST(KSPEC2_G),IMYFIELDS
+(   61) 
+(   62) !     ------------------------------------------------------------------
+(   63) 
+(   64) 
+(   65) !GATHER SPECTRAL ARRAY
+(   66) 
+(   67) IF( NPROC == 1 ) THEN
+(   68)   CALL GSTATS(1644,0)
+(   69)   IF(LDIM1_IS_FLD) THEN
+(   70) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JM,JFLD)
+(   71)     DO JM=1,KSPEC2_G
+(   72)       DO JFLD=1,KFGATHG
+(   73)         PSPECG(JFLD,JM) =PSPEC(JFLD,JM)
+(   74)       ENDDO
+(   75)     ENDDO
+(   76) !$OMP END PARALLEL DO
+(   77)   ELSE
+(   78) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JM,JFLD)
+(   79)     DO JFLD=1,KFGATHG
+(   80)       DO JM=1,KSPEC2_G
+(   81)         PSPECG(JM,JFLD) =PSPEC(JM,JFLD)
+(   82)       ENDDO
+(   83)     ENDDO
+(   84) !$OMP END PARALLEL DO
+(   85)   ENDIF
+(   86)   CALL GSTATS(1644,1)
+(   87) ELSE
+(   88)   IMYFIELDS = 0
+(   89)   DO JFLD=1,KFGATHG
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:41      page 3
+
+(   90)     IF(KTO(JFLD) == MYPROC) THEN
+(   91)       IMYFIELDS = IMYFIELDS+1
+(   92)     ENDIF
+(   93)   ENDDO
+(   94)   IF(IMYFIELDS>0) THEN
+(   95)     ALLOCATE(ZRECV(KSPEC2_G,IMYFIELDS))
+(   96)     II = 0
+(   97)     CALL GSTATS(1804,0)
+(   98)     DO JM=0,KMSMAX
+(   99)       DO JN=0,KCPL2M(JM)/2-1
+(  100)         IDIST(II+1) = KDIM0G(JM)+4*JN
+(  101)         IDIST(II+2) = KDIM0G(JM)+4*JN+1
+(  102)         IDIST(II+3) = KDIM0G(JM)+4*JN+2
+(  103)         IDIST(II+4) = KDIM0G(JM)+4*JN+3
+(  104)         II = II+4
+(  105)       ENDDO
+(  106)     ENDDO
+(  107)     CALL GSTATS(1804,1)
+(  108)   ENDIF
+(  109) 
+(  110)   CALL GSTATS_BARRIER(788)
+(  111) 
+(  112)   !Send
+(  113)   CALL GSTATS(810,0)
+(  114)   IFLDS = 0
+(  115)   IF(KSPEC2 > 0 )THEN
+(  116)     DO JFLD=1,KFGATHG
+(  117) 
+(  118)       IBSET = KVSET(JFLD)
+(  119)       IF( IBSET == MYSETV )THEN
+(  120) 
+(  121)         IFLDS = IFLDS+1
+(  122)         ISND  = KTO(JFLD)
+(  123)         ITAG  = MTAGDISTSP+JFLD+17
+(  124)         IF(LDIM1_IS_FLD) THEN
+(  125)           ZFLD(1:KSPEC2,IFLDS)=PSPEC(IFLDS,1:KSPEC2)
+(  126)           CALL MPL_SEND(ZFLD(1:KSPEC2,IFLDS),KDEST=NPRCIDS(ISND),KTAG=ITAG,&
+(  127)            &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(JFLD),&
+(  128)            &CDSTRING='EGATH_SPEC_CONTROL')
+(  129)         ELSE
+(  130)           CALL MPL_SEND(PSPEC(1:KSPEC2,IFLDS),KDEST=NPRCIDS(ISND),KTAG=ITAG,&
+(  131)            &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(JFLD),&
+(  132)            &CDSTRING='EGATH_SPEC_CONTROL')
+(  133)         ENDIF
+(  134)       ENDIF
+(  135)     ENDDO
+(  136)   ENDIF
+(  137) 
+(  138)   ! Recieve
+(  139)   IFLDR = 0
+(  140)   DO JFLD=1,KFGATHG
+(  141)     IF(KTO(JFLD) == MYPROC) THEN
+(  142)       IBSET = KVSET(JFLD)
+(  143)       IFLDR = IFLDR+1
+(  144)       DO JA=1,NPRTRW
+(  145)         ILEN = KPOSSP(JA+1)-KPOSSP(JA)
+(  146)         IF( ILEN > 0 )THEN
+(  147)           CALL SET2PE(IRCV,0,0,JA,IBSET)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:41      page 4
+
+(  148)           ITAG = MTAGDISTSP+JFLD+17
+(  149)           ISTA = KPOSSP(JA)
+(  150)           ISTP = ISTA+ILEN-1
+(  151)           CALL MPL_RECV(ZRECV(ISTA:ISTP,IFLDR),KSOURCE=NPRCIDS(IRCV),KTAG=ITAG,&
+(  152)            &KMP_TYPE=JP_BLOCKING_STANDARD,KOUNT=ILENR, &
+(  153)            &CDSTRING='EGATH_SPEC_CONTROL')
+(  154)           IF( ILENR /= ILEN )THEN
+(  155)             WRITE(0,'("EGATH_SPEC_CONTROL: JFLD=",I4," JA=",I4," ILEN=",I10," ILENR=",I10)')&
+(  156)             &JFLD,JA,ILEN,ILENR
+(  157)             CALL ABORT_TRANS('EGATH_SPEC_CONTROL:INVALID RECEIVE MESSAGE LENGTH')
+(  158)           ENDIF
+(  159)         ENDIF
+(  160)       ENDDO
+(  161)     ENDIF
+(  162)   ENDDO
+(  163) 
+(  164)   ! Check for completion of sends
+(  165)   IF(KSPEC2 > 0 )THEN
+(  166)     DO JFLD=1,KFGATHG
+(  167)       IBSET = KVSET(JFLD)
+(  168)       IF( IBSET == MYSETV )THEN
+(  169)         CALL MPL_WAIT(KREQUEST=ISENDREQ(JFLD), &
+(  170)          & CDSTRING='GATH_GRID_CTL: WAIT')
+(  171)       ENDIF
+(  172)     ENDDO
+(  173)   ENDIF
+(  174)   CALL GSTATS(810,1)
+(  175)   CALL GSTATS_BARRIER2(788)
+(  176) 
+(  177)   CALL GSTATS(1644,0)
+(  178) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JFLD,JNM,II,JN,ISP)
+(  179)   DO JFLD=1,IMYFIELDS
+(  180)     IF(LDIM1_IS_FLD) THEN
+(  181)       DO JNM=1,KSPEC2_G
+(  182)         PSPECG(JFLD,JNM) = ZRECV(IDIST(JNM),JFLD)
+(  183)       ENDDO
+(  184)     ELSE
+(  185)       DO JNM=1,KSPEC2_G
+(  186)         PSPECG(JNM,JFLD) = ZRECV(IDIST(JNM),JFLD)
+(  187)       ENDDO
+(  188)     ENDIF
+(  189)   ENDDO
+(  190) !$OMP END PARALLEL DO
+(  191)   CALL GSTATS(1644,1)
+(  192)   IF(ALLOCATED(ZRECV)) DEALLOCATE(ZRECV)
+(  193) 
+(  194)   !Synchronize processors
+(  195)   CALL GSTATS(785,0)
+(  196)   CALL MPL_BARRIER(CDSTRING='EGATH_SPEC_CONTROL:')
+(  197)   CALL GSTATS(785,1)
+(  198) ENDIF
+(  199) 
+(  200) !     ------------------------------------------------------------------
+(  201) 
+(  202) END SUBROUTINE EGATH_SPEC_CONTROL
+(  203) END MODULE EGATH_SPEC_CONTROL_MOD
+(  204) 
+(  205) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:41      page 5
+
+(    1) # 1 "egath_spec_control_mod.F90"
+(    1) MODULE EGATH_SPEC_CONTROL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EGATH_SPEC_CONTROL(PSPECG,KFGATHG,KTO,KVSET,PSPEC,LDIM1_IS_FLD,&
+(    4)  & KMSMAX,KSPEC2,KSPEC2_G,KPOSSP,KDIM0G,KCPL2M,LDZA0IP)
+(    5) # 6 "egath_spec_control_mod.F90"
+(    6) !**** *EGATH_SPEC_CONTROL* - Gather global spectral array from processors
+(    7) # 8 "egath_spec_control_mod.F90"
+(    8) !     Purpose.
+(    9) !     --------
+(   10) !        Routine for gathering spectral array
+(   11) # 12 "egath_spec_control_mod.F90"
+(   12) !**   Interface.
+(   13) !     ----------
+(   14) !     CALL EGATH_SPEC_CONTROL(...)
+(   15) # 16 "egath_spec_control_mod.F90"
+(   16) !     Explicit arguments :
+(   17) !     --------------------
+(   18) !     PSPECG(:,:) - Global spectral array
+(   19) !     KFGATHG     - Global number of fields to be distributed
+(   20) !     KTO(:)    - Processor responsible for distributing each field
+(   21) !     KVSET(:)    - "B-Set" for each field
+(   22) !     PSPEC(:,:)  - Local spectral array
+(   23) !     LDZA0IP     - Set to zero unused spectral coefficients
+(   24) # 25 "egath_spec_control_mod.F90"
+(   25) !     ------------------------------------------------------------------
+(   26) # 28 "egath_spec_control_mod.F90"
+(   28) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   29) USE MPL_MODULE  ,ONLY : MPL_RECV, MPL_SEND, MPL_BARRIER, MPL_WAIT, &
+(   30)      &                  JP_NON_BLOCKING_STANDARD, JP_BLOCKING_STANDARD
+(   31) # 32 "egath_spec_control_mod.F90"
+(   32) !USE TPM_GEN
+(   33) !USE TPM_DIM
+(   34) USE TPM_DISTR       ,ONLY : MTAGDISTSP, NPRCIDS, NPRTRW, MYSETV, MYPROC, NPROC
+(   35) # 36 "egath_spec_control_mod.F90"
+(   36) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   37) USE SET2PE_MOD      ,ONLY : SET2PE
+(   38) USE SUWAVEDI_MOD
+(   39) # 40 "egath_spec_control_mod.F90"
+(   40) IMPLICIT NONE
+(   41) # 42 "egath_spec_control_mod.F90"
+(   42) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT)  :: PSPECG(:,:)
+(   43) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFGATHG
+(   44) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KTO(:)
+(   45) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KVSET(:)
+(   46) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPEC(:,:)
+(   47) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDIM1_IS_FLD
+(   48) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KMSMAX
+(   49) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KSPEC2
+(   50) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KSPEC2_G
+(   51) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KPOSSP(:)
+(   52) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KDIM0G(0:)
+(   53) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KCPL2M(0:)
+(   54) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDZA0IP
+(   55) # 56 "egath_spec_control_mod.F90"
+(   56) REAL(KIND=JPRB)    :: ZFLD(KSPEC2,KFGATHG)
+(   57) REAL(KIND=JPRB),ALLOCATABLE :: ZRECV(:,:)
+(   58) INTEGER(KIND=JPIM) :: JM,JN,II,IFLDR,IFLDS,JFLD,ITAG,IBSET,ILEN,JA,ISND
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:41      page 6
+
+(   59) INTEGER(KIND=JPIM) :: IRCV,ISP,ILENR,ISTA,ISTP,ISENDREQ(KFGATHG),IPOS0,JNM
+(   60) INTEGER(KIND=JPIM) :: IDIST(KSPEC2_G),IMYFIELDS
+(   61) # 62 "egath_spec_control_mod.F90"
+(   62) !     ------------------------------------------------------------------
+(   63) # 65 "egath_spec_control_mod.F90"
+(   65) !GATHER SPECTRAL ARRAY
+(   66) # 67 "egath_spec_control_mod.F90"
+(   67) IF( NPROC == 1 ) THEN
+(   68)   CALL GSTATS(1644,0)
+(   69)   IF(LDIM1_IS_FLD) THEN
+(   70) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JM,JFLD)
+(   71)     DO JM=1,KSPEC2_G
+(   72)       DO JFLD=1,KFGATHG
+(   73)         PSPECG(JFLD,JM) =PSPEC(JFLD,JM)
+(   74)       ENDDO
+(   75)     ENDDO
+(   76) !$OMP END PARALLEL DO
+(   77)   ELSE
+(   78) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JM,JFLD)
+(   79)     DO JFLD=1,KFGATHG
+(   80)       DO JM=1,KSPEC2_G
+(   81)         PSPECG(JM,JFLD) =PSPEC(JM,JFLD)
+(   82)       ENDDO
+(   83)     ENDDO
+(   84) !$OMP END PARALLEL DO
+(   85)   ENDIF
+(   86)   CALL GSTATS(1644,1)
+(   87) ELSE
+(   88)   IMYFIELDS = 0
+(   89)   DO JFLD=1,KFGATHG
+(   90)     IF(KTO(JFLD) == MYPROC) THEN
+(   91)       IMYFIELDS = IMYFIELDS+1
+(   92)     ENDIF
+(   93)   ENDDO
+(   94)   IF(IMYFIELDS>0) THEN
+(   95)     ALLOCATE(ZRECV(KSPEC2_G,IMYFIELDS))
+(   96)     II = 0
+(   97)     CALL GSTATS(1804,0)
+(   98)     DO JM=0,KMSMAX
+(   99)       DO JN=0,KCPL2M(JM)/2-1
+(  100)         IDIST(II+1) = KDIM0G(JM)+4*JN
+(  101)         IDIST(II+2) = KDIM0G(JM)+4*JN+1
+(  102)         IDIST(II+3) = KDIM0G(JM)+4*JN+2
+(  103)         IDIST(II+4) = KDIM0G(JM)+4*JN+3
+(  104)         II = II+4
+(  105)       ENDDO
+(  106)     ENDDO
+(  107)     CALL GSTATS(1804,1)
+(  108)   ENDIF
+(  109) # 110 "egath_spec_control_mod.F90"
+(  110)   CALL GSTATS_BARRIER(788)
+(  111) # 112 "egath_spec_control_mod.F90"
+(  112)   !Send
+(  113)   CALL GSTATS(810,0)
+(  114)   IFLDS = 0
+(  115)   IF(KSPEC2 > 0 )THEN
+(  116)     DO JFLD=1,KFGATHG
+(  117) # 118 "egath_spec_control_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:41      page 7
+
+(  118)       IBSET = KVSET(JFLD)
+(  119)       IF( IBSET == MYSETV )THEN
+(  120) # 121 "egath_spec_control_mod.F90"
+(  121)         IFLDS = IFLDS+1
+(  122)         ISND  = KTO(JFLD)
+(  123)         ITAG  = MTAGDISTSP+JFLD+17
+(  124)         IF(LDIM1_IS_FLD) THEN
+(  125)           ZFLD(1:KSPEC2,IFLDS)=PSPEC(IFLDS,1:KSPEC2)
+(  126)           CALL MPL_SEND(ZFLD(1:KSPEC2,IFLDS),KDEST=NPRCIDS(ISND),KTAG=ITAG,&
+(  127)            &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(JFLD),&
+(  128)            &CDSTRING='EGATH_SPEC_CONTROL')
+(  129)         ELSE
+(  130)           CALL MPL_SEND(PSPEC(1:KSPEC2,IFLDS),KDEST=NPRCIDS(ISND),KTAG=ITAG,&
+(  131)            &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(JFLD),&
+(  132)            &CDSTRING='EGATH_SPEC_CONTROL')
+(  133)         ENDIF
+(  134)       ENDIF
+(  135)     ENDDO
+(  136)   ENDIF
+(  137) # 138 "egath_spec_control_mod.F90"
+(  138)   ! Recieve
+(  139)   IFLDR = 0
+(  140)   DO JFLD=1,KFGATHG
+(  141)     IF(KTO(JFLD) == MYPROC) THEN
+(  142)       IBSET = KVSET(JFLD)
+(  143)       IFLDR = IFLDR+1
+(  144)       DO JA=1,NPRTRW
+(  145)         ILEN = KPOSSP(JA+1)-KPOSSP(JA)
+(  146)         IF( ILEN > 0 )THEN
+(  147)           CALL SET2PE(IRCV,0,0,JA,IBSET)
+(  148)           ITAG = MTAGDISTSP+JFLD+17
+(  149)           ISTA = KPOSSP(JA)
+(  150)           ISTP = ISTA+ILEN-1
+(  151)           CALL MPL_RECV(ZRECV(ISTA:ISTP,IFLDR),KSOURCE=NPRCIDS(IRCV),KTAG=ITAG,&
+(  152)            &KMP_TYPE=JP_BLOCKING_STANDARD,KOUNT=ILENR, &
+(  153)            &CDSTRING='EGATH_SPEC_CONTROL')
+(  154)           IF( ILENR /= ILEN )THEN
+(  155)             WRITE(0,'("EGATH_SPEC_CONTROL: JFLD=",I4," JA=",I4," ILEN=",I10," ILENR=",I10)')&
+(  156)             &JFLD,JA,ILEN,ILENR
+(  157)             CALL ABORT_TRANS('EGATH_SPEC_CONTROL:INVALID RECEIVE MESSAGE LENGTH')
+(  158)           ENDIF
+(  159)         ENDIF
+(  160)       ENDDO
+(  161)     ENDIF
+(  162)   ENDDO
+(  163) # 164 "egath_spec_control_mod.F90"
+(  164)   ! Check for completion of sends
+(  165)   IF(KSPEC2 > 0 )THEN
+(  166)     DO JFLD=1,KFGATHG
+(  167)       IBSET = KVSET(JFLD)
+(  168)       IF( IBSET == MYSETV )THEN
+(  169)         CALL MPL_WAIT(KREQUEST=ISENDREQ(JFLD), &
+(  170)          & CDSTRING='GATH_GRID_CTL: WAIT')
+(  171)       ENDIF
+(  172)     ENDDO
+(  173)   ENDIF
+(  174)   CALL GSTATS(810,1)
+(  175)   CALL GSTATS_BARRIER2(788)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:41      page 8
+
+(  176) # 177 "egath_spec_control_mod.F90"
+(  177)   CALL GSTATS(1644,0)
+(  178) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JFLD,JNM,II,JN,ISP)
+(  179)   DO JFLD=1,IMYFIELDS
+(  180)     IF(LDIM1_IS_FLD) THEN
+(  181)       DO JNM=1,KSPEC2_G
+(  182)         PSPECG(JFLD,JNM) = ZRECV(IDIST(JNM),JFLD)
+(  183)       ENDDO
+(  184)     ELSE
+(  185)       DO JNM=1,KSPEC2_G
+(  186)         PSPECG(JNM,JFLD) = ZRECV(IDIST(JNM),JFLD)
+(  187)       ENDDO
+(  188)     ENDIF
+(  189)   ENDDO
+(  190) !$OMP END PARALLEL DO
+(  191)   CALL GSTATS(1644,1)
+(  192)   IF(ALLOCATED(ZRECV)) DEALLOCATE(ZRECV)
+(  193) # 194 "egath_spec_control_mod.F90"
+(  194)   !Synchronize processors
+(  195)   CALL GSTATS(785,0)
+(  196)   CALL MPL_BARRIER(CDSTRING='EGATH_SPEC_CONTROL:')
+(  197)   CALL GSTATS(785,1)
+(  198) ENDIF
+(  199) # 200 "egath_spec_control_mod.F90"
+(  200) !     ------------------------------------------------------------------
+(  201) # 202 "egath_spec_control_mod.F90"
+(  202) END SUBROUTINE EGATH_SPEC_CONTROL
+(  203) END MODULE EGATH_SPEC_CONTROL_MOD

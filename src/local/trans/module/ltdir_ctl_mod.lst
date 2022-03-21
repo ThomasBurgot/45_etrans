@@ -1,0 +1,237 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:21      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: ltdir_ctl_mod.F90
+
+(    1) MODULE LTDIR_CTL_MOD
+(    2)   CONTAINS
+(    3)   SUBROUTINE LTDIR_CTL(KF_FS,KF_UV,KF_SCALARS, &
+(    4)    & PSPVOR,PSPDIV,PSPSCALAR, &
+(    5)    & PSPSC3A,PSPSC3B,PSPSC2, &
+(    6)    & KFLDPTRUV,KFLDPTRSC)
+(    7)   
+(    8)   !**** *LTDIR_CTL* - Control routine for direct Legendre transform
+(    9)   
+(   10)   !     Purpose.
+(   11)   !     --------
+(   12)   !        Direct Legendre transform
+(   13)   
+(   14)   !**   Interface.
+(   15)   !     ----------
+(   16)   !     CALL LTDIR_CTL(...)
+(   17)   
+(   18)   !     Explicit arguments :
+(   19)   !     --------------------
+(   20)   !     KF_FS      - number of fields in Fourier space
+(   21)   !     KF_UV      - local number of spectral u-v fields
+(   22)   !     KF_SCALARS - local number of scalar spectral fields
+(   23)   !     PSPVOR(:,:) - spectral vorticity (output)
+(   24)   !     PSPDIV(:,:) - spectral divergence (output)
+(   25)   !     PSPSCALAR(:,:) - spectral scalarvalued fields (output)
+(   26)   !     KFLDPTRUV(:) - field pointer for vorticity and divergence (input)
+(   27)   !     KFLDPTRSC(:) - field pointer for scalarvalued fields (input)
+(   28)   
+(   29)   !     ------------------------------------------------------------------
+(   30)   
+(   31)   USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   32)   
+(   33)   USE TPM_GEN, only: nout
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:21      page 2
+
+(   34)   USE TPM_DIM         ,ONLY : R
+(   35)   USE TPM_TRANS       ,ONLY : FOUBUF, FOUBUF_IN
+(   36)   USE TPM_DISTR       ,ONLY : D
+(   37)   USE TPM_GEOMETRY    ,ONLY : G
+(   38)   USE TPM_FIELDS      ,ONLY : F
+(   39)   
+(   40)   
+(   41)   USE LTDIR_MOD       ,ONLY : LTDIR
+(   42)   USE TRLTOM_MOD      ,ONLY : TRLTOM
+(   43)  
+(   44)   USE TPM_FIELDS      ,ONLY : ZSIA,ZAIA,ZOA1,ZOA2,ZEPSNM
+(   45)   
+(   46)   IMPLICIT NONE
+(   47)   
+(   48)   INTEGER(KIND=JPIM),INTENT(IN) :: KF_FS,KF_UV,KF_SCALARS
+(   49)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPVOR(:,:)
+(   50)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPDIV(:,:)
+(   51)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPSCALAR(:,:)
+(   52)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPSC3A(:,:,:)
+(   53)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPSC3B(:,:,:)
+(   54)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPSC2(:,:)
+(   55)   INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN) :: KFLDPTRUV(:)
+(   56)   INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN) :: KFLDPTRSC(:)
+(   57)   
+(   58)   INTEGER(KIND=JPIM) :: JM,IM,IBLEN,ILED2
+(   59)   
+(   60)   ! Transposition from Fourier space distribution to spectral space distribution
+(   61)   ! requires currently both on the host !!!
+(   62) 
+(   63)   !$acc update host(FOUBUF_IN) async(1)
+(   64)   !$acc wait(1)
+(   65)   IBLEN = D%NLENGT0B*2*KF_FS
+(   66)   CALL GSTATS(153,0)
+(   67)   CALL TRLTOM(FOUBUF_IN,FOUBUF,2*KF_FS)
+(   68)   CALL GSTATS(153,1)
+(   69)   
+(   70)   ! Direct Legendre transform
+(   71)   
+(   72)   CALL GSTATS(103,0)
+(   73)   ILED2 = 2*KF_FS
+(   74)   CALL GSTATS(1645,0)
+(   75)   IF(KF_FS>0) THEN
+(   76) 
+(   77)    CALL LTDIR(KF_FS,KF_UV,KF_SCALARS,ILED2, &
+(   78)           & PSPVOR,PSPDIV,PSPSCALAR,&
+(   79)           & PSPSC3A,PSPSC3B,PSPSC2 , &
+(   80)           & KFLDPTRUV,KFLDPTRSC)
+(   81)   
+(   82)   ENDIF
+(   83)   CALL GSTATS(1645,1)
+(   84)   
+(   85)   CALL GSTATS(103,1)
+(   86)   
+(   87)   !     -----------------------------------------------------------------
+(   88)   
+(   89)   END SUBROUTINE LTDIR_CTL
+(   90)   END MODULE LTDIR_CTL_MOD
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:21      page 3
+
+(    1) # 1 "ltdir_ctl_mod.F90"
+(    1) MODULE LTDIR_CTL_MOD
+(    2)   CONTAINS
+(    3)   SUBROUTINE LTDIR_CTL(KF_FS,KF_UV,KF_SCALARS, &
+(    4)    & PSPVOR,PSPDIV,PSPSCALAR, &
+(    5)    & PSPSC3A,PSPSC3B,PSPSC2, &
+(    6)    & KFLDPTRUV,KFLDPTRSC)
+(    7)   
+(    8)   !**** *LTDIR_CTL* - Control routine for direct Legendre transform
+(    9)   
+(   10)   !     Purpose.
+(   11)   !     --------
+(   12)   !        Direct Legendre transform
+(   13)   
+(   14)   !**   Interface.
+(   15)   !     ----------
+(   16)   !     CALL LTDIR_CTL(...)
+(   17)   
+(   18)   !     Explicit arguments :
+(   19)   !     --------------------
+(   20)   !     KF_FS      - number of fields in Fourier space
+(   21)   !     KF_UV      - local number of spectral u-v fields
+(   22)   !     KF_SCALARS - local number of scalar spectral fields
+(   23)   !     PSPVOR(:,:) - spectral vorticity (output)
+(   24)   !     PSPDIV(:,:) - spectral divergence (output)
+(   25)   !     PSPSCALAR(:,:) - spectral scalarvalued fields (output)
+(   26)   !     KFLDPTRUV(:) - field pointer for vorticity and divergence (input)
+(   27)   !     KFLDPTRSC(:) - field pointer for scalarvalued fields (input)
+(   28)   
+(   29)   !     ------------------------------------------------------------------
+(   30)   
+(   31)   USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   32)   
+(   33)   USE TPM_GEN, only: nout
+(   34)   USE TPM_DIM         ,ONLY : R
+(   35)   USE TPM_TRANS       ,ONLY : FOUBUF, FOUBUF_IN
+(   36)   USE TPM_DISTR       ,ONLY : D
+(   37)   USE TPM_GEOMETRY    ,ONLY : G
+(   38)   USE TPM_FIELDS      ,ONLY : F
+(   39)   
+(   40)   
+(   41)   USE LTDIR_MOD       ,ONLY : LTDIR
+(   42)   USE TRLTOM_MOD      ,ONLY : TRLTOM
+(   43)  
+(   44)   USE TPM_FIELDS      ,ONLY : ZSIA,ZAIA,ZOA1,ZOA2,ZEPSNM
+(   45)   
+(   46)   IMPLICIT NONE
+(   47)   
+(   48)   INTEGER(KIND=JPIM),INTENT(IN) :: KF_FS,KF_UV,KF_SCALARS
+(   49)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPVOR(:,:)
+(   50)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPDIV(:,:)
+(   51)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPSCALAR(:,:)
+(   52)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPSC3A(:,:,:)
+(   53)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPSC3B(:,:,:)
+(   54)   REAL(KIND=JPRB) ,OPTIONAL, INTENT(OUT) :: PSPSC2(:,:)
+(   55)   INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN) :: KFLDPTRUV(:)
+(   56)   INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN) :: KFLDPTRSC(:)
+(   57)   
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:21      page 4
+
+(   58)   INTEGER(KIND=JPIM) :: JM,IM,IBLEN,ILED2
+(   59)   
+(   60)   ! Transposition from Fourier space distribution to spectral space distribution
+(   61)   ! requires currently both on the host !!!
+(   62) # 63 "ltdir_ctl_mod.F90"
+(   63)   !$acc update host(FOUBUF_IN) async(1)
+(   64)   !$acc wait(1)
+(   65)   IBLEN = D%NLENGT0B*2*KF_FS
+(   66)   CALL GSTATS(153,0)
+(   67)   CALL TRLTOM(FOUBUF_IN,FOUBUF,2*KF_FS)
+(   68)   CALL GSTATS(153,1)
+(   69)   
+(   70)   ! Direct Legendre transform
+(   71)   
+(   72)   CALL GSTATS(103,0)
+(   73)   ILED2 = 2*KF_FS
+(   74)   CALL GSTATS(1645,0)
+(   75)   IF(KF_FS>0) THEN
+(   76) # 77 "ltdir_ctl_mod.F90"
+(   77)    CALL LTDIR(KF_FS,KF_UV,KF_SCALARS,ILED2, &
+(   78)           & PSPVOR,PSPDIV,PSPSCALAR,&
+(   79)           & PSPSC3A,PSPSC3B,PSPSC2 , &
+(   80)           & KFLDPTRUV,KFLDPTRSC)
+(   81)   
+(   82)   ENDIF
+(   83)   CALL GSTATS(1645,1)
+(   84)   
+(   85)   CALL GSTATS(103,1)
+(   86)   
+(   87)   !     -----------------------------------------------------------------
+(   88)   
+(   89)   END SUBROUTINE LTDIR_CTL
+(   90)   END MODULE LTDIR_CTL_MOD

@@ -1,0 +1,438 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:17      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: vdtuv_mod.F90
+
+(    1) MODULE VDTUV_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE VDTUV(KFIELD,PEPSNM,PVOR,PDIV,PU,PV)
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(    6) 
+(    7) USE TPM_DIM         ,ONLY : R
+(    8) USE TPM_FIELDS      ,ONLY : F
+(    9) USE TPM_DISTR       ,ONLY : D,D_NUMP,D_MYMS
+(   10) use tpm_gen, only: nout
+(   11) 
+(   12) 
+(   13) !**** *VDTUV* - Compute U,V in  spectral space
+(   14) 
+(   15) !     Purpose.
+(   16) !     --------
+(   17) !        In Laplace space compute the the winds
+(   18) !        from vorticity and divergence.
+(   19) 
+(   20) !**   Interface.
+(   21) !     ----------
+(   22) !        CALL VDTUV(...)
+(   23) 
+(   24) !        Explicit arguments :  KM -zonal wavenumber (input-c)
+(   25) !        --------------------  KFIELD - number of fields (input-c)
+(   26) !                              PEPSNM - REPSNM for wavenumber KM (input-c)
+(   27) !                              PVOR(NLEI1,2*KFIELD) - vorticity (input)
+(   28) !                              PDIV(NLEI1,2*KFIELD) - divergence (input)
+(   29) !                              PU(NLEI1,2*KFIELD)   - u wind (output)
+(   30) !                              PV(NLEI1,2*KFIELD)   - v wind (output)
+(   31) !        Organisation within NLEI1:
+(   32) !        NLEI1 = NSMAX+4+mod(NSMAX+4+1,2)
+(   33) !                        overdimensioning
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:17      page 2
+
+(   34) !        1        : n=NSMAX+2
+(   35) !        2        : n=NSMAX+1
+(   36) !        3        : n=NSMAX
+(   37) !        .        :
+(   38) !        .        :
+(   39) !        NSMAX+3  : n=0
+(   40) !        NSMAX+4  : n=-1
+(   41) 
+(   42) !        Implicit arguments :  Eigenvalues of inverse Laplace operator
+(   43) !        --------------------  from YOMLAP
+(   44) 
+(   45) !     Method.
+(   46) !     -------
+(   47) 
+(   48) !     Externals.   None.
+(   49) !     ----------
+(   50) 
+(   51) !     Reference.
+(   52) !     ----------
+(   53) !        ECMWF Research Department documentation of the IFS
+(   54) !        Temperton, 1991, MWR 119 p1303
+(   55) 
+(   56) !     Author.
+(   57) !     -------
+(   58) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   59) 
+(   60) !     Modifications.
+(   61) !     --------------
+(   62) !        Original : 00-02-01 From VDTUV in IFS CY22R1
+(   63) 
+(   64) !     ------------------------------------------------------------------
+(   65) 
+(   66) IMPLICIT NONE
+(   67) 
+(   68) INTEGER(KIND=JPIM) :: KM, kmloc
+(   69) INTEGER(KIND=JPIM), INTENT(IN) :: KFIELD
+(   70) REAL(KIND=JPRBT), INTENT(IN)    :: PEPSNM(1:D%NUMP,0:R%NTMAX+2)
+(   71) REAL(KIND=JPRB), INTENT(IN)    :: PVOR(:,:,:),PDIV(:,:,:)
+(   72) REAL(KIND=JPRB), INTENT(OUT)   :: PU  (:,:,:),PV  (:,:,:)
+(   73) 
+(   74) !     LOCAL INTEGER SCALARS
+(   75) INTEGER(KIND=JPIM) :: II, IJ, IR, J, JN, ISMAX,JI
+(   76) 
+(   77) !     LOCAL REAL SCALARS
+(   78) REAL(KIND=JPRBT) :: ZKM
+(   79) REAL(KIND=JPRBT) :: ZN(-1:R%NTMAX+4)
+(   80) REAL(KIND=JPRBT) :: ZLAPIN(-1:R%NSMAX+4)
+(   81) REAL(KIND=JPRBT) :: ZEPSNM(-1:R%NSMAX+4)
+(   82) 
+(   83) !$ACC DATA                                     &
+(   84) !$ACC      CREATE (ZEPSNM, ZN, ZLAPIN)         &
+(   85) !$ACC      COPYIN (D,D%MYMS,F,F%RLAPIN,F%RN)   &
+(   86) !$ACC      present(PEPSNM, PVOR, PDIV)         &
+(   87) !$ACC      present(PU, PV)
+(   88) 
+(   89) 
+(   90) !     ------------------------------------------------------------------
+(   91) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:17      page 3
+
+(   92) !*       1.    COMPUTE U V FROM VORTICITY AND DIVERGENCE.
+(   93) !              ------------------------------------------
+(   94) 
+(   95) ISMAX = R%NSMAX
+(   96) DO KMLOC=1,D%NUMP
+(   97)   ZKM = D%MYMS(KMLOC)
+(   98)   !$ACC parallel loop
+(   99)   DO JN=ZKM-1,ISMAX+2
+(  100)     IJ = ISMAX+3-JN
+(  101)     ZN(IJ) = F%RN(JN)
+(  102)     ZLAPIN(IJ) = F%RLAPIN(JN)
+(  103)     IF( JN >= 0 ) ZEPSNM(IJ) = PEPSNM(KMLOC,JN)
+(  104)   ENDDO
+(  105)   ZN(0) = F%RN(ISMAX+3)
+(  106) 
+(  107) !*       1.1      U AND V (KM=0) .
+(  108) 
+(  109) IF(ZKM == 0) THEN
+(  110)   !$ACC PARALLEL LOOP
+(  111)   DO J=1,KFIELD
+(  112)     IR = 2*J-1
+(  113)     DO JI=2,ISMAX+3
+(  114)       PU(IR,JI,KMLOC) = +&
+(  115)       &ZN(JI+1)*ZEPSNM(JI)*ZLAPIN(JI+1)*PVOR(IR,JI+1,KMLOC)-&
+(  116)       &ZN(JI-2)*ZEPSNM(JI-1)*ZLAPIN(JI-1)*PVOR(IR,JI-1,KMLOC)
+(  117)       PV(IR,JI,KMLOC) = -&
+(  118)       &ZN(JI+1)*ZEPSNM(JI)*ZLAPIN(JI+1)*PDIV(IR,JI+1,KMLOC)+&
+(  119)       &ZN(JI-2)*ZEPSNM(JI-1)*ZLAPIN(JI-1)*PDIV(IR,JI-1,KMLOC)
+(  120)     ENDDO
+(  121)   ENDDO
+(  122) ELSE
+(  123) !*       1.2      U AND V (KM!=0) .
+(  124) 
+(  125)     !$ACC parallel loop collapse(2)
+(  126)     DO J=1,KFIELD
+(  127)       DO JI=2,ISMAX+3-ZKM
+(  128)         !ZKM = D_MYMS(KMLOC)
+(  129)         IR = 2*J-1
+(  130)         II = IR+1
+(  131)         !IF (ZKM>0 .AND. JI<=ISMAX+3-zKM) THEN
+(  132)           PU(ir,JI,kmloc) = -ZKM*ZLAPIN(JI)*PDIV(ii,JI,kmloc)+&
+(  133)           &ZN(JI+1)*ZEPSNM(JI)*ZLAPIN(JI+1)*PVOR(ir,JI+1,kmloc)-&
+(  134)           &ZN(JI-2)*ZEPSNM(JI-1)*ZLAPIN(JI-1)*PVOR(ir,JI-1,kmloc)
+(  135)           PU(ii,JI,kmloc) = +ZKM*ZLAPIN(JI)*PDIV(ir,JI,kmloc)+&
+(  136)           &ZN(JI+1)*ZEPSNM(JI)*ZLAPIN(JI+1)*PVOR(ii,JI+1,kmloc)-&
+(  137)           &ZN(JI-2)*ZEPSNM(JI-1)*ZLAPIN(JI-1)*PVOR(ii,JI-1,kmloc)
+(  138)           PV(ir,JI,kmloc) = -ZKM*ZLAPIN(JI)*PVOR(ii,JI,kmloc)-&
+(  139)           &ZN(JI+1)*ZEPSNM(JI)*ZLAPIN(JI+1)*PDIV(ir,JI+1,kmloc)+&
+(  140)           &ZN(JI-2)*ZEPSNM(JI-1)*ZLAPIN(JI-1)*PDIV(ir,JI-1,kmloc)
+(  141)           PV(ii,JI,kmloc) = +ZKM*ZLAPIN(JI)*PVOR(ir,JI,kmloc)-&
+(  142)           &ZN(JI+1)*ZEPSNM(JI)*ZLAPIN(JI+1)*PDIV(ii,JI+1,kmloc)+&
+(  143)           &ZN(JI-2)*ZEPSNM(JI-1)*ZLAPIN(JI-1)*PDIV(ii,JI-1,kmloc)
+(  144)         !ENDIF
+(  145)       ENDDO
+(  146)     ENDDO
+(  147)   ENDIF
+(  148) ENDDO
+(  149) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:17      page 4
+
+(  150) !$ACC END DATA
+(  151) !     ------------------------------------------------------------------
+(  152) 
+(  153) END SUBROUTINE VDTUV
+(  154) END MODULE VDTUV_MOD
+(  155) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:17      page 5
+
+(    1) # 1 "vdtuv_mod.F90"
+(    1) MODULE VDTUV_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE VDTUV(KFIELD,PEPSNM,PVOR,PDIV,PU,PV)
+(    4) # 5 "vdtuv_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(    6) # 7 "vdtuv_mod.F90"
+(    7) USE TPM_DIM         ,ONLY : R
+(    8) USE TPM_FIELDS      ,ONLY : F
+(    9) USE TPM_DISTR       ,ONLY : D,D_NUMP,D_MYMS
+(   10) use tpm_gen, only: nout
+(   11) # 13 "vdtuv_mod.F90"
+(   13) !**** *VDTUV* - Compute U,V in  spectral space
+(   14) # 15 "vdtuv_mod.F90"
+(   15) !     Purpose.
+(   16) !     --------
+(   17) !        In Laplace space compute the the winds
+(   18) !        from vorticity and divergence.
+(   19) # 20 "vdtuv_mod.F90"
+(   20) !**   Interface.
+(   21) !     ----------
+(   22) !        CALL VDTUV(...)
+(   23) # 24 "vdtuv_mod.F90"
+(   24) !        Explicit arguments :  KM -zonal wavenumber (input-c)
+(   25) !        --------------------  KFIELD - number of fields (input-c)
+(   26) !                              PEPSNM - REPSNM for wavenumber KM (input-c)
+(   27) !                              PVOR(NLEI1,2*KFIELD) - vorticity (input)
+(   28) !                              PDIV(NLEI1,2*KFIELD) - divergence (input)
+(   29) !                              PU(NLEI1,2*KFIELD)   - u wind (output)
+(   30) !                              PV(NLEI1,2*KFIELD)   - v wind (output)
+(   31) !        Organisation within NLEI1:
+(   32) !        NLEI1 = NSMAX+4+mod(NSMAX+4+1,2)
+(   33) !                        overdimensioning
+(   34) !        1        : n=NSMAX+2
+(   35) !        2        : n=NSMAX+1
+(   36) !        3        : n=NSMAX
+(   37) !        .        :
+(   38) !        .        :
+(   39) !        NSMAX+3  : n=0
+(   40) !        NSMAX+4  : n=-1
+(   41) # 42 "vdtuv_mod.F90"
+(   42) !        Implicit arguments :  Eigenvalues of inverse Laplace operator
+(   43) !        --------------------  from YOMLAP
+(   44) # 45 "vdtuv_mod.F90"
+(   45) !     Method.
+(   46) !     -------
+(   47) # 48 "vdtuv_mod.F90"
+(   48) !     Externals.   None.
+(   49) !     ----------
+(   50) # 51 "vdtuv_mod.F90"
+(   51) !     Reference.
+(   52) !     ----------
+(   53) !        ECMWF Research Department documentation of the IFS
+(   54) !        Temperton, 1991, MWR 119 p1303
+(   55) # 56 "vdtuv_mod.F90"
+(   56) !     Author.
+(   57) !     -------
+(   58) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:17      page 6
+
+(   59) # 60 "vdtuv_mod.F90"
+(   60) !     Modifications.
+(   61) !     --------------
+(   62) !        Original : 00-02-01 From VDTUV in IFS CY22R1
+(   63) # 64 "vdtuv_mod.F90"
+(   64) !     ------------------------------------------------------------------
+(   65) # 66 "vdtuv_mod.F90"
+(   66) IMPLICIT NONE
+(   67) # 68 "vdtuv_mod.F90"
+(   68) INTEGER(KIND=JPIM) :: KM, kmloc
+(   69) INTEGER(KIND=JPIM), INTENT(IN) :: KFIELD
+(   70) REAL(KIND=JPRBT), INTENT(IN)    :: PEPSNM(1:D%NUMP,0:R%NTMAX+2)
+(   71) REAL(KIND=JPRB), INTENT(IN)    :: PVOR(:,:,:),PDIV(:,:,:)
+(   72) REAL(KIND=JPRB), INTENT(OUT)   :: PU  (:,:,:),PV  (:,:,:)
+(   73) # 74 "vdtuv_mod.F90"
+(   74) !     LOCAL INTEGER SCALARS
+(   75) INTEGER(KIND=JPIM) :: II, IJ, IR, J, JN, ISMAX,JI
+(   76) # 77 "vdtuv_mod.F90"
+(   77) !     LOCAL REAL SCALARS
+(   78) REAL(KIND=JPRBT) :: ZKM
+(   79) REAL(KIND=JPRBT) :: ZN(-1:R%NTMAX+4)
+(   80) REAL(KIND=JPRBT) :: ZLAPIN(-1:R%NSMAX+4)
+(   81) REAL(KIND=JPRBT) :: ZEPSNM(-1:R%NSMAX+4)
+(   82) # 83 "vdtuv_mod.F90"
+(   84) !$ACC      CREATE (ZEPSNM, ZN, ZLAPIN)         &
+(   85) !$ACC      COPYIN (D,D%MYMS,F,F%RLAPIN,F%RN)   &
+(   86) !$ACC      present(PEPSNM, PVOR, PDIV)         &
+(   87) !$ACC      present(PU, PV)
+(   88) # 90 "vdtuv_mod.F90"
+(   90) !     ------------------------------------------------------------------
+(   91) # 92 "vdtuv_mod.F90"
+(   92) !*       1.    COMPUTE U V FROM VORTICITY AND DIVERGENCE.
+(   93) !              ------------------------------------------
+(   94) # 95 "vdtuv_mod.F90"
+(   95) ISMAX = R%NSMAX
+(   96) DO KMLOC=1,D%NUMP
+(   97)   ZKM = D%MYMS(KMLOC)
+(   98)   !$ACC parallel loop
+(   99)   DO JN=ZKM-1,ISMAX+2
+(  100)     IJ = ISMAX+3-JN
+(  101)     ZN(IJ) = F%RN(JN)
+(  102)     ZLAPIN(IJ) = F%RLAPIN(JN)
+(  103)     IF( JN >= 0 ) ZEPSNM(IJ) = PEPSNM(KMLOC,JN)
+(  104)   ENDDO
+(  105)   ZN(0) = F%RN(ISMAX+3)
+(  106) # 107 "vdtuv_mod.F90"
+(  107) !*       1.1      U AND V (KM=0) .
+(  108) # 109 "vdtuv_mod.F90"
+(  109) IF(ZKM == 0) THEN
+(  110)   !$ACC PARALLEL LOOP
+(  111)   DO J=1,KFIELD
+(  112)     IR = 2*J-1
+(  113)     DO JI=2,ISMAX+3
+(  114)       PU(IR,JI,KMLOC) = +&
+(  115)       &ZN(JI+1)*ZEPSNM(JI)*ZLAPIN(JI+1)*PVOR(IR,JI+1,KMLOC)-&
+(  116)       &ZN(JI-2)*ZEPSNM(JI-1)*ZLAPIN(JI-1)*PVOR(IR,JI-1,KMLOC)
+(  117)       PV(IR,JI,KMLOC) = -&
+(  118)       &ZN(JI+1)*ZEPSNM(JI)*ZLAPIN(JI+1)*PDIV(IR,JI+1,KMLOC)+&
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:17      page 7
+
+(  119)       &ZN(JI-2)*ZEPSNM(JI-1)*ZLAPIN(JI-1)*PDIV(IR,JI-1,KMLOC)
+(  120)     ENDDO
+(  121)   ENDDO
+(  122) ELSE
+(  123) !*       1.2      U AND V (KM!=0) .
+(  124) # 125 "vdtuv_mod.F90"
+(  125)     !$ACC parallel loop collapse(2)
+(  126)     DO J=1,KFIELD
+(  127)       DO JI=2,ISMAX+3-ZKM
+(  128)         !ZKM = D_MYMS(KMLOC)
+(  129)         IR = 2*J-1
+(  130)         II = IR+1
+(  131)         !IF (ZKM>0 .AND. JI<=ISMAX+3-zKM) THEN
+(  132)           PU(ir,JI,kmloc) = -ZKM*ZLAPIN(JI)*PDIV(ii,JI,kmloc)+&
+(  133)           &ZN(JI+1)*ZEPSNM(JI)*ZLAPIN(JI+1)*PVOR(ir,JI+1,kmloc)-&
+(  134)           &ZN(JI-2)*ZEPSNM(JI-1)*ZLAPIN(JI-1)*PVOR(ir,JI-1,kmloc)
+(  135)           PU(ii,JI,kmloc) = +ZKM*ZLAPIN(JI)*PDIV(ir,JI,kmloc)+&
+(  136)           &ZN(JI+1)*ZEPSNM(JI)*ZLAPIN(JI+1)*PVOR(ii,JI+1,kmloc)-&
+(  137)           &ZN(JI-2)*ZEPSNM(JI-1)*ZLAPIN(JI-1)*PVOR(ii,JI-1,kmloc)
+(  138)           PV(ir,JI,kmloc) = -ZKM*ZLAPIN(JI)*PVOR(ii,JI,kmloc)-&
+(  139)           &ZN(JI+1)*ZEPSNM(JI)*ZLAPIN(JI+1)*PDIV(ir,JI+1,kmloc)+&
+(  140)           &ZN(JI-2)*ZEPSNM(JI-1)*ZLAPIN(JI-1)*PDIV(ir,JI-1,kmloc)
+(  141)           PV(ii,JI,kmloc) = +ZKM*ZLAPIN(JI)*PVOR(ir,JI,kmloc)-&
+(  142)           &ZN(JI+1)*ZEPSNM(JI)*ZLAPIN(JI+1)*PDIV(ii,JI+1,kmloc)+&
+(  143)           &ZN(JI-2)*ZEPSNM(JI-1)*ZLAPIN(JI-1)*PDIV(ii,JI-1,kmloc)
+(  144)         !ENDIF
+(  145)       ENDDO
+(  146)     ENDDO
+(  147)   ENDIF
+(  148) ENDDO
+(  149) # 150 "vdtuv_mod.F90"
+(  150) !$ACC END DATA
+(  151) !     ------------------------------------------------------------------
+(  152) # 153 "vdtuv_mod.F90"
+(  153) END SUBROUTINE VDTUV
+(  154) END MODULE VDTUV_MOD

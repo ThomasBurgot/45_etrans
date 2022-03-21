@@ -1,0 +1,475 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:17      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: edist_spec.F90
+
+(    1) SUBROUTINE EDIST_SPEC(PSPECG,KFDISTG,KFROM,KVSET,KRESOL,PSPEC,&
+(    2)  & LDIM1_IS_FLD,KSORT)
+(    3) 
+(    4) !**** *EDIST_SPEC* - Distribute global spectral array among processors
+(    5) 
+(    6) !     Purpose.
+(    7) !     --------
+(    8) !        Interface routine for distributing spectral array
+(    9) 
+(   10) !**   Interface.
+(   11) !     ----------
+(   12) !     CALL EDIST__SPEC(...)
+(   13) 
+(   14) !     Explicit arguments :
+(   15) !     --------------------
+(   16) !     PSPECG(:,:) - Global spectral array
+(   17) !     KFDISTG     - Global number of fields to be distributed
+(   18) !     KFROM(:)    - Processor resposible for distributing each field
+(   19) !     KVSET(:)    - "B-Set" for each field
+(   20) !     KRESOL      - resolution tag  which is required ,default is the
+(   21) !                   first defined resulution (input)
+(   22) !     PSPEC(:,:)  - Local spectral array
+(   23) 
+(   24) !     Method.
+(   25) !     -------
+(   26) 
+(   27) !     Externals.  ESET_RESOL   - set resolution
+(   28) !     ----------  EDIST_SPEC_CONTROL - control routine
+(   29) 
+(   30) !     Author.
+(   31) !     -------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:17      page 2
+
+(   32) !        Mats Hamrud *ECMWF*
+(   33) 
+(   34) !     Modifications.
+(   35) !     --------------
+(   36) !        Original : 00-03-03
+(   37) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   38) !        P.Marguinaud  10-Oct-2014 Add KSORT argument (change the order of fields)
+(   39) 
+(   40) !     ------------------------------------------------------------------
+(   41) 
+(   42) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   43) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   44) 
+(   45) !ifndef INTERFACE
+(   46) 
+(   47) USE TPM_GEN         ,ONLY : NERR
+(   48) USE TPM_DIM         ,ONLY : R
+(   49) USE TPMALD_DIM      ,ONLY : RALD
+(   50) USE TPM_DISTR       ,ONLY : D, NPRTRV, NPRTRW, MYSETV, MYPROC, NPROC
+(   51) 
+(   52) USE ESET_RESOL_MOD  ,ONLY : ESET_RESOL
+(   53) USE EDIST_SPEC_CONTROL_MOD ,ONLY : EDIST_SPEC_CONTROL
+(   54) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   55) 
+(   56) !endif INTERFACE
+(   57) 
+(   58) IMPLICIT NONE
+(   59) 
+(   60) ! Declaration of arguments
+(   61) 
+(   62) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)    :: PSPECG(:,:)
+(   63) INTEGER(KIND=JPIM),INTENT(IN)    :: KFDISTG
+(   64) INTEGER(KIND=JPIM),INTENT(IN)    :: KFROM(:)
+(   65) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KVSET(:)
+(   66) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KRESOL
+(   67) LOGICAL           ,OPTIONAL,INTENT(IN)    :: LDIM1_IS_FLD
+(   68) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT)   :: PSPEC(:,:)
+(   69) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KSORT (:)
+(   70) !ifndef INTERFACE
+(   71) 
+(   72) INTEGER(KIND=JPIM) :: IVSET(KFDISTG)
+(   73) INTEGER(KIND=JPIM) :: IFSEND,IFRECV,J, IFLD, ICOEFF
+(   74) INTEGER(KIND=JPIM) :: ISMAX, ISPEC2, ISPEC2_G
+(   75) INTEGER(KIND=JPIM) :: IPOSSP(NPRTRW+1)
+(   76) INTEGER(KIND=JPIM), ALLOCATABLE :: IDIM0G(:)
+(   77) LOGICAL :: LLDIM1_IS_FLD
+(   78) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   79) !     ------------------------------------------------------------------
+(   80) 
+(   81) ! Set current resolution
+(   82) IF (LHOOK) CALL DR_HOOK('EDIST_SPEC',0,ZHOOK_HANDLE)
+(   83) CALL ESET_RESOL(KRESOL)
+(   84) 
+(   85) LLDIM1_IS_FLD=.TRUE.
+(   86) IF(PRESENT(LDIM1_IS_FLD)) LLDIM1_IS_FLD=LDIM1_IS_FLD
+(   87) IF(LLDIM1_IS_FLD) THEN
+(   88)   IFLD=1
+(   89)   ICOEFF=2
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:17      page 3
+
+(   90) ELSE
+(   91)   IFLD=2
+(   92)   ICOEFF=1
+(   93) ENDIF
+(   94) 
+(   95) ISMAX = RALD%NMSMAX
+(   96) ALLOCATE(IDIM0G(0:ISMAX))
+(   97) ISPEC2    = D%NSPEC2
+(   98) ISPEC2_G  = R%NSPEC2_G
+(   99) IPOSSP(:) = D%NPOSSP(:)
+(  100) IDIM0G(:) = D%NDIM0G(:)
+(  101) 
+(  102) IF(UBOUND(KFROM,1) < KFDISTG) THEN
+(  103)   CALL ABORT_TRANS('EDIST_SPEC: KFROM TOO SHORT!')
+(  104) ENDIF
+(  105)  
+(  106) IFSEND = 0
+(  107) IFRECV = 0
+(  108) 
+(  109) DO J=1,KFDISTG
+(  110)   IF(KFROM(J) < 1 .OR. KFROM(J) > NPROC) THEN
+(  111)     WRITE(NERR,*) 'EDIST_SPEC:ILLEGAL KFROM VALUE',KFROM(J),J
+(  112)     CALL ABORT_TRANS('EDIST_SPEC:ILLEGAL KFROM VALUE')
+(  113)   ENDIF
+(  114)   IF(KFROM(J) == MYPROC) IFSEND = IFSEND+1
+(  115) ENDDO
+(  116) 
+(  117) IF(IFSEND > 0) THEN
+(  118)   IF(.NOT.PRESENT(PSPECG)) THEN
+(  119)     CALL ABORT_TRANS('EDIST_SPEC:PSPECG MISSING')
+(  120)   ENDIF
+(  121)   IF(UBOUND(PSPECG,IFLD) < IFSEND) THEN
+(  122)     WRITE(NERR,*)'EDIST_SPEC: ',IFLD, UBOUND(PSPECG,IFLD), IFSEND
+(  123)     CALL ABORT_TRANS('EDIST_SPEC:FIELD DIMENSION OF PSPECG TOO SMALL')
+(  124)   ENDIF
+(  125)   IF(UBOUND(PSPECG,ICOEFF) < ISPEC2_G) THEN
+(  126)     WRITE(NERR,*)'EDIST_SPEC: ',ICOEFF, UBOUND(PSPECG,ICOEFF), ISPEC2_G
+(  127)     CALL ABORT_TRANS('EDIST_SPEC: COEFF DIMENSION OF PSPECG TOO SMALL')
+(  128)   ENDIF
+(  129) ENDIF
+(  130) 
+(  131) IF(PRESENT(KVSET)) THEN
+(  132)   IF(UBOUND(KVSET,1) < KFDISTG) THEN
+(  133)     CALL ABORT_TRANS('EDIST_SPEC: KVSET TOO SHORT!')
+(  134)   ENDIF
+(  135)   DO J=1,KFDISTG
+(  136)     IF(KVSET(J) > NPRTRV .OR. KVSET(J) < 1) THEN
+(  137)       WRITE(NERR,*) 'EDIST_SPEC:KVSET(J) > NPRTRV ',J,KVSET(J),NPRTRV
+(  138)       CALL ABORT_TRANS('EDIST_SPEC:KVSET CONTAINS VALUES OUTSIDE RANGE')
+(  139)     ENDIF
+(  140)     IF(KVSET(J) == MYSETV) THEN
+(  141)       IFRECV = IFRECV+1
+(  142)     ENDIF
+(  143)   ENDDO
+(  144)   IVSET(:) = KVSET(1:KFDISTG)
+(  145) ELSE
+(  146)   IFRECV   = KFDISTG
+(  147)   IVSET(:) = MYSETV
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:17      page 4
+
+(  148) ENDIF
+(  149) 
+(  150) IF(IFRECV > 0 ) THEN
+(  151)   IF(.NOT.PRESENT(PSPEC)) THEN
+(  152)     CALL ABORT_TRANS('EDIST_SPEC: FIELDS TO RECEIVE AND PSPEC NOT PRESENT')
+(  153)   ENDIF
+(  154)   IF(UBOUND(PSPEC,IFLD) < IFRECV) THEN
+(  155)     CALL ABORT_TRANS('EDIST_SPEC: FIELD DIMENSION OF PSPEC TOO SMALL')
+(  156)   ENDIF
+(  157)   IF(UBOUND(PSPEC,ICOEFF) < ISPEC2 ) THEN
+(  158)     CALL ABORT_TRANS('EDIST_SPEC: COEFF DIMENSION OF PSPEC TOO SMALL')
+(  159)   ENDIF
+(  160) ENDIF
+(  161) 
+(  162) IF (PRESENT (KSORT)) THEN
+(  163)   IF (.NOT. PRESENT (PSPEC)) THEN
+(  164)     CALL ABORT_TRANS('EDIST_SPEC: KSORT REQUIRES PSPEC')
+(  165)   ENDIF
+(  166)   IF (UBOUND (KSORT, 1) /= UBOUND (PSPEC, IFLD)) THEN
+(  167)     CALL ABORT_TRANS('EDIST_SPEC: DIMENSION MISMATCH KSORT, PSPEC')
+(  168)   ENDIF
+(  169) ENDIF
+(  170) 
+(  171) CALL EDIST_SPEC_CONTROL(PSPECG,KFDISTG,KFROM,IVSET,PSPEC,LLDIM1_IS_FLD,&
+(  172)   ISMAX,ISPEC2,ISPEC2_G,IPOSSP,IDIM0G,KSORT)
+(  173) DEALLOCATE(IDIM0G)
+(  174) IF (LHOOK) CALL DR_HOOK('EDIST_SPEC',1,ZHOOK_HANDLE)
+(  175) 
+(  176) !endif INTERFACE
+(  177) 
+(  178) !     ------------------------------------------------------------------
+(  179) 
+(  180) END SUBROUTINE EDIST_SPEC
+(  181) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:17      page 5
+
+(    1) # 1 "edist_spec.F90"
+(    1) SUBROUTINE EDIST_SPEC(PSPECG,KFDISTG,KFROM,KVSET,KRESOL,PSPEC,&
+(    2)  & LDIM1_IS_FLD,KSORT)
+(    3) # 4 "edist_spec.F90"
+(    4) !**** *EDIST_SPEC* - Distribute global spectral array among processors
+(    5) # 6 "edist_spec.F90"
+(    6) !     Purpose.
+(    7) !     --------
+(    8) !        Interface routine for distributing spectral array
+(    9) # 10 "edist_spec.F90"
+(   10) !**   Interface.
+(   11) !     ----------
+(   12) !     CALL EDIST__SPEC(...)
+(   13) # 14 "edist_spec.F90"
+(   14) !     Explicit arguments :
+(   15) !     --------------------
+(   16) !     PSPECG(:,:) - Global spectral array
+(   17) !     KFDISTG     - Global number of fields to be distributed
+(   18) !     KFROM(:)    - Processor resposible for distributing each field
+(   19) !     KVSET(:)    - "B-Set" for each field
+(   20) !     KRESOL      - resolution tag  which is required ,default is the
+(   21) !                   first defined resulution (input)
+(   22) !     PSPEC(:,:)  - Local spectral array
+(   23) # 24 "edist_spec.F90"
+(   24) !     Method.
+(   25) !     -------
+(   26) # 27 "edist_spec.F90"
+(   27) !     Externals.  ESET_RESOL   - set resolution
+(   28) !     ----------  EDIST_SPEC_CONTROL - control routine
+(   29) # 30 "edist_spec.F90"
+(   30) !     Author.
+(   31) !     -------
+(   32) !        Mats Hamrud *ECMWF*
+(   33) # 34 "edist_spec.F90"
+(   34) !     Modifications.
+(   35) !     --------------
+(   36) !        Original : 00-03-03
+(   37) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   38) !        P.Marguinaud  10-Oct-2014 Add KSORT argument (change the order of fields)
+(   39) # 40 "edist_spec.F90"
+(   40) !     ------------------------------------------------------------------
+(   41) # 42 "edist_spec.F90"
+(   42) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   43) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   44) # 45 "edist_spec.F90"
+(   45) !ifndef INTERFACE
+(   46) # 47 "edist_spec.F90"
+(   47) USE TPM_GEN         ,ONLY : NERR
+(   48) USE TPM_DIM         ,ONLY : R
+(   49) USE TPMALD_DIM      ,ONLY : RALD
+(   50) USE TPM_DISTR       ,ONLY : D, NPRTRV, NPRTRW, MYSETV, MYPROC, NPROC
+(   51) # 52 "edist_spec.F90"
+(   52) USE ESET_RESOL_MOD  ,ONLY : ESET_RESOL
+(   53) USE EDIST_SPEC_CONTROL_MOD ,ONLY : EDIST_SPEC_CONTROL
+(   54) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   55) # 56 "edist_spec.F90"
+(   56) !endif INTERFACE
+(   57) # 58 "edist_spec.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:17      page 6
+
+(   58) IMPLICIT NONE
+(   59) # 60 "edist_spec.F90"
+(   60) ! Declaration of arguments
+(   61) # 62 "edist_spec.F90"
+(   62) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)    :: PSPECG(:,:)
+(   63) INTEGER(KIND=JPIM),INTENT(IN)    :: KFDISTG
+(   64) INTEGER(KIND=JPIM),INTENT(IN)    :: KFROM(:)
+(   65) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KVSET(:)
+(   66) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KRESOL
+(   67) LOGICAL           ,OPTIONAL,INTENT(IN)    :: LDIM1_IS_FLD
+(   68) REAL(KIND=JPRB)   ,OPTIONAL,INTENT(OUT)   :: PSPEC(:,:)
+(   69) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KSORT (:)
+(   70) !ifndef INTERFACE
+(   71) # 72 "edist_spec.F90"
+(   72) INTEGER(KIND=JPIM) :: IVSET(KFDISTG)
+(   73) INTEGER(KIND=JPIM) :: IFSEND,IFRECV,J, IFLD, ICOEFF
+(   74) INTEGER(KIND=JPIM) :: ISMAX, ISPEC2, ISPEC2_G
+(   75) INTEGER(KIND=JPIM) :: IPOSSP(NPRTRW+1)
+(   76) INTEGER(KIND=JPIM), ALLOCATABLE :: IDIM0G(:)
+(   77) LOGICAL :: LLDIM1_IS_FLD
+(   78) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   79) !     ------------------------------------------------------------------
+(   80) # 81 "edist_spec.F90"
+(   81) ! Set current resolution
+(   82) IF (LHOOK) CALL DR_HOOK('EDIST_SPEC',0,ZHOOK_HANDLE)
+(   83) CALL ESET_RESOL(KRESOL)
+(   84) # 85 "edist_spec.F90"
+(   85) LLDIM1_IS_FLD=.TRUE.
+(   86) IF(PRESENT(LDIM1_IS_FLD)) LLDIM1_IS_FLD=LDIM1_IS_FLD
+(   87) IF(LLDIM1_IS_FLD) THEN
+(   88)   IFLD=1
+(   89)   ICOEFF=2
+(   90) ELSE
+(   91)   IFLD=2
+(   92)   ICOEFF=1
+(   93) ENDIF
+(   94) # 95 "edist_spec.F90"
+(   95) ISMAX = RALD%NMSMAX
+(   96) ALLOCATE(IDIM0G(0:ISMAX))
+(   97) ISPEC2    = D%NSPEC2
+(   98) ISPEC2_G  = R%NSPEC2_G
+(   99) IPOSSP(:) = D%NPOSSP(:)
+(  100) IDIM0G(:) = D%NDIM0G(:)
+(  101) # 102 "edist_spec.F90"
+(  102) IF(UBOUND(KFROM,1) < KFDISTG) THEN
+(  103)   CALL ABORT_TRANS('EDIST_SPEC: KFROM TOO SHORT!')
+(  104) ENDIF
+(  105)  
+(  106) IFSEND = 0
+(  107) IFRECV = 0
+(  108) # 109 "edist_spec.F90"
+(  109) DO J=1,KFDISTG
+(  110)   IF(KFROM(J) < 1 .OR. KFROM(J) > NPROC) THEN
+(  111)     WRITE(NERR,*) 'EDIST_SPEC:ILLEGAL KFROM VALUE',KFROM(J),J
+(  112)     CALL ABORT_TRANS('EDIST_SPEC:ILLEGAL KFROM VALUE')
+(  113)   ENDIF
+(  114)   IF(KFROM(J) == MYPROC) IFSEND = IFSEND+1
+(  115) ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:17      page 7
+
+(  116) # 117 "edist_spec.F90"
+(  117) IF(IFSEND > 0) THEN
+(  118)   IF(.NOT.PRESENT(PSPECG)) THEN
+(  119)     CALL ABORT_TRANS('EDIST_SPEC:PSPECG MISSING')
+(  120)   ENDIF
+(  121)   IF(UBOUND(PSPECG,IFLD) < IFSEND) THEN
+(  122)     WRITE(NERR,*)'EDIST_SPEC: ',IFLD, UBOUND(PSPECG,IFLD), IFSEND
+(  123)     CALL ABORT_TRANS('EDIST_SPEC:FIELD DIMENSION OF PSPECG TOO SMALL')
+(  124)   ENDIF
+(  125)   IF(UBOUND(PSPECG,ICOEFF) < ISPEC2_G) THEN
+(  126)     WRITE(NERR,*)'EDIST_SPEC: ',ICOEFF, UBOUND(PSPECG,ICOEFF), ISPEC2_G
+(  127)     CALL ABORT_TRANS('EDIST_SPEC: COEFF DIMENSION OF PSPECG TOO SMALL')
+(  128)   ENDIF
+(  129) ENDIF
+(  130) # 131 "edist_spec.F90"
+(  131) IF(PRESENT(KVSET)) THEN
+(  132)   IF(UBOUND(KVSET,1) < KFDISTG) THEN
+(  133)     CALL ABORT_TRANS('EDIST_SPEC: KVSET TOO SHORT!')
+(  134)   ENDIF
+(  135)   DO J=1,KFDISTG
+(  136)     IF(KVSET(J) > NPRTRV .OR. KVSET(J) < 1) THEN
+(  137)       WRITE(NERR,*) 'EDIST_SPEC:KVSET(J) > NPRTRV ',J,KVSET(J),NPRTRV
+(  138)       CALL ABORT_TRANS('EDIST_SPEC:KVSET CONTAINS VALUES OUTSIDE RANGE')
+(  139)     ENDIF
+(  140)     IF(KVSET(J) == MYSETV) THEN
+(  141)       IFRECV = IFRECV+1
+(  142)     ENDIF
+(  143)   ENDDO
+(  144)   IVSET(:) = KVSET(1:KFDISTG)
+(  145) ELSE
+(  146)   IFRECV   = KFDISTG
+(  147)   IVSET(:) = MYSETV
+(  148) ENDIF
+(  149) # 150 "edist_spec.F90"
+(  150) IF(IFRECV > 0 ) THEN
+(  151)   IF(.NOT.PRESENT(PSPEC)) THEN
+(  152)     CALL ABORT_TRANS('EDIST_SPEC: FIELDS TO RECEIVE AND PSPEC NOT PRESENT')
+(  153)   ENDIF
+(  154)   IF(UBOUND(PSPEC,IFLD) < IFRECV) THEN
+(  155)     CALL ABORT_TRANS('EDIST_SPEC: FIELD DIMENSION OF PSPEC TOO SMALL')
+(  156)   ENDIF
+(  157)   IF(UBOUND(PSPEC,ICOEFF) < ISPEC2 ) THEN
+(  158)     CALL ABORT_TRANS('EDIST_SPEC: COEFF DIMENSION OF PSPEC TOO SMALL')
+(  159)   ENDIF
+(  160) ENDIF
+(  161) # 162 "edist_spec.F90"
+(  162) IF (PRESENT (KSORT)) THEN
+(  163)   IF (.NOT. PRESENT (PSPEC)) THEN
+(  164)     CALL ABORT_TRANS('EDIST_SPEC: KSORT REQUIRES PSPEC')
+(  165)   ENDIF
+(  166)   IF (UBOUND (KSORT, 1) /= UBOUND (PSPEC, IFLD)) THEN
+(  167)     CALL ABORT_TRANS('EDIST_SPEC: DIMENSION MISMATCH KSORT, PSPEC')
+(  168)   ENDIF
+(  169) ENDIF
+(  170) # 171 "edist_spec.F90"
+(  171) CALL EDIST_SPEC_CONTROL(PSPECG,KFDISTG,KFROM,IVSET,PSPEC,LLDIM1_IS_FLD,&
+(  172)   ISMAX,ISPEC2,ISPEC2_G,IPOSSP,IDIM0G,KSORT)
+(  173) DEALLOCATE(IDIM0G)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:17      page 8
+
+(  174) IF (LHOOK) CALL DR_HOOK('EDIST_SPEC',1,ZHOOK_HANDLE)
+(  175) # 176 "edist_spec.F90"
+(  176) !endif INTERFACE
+(  177) # 178 "edist_spec.F90"
+(  178) !     ------------------------------------------------------------------
+(  179) # 180 "edist_spec.F90"
+(  180) END SUBROUTINE EDIST_SPEC

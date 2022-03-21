@@ -1,0 +1,710 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:31      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: sumplatbeq_mod.F90
+
+(    1) MODULE SUMPLATBEQ_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUMPLATBEQ(KDGSA,KDGL,KPROC,KPROCA,KLOENG,LDSPLIT,LDEQ_REGIONS,&
+(    4)                     &PWEIGHT,LDWEIGHTED_DISTR,PMEDIAP,KPROCAGP,&
+(    5)                     &KMEDIAP,KRESTM,KINDIC,KLAST)
+(    6) 
+(    7) !**** *SUMPLATBEQ * - Routine to initialize parallel environment
+(    8) !                     (latitude partitioning for LEQ_REGIONS=T)
+(    9) 
+(   10) !     Purpose.
+(   11) !     --------
+(   12) 
+(   13) 
+(   14) !**   Interface.
+(   15) !     ----------
+(   16) !        *CALL* *SUMPLATBEQ *
+(   17) 
+(   18) !     Explicit arguments - input :
+(   19) !     --------------------
+(   20) !                          KDGSA      -first latitude (grid-space)
+(   21) !                                      (may be different from NDGSAG)
+(   22) !                          KDGL       -last  latitude
+(   23) !                          KPROC      -total number of processors
+(   24) !                          KPROCA     -number of processors in A direction
+(   25) !                          KLOENG     -actual number of longitudes per latitude.
+(   26) !                          LDSPLIT    -true for latitudes shared between sets
+(   27) !                          LDEQ_REGIONS -true if eq_regions partitioning
+(   28) !                          PWEIGHT    -weight per grid-point if weighted distribution
+(   29) !                          LDWEIGHTED_DISTR -true if weighted distribution
+(   30) 
+(   31) !     Explicit arguments - output:
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:31      page 2
+
+(   32) !     --------------------
+(   33) !                          PMEDIAP    -mean weight per PE if weighted distribution
+(   34) !                          KMEDIAP    -mean number of grid points per PE
+(   35) !                          KPROCAGP   -number of grid points per A set
+(   36) !                          KRESTM     -number of PEs with one extra point
+(   37) !                          KINDIC     -intermediate quantity for 'sumplat'
+(   38) !                          KLAST      -intermediate quantity for 'sumplat'
+(   39) 
+(   40) !        Implicit arguments :
+(   41) !        --------------------
+(   42) 
+(   43) 
+(   44) !     Method.
+(   45) !     -------
+(   46) !        See documentation
+(   47) 
+(   48) !     Externals.   NONE.
+(   49) !     ----------
+(   50) 
+(   51) !     Reference.
+(   52) !     ----------
+(   53) !        ECMWF Research Department documentation of the IFS
+(   54) 
+(   55) !     Author.
+(   56) !     -------
+(   57) !        G. Mozdzynski
+(   58) 
+(   59) !     Modifications.
+(   60) !     --------------
+(   61) !        Original : April 2006
+(   62) !     ------------------------------------------------------------------
+(   63) 
+(   64) 
+(   65) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   66) 
+(   67) USE TPM_DISTR       ,ONLY : MYPROC
+(   68) USE EQ_REGIONS_MOD  ,ONLY : N_REGIONS
+(   69) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   70) !
+(   71) 
+(   72) IMPLICIT NONE
+(   73) 
+(   74) 
+(   75) !     * DUMMY:
+(   76) INTEGER(KIND=JPIM),INTENT(IN)  :: KDGSA
+(   77) INTEGER(KIND=JPIM),INTENT(IN)  :: KDGL
+(   78) INTEGER(KIND=JPIM),INTENT(IN)  :: KPROC
+(   79) INTEGER(KIND=JPIM),INTENT(IN)  :: KPROCA
+(   80) INTEGER(KIND=JPIM),INTENT(IN)  :: KLOENG(KDGSA:KDGL)
+(   81) REAL(KIND=JPRBT),INTENT(IN)     :: PWEIGHT(:)
+(   82) LOGICAL,INTENT(IN)  :: LDSPLIT
+(   83) LOGICAL,INTENT(IN)  :: LDEQ_REGIONS
+(   84) LOGICAL,INTENT(INOUT)  :: LDWEIGHTED_DISTR
+(   85) REAL(KIND=JPRBT),INTENT(OUT)     :: PMEDIAP
+(   86) INTEGER(KIND=JPIM),INTENT(OUT)  :: KMEDIAP
+(   87) INTEGER(KIND=JPIM),INTENT(OUT)  :: KRESTM
+(   88) INTEGER(KIND=JPIM),INTENT(OUT)  :: KINDIC(KPROCA)
+(   89) INTEGER(KIND=JPIM),INTENT(OUT)  :: KLAST(KPROCA)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:31      page 3
+
+(   90) INTEGER(KIND=JPIM),INTENT(OUT)  :: KPROCAGP(KPROCA)
+(   91) 
+(   92) !     * LOCAL:
+(   93) 
+(   94) !     LOCAL INTEGER SCALARS
+(   95) INTEGER(KIND=JPIM) :: ICOMP, IGL, IMAXI, IMEDIA, IMEDIAP, ITOT, JA, JB, IA, JGL,&
+(   96)             &ILAST,IREST,IPE,I2REGIONS,IGP
+(   97) REAL(KIND=JPRBT) :: ZMEDIA, ZCOMP
+(   98) LOGICAL   :: LLDONE
+(   99) 
+(  100) !      -----------------------------------------------------------------
+(  101) 
+(  102) !*       1.    COMPUTATION OF KMEDIAP, KRESTM, KINDIC, KLAST.
+(  103) !              ----------------------------------------------
+(  104) 100 CONTINUE
+(  105) !     * Computation of KMEDIAP and KRESTM.
+(  106) 
+(  107) IF (.NOT.LDWEIGHTED_DISTR) THEN
+(  108) 
+(  109)   IMEDIA = SUM(KLOENG(KDGSA:KDGL))
+(  110)   KMEDIAP = IMEDIA / KPROC
+(  111) 
+(  112)   IF( KPROC > 1 )THEN
+(  113) ! test if KMEDIAP is too small and no more than 2 asets would be required
+(  114) ! for the first latitude
+(  115)     IF( LDSPLIT )THEN
+(  116)       I2REGIONS=N_REGIONS(1)+N_REGIONS(2)
+(  117)       IF( KMEDIAP < (KLOENG(KDGSA)-1)/I2REGIONS+1 )THEN
+(  118)         WRITE(0,'("SUMPLATBEQ: KMEDIAP=",I6," I2REGIONS=",I3," KLOENG(KDGSA)=",I4)')&
+(  119)         &KMEDIAP,I2REGIONS,KLOENG(KDGSA)
+(  120)         CALL ABORT_TRANS ('SUMPLATBEQ: NPROC TOO BIG FOR THIS RESOLUTION, LDSPLIT=T')
+(  121)       ENDIF
+(  122)     ELSE
+(  123) ! test for number asets too large for the number of latitudes
+(  124)       IF( KPROCA > KDGL )THEN
+(  125)         WRITE(0,'("SUMPLATBEQ: KMEDIAP=",I6," KPROCA=",I4," KDGL=",I4)')&
+(  126)         &KMEDIAP,KPROCA,KDGL
+(  127)         CALL ABORT_TRANS ('SUMPLATBEQ: NPROC TOO BIG FOR THIS RESOLUTION, LDSPLIT=F')
+(  128)       ENDIF
+(  129)     ENDIF
+(  130)   ENDIF
+(  131) 
+(  132)   KRESTM = IMEDIA - KMEDIAP * KPROC
+(  133)   IF (KRESTM  >  0) KMEDIAP = KMEDIAP + 1
+(  134) 
+(  135) ELSE
+(  136) 
+(  137)   ZMEDIA = SUM(PWEIGHT(:))
+(  138)   PMEDIAP = ZMEDIA / KPROC
+(  139) 
+(  140) ENDIF
+(  141) 
+(  142) !     * Computation of intermediate quantities KINDIC and KLAST
+(  143) 
+(  144) IF (LDSPLIT) THEN
+(  145) 
+(  146)   KPROCAGP(:)=0
+(  147)   IREST = 0
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:31      page 4
+
+(  148)   ILAST =0
+(  149)   IPE=0
+(  150)   ZCOMP=0
+(  151)   IGP=0
+(  152)   DO JA=1,KPROCA
+(  153)     ICOMP=0
+(  154)     DO JB=1,N_REGIONS(JA)
+(  155)       IF( LDWEIGHTED_DISTR )THEN
+(  156)         DO WHILE ( ( JA == KPROCA .OR. ZCOMP < PMEDIAP ) .AND. IGP < SIZE(PWEIGHT) )
+(  157)           IGP = IGP + 1
+(  158)           ICOMP = ICOMP + 1
+(  159)           ZCOMP = ZCOMP + PWEIGHT(IGP)
+(  160)         ENDDO
+(  161)         ZCOMP = ZCOMP - PMEDIAP
+(  162)       ELSE
+(  163)         IPE=IPE+1
+(  164)         IF (IPE  <=  KRESTM .OR. KRESTM  ==  0) THEN
+(  165)           ICOMP = ICOMP + KMEDIAP
+(  166)         ELSE
+(  167)           ICOMP = ICOMP + (KMEDIAP-1)
+(  168)         ENDIF
+(  169)       ENDIF
+(  170)     ENDDO
+(  171)     KPROCAGP(JA)=ICOMP
+(  172)     ITOT = IREST
+(  173)     IGL = ILAST+1
+(  174)     DO JGL=IGL,KDGL
+(  175)       ILAST = JGL
+(  176)       IF(ITOT+KLOENG(JGL) < ICOMP) THEN
+(  177)         ITOT = ITOT+KLOENG(JGL)
+(  178)       ELSEIF(ITOT+KLOENG(JGL) == ICOMP) THEN
+(  179)         IREST = 0
+(  180)         KLAST(JA) = JGL
+(  181)         KINDIC(JA) = 0
+(  182)         EXIT
+(  183)       ELSE
+(  184)         IREST =  KLOENG(JGL) -(ICOMP-ITOT)
+(  185)         KLAST(JA) = JGL
+(  186)         KINDIC(JA) = JGL
+(  187)         EXIT
+(  188)       ENDIF
+(  189)     ENDDO
+(  190)   ENDDO
+(  191)   IF( LDWEIGHTED_DISTR )THEN
+(  192)     IF( KLAST(KPROCA) /= KDGL )THEN
+(  193)       DO JA=1,KPROCA
+(  194)         IF( MYPROC == 1 )THEN
+(  195)           WRITE(0,'("SUMPLATBEQ_MOD: JA=",I3," KLAST=",I3," KINDIC=",I3)')&
+(  196)           &JA,KLAST(JA),KINDIC(JA)
+(  197)         ENDIF
+(  198)       ENDDO
+(  199)       WRITE(0,'("SUMPLATBEQ: LWEIGHTED_DISTR=T FAILED TO PARTITION GRID, REVERTING TO ",&
+(  200)       & " LWEIGHTED_DISTR=F PARTITIONING")')
+(  201)       LDWEIGHTED_DISTR=.FALSE.
+(  202)       GOTO 100
+(  203)     ENDIF
+(  204)   ENDIF
+(  205)   IF( SUM(KPROCAGP(:)) /= SUM(KLOENG(KDGSA:KDGL)) )THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:31      page 5
+
+(  206)     IF( MYPROC == 1 )THEN
+(  207)       WRITE(0,'("SUM(KPROCAGP(:))=",I12)')SUM(KPROCAGP(:))
+(  208)       WRITE(0,'("SUM(KLOENG(:))=",I12)')SUM(KLOENG(KDGSA:KDGL))
+(  209)     ENDIF
+(  210)     CALL ABORT_TRANS ('SUMPLATBEQ: PROBLEM IN PARTITIONING ')
+(  211)   ENDIF
+(  212) 
+(  213) ELSE
+(  214) 
+(  215)   IF( LDWEIGHTED_DISTR )THEN
+(  216)     CALL ABORT_TRANS ('SUMPLATBEQ: LSPLIT=F NOT SUPPORTED FOR WEIGHTED DISTRIBUTION ')
+(  217)   ENDIF
+(  218) 
+(  219)   KINDIC(:) = 0
+(  220)   LLDONE=.FALSE.
+(  221)   IMEDIAP=KMEDIAP
+(  222)   IF( MYPROC == 1 )THEN
+(  223)     WRITE(0,'("SUMPLATBEQ: IMEDIAP=",I6)')IMEDIAP
+(  224)   ENDIF
+(  225)   DO WHILE(.NOT.LLDONE)
+(  226) !   loop until a satisfactory distribution can be found
+(  227)     IA=1
+(  228)     IMAXI=IMEDIAP*N_REGIONS(IA)
+(  229)     DO JGL=1,KDGL
+(  230)       KLAST(IA)=JGL
+(  231)       IMAXI=IMAXI-KLOENG(JGL)
+(  232)       IF( IA == KPROCA .AND. JGL == KDGL )THEN
+(  233)         IF( MYPROC == 1 )THEN
+(  234)           WRITE(0,'("SUMPLATBEQ: EXIT 1")')
+(  235)         ENDIF
+(  236)         EXIT
+(  237)       ENDIF
+(  238)       IF( IA == KPROCA .AND. JGL < KDGL )THEN
+(  239)         IF( MYPROC == 1 )THEN
+(  240)           WRITE(0,'("SUMPLATBEQ: EXIT 2")')
+(  241)         ENDIF
+(  242)         KLAST(KPROCA)=KDGL
+(  243)         EXIT
+(  244)       ENDIF
+(  245)       IF( IA < KPROCA .AND. JGL == KDGL )THEN
+(  246)         DO JA=KPROCA,IA+1,-1
+(  247)           KLAST(JA)=KDGL+JA-KPROCA
+(  248)         ENDDO
+(  249)         DO JA=KPROCA,2,-1
+(  250)           IF( KLAST(JA) <= KLAST(JA-1) )THEN
+(  251)             KLAST(JA-1)=KLAST(JA)-1
+(  252)           ENDIF
+(  253)         ENDDO
+(  254)         IF( MYPROC == 1 )THEN
+(  255)           WRITE(0,'("SUMPLATBEQ: EXIT 3")')
+(  256)         ENDIF
+(  257)         EXIT
+(  258)       ENDIF
+(  259)       IF( IMAXI <= 0 )THEN
+(  260)         IA=IA+1
+(  261)         IMAXI=IMAXI+IMEDIAP*N_REGIONS(IA)
+(  262)       ENDIF
+(  263)     ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:31      page 6
+
+(  264)     IF( KPROCA > 1 .AND. KLAST(KPROCA) == KLAST(KPROCA-1) )THEN
+(  265)       IMEDIAP=IMEDIAP-1
+(  266)       IF( MYPROC == 1 )THEN
+(  267)         WRITE(0,'("SUMPLATBEQ: REDUCING IMEDIAP=",I6)')IMEDIAP
+(  268)       ENDIF
+(  269)       IF( IMEDIAP <= 0 )THEN
+(  270)         CALL ABORT_TRANS ('SUMPLATBEQ: PROBLEM PARTITIONING WITH LSPLIT=F, IMEDIAP <= 0')
+(  271)       ENDIF
+(  272)     ELSE
+(  273)       LLDONE=.TRUE.
+(  274)     ENDIF
+(  275)   ENDDO
+(  276) ENDIF
+(  277) 
+(  278) END SUBROUTINE SUMPLATBEQ
+(  279) END MODULE SUMPLATBEQ_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:31      page 7
+
+(    1) # 1 "sumplatbeq_mod.F90"
+(    1) MODULE SUMPLATBEQ_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUMPLATBEQ(KDGSA,KDGL,KPROC,KPROCA,KLOENG,LDSPLIT,LDEQ_REGIONS,&
+(    4)                     &PWEIGHT,LDWEIGHTED_DISTR,PMEDIAP,KPROCAGP,&
+(    5)                     &KMEDIAP,KRESTM,KINDIC,KLAST)
+(    6) # 7 "sumplatbeq_mod.F90"
+(    7) !**** *SUMPLATBEQ * - Routine to initialize parallel environment
+(    8) !                     (latitude partitioning for LEQ_REGIONS=T)
+(    9) # 10 "sumplatbeq_mod.F90"
+(   10) !     Purpose.
+(   11) !     --------
+(   12) # 14 "sumplatbeq_mod.F90"
+(   14) !**   Interface.
+(   15) !     ----------
+(   16) !        *CALL* *SUMPLATBEQ *
+(   17) # 18 "sumplatbeq_mod.F90"
+(   18) !     Explicit arguments - input :
+(   19) !     --------------------
+(   20) !                          KDGSA      -first latitude (grid-space)
+(   21) !                                      (may be different from NDGSAG)
+(   22) !                          KDGL       -last  latitude
+(   23) !                          KPROC      -total number of processors
+(   24) !                          KPROCA     -number of processors in A direction
+(   25) !                          KLOENG     -actual number of longitudes per latitude.
+(   26) !                          LDSPLIT    -true for latitudes shared between sets
+(   27) !                          LDEQ_REGIONS -true if eq_regions partitioning
+(   28) !                          PWEIGHT    -weight per grid-point if weighted distribution
+(   29) !                          LDWEIGHTED_DISTR -true if weighted distribution
+(   30) # 31 "sumplatbeq_mod.F90"
+(   31) !     Explicit arguments - output:
+(   32) !     --------------------
+(   33) !                          PMEDIAP    -mean weight per PE if weighted distribution
+(   34) !                          KMEDIAP    -mean number of grid points per PE
+(   35) !                          KPROCAGP   -number of grid points per A set
+(   36) !                          KRESTM     -number of PEs with one extra point
+(   37) !                          KINDIC     -intermediate quantity for 'sumplat'
+(   38) !                          KLAST      -intermediate quantity for 'sumplat'
+(   39) # 40 "sumplatbeq_mod.F90"
+(   40) !        Implicit arguments :
+(   41) !        --------------------
+(   42) # 44 "sumplatbeq_mod.F90"
+(   44) !     Method.
+(   45) !     -------
+(   46) !        See documentation
+(   47) # 48 "sumplatbeq_mod.F90"
+(   48) !     Externals.   NONE.
+(   49) !     ----------
+(   50) # 51 "sumplatbeq_mod.F90"
+(   51) !     Reference.
+(   52) !     ----------
+(   53) !        ECMWF Research Department documentation of the IFS
+(   54) # 55 "sumplatbeq_mod.F90"
+(   55) !     Author.
+(   56) !     -------
+(   57) !        G. Mozdzynski
+(   58) # 59 "sumplatbeq_mod.F90"
+(   59) !     Modifications.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:31      page 8
+
+(   60) !     --------------
+(   61) !        Original : April 2006
+(   62) !     ------------------------------------------------------------------
+(   63) # 65 "sumplatbeq_mod.F90"
+(   65) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(   66) # 67 "sumplatbeq_mod.F90"
+(   67) USE TPM_DISTR       ,ONLY : MYPROC
+(   68) USE EQ_REGIONS_MOD  ,ONLY : N_REGIONS
+(   69) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   70) !
+(   71) # 72 "sumplatbeq_mod.F90"
+(   72) IMPLICIT NONE
+(   73) # 75 "sumplatbeq_mod.F90"
+(   75) !     * DUMMY:
+(   76) INTEGER(KIND=JPIM),INTENT(IN)  :: KDGSA
+(   77) INTEGER(KIND=JPIM),INTENT(IN)  :: KDGL
+(   78) INTEGER(KIND=JPIM),INTENT(IN)  :: KPROC
+(   79) INTEGER(KIND=JPIM),INTENT(IN)  :: KPROCA
+(   80) INTEGER(KIND=JPIM),INTENT(IN)  :: KLOENG(KDGSA:KDGL)
+(   81) REAL(KIND=JPRBT),INTENT(IN)     :: PWEIGHT(:)
+(   82) LOGICAL,INTENT(IN)  :: LDSPLIT
+(   83) LOGICAL,INTENT(IN)  :: LDEQ_REGIONS
+(   84) LOGICAL,INTENT(INOUT)  :: LDWEIGHTED_DISTR
+(   85) REAL(KIND=JPRBT),INTENT(OUT)     :: PMEDIAP
+(   86) INTEGER(KIND=JPIM),INTENT(OUT)  :: KMEDIAP
+(   87) INTEGER(KIND=JPIM),INTENT(OUT)  :: KRESTM
+(   88) INTEGER(KIND=JPIM),INTENT(OUT)  :: KINDIC(KPROCA)
+(   89) INTEGER(KIND=JPIM),INTENT(OUT)  :: KLAST(KPROCA)
+(   90) INTEGER(KIND=JPIM),INTENT(OUT)  :: KPROCAGP(KPROCA)
+(   91) # 92 "sumplatbeq_mod.F90"
+(   92) !     * LOCAL:
+(   93) # 94 "sumplatbeq_mod.F90"
+(   94) !     LOCAL INTEGER SCALARS
+(   95) INTEGER(KIND=JPIM) :: ICOMP, IGL, IMAXI, IMEDIA, IMEDIAP, ITOT, JA, JB, IA, JGL,&
+(   96)             &ILAST,IREST,IPE,I2REGIONS,IGP
+(   97) REAL(KIND=JPRBT) :: ZMEDIA, ZCOMP
+(   98) LOGICAL   :: LLDONE
+(   99) # 100 "sumplatbeq_mod.F90"
+(  100) !      -----------------------------------------------------------------
+(  101) # 102 "sumplatbeq_mod.F90"
+(  102) !*       1.    COMPUTATION OF KMEDIAP, KRESTM, KINDIC, KLAST.
+(  103) !              ----------------------------------------------
+(  104) 100 CONTINUE
+(  105) !     * Computation of KMEDIAP and KRESTM.
+(  106) # 107 "sumplatbeq_mod.F90"
+(  107) IF (.NOT.LDWEIGHTED_DISTR) THEN
+(  108) # 109 "sumplatbeq_mod.F90"
+(  109)   IMEDIA = SUM(KLOENG(KDGSA:KDGL))
+(  110)   KMEDIAP = IMEDIA / KPROC
+(  111) # 112 "sumplatbeq_mod.F90"
+(  112)   IF( KPROC > 1 )THEN
+(  113) ! test if KMEDIAP is too small and no more than 2 asets would be required
+(  114) ! for the first latitude
+(  115)     IF( LDSPLIT )THEN
+(  116)       I2REGIONS=N_REGIONS(1)+N_REGIONS(2)
+(  117)       IF( KMEDIAP < (KLOENG(KDGSA)-1)/I2REGIONS+1 )THEN
+(  118)         WRITE(0,'("SUMPLATBEQ: KMEDIAP=",I6," I2REGIONS=",I3," KLOENG(KDGSA)=",I4)')&
+(  119)         &KMEDIAP,I2REGIONS,KLOENG(KDGSA)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:31      page 9
+
+(  120)         CALL ABORT_TRANS ('SUMPLATBEQ: NPROC TOO BIG FOR THIS RESOLUTION, LDSPLIT=T')
+(  121)       ENDIF
+(  122)     ELSE
+(  123) ! test for number asets too large for the number of latitudes
+(  124)       IF( KPROCA > KDGL )THEN
+(  125)         WRITE(0,'("SUMPLATBEQ: KMEDIAP=",I6," KPROCA=",I4," KDGL=",I4)')&
+(  126)         &KMEDIAP,KPROCA,KDGL
+(  127)         CALL ABORT_TRANS ('SUMPLATBEQ: NPROC TOO BIG FOR THIS RESOLUTION, LDSPLIT=F')
+(  128)       ENDIF
+(  129)     ENDIF
+(  130)   ENDIF
+(  131) # 132 "sumplatbeq_mod.F90"
+(  132)   KRESTM = IMEDIA - KMEDIAP * KPROC
+(  133)   IF (KRESTM  >  0) KMEDIAP = KMEDIAP + 1
+(  134) # 135 "sumplatbeq_mod.F90"
+(  135) ELSE
+(  136) # 137 "sumplatbeq_mod.F90"
+(  137)   ZMEDIA = SUM(PWEIGHT(:))
+(  138)   PMEDIAP = ZMEDIA / KPROC
+(  139) # 140 "sumplatbeq_mod.F90"
+(  140) ENDIF
+(  141) # 142 "sumplatbeq_mod.F90"
+(  142) !     * Computation of intermediate quantities KINDIC and KLAST
+(  143) # 144 "sumplatbeq_mod.F90"
+(  144) IF (LDSPLIT) THEN
+(  145) # 146 "sumplatbeq_mod.F90"
+(  146)   KPROCAGP(:)=0
+(  147)   IREST = 0
+(  148)   ILAST =0
+(  149)   IPE=0
+(  150)   ZCOMP=0
+(  151)   IGP=0
+(  152)   DO JA=1,KPROCA
+(  153)     ICOMP=0
+(  154)     DO JB=1,N_REGIONS(JA)
+(  155)       IF( LDWEIGHTED_DISTR )THEN
+(  156)         DO WHILE ( ( JA == KPROCA .OR. ZCOMP < PMEDIAP ) .AND. IGP < SIZE(PWEIGHT) )
+(  157)           IGP = IGP + 1
+(  158)           ICOMP = ICOMP + 1
+(  159)           ZCOMP = ZCOMP + PWEIGHT(IGP)
+(  160)         ENDDO
+(  161)         ZCOMP = ZCOMP - PMEDIAP
+(  162)       ELSE
+(  163)         IPE=IPE+1
+(  164)         IF (IPE  <=  KRESTM .OR. KRESTM  ==  0) THEN
+(  165)           ICOMP = ICOMP + KMEDIAP
+(  166)         ELSE
+(  167)           ICOMP = ICOMP + (KMEDIAP-1)
+(  168)         ENDIF
+(  169)       ENDIF
+(  170)     ENDDO
+(  171)     KPROCAGP(JA)=ICOMP
+(  172)     ITOT = IREST
+(  173)     IGL = ILAST+1
+(  174)     DO JGL=IGL,KDGL
+(  175)       ILAST = JGL
+(  176)       IF(ITOT+KLOENG(JGL) < ICOMP) THEN
+(  177)         ITOT = ITOT+KLOENG(JGL)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:31      page 10
+
+(  178)       ELSEIF(ITOT+KLOENG(JGL) == ICOMP) THEN
+(  179)         IREST = 0
+(  180)         KLAST(JA) = JGL
+(  181)         KINDIC(JA) = 0
+(  182)         EXIT
+(  183)       ELSE
+(  184)         IREST =  KLOENG(JGL) -(ICOMP-ITOT)
+(  185)         KLAST(JA) = JGL
+(  186)         KINDIC(JA) = JGL
+(  187)         EXIT
+(  188)       ENDIF
+(  189)     ENDDO
+(  190)   ENDDO
+(  191)   IF( LDWEIGHTED_DISTR )THEN
+(  192)     IF( KLAST(KPROCA) /= KDGL )THEN
+(  193)       DO JA=1,KPROCA
+(  194)         IF( MYPROC == 1 )THEN
+(  195)           WRITE(0,'("SUMPLATBEQ_MOD: JA=",I3," KLAST=",I3," KINDIC=",I3)')&
+(  196)           &JA,KLAST(JA),KINDIC(JA)
+(  197)         ENDIF
+(  198)       ENDDO
+(  199)       WRITE(0,'("SUMPLATBEQ: LWEIGHTED_DISTR=T FAILED TO PARTITION GRID, REVERTING TO ",&
+(  200)       & " LWEIGHTED_DISTR=F PARTITIONING")')
+(  201)       LDWEIGHTED_DISTR=.FALSE.
+(  202)       GOTO 100
+(  203)     ENDIF
+(  204)   ENDIF
+(  205)   IF( SUM(KPROCAGP(:)) /= SUM(KLOENG(KDGSA:KDGL)) )THEN
+(  206)     IF( MYPROC == 1 )THEN
+(  207)       WRITE(0,'("SUM(KPROCAGP(:))=",I12)')SUM(KPROCAGP(:))
+(  208)       WRITE(0,'("SUM(KLOENG(:))=",I12)')SUM(KLOENG(KDGSA:KDGL))
+(  209)     ENDIF
+(  210)     CALL ABORT_TRANS ('SUMPLATBEQ: PROBLEM IN PARTITIONING ')
+(  211)   ENDIF
+(  212) # 213 "sumplatbeq_mod.F90"
+(  213) ELSE
+(  214) # 215 "sumplatbeq_mod.F90"
+(  215)   IF( LDWEIGHTED_DISTR )THEN
+(  216)     CALL ABORT_TRANS ('SUMPLATBEQ: LSPLIT=F NOT SUPPORTED FOR WEIGHTED DISTRIBUTION ')
+(  217)   ENDIF
+(  218) # 219 "sumplatbeq_mod.F90"
+(  219)   KINDIC(:) = 0
+(  220)   LLDONE=.FALSE.
+(  221)   IMEDIAP=KMEDIAP
+(  222)   IF( MYPROC == 1 )THEN
+(  223)     WRITE(0,'("SUMPLATBEQ: IMEDIAP=",I6)')IMEDIAP
+(  224)   ENDIF
+(  225)   DO WHILE(.NOT.LLDONE)
+(  226) !   loop until a satisfactory distribution can be found
+(  227)     IA=1
+(  228)     IMAXI=IMEDIAP*N_REGIONS(IA)
+(  229)     DO JGL=1,KDGL
+(  230)       KLAST(IA)=JGL
+(  231)       IMAXI=IMAXI-KLOENG(JGL)
+(  232)       IF( IA == KPROCA .AND. JGL == KDGL )THEN
+(  233)         IF( MYPROC == 1 )THEN
+(  234)           WRITE(0,'("SUMPLATBEQ: EXIT 1")')
+(  235)         ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:31      page 11
+
+(  236)         EXIT
+(  237)       ENDIF
+(  238)       IF( IA == KPROCA .AND. JGL < KDGL )THEN
+(  239)         IF( MYPROC == 1 )THEN
+(  240)           WRITE(0,'("SUMPLATBEQ: EXIT 2")')
+(  241)         ENDIF
+(  242)         KLAST(KPROCA)=KDGL
+(  243)         EXIT
+(  244)       ENDIF
+(  245)       IF( IA < KPROCA .AND. JGL == KDGL )THEN
+(  246)         DO JA=KPROCA,IA+1,-1
+(  247)           KLAST(JA)=KDGL+JA-KPROCA
+(  248)         ENDDO
+(  249)         DO JA=KPROCA,2,-1
+(  250)           IF( KLAST(JA) <= KLAST(JA-1) )THEN
+(  251)             KLAST(JA-1)=KLAST(JA)-1
+(  252)           ENDIF
+(  253)         ENDDO
+(  254)         IF( MYPROC == 1 )THEN
+(  255)           WRITE(0,'("SUMPLATBEQ: EXIT 3")')
+(  256)         ENDIF
+(  257)         EXIT
+(  258)       ENDIF
+(  259)       IF( IMAXI <= 0 )THEN
+(  260)         IA=IA+1
+(  261)         IMAXI=IMAXI+IMEDIAP*N_REGIONS(IA)
+(  262)       ENDIF
+(  263)     ENDDO
+(  264)     IF( KPROCA > 1 .AND. KLAST(KPROCA) == KLAST(KPROCA-1) )THEN
+(  265)       IMEDIAP=IMEDIAP-1
+(  266)       IF( MYPROC == 1 )THEN
+(  267)         WRITE(0,'("SUMPLATBEQ: REDUCING IMEDIAP=",I6)')IMEDIAP
+(  268)       ENDIF
+(  269)       IF( IMEDIAP <= 0 )THEN
+(  270)         CALL ABORT_TRANS ('SUMPLATBEQ: PROBLEM PARTITIONING WITH LSPLIT=F, IMEDIAP <= 0')
+(  271)       ENDIF
+(  272)     ELSE
+(  273)       LLDONE=.TRUE.
+(  274)     ENDIF
+(  275)   ENDDO
+(  276) ENDIF
+(  277) # 278 "sumplatbeq_mod.F90"
+(  278) END SUBROUTINE SUMPLATBEQ
+(  279) END MODULE SUMPLATBEQ_MOD

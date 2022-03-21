@@ -1,0 +1,717 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:02      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: vordiv_to_uv.F90
+
+(    1) SUBROUTINE VORDIV_TO_UV(PSPVOR,PSPDIV,PSPU,PSPV,KSMAX,KVSETUV)
+(    2) 
+(    3) !**** *VORDIV_TO_UV* - Convert spectral vorticity and divergence to spectral U (u*cos(theta)) and V (v*cos(theta).
+(    4) 
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !        Interface routine for  Convert spectral vorticity and divergence to spectral U  and V 
+(    8) 
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL VORDIV_TO_UV(...)
+(   12) 
+(   13) !     Explicit arguments :
+(   14) !     --------------------
+(   15) !     PSPVOR(:,:) - spectral vorticity (input)
+(   16) !     PSPDIV(:,:) - spectral divergence (input)
+(   17) !     PSPU(:,:)   - spectral U (u*cos(theta) (output)
+(   18) !     PSPV(:,:)   - spectral V (v*cos(theta) (output)
+(   19) !     KSMAX       - spectral resolution (input)
+(   20) !     KVSETUV(:)  - Optionally indicating which 'b-set' in spectral space owns a
+(   21) !                   vor/div field. Equivalant to NBSETLEV in the IFS.
+(   22) !                   The length of KVSETUV should be the GLOBAL number
+(   23) !                   of u/v fields which is the dimension of u and v releated
+(   24) !                   fields in grid-point space.
+(   25) 
+(   26) !     Method.
+(   27) !     -------
+(   28) 
+(   29) !     Externals.  SET_RESOL   - set resolution
+(   30) !     ----------  VD2UV_CTL   - control vordiv to uv
+(   31) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:02      page 2
+
+(   32) !     Author.
+(   33) !     -------
+(   34) !        Mats Hamrud *ECMWF*
+(   35) 
+(   36) !     Modifications.
+(   37) !     --------------
+(   38) !        Original : 15-06-15
+(   39) 
+(   40) 
+(   41) !     ------------------------------------------------------------------
+(   42) 
+(   43) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   44) 
+(   45) !ifndef INTERFACE
+(   46) 
+(   47) USE TPM_GEN         ,ONLY : NERR, NOUT,MSETUP0
+(   48) USE TPM_DISTR       ,ONLY : D, NPRTRV, MYSETV
+(   49) 
+(   50) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(   51) USE VD2UV_CTL_MOD ,ONLY   : VD2UV_CTL
+(   52) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   53) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   54) 
+(   55) !endif INTERFACE
+(   56) 
+(   57) IMPLICIT NONE
+(   58) 
+(   59) ! Declaration of arguments
+(   60) 
+(   61) REAL(KIND=JPRB), INTENT(IN) :: PSPVOR(:,:)
+(   62) REAL(KIND=JPRB), INTENT(IN) :: PSPDIV(:,:)
+(   63) REAL(KIND=JPRB), INTENT(OUT) :: PSPU(:,:)
+(   64) REAL(KIND=JPRB), INTENT(OUT) :: PSPV(:,:)
+(   65) INTEGER(KIND=JPIM) , INTENT(IN) :: KSMAX
+(   66) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETUV(:)
+(   67) 
+(   68) !ifndef INTERFACE
+(   69) 
+(   70) ! Local varaibles
+(   71) INTEGER(KIND=JPIM) :: IUBOUND(4),J
+(   72) INTEGER(KIND=JPIM) :: IF_UV,IF_UV_G,IRESOL,IDGL
+(   73) LOGICAL :: LTMP_SETUP0
+(   74) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   75) 
+(   76) #include "setup_trans0.h"
+(   77) #include "setup_trans.h"
+(   78) #include "trans_release.h"
+(   79) #include "trans_end.h"
+(   80) 
+(   81) !     ------------------------------------------------------------------
+(   82) 
+(   83) IF (LHOOK) CALL DR_HOOK('VORDIV_TO_UV',0,ZHOOK_HANDLE)
+(   84) 
+(   85) !CALL GSTATS(XXXX,0)
+(   86) 
+(   87) IF(MSETUP0 == 0) THEN
+(   88)   CALL SETUP_TRANS0()
+(   89)   LTMP_SETUP0 = .TRUE.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:02      page 3
+
+(   90) ELSE
+(   91)   LTMP_SETUP0 = .FALSE.
+(   92) ENDIF
+(   93) IDGL = 2 ! It doesn't matter as long as it's a positive even number
+(   94) CALL SETUP_TRANS(KSMAX,IDGL,LDSPSETUPONLY=.TRUE.,KRESOL=IRESOL)
+(   95) CALL SET_RESOL(IRESOL)
+(   96) 
+(   97) 
+(   98) ! Set defaults
+(   99) 
+(  100) IF_UV = 0
+(  101) IF_UV_G = 0
+(  102) ! Decide requirements
+(  103) 
+(  104) IF(PRESENT(KVSETUV)) THEN
+(  105)   IF_UV_G = UBOUND(KVSETUV,1)
+(  106)   DO J=1,IF_UV_G
+(  107)     IF(KVSETUV(J) > NPRTRV .OR. KVSETUV(J) < 1) THEN
+(  108)       WRITE(NERR,*) 'VORDIV_TO_UV:KVSETUV(J) > NPRTRV ',J,KVSETUV(J),NPRTRV
+(  109)       CALL ABORT_TRANS('VORDIV_TO_UV:KVSETUV TOO LONG OR CONTAINS VALUES OUTSIDE RANGE')
+(  110)     ENDIF
+(  111)     IF(KVSETUV(J) == MYSETV) THEN
+(  112)       IF_UV = IF_UV+1
+(  113)     ENDIF
+(  114)   ENDDO
+(  115) ELSE
+(  116)   IF_UV = UBOUND(PSPVOR,1)
+(  117)   IF_UV_G = IF_UV
+(  118) ENDIF
+(  119) 
+(  120) ! Consistency checks
+(  121) 
+(  122) IF (IF_UV > 0) THEN
+(  123)   IF(UBOUND(PSPVOR,1) < IF_UV) THEN
+(  124)     WRITE(NERR,*)'VORDIV_TO_UV : UBOUND(PSPVOR,1) < IF_UV ',UBOUND(PSPVOR,1),IF_UV
+(  125)     CALL ABORT_TRANS('VORDIV_TO_UV : PSPVOR TOO SHORT')
+(  126)   ENDIF
+(  127)   IF(UBOUND(PSPDIV,1) < IF_UV) THEN
+(  128)     WRITE(NERR,*)'VORDIV_TO_UV : UBOUND(PSPDIV,1) < IF_UV ',UBOUND(PSPDIV,1),IF_UV
+(  129)     CALL ABORT_TRANS('VORDIV_TO_UV : PSPDIV TOO SHORT')
+(  130)   ENDIF
+(  131)   IF(UBOUND(PSPU,1) < IF_UV) THEN
+(  132)     WRITE(NERR,*)'VORDIV_TO_UV : UBOUND(PSPU,1) < IF_UV ',UBOUND(PSPU,1),IF_UV
+(  133)     CALL ABORT_TRANS('VORDIV_TO_UV : PSPU TOO SHORT')
+(  134)   ENDIF
+(  135)   IF(UBOUND(PSPV,1) < IF_UV) THEN
+(  136)     WRITE(NERR,*)'VORDIV_TO_UV : UBOUND(PSPV,1) < IF_UV ',UBOUND(PSPV,1),IF_UV
+(  137)     CALL ABORT_TRANS('VORDIV_TO_UV : PSPV TOO SHORT')
+(  138)   ENDIF
+(  139) ENDIF
+(  140) 
+(  141) 
+(  142) IF(NPRTRV >1) THEN
+(  143)   IF(IF_UV > 0 .AND. .NOT. PRESENT(KVSETUV)) THEN
+(  144)     WRITE(NERR,*)'NPRTRV >1 AND IF_UV > 0 AND NOT PRESENT(KVSETUV)',&
+(  145)                  &NPRTRV,IF_UV
+(  146)     CALL ABORT_TRANS('VORDIV_TO_UV: SPECIFY VERTICAL SPECTRAL DISTRIBUTION!')
+(  147)   ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:02      page 4
+
+(  148) ENDIF
+(  149) 
+(  150) !CALL GSTATS(XXXX,1)
+(  151) 
+(  152) !     ------------------------------------------------------------------
+(  153) 
+(  154) ! Perform transform
+(  155) 
+(  156) CALL VD2UV_CTL(IF_UV,PSPVOR,PSPDIV,PSPU,PSPV)
+(  157) 
+(  158) CALL TRANS_RELEASE(IRESOL)
+(  159) IF (LTMP_SETUP0) THEN
+(  160)   CALL TRANS_END()
+(  161) ENDIF
+(  162) 
+(  163) IF (LHOOK) CALL DR_HOOK('VORDIV_TO_UV',1,ZHOOK_HANDLE)
+(  164) !     ------------------------------------------------------------------
+(  165) 
+(  166) !endif INTERFACE
+(  167) 
+(  168) END SUBROUTINE VORDIV_TO_UV
+(  169) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:02      page 5
+
+(    1) # 1 "vordiv_to_uv.F90"
+(    1) SUBROUTINE VORDIV_TO_UV(PSPVOR,PSPDIV,PSPU,PSPV,KSMAX,KVSETUV)
+(    2) # 3 "vordiv_to_uv.F90"
+(    3) !**** *VORDIV_TO_UV* - Convert spectral vorticity and divergence to spectral U (u*cos(theta)) and V (v*cos(theta).
+(    4) # 5 "vordiv_to_uv.F90"
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !        Interface routine for  Convert spectral vorticity and divergence to spectral U  and V 
+(    8) # 9 "vordiv_to_uv.F90"
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL VORDIV_TO_UV(...)
+(   12) # 13 "vordiv_to_uv.F90"
+(   13) !     Explicit arguments :
+(   14) !     --------------------
+(   15) !     PSPVOR(:,:) - spectral vorticity (input)
+(   16) !     PSPDIV(:,:) - spectral divergence (input)
+(   17) !     PSPU(:,:)   - spectral U (u*cos(theta) (output)
+(   18) !     PSPV(:,:)   - spectral V (v*cos(theta) (output)
+(   19) !     KSMAX       - spectral resolution (input)
+(   20) !     KVSETUV(:)  - Optionally indicating which 'b-set' in spectral space owns a
+(   21) !                   vor/div field. Equivalant to NBSETLEV in the IFS.
+(   22) !                   The length of KVSETUV should be the GLOBAL number
+(   23) !                   of u/v fields which is the dimension of u and v releated
+(   24) !                   fields in grid-point space.
+(   25) # 26 "vordiv_to_uv.F90"
+(   26) !     Method.
+(   27) !     -------
+(   28) # 29 "vordiv_to_uv.F90"
+(   29) !     Externals.  SET_RESOL   - set resolution
+(   30) !     ----------  VD2UV_CTL   - control vordiv to uv
+(   31) # 32 "vordiv_to_uv.F90"
+(   32) !     Author.
+(   33) !     -------
+(   34) !        Mats Hamrud *ECMWF*
+(   35) # 36 "vordiv_to_uv.F90"
+(   36) !     Modifications.
+(   37) !     --------------
+(   38) !        Original : 15-06-15
+(   39) # 41 "vordiv_to_uv.F90"
+(   41) !     ------------------------------------------------------------------
+(   42) # 43 "vordiv_to_uv.F90"
+(   43) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   44) # 45 "vordiv_to_uv.F90"
+(   45) !ifndef INTERFACE
+(   46) # 47 "vordiv_to_uv.F90"
+(   47) USE TPM_GEN         ,ONLY : NERR, NOUT,MSETUP0
+(   48) USE TPM_DISTR       ,ONLY : D, NPRTRV, MYSETV
+(   49) # 50 "vordiv_to_uv.F90"
+(   50) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(   51) USE VD2UV_CTL_MOD ,ONLY   : VD2UV_CTL
+(   52) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   53) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   54) # 55 "vordiv_to_uv.F90"
+(   55) !endif INTERFACE
+(   56) # 57 "vordiv_to_uv.F90"
+(   57) IMPLICIT NONE
+(   58) # 59 "vordiv_to_uv.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:02      page 6
+
+(   59) ! Declaration of arguments
+(   60) # 61 "vordiv_to_uv.F90"
+(   61) REAL(KIND=JPRB), INTENT(IN) :: PSPVOR(:,:)
+(   62) REAL(KIND=JPRB), INTENT(IN) :: PSPDIV(:,:)
+(   63) REAL(KIND=JPRB), INTENT(OUT) :: PSPU(:,:)
+(   64) REAL(KIND=JPRB), INTENT(OUT) :: PSPV(:,:)
+(   65) INTEGER(KIND=JPIM) , INTENT(IN) :: KSMAX
+(   66) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN) :: KVSETUV(:)
+(   67) # 68 "vordiv_to_uv.F90"
+(   68) !ifndef INTERFACE
+(   69) # 70 "vordiv_to_uv.F90"
+(   70) ! Local varaibles
+(   71) INTEGER(KIND=JPIM) :: IUBOUND(4),J
+(   72) INTEGER(KIND=JPIM) :: IF_UV,IF_UV_G,IRESOL,IDGL
+(   73) LOGICAL :: LTMP_SETUP0
+(   74) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   75) # 76 "vordiv_to_uv.F90"
+(   76) # 1 ".D[10]/setup_trans0.h"
+(    1) INTERFACE
+(    2) SUBROUTINE SETUP_TRANS0(KOUT,KERR,KPRINTLEV,KMAX_RESOL,KPROMATR,&
+(    3) &                       KPRGPNS,KPRGPEW,KPRTRW,KCOMBFLEN,&
+(    4) &                       LDMPOFF,LDSYNC_TRANS,KTRANS_SYNC_LEVEL,&
+(    5) &                       LDEQ_REGIONS,K_REGIONS_NS,K_REGIONS_EW,K_REGIONS,&
+(    6) &                       PRAD,LDALLOPERM,LDALLOPERM2)
+(    7) # 8 ".D[10]/setup_trans0.h"
+(    8) !**** *SETUP_TRANS0* - General setup routine for transform package
+(    9) # 10 ".D[10]/setup_trans0.h"
+(   10) !     Purpose.
+(   11) !     --------
+(   12) !     Resolution independent part of setup of transform package
+(   13) !     Has to be called BEFORE SETUP_TRANS
+(   14) # 15 ".D[10]/setup_trans0.h"
+(   15) !**   Interface.
+(   16) !     ----------
+(   17) !     CALL SETUP_TRANS0(...)
+(   18) # 19 ".D[10]/setup_trans0.h"
+(   19) !     Explicit arguments : All arguments are optional, [..] default value
+(   20) !     -------------------
+(   21) !     KOUT - Unit number for listing output [6]
+(   22) !     KERR - Unit number for error messages [0]
+(   23) !     KPRINTLEV - level of output to KOUT, 0->no output,1->normal,2->debug [0]
+(   24) !     KMAX_RESOL - maximum number of different resolutions for this run [1]
+(   25) !     KPRGPNS - splitting level in N-S direction in grid-point space [1]
+(   26) !     KPRGPEW - splitting level in E-W direction in grid-point space [1]
+(   27) !     KPRTRW  - splitting level in wave direction in spectral space [1]
+(   28) !     KCOMBFLEN - Size of communication buffer [1800000 (*8bytes) ]
+(   29) !     LDMPOFF - switch off message passing [false]
+(   30) !     LDSYNC_TRANS - switch to activate barrier before transforms [false]
+(   31) !     KTRANS_SYNC_LEVEL - use of synchronization/blocking [0]
+(   32) !     LDEQ_REGIONS - true if new eq_regions partitioning [false]
+(   33) !     K_REGIONS    - Number of regions (1D or 2D partitioning)
+(   34) !     K_REGIONS_NS - Maximum number of NS partitions
+(   35) !     K_REGIONS_EW - Maximum number of EW partitions
+(   36) !     PRAD         - Radius of the planet
+(   37) !     LDALLOPERM  - Allocate certain arrays permanently
+(   38) # 39 ".D[10]/setup_trans0.h"
+(   39) !     The total number of (MPI)-processors has to be equal to KPRGPNS*KPRGPEW
+(   40) # 41 ".D[10]/setup_trans0.h"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:02      page 7
+
+(   41) !     Method.
+(   42) !     -------
+(   43) # 44 ".D[10]/setup_trans0.h"
+(   44) !     Externals.  SUMP_TRANS0 - initial setup routine
+(   45) !     ----------
+(   46) # 47 ".D[10]/setup_trans0.h"
+(   47) !     Author.
+(   48) !     -------
+(   49) !        Mats Hamrud *ECMWF*
+(   50) # 51 ".D[10]/setup_trans0.h"
+(   51) !     Modifications.
+(   52) !     --------------
+(   53) !        Original : 00-03-03
+(   54) !        R. El Khatib 03-01-24 LDMPOFF
+(   55) !        G. Mozdzynski 2006-09-13 LDEQ_REGIONS
+(   56) !        N. Wedi  2009-11-30 add radius
+(   57) # 58 ".D[10]/setup_trans0.h"
+(   58) !     ------------------------------------------------------------------
+(   59) # 60 ".D[10]/setup_trans0.h"
+(   60) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   61) # 62 ".D[10]/setup_trans0.h"
+(   62) IMPLICIT NONE
+(   63) # 64 ".D[10]/setup_trans0.h"
+(   64) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN)  :: KOUT,KERR,KPRINTLEV,KMAX_RESOL,KPROMATR
+(   65) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN)  :: KPRGPNS,KPRGPEW,KPRTRW,KCOMBFLEN
+(   66) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDMPOFF
+(   67) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDSYNC_TRANS
+(   68) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN)  :: KTRANS_SYNC_LEVEL
+(   69) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDEQ_REGIONS
+(   70) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDALLOPERM
+(   71) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDALLOPERM2
+(   72) REAL(KIND=JPRB)    ,OPTIONAL,INTENT(IN)  :: PRAD
+(   73) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT) :: K_REGIONS(:)
+(   74) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT) :: K_REGIONS_NS
+(   75) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT) :: K_REGIONS_EW
+(   76) # 77 ".D[10]/setup_trans0.h"
+(   77) END SUBROUTINE SETUP_TRANS0
+(   78) # 81 ".D[10]/setup_trans0.h"
+(   81) END INTERFACE
+(   82) # 77 "vordiv_to_uv.F90"
+(   77) # 77 "vordiv_to_uv.F90"
+(   77) # 1 ".D[18]/setup_trans.h"
+(    1) INTERFACE
+(    2) SUBROUTINE SETUP_TRANS(KSMAX,KDGL,KDLON,KLOEN,LDSPLIT,PSTRET,&
+(    3) &KFLEV,KTMAX,KRESOL,PWEIGHT,LDGRIDONLY,LDUSERPNM,LDKEEPRPNM,LDUSEFLT,&
+(    4) &LDSPSETUPONLY,LDPNMONLY,LDUSEFFTW,&
+(    5) &LDLL,LDSHIFTLL,CDIO_LEGPOL,CDLEGPOLFNAME,KLEGPOLPTR,KLEGPOLPTR_LEN)
+(    6) # 7 ".D[18]/setup_trans.h"
+(    7) !**** *SETUP_TRANS* - Setup transform package for specific resolution
+(    8) # 9 ".D[18]/setup_trans.h"
+(    9) !     Purpose.
+(   10) !     --------
+(   11) !     To setup for making spectral transforms. Each call to this routine
+(   12) !     creates a new resolution up to a maximum of NMAX_RESOL set up in
+(   13) !     SETUP_TRANS0. You need to call SETUP_TRANS0 before this routine can
+(   14) !     be called.
+(   15) # 16 ".D[18]/setup_trans.h"
+(   16) !**   Interface.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:02      page 8
+
+(   17) !     ----------
+(   18) !     CALL SETUP_TRANS(...)
+(   19) # 20 ".D[18]/setup_trans.h"
+(   20) !     Explicit arguments : KLOEN,LDSPLIT are optional arguments
+(   21) !     -------------------- 
+(   22) !     KSMAX - spectral truncation required
+(   23) !     KDGL  - number of Gaussian latitudes
+(   24) !     KDLON - number of points on each latitude [2*KDGL]
+(   25) !     KLOEN(:) - number of points on each Gaussian latitude [2*KDGL]
+(   26) !     LDSPLIT - true if split latitudes in grid-point space [false]
+(   27) !     KTMAX - truncation order for tendencies?
+(   28) !     KRESOL - the resolution identifier
+(   29) !     PWEIGHT - the weight per grid-point (for a weighted distribution)
+(   30) !     LDGRIDONLY - true if only grid space is required
+(   31) # 32 ".D[18]/setup_trans.h"
+(   32) !     KSMAX,KDGL,KTMAX and KLOEN are GLOBAL variables desribing the resolution
+(   33) !     in spectral and grid-point space
+(   34) # 35 ".D[18]/setup_trans.h"
+(   35) !     LDSPLIT describe the distribution among processors of grid-point data and
+(   36) !     has no relevance if you are using a single processor
+(   37) # 38 ".D[18]/setup_trans.h"
+(   38) !     LDUSEFLT   - use Fast Legandre Transform (Butterfly algorithm)
+(   39) !     LDUSERPNM  - Use Belusov to compute legendre pol. (else new alg.)
+(   40) !     LDKEEPRPNM - Keep Legendre Polynomials (only applicable when using
+(   41) !                  FLT, otherwise always kept)
+(   42) !     LDPNMONLY  - Compute the Legendre polynomialsonly, not the FFTs.
+(   43) !     LDUSEFFTW   - Use FFTW for FFTs
+(   44) !     LDLL                 - Setup second set of input/output latitudes
+(   45) !                                 the number of input/output latitudes to transform is equal KDGL 
+(   46) !                                 or KDGL+2 in the case that includes poles + equator
+(   47) !                                 the number of input/output longitudes to transform is 2*KDGL
+(   48) !     LDSHIFTLL       - Shift output lon/lat data by 0.5*dx and 0.5*dy
+(   49)  
+(   50) !     Method.
+(   51) !     -------
+(   52) # 53 ".D[18]/setup_trans.h"
+(   53) !     Externals.  SET_RESOL   - set resolution
+(   54) !     ----------  SETUP_DIMS  - setup distribution independent dimensions
+(   55) !                 SUMP_TRANS_PRELEG - first part of setup of distr. environment
+(   56) !                 SULEG - Compute Legandre polonomial and Gaussian 
+(   57) !                         Latitudes and Weights
+(   58) !                 SUMP_TRANS - Second part of setup of distributed environment
+(   59) !                 SUFFT - setup for FFT
+(   60) # 61 ".D[18]/setup_trans.h"
+(   61) !     Author.
+(   62) !     -------
+(   63) !        Mats Hamrud *ECMWF*
+(   64) # 65 ".D[18]/setup_trans.h"
+(   65) !     Modifications.
+(   66) !     --------------
+(   67) !        Original : 00-03-03
+(   68) # 69 ".D[18]/setup_trans.h"
+(   69) !     ------------------------------------------------------------------
+(   70) # 71 ".D[18]/setup_trans.h"
+(   71) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   72)     USE, INTRINSIC :: ISO_C_BINDING, ONLY:  C_PTR, C_INT,C_ASSOCIATED,C_SIZE_T
+(   73) # 75 ".D[18]/setup_trans.h"
+(   75) IMPLICIT NONE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:02      page 9
+
+(   76) # 77 ".D[18]/setup_trans.h"
+(   77) ! Dummy arguments
+(   78) # 79 ".D[18]/setup_trans.h"
+(   79) INTEGER(KIND=JPIM) ,INTENT(IN) :: KSMAX,KDGL
+(   80) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KDLON
+(   81) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KLOEN(:)
+(   82) LOGICAL   ,OPTIONAL,INTENT(IN) :: LDSPLIT
+(   83) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KTMAX
+(   84) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT):: KRESOL
+(   85) REAL(KIND=JPRB)    ,OPTIONAL,INTENT(IN) :: PWEIGHT(:)
+(   86) REAL(KIND=JPRB)    ,OPTIONAL,INTENT(IN) :: PSTRET
+(   87) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN) :: KFLEV
+(   88) LOGICAL   ,OPTIONAL,INTENT(IN):: LDGRIDONLY
+(   89) LOGICAL   ,OPTIONAL,INTENT(IN):: LDUSEFLT
+(   90) LOGICAL   ,OPTIONAL,INTENT(IN):: LDUSERPNM
+(   91) LOGICAL   ,OPTIONAL,INTENT(IN):: LDKEEPRPNM
+(   92) LOGICAL   ,OPTIONAL,INTENT(IN):: LDPNMONLY
+(   93) LOGICAL   ,OPTIONAL,INTENT(IN):: LDSPSETUPONLY
+(   94) LOGICAL   ,OPTIONAL,INTENT(IN):: LDUSEFFTW
+(   95) LOGICAL   ,OPTIONAL,INTENT(IN):: LDLL
+(   96) LOGICAL   ,OPTIONAL,INTENT(IN):: LDSHIFTLL
+(   97) CHARACTER(LEN=*),OPTIONAL,INTENT(IN):: CDIO_LEGPOL
+(   98) CHARACTER(LEN=*),OPTIONAL,INTENT(IN):: CDLEGPOLFNAME
+(   99) TYPE(C_PTR) ,OPTIONAL,INTENT(IN) :: KLEGPOLPTR
+(  100) INTEGER(C_SIZE_T) ,OPTIONAL,INTENT(IN) :: KLEGPOLPTR_LEN
+(  101) # 103 ".D[18]/setup_trans.h"
+(  103) END SUBROUTINE SETUP_TRANS
+(  104) # 106 ".D[18]/setup_trans.h"
+(  106) END INTERFACE
+(  107) # 78 "vordiv_to_uv.F90"
+(   78) # 78 "vordiv_to_uv.F90"
+(   78) # 1 ".D[18]/trans_release.h"
+(    1) INTERFACE
+(    2) SUBROUTINE TRANS_RELEASE(KRESOL)
+(    3) USE PARKIND1 ,ONLY : JPIM
+(    4) INTEGER(KIND=JPIM),INTENT(IN) :: KRESOL
+(    5) END SUBROUTINE TRANS_RELEASE
+(    6) END INTERFACE
+(    7) # 79 "vordiv_to_uv.F90"
+(   79) # 79 "vordiv_to_uv.F90"
+(   79) # 1 ".D[18]/trans_end.h"
+(    1) INTERFACE
+(    2) SUBROUTINE TRANS_END(CDMODE)
+(    3) # 4 ".D[18]/trans_end.h"
+(    4) !**** *TRANS_END* - Terminate transform package 
+(    5) # 6 ".D[18]/trans_end.h"
+(    6) !     Purpose.
+(    7) !     --------
+(    8) !     Terminate transform package. Release all allocated arrays.
+(    9) # 10 ".D[18]/trans_end.h"
+(   10) !**   Interface.
+(   11) !     ----------
+(   12) !     CALL TRANS_END
+(   13) # 14 ".D[18]/trans_end.h"
+(   14) !     Explicit arguments : None
+(   15) !     -------------------- 
+(   16) # 17 ".D[18]/trans_end.h"
+(   17) !     Method.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:02      page 10
+
+(   18) !     -------
+(   19) # 20 ".D[18]/trans_end.h"
+(   20) !     Externals.  None
+(   21) !     ----------  
+(   22) # 23 ".D[18]/trans_end.h"
+(   23) !     Author.
+(   24) !     -------
+(   25) !        Mats Hamrud *ECMWF*
+(   26) # 27 ".D[18]/trans_end.h"
+(   27) !     Modifications.
+(   28) !     --------------
+(   29) !        Original : 00-03-03
+(   30) # 32 ".D[18]/trans_end.h"
+(   32) !     ------------------------------------------------------------------
+(   33) # 34 ".D[18]/trans_end.h"
+(   34) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   35) IMPLICIT NONE
+(   36) CHARACTER*5, OPTIONAL, INTENT(IN) :: CDMODE
+(   37) # 39 ".D[18]/trans_end.h"
+(   39) END SUBROUTINE TRANS_END
+(   40) END INTERFACE
+(   41) # 80 "vordiv_to_uv.F90"
+(   80) # 81 "vordiv_to_uv.F90"
+(   81) !     ------------------------------------------------------------------
+(   82) # 83 "vordiv_to_uv.F90"
+(   83) IF (LHOOK) CALL DR_HOOK('VORDIV_TO_UV',0,ZHOOK_HANDLE)
+(   84) # 85 "vordiv_to_uv.F90"
+(   85) !CALL GSTATS(XXXX,0)
+(   86) # 87 "vordiv_to_uv.F90"
+(   87) IF(MSETUP0 == 0) THEN
+(   88)   CALL SETUP_TRANS0()
+(   89)   LTMP_SETUP0 = .TRUE.
+(   90) ELSE
+(   91)   LTMP_SETUP0 = .FALSE.
+(   92) ENDIF
+(   93) IDGL = 2 ! It doesn't matter as long as it's a positive even number
+(   94) CALL SETUP_TRANS(KSMAX,IDGL,LDSPSETUPONLY=.TRUE.,KRESOL=IRESOL)
+(   95) CALL SET_RESOL(IRESOL)
+(   96) # 98 "vordiv_to_uv.F90"
+(   98) ! Set defaults
+(   99) # 100 "vordiv_to_uv.F90"
+(  100) IF_UV = 0
+(  101) IF_UV_G = 0
+(  102) ! Decide requirements
+(  103) # 104 "vordiv_to_uv.F90"
+(  104) IF(PRESENT(KVSETUV)) THEN
+(  105)   IF_UV_G = UBOUND(KVSETUV,1)
+(  106)   DO J=1,IF_UV_G
+(  107)     IF(KVSETUV(J) > NPRTRV .OR. KVSETUV(J) < 1) THEN
+(  108)       WRITE(NERR,*) 'VORDIV_TO_UV:KVSETUV(J) > NPRTRV ',J,KVSETUV(J),NPRTRV
+(  109)       CALL ABORT_TRANS('VORDIV_TO_UV:KVSETUV TOO LONG OR CONTAINS VALUES OUTSIDE RANGE')
+(  110)     ENDIF
+(  111)     IF(KVSETUV(J) == MYSETV) THEN
+(  112)       IF_UV = IF_UV+1
+(  113)     ENDIF
+(  114)   ENDDO
+(  115) ELSE
+(  116)   IF_UV = UBOUND(PSPVOR,1)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:02      page 11
+
+(  117)   IF_UV_G = IF_UV
+(  118) ENDIF
+(  119) # 120 "vordiv_to_uv.F90"
+(  120) ! Consistency checks
+(  121) # 122 "vordiv_to_uv.F90"
+(  122) IF (IF_UV > 0) THEN
+(  123)   IF(UBOUND(PSPVOR,1) < IF_UV) THEN
+(  124)     WRITE(NERR,*)'VORDIV_TO_UV : UBOUND(PSPVOR,1) < IF_UV ',UBOUND(PSPVOR,1),IF_UV
+(  125)     CALL ABORT_TRANS('VORDIV_TO_UV : PSPVOR TOO SHORT')
+(  126)   ENDIF
+(  127)   IF(UBOUND(PSPDIV,1) < IF_UV) THEN
+(  128)     WRITE(NERR,*)'VORDIV_TO_UV : UBOUND(PSPDIV,1) < IF_UV ',UBOUND(PSPDIV,1),IF_UV
+(  129)     CALL ABORT_TRANS('VORDIV_TO_UV : PSPDIV TOO SHORT')
+(  130)   ENDIF
+(  131)   IF(UBOUND(PSPU,1) < IF_UV) THEN
+(  132)     WRITE(NERR,*)'VORDIV_TO_UV : UBOUND(PSPU,1) < IF_UV ',UBOUND(PSPU,1),IF_UV
+(  133)     CALL ABORT_TRANS('VORDIV_TO_UV : PSPU TOO SHORT')
+(  134)   ENDIF
+(  135)   IF(UBOUND(PSPV,1) < IF_UV) THEN
+(  136)     WRITE(NERR,*)'VORDIV_TO_UV : UBOUND(PSPV,1) < IF_UV ',UBOUND(PSPV,1),IF_UV
+(  137)     CALL ABORT_TRANS('VORDIV_TO_UV : PSPV TOO SHORT')
+(  138)   ENDIF
+(  139) ENDIF
+(  140) # 142 "vordiv_to_uv.F90"
+(  142) IF(NPRTRV >1) THEN
+(  143)   IF(IF_UV > 0 .AND. .NOT. PRESENT(KVSETUV)) THEN
+(  144)     WRITE(NERR,*)'NPRTRV >1 AND IF_UV > 0 AND NOT PRESENT(KVSETUV)',&
+(  145)                  &NPRTRV,IF_UV
+(  146)     CALL ABORT_TRANS('VORDIV_TO_UV: SPECIFY VERTICAL SPECTRAL DISTRIBUTION!')
+(  147)   ENDIF
+(  148) ENDIF
+(  149) # 150 "vordiv_to_uv.F90"
+(  150) !CALL GSTATS(XXXX,1)
+(  151) # 152 "vordiv_to_uv.F90"
+(  152) !     ------------------------------------------------------------------
+(  153) # 154 "vordiv_to_uv.F90"
+(  154) ! Perform transform
+(  155) # 156 "vordiv_to_uv.F90"
+(  156) CALL VD2UV_CTL(IF_UV,PSPVOR,PSPDIV,PSPU,PSPV)
+(  157) # 158 "vordiv_to_uv.F90"
+(  158) CALL TRANS_RELEASE(IRESOL)
+(  159) IF (LTMP_SETUP0) THEN
+(  160)   CALL TRANS_END()
+(  161) ENDIF
+(  162) # 163 "vordiv_to_uv.F90"
+(  163) IF (LHOOK) CALL DR_HOOK('VORDIV_TO_UV',1,ZHOOK_HANDLE)
+(  164) !     ------------------------------------------------------------------
+(  165) # 166 "vordiv_to_uv.F90"
+(  166) !endif INTERFACE
+(  167) # 168 "vordiv_to_uv.F90"
+(  168) END SUBROUTINE VORDIV_TO_UV

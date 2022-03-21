@@ -1,0 +1,2283 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: facgrm.F90
+
+(    1) SUBROUTINE FACGRM_MT64                                              &
+(    2) &                     (FA, KREP, KRANG, CDPREF, KNIVAU, CDSUFF,     &
+(    3) &                      PCHAMP, LDCOSP, KGRIBH, LDUNDF,              &
+(    4) &                      PUNDF, KLOCSN)
+(    5) USE FA_MOD, ONLY : FA_COM, JPNIIL, FACADR, FAFICH,                  &
+(    6)                  & NGRIB2_GLO_SH, NGRIB2_GLO_GP, NGRIB2_LAM_GP,     &
+(    7)                  & NGRIB2_LAM_BF, NGRIB2_LATLON, NGRIB1_LATLON,     &
+(    8)                  & LGRIB2_LAM_EX, NUNDEF
+(    9) USE PARKIND1, ONLY : JPRB
+(   10) USE YOMHOOK , ONLY : LHOOK, DR_HOOK
+(   11) USE LFI_PRECISION
+(   12) USE GRIB_API_INTERFACE
+(   13) USE GRIB_API
+(   14) IMPLICIT NONE
+(   15) !****
+(   16) !      Sous-programme INTERNE du logiciel de Fichiers ARPEGE:
+(   17) !      PREPARATION (codage GRIB_API) d'un CHAMP HORIZONTAL
+(   18) !      destine a etre ecrit sur un fichier ARPEGE/ALADIN.
+(   19) !**
+(   20) !    Arguments : KREP   (Sortie) ==> Code-reponse du sous-programme;
+(   21) !                KRANG  (Entree) ==> Rang de l'unite logique;
+(   22) !                CDPREF (Entree) ==> Prefixe eventuel du nom d'article;
+(   23) !                KNIVAU (Entree) ==> Niveau vertical eventuel;
+(   24) !                CDSUFF (Entree) ==> Suffixe eventuel du nom d'article;
+(   25) !    ( Tableau ) PCHAMP (Entree) ==> Valeurs REELLES du champ a ecrire;
+(   26) !                LDCOSP (Entree) ==> Vrai si le champ est represente
+(   27) !                                    par des coefficients spectraux;
+(   28) !    ( Tableau ) KGRIBH (Sortie) ==> Message GRIB
+(   29) !*
+(   30) !
+(   31) TYPE(FA_COM)   :: FA
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 2
+
+(   32) INTEGER (KIND=JPLIKB) KREP, KRANG, KNIVAU, KLOCSN
+(   33) !
+(   34) INTEGER (KIND=JPLIKM) KGRIBH
+(   35) REAL (KIND=JPDBLR), TARGET :: PCHAMP(*)
+(   36) REAL (KIND=JPDBLR) PUNDF, ZUNDF
+(   37) !
+(   38) LOGICAL LDCOSP, LDUNDF, LLCOSP, LLUNDF
+(   39) !
+(   40) CHARACTER CDPREF*(*), CDSUFF*(*)
+(   41) !
+(   42) REAL (KIND=JPDBLR), PARAMETER :: RPI = 2.0_JPDBLR * ASIN (1.0_JPDBLR)
+(   43) !
+(   44) TYPE (FACADR), POINTER :: YLCADR
+(   45) TYPE (FAFICH), POINTER :: YLFICH
+(   46) INTEGER (KIND=JPLIKB) :: IRANGC, INIMES, INUMER
+(   47) INTEGER (KIND=JPLIKB) INGRIB, INBITS
+(   48) CHARACTER(LEN=FA%JPLSPX)   CLNSPR
+(   49) CHARACTER(LEN=FA%JPXNOM)   CLACTI 
+(   50) CHARACTER(LEN=FA%JPLMES)   CLMESS 
+(   51) CHARACTER(LEN=FA%JPXNOM)   CLNOMA
+(   52) LOGICAL LLMLAM, LLLTLN, LLFATA, LLMGLO
+(   53) INTEGER (KIND=JPLIKB) :: ILNOMA
+(   54) INTEGER (KIND=JPLIKB) :: INGRIB_GP, INGRIB_SP
+(   55) INTEGER (KIND=JPLIKB) :: IVERSI
+(   56) REAL (KIND=JPDBLR)    :: ZMULTI  ! Facteur multiplicatif
+(   57) INTEGER               :: ISTCUM  ! Cumul depuis le debut
+(   58) INTEGER               :: ILOCAL
+(   59) INTEGER               :: IOUT
+(   60) LOGICAL               :: LLGRIB1
+(   61) LOGICAL,PARAMETER     :: LLDOUBLE = (JPDBLR == JPDBLD)
+(   62) 
+(   63) REAL (KIND=JPRB) :: ZHOOK_HANDLE
+(   64) 
+(   65) IF (LHOOK) CALL DR_HOOK('FACGRM_MT',0,ZHOOK_HANDLE)
+(   66) 
+(   67) LLFATA=LLMOER (KREP,KRANG)
+(   68) 
+(   69) CALL FAIGRA_MT64 (FA)
+(   70) 
+(   71) KREP = 0
+(   72) 
+(   73) YLFICH => FA%FICHIER(KRANG)
+(   74) IRANGC = YLFICH%NUCADR
+(   75) YLCADR => FA%CADRE(IRANGC)
+(   76) !
+(   77) LLMLAM = YLCADR%LIMLAM
+(   78) LLLTLN = YLCADR%SINLAT(2) < 0 .AND. LLMLAM
+(   79) LLMGLO = (.NOT. LLMLAM) .AND. (.NOT. LLLTLN)
+(   80) !
+(   81) LLUNDF = LDUNDF
+(   82) LLCOSP = LDCOSP
+(   83) !
+(   84) INUMER = YLFICH%NULOGI
+(   85) !
+(   86) 
+(   87) INGRIB    = YLFICH%NFGRIB
+(   88) INGRIB_GP = FALGRA_GP (INGRIB)
+(   89) INGRIB_SP = FALGRA_SP (INGRIB)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 3
+
+(   90) 
+(   91) CALL GRIB_GET_API_VERSION (IVERSI)
+(   92) 
+(   93) IF (LDCOSP .AND. (IVERSI /= 11400) .AND. (INGRIB_SP == 101)) THEN
+(   94)   LLFATA = .TRUE.
+(   95)   KREP   = -125
+(   96)   GOTO 1001
+(   97) ELSE IF (LDCOSP .AND. (IVERSI == 11400) .AND. (INGRIB_SP /= 101)) THEN
+(   98)   LLFATA = .TRUE.
+(   99)   KREP   = -125
+(  100)   GOTO 1001
+(  101) ENDIF
+(  102) 
+(  103) IF (LLCOSP) THEN
+(  104)   INGRIB = INGRIB_SP
+(  105) ELSE
+(  106)   INGRIB = INGRIB_GP
+(  107) ENDIF
+(  108) 
+(  109) 
+(  110) LLGRIB1 = FALGRA_ED (INGRIB) == 1
+(  111) 
+(  112) IF (LLLTLN) THEN
+(  113)   IF (LLGRIB1) THEN
+(  114)     CALL IGRIB_CLONE (NGRIB1_LATLON, KGRIBH)
+(  115)   ELSE
+(  116)     CALL IGRIB_CLONE (NGRIB2_LATLON, KGRIBH)
+(  117)   ENDIF
+(  118) ELSEIF (LLMLAM) THEN
+(  119)   IF (LLCOSP) THEN
+(  120)     CALL IGRIB_CLONE (NGRIB2_LAM_BF, KGRIBH)
+(  121)   ELSE
+(  122)     CALL IGRIB_CLONE (NGRIB2_LAM_GP, KGRIBH)
+(  123)   ENDIF
+(  124) ELSEIF (LLMGLO) THEN
+(  125)   IF (LLCOSP) THEN
+(  126)     CALL IGRIB_CLONE (NGRIB2_GLO_SH, KGRIBH)
+(  127)   ELSE
+(  128)     CALL IGRIB_CLONE (NGRIB2_GLO_GP, KGRIBH)
+(  129)   ENDIF
+(  130) ENDIF
+(  131) 
+(  132) ! Set parameter
+(  133) 
+(  134) CALL FAGRIB_API_SET_PARAM 
+(  135) 
+(  136) ! Horizontal geometry
+(  137) 
+(  138) CALL FAGRIB_API_HGEOM 
+(  139) 
+(  140) ! Vertical geometry
+(  141) 
+(  142) CALL FAGRIB_API_VGEOM 
+(  143) 
+(  144) ! Date
+(  145) 
+(  146) CALL FAGRIB_API_DATE 
+(  147) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 4
+
+(  148) ! Set values
+(  149) 
+(  150) CALL FAGRIB_API_SET_VALUES 
+(  151) 
+(  152) ! Set local section
+(  153) 
+(  154) CALL FAGRIB_SET_LOCAL_SECTION 
+(  155) 
+(  156) 1001 CONTINUE
+(  157) !
+(  158) IF (FA%LFAMOP.OR.LLFATA) THEN
+(  159)   INIMES=2
+(  160)   CLNSPR='FACGRM'
+(  161)   INUMER=JPNIIL
+(  162) !
+(  163)   WRITE (UNIT=CLMESS,FMT='(''KREP='',I5,'', KRANG='',I4,  &
+(  164) &         '', CDPREF='''''',A,'''''', KNIVAU='',I6,       &
+(  165) &         '', CDSUFF='''''',A,'''''', LLCOSP= '',L1)')    &
+(  166) &     KREP, KRANG, CDPREF(1:LEN_TRIM(CDPREF)), KNIVAU,    &
+(  167) &     CDSUFF(1:LEN_TRIM(CDSUFF)), LLCOSP
+(  168) 
+(  169)   CALL FAIPAR_MT64                                        &
+(  170) &                 (FA, INUMER,INIMES,KREP,.FALSE.,CLMESS, &
+(  171) &                  CLNSPR,CLACTI,.FALSE.)
+(  172) ENDIF
+(  173) 
+(  174) IF (LHOOK) CALL DR_HOOK('FACGRM_MT',1,ZHOOK_HANDLE)
+(  175) !
+(  176) CONTAINS
+(  177) 
+(  178) SUBROUTINE STRU (CDS, CDU)
+(  179) CHARACTER (LEN=*) :: CDS, CDU
+(  180) INTEGER (KIND=JPLIKB) :: J
+(  181) 
+(  182) DO J = 1, LEN (CDU)
+(  183)   CDU (J:J) = ' '
+(  184) ENDDO
+(  185) 
+(  186) DO J = 1, LEN_TRIM (CDS)
+(  187)   IF (CDS (J:J) == ' ') THEN
+(  188)     CDU (J:J) = '_'
+(  189)   ELSE
+(  190)     CDU (J:J) = CDS (J:J)
+(  191)   ENDIF
+(  192) ENDDO
+(  193) 
+(  194) END SUBROUTINE STRU
+(  195) 
+(  196) #include "facom2.llmoer.h"
+(  197) #include "falgra.h"
+(  198) 
+(  199) SUBROUTINE FAGRIB_API_SET_PARAM 
+(  200) 
+(  201) CHARACTER(LEN=FA%JPXNOM)  CLPREF, CLSUFF, CLNOMU
+(  202) INTEGER(KIND=JPLIKB)      INIVAU, IPARAM, IDPROC
+(  203) INTEGER(KIND=JPLIKB)      IMULTM, IMULTE
+(  204) REAL (KIND=JPDBLR)        ZLBASE, ZLMULT, ZLEVEL
+(  205) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 5
+
+(  206) 
+(  207) CALL IGRIB_SET_VALUE (KGRIBH, 'centre', YLFICH%NIDCEN)
+(  208) 
+(  209) IF (LLGRIB1) THEN
+(  210)   CALL IGRIB_SET_VALUE (KGRIBH, 'setLocalDefinition', 1)
+(  211) ELSE
+(  212)   CALL IGRIB_SET_VALUE (KGRIBH, 'grib2LocalSectionPresent', 1)
+(  213)   CALL IGRIB_SET_VALUE (KGRIBH, 'grib2LocalSectionNumber', KLOCSN)
+(  214) ENDIF
+(  215) 
+(  216) IF (YLFICH%CMODEL /= '') THEN
+(  217)   CALL IGRIB_SET_VALUE (KGRIBH, 'faModelName', TRIM (YLFICH%CMODEL))
+(  218)   CALL IGRIB_GET_VALUE (KGRIBH, 'generatingProcessIdentifier', IDPROC)
+(  219)   IF (IDPROC == 255) THEN
+(  220)     WRITE (FA%NULOUT, '(" FACGRM: Model `",A,"'' is not &
+(  221)          &declared in `faModelName.def''")') TRIM (YLFICH%CMODEL)
+(  222)   ENDIF
+(  223) ENDIF
+(  224) 
+(  225) CALL FANFAN_MT64 (FA, KREP, INUMER, CDPREF, KNIVAU, CDSUFF, CLNOMA, ILNOMA)
+(  226) CALL FAQUIN_MT64 (FA, KREP, INUMER, CLPREF, INIVAU, CLSUFF, CLNOMA, ILNOMA)
+(  227) 
+(  228) IF (KNIVAU > 0) THEN
+(  229)   CALL STRU (CLPREF, CLNOMU)
+(  230)   CALL IGRIB_SET_VALUE (KGRIBH, 'faLevelName', TRIM (CLNOMU))
+(  231)   CALL STRU (CLSUFF, CLNOMU)
+(  232)   CALL IGRIB_SET_VALUE (KGRIBH, 'faFieldName', TRIM (CLNOMU))
+(  233)   CALL IGRIB_GET_VALUE (KGRIBH, 'ZLMULT', ZLMULT)
+(  234)   CALL IGRIB_GET_VALUE (KGRIBH, 'ZLBASE', ZLBASE)
+(  235)   ZLEVEL = ZLMULT * INIVAU + ZLBASE
+(  236)   CALL IGRIB_SET_VALUE (KGRIBH, 'level', ZLEVEL)
+(  237) ELSE
+(  238)   CALL STRU (CLNOMA, CLNOMU)
+(  239)   CALL IGRIB_SET_VALUE (KGRIBH, 'faFieldName', CLNOMU (1:ILNOMA))
+(  240) ENDIF
+(  241) 
+(  242) IF (LLGRIB1) THEN
+(  243)   CALL IGRIB_GET_VALUE (KGRIBH, 'indicatorOfParameter', IPARAM)
+(  244) ELSE
+(  245)   CALL IGRIB_GET_VALUE (KGRIBH, 'parameterNumber', IPARAM)
+(  246) ENDIF
+(  247) 
+(  248) IF (IPARAM == 255) THEN
+(  249)   WRITE (FA%NULOUT, '(" FACGRM: Field `",A,"'' is not &
+(  250)        &declared in `faFieldName.def''")') TRIM (CLNOMA)
+(  251) ENDIF
+(  252) 
+(  253) CALL IGRIB_GET_VALUE (KGRIBH, 'FMULTM', IMULTM)
+(  254) CALL IGRIB_GET_VALUE (KGRIBH, 'FMULTE', IMULTE)
+(  255) ZMULTI = REAL (IMULTM, JPDBLR) * 10._JPDBLR ** IMULTE
+(  256) 
+(  257) END SUBROUTINE FAGRIB_API_SET_PARAM
+(  258) 
+(  259) SUBROUTINE FAGRIB_API_HGEOM 
+(  260) 
+(  261) IF (LLLTLN) THEN
+(  262)   CALL FAGRIB_API_HGEOM_LATLON 
+(  263) ELSEIF (LLMLAM) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 6
+
+(  264)   IF (LLCOSP) THEN
+(  265)     CALL FAGRIB_API_HGEOM_LAM_BF 
+(  266)   ELSE
+(  267)     CALL FAGRIB_API_HGEOM_LAM_GP 
+(  268)   ENDIF
+(  269) ELSEIF (LLMGLO) THEN
+(  270)   IF (LLCOSP) THEN
+(  271)     CALL FAGRIB_API_HGEOM_GLO_SH 
+(  272)   ELSE
+(  273)     CALL FAGRIB_API_HGEOM_GLO_GP 
+(  274)   ENDIF
+(  275) ENDIF
+(  276) 
+(  277) END SUBROUTINE FAGRIB_API_HGEOM
+(  278) 
+(  279) SUBROUTINE FAGRIB_API_HGEOM_LAM_BF 
+(  280) 
+(  281) REAL (KIND=JPDBLR) :: ZDELX, ZDELY, ZRPK
+(  282) INTEGER (KIND=JPLIKB) :: ILONS, ILATS
+(  283) 
+(  284) ILATS = YLCADR%NLATIT
+(  285) ILONS = YLCADR%NXLOPA
+(  286) ZDELX = YLCADR%SINLAT (7)
+(  287) ZDELY = YLCADR%SINLAT (8)
+(  288) ZRPK  = YLCADR%SINLAT (2)
+(  289) 
+(  290) IF (0._JPDBLR < ZRPK .AND. ZRPK < 1._JPDBLR) THEN
+(  291) 
+(  292) ! Lambert
+(  293) 
+(  294)   CALL IGRIB_SET_VALUE (KGRIBH, 'gridType', 'lambert_bf')
+(  295) 
+(  296) ELSEIF (ZRPK == 0._JPDBLR) THEN
+(  297) 
+(  298) ! Mercator
+(  299) 
+(  300)   CALL IGRIB_SET_VALUE (KGRIBH, 'gridType', 'mercator_bf')
+(  301) 
+(  302) ELSEIF (ZRPK == 1._JPDBLR) THEN
+(  303) 
+(  304) ! Polar stereographic
+(  305) 
+(  306)   CALL IGRIB_SET_VALUE (KGRIBH, 'gridType', 'polar_stereographic_bf')
+(  307) 
+(  308) ENDIF
+(  309) 
+(  310) CALL IGRIB_SET_VALUE (KGRIBH, "biFourierResolutionParameterN", YLCADR%NSMAX)
+(  311) CALL IGRIB_SET_VALUE (KGRIBH, "biFourierResolutionParameterM", YLCADR%NMSMAX)
+(  312) 
+(  313) CALL IGRIB_SET_VALUE (KGRIBH, 'LxInMetres', ZDELX * (ILONS-1))
+(  314) CALL IGRIB_SET_VALUE (KGRIBH, 'LyInMetres', ZDELY * (ILATS-1))
+(  315) 
+(  316) CALL IGRIB_SET_VALUE (KGRIBH, 'LuxInMetres', ZDELX * (YLCADR%NLOPAR (4)-1))
+(  317) CALL IGRIB_SET_VALUE (KGRIBH, 'LuyInMetres', ZDELY * (YLCADR%NLOPAR (6)-1))
+(  318) 
+(  319) CALL IGRIB_SET_VALUE (KGRIBH, 'LcxInMetres', ZDELX * MAX (1, YLCADR%NLOPAR (7)-1))
+(  320) CALL IGRIB_SET_VALUE (KGRIBH, 'LcyInMetres', ZDELY * MAX (1, YLCADR%NLOPAR (8)-1))
+(  321) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 7
+
+(  322) CALL IGRIB_SET_VALUE (KGRIBH, "biFourierTruncationType", 99) 
+(  323) 
+(  324) CALL FAGRIB_API_HGEOM_LAM_PR
+(  325) 
+(  326) END SUBROUTINE FAGRIB_API_HGEOM_LAM_BF
+(  327) 
+(  328) SUBROUTINE FAGRIB_API_HGEOM_LATLON 
+(  329) 
+(  330) INTEGER (KIND=JPLIKB) :: ILONS, ILATS
+(  331) REAL (KIND=JPDBLR)    :: ZLONW, ZLATS, ZLONE, ZLATN, ZLOND, ZLATD
+(  332) 
+(  333) ILATS = YLCADR%NLATIT
+(  334) ILONS = YLCADR%NXLOPA
+(  335) 
+(  336) ZLONW = LONRAD2DEG (YLCADR%SINLAT(13))
+(  337) ZLATS = LATRAD2DEG (YLCADR%SINLAT(14))
+(  338) ZLONE = LONRAD2DEG (YLCADR%SINLAT(15))
+(  339) ZLATN = LATRAD2DEG (YLCADR%SINLAT(16))
+(  340) 
+(  341) ZLOND = MODULO (ZLONE-ZLONW, 360._JPDBLR) / (ILONS-1)
+(  342) ZLATD = (ZLATN-ZLATS)/(ILATS-1)
+(  343) 
+(  344) CALL IGRIB_SET_VALUE (KGRIBH, 'Ni', ILONS)
+(  345) CALL IGRIB_SET_VALUE (KGRIBH, 'Nj', ILATS)
+(  346) CALL IGRIB_SET_VALUE (KGRIBH, 'longitudeOfFirstGridPointInDegrees', ZLONW)
+(  347) CALL IGRIB_SET_VALUE (KGRIBH, 'latitudeOfLastGridPointInDegrees',   ZLATS)
+(  348) CALL IGRIB_SET_VALUE (KGRIBH, 'longitudeOfLastGridPointInDegrees',  ZLONE)
+(  349) CALL IGRIB_SET_VALUE (KGRIBH, 'latitudeOfFirstGridPointInDegrees',  ZLATN)
+(  350) CALL IGRIB_SET_VALUE (KGRIBH, 'iScansNegatively', 0)
+(  351) CALL IGRIB_SET_VALUE (KGRIBH, 'jScansPositively', 0)
+(  352) CALL IGRIB_SET_VALUE (KGRIBH, 'iDirectionIncrementInDegrees', ZLOND)
+(  353) CALL IGRIB_SET_VALUE (KGRIBH, 'jDirectionIncrementInDegrees', ZLATD)
+(  354) 
+(  355) END SUBROUTINE FAGRIB_API_HGEOM_LATLON
+(  356) 
+(  357) SUBROUTINE FAGRIB_API_HGEOM_LAM_GP 
+(  358) 
+(  359) REAL (KIND=JPDBLR) :: ZRPK, ZDELX, ZDELY
+(  360) INTEGER (KIND=JPLIKB) :: ILONS, ILATS
+(  361) INTEGER               :: IRET
+(  362) CHARACTER (LEN=4)     :: CLEXT
+(  363) 
+(  364) ILATS = YLCADR%NLATIT
+(  365) ILONS = YLCADR%NXLOPA
+(  366) ZRPK  = YLCADR%SINLAT (2)
+(  367) ZDELX = YLCADR%SINLAT (7)
+(  368) ZDELY = YLCADR%SINLAT (8)
+(  369) 
+(  370) IF (LGRIB2_LAM_EX) THEN
+(  371)   CLEXT = '_lam'
+(  372) ELSE
+(  373)   CLEXT = ''
+(  374) ENDIF
+(  375) 
+(  376) IF (0._JPDBLR < ZRPK .AND. ZRPK < 1._JPDBLR) THEN
+(  377) 
+(  378) ! Lambert
+(  379) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 8
+
+(  380)   CALL IGRIB_SET_VALUE (KGRIBH, 'gridType', TRIM ('lambert'//CLEXT))
+(  381) 
+(  382)   CALL IGRIB_SET_VALUE (KGRIBH, 'Nx', ILONS)
+(  383)   CALL IGRIB_SET_VALUE (KGRIBH, 'Ny', ILATS)
+(  384)   CALL IGRIB_SET_VALUE (KGRIBH, 'DxInMetres', ZDELX)
+(  385)   CALL IGRIB_SET_VALUE (KGRIBH, 'DyInMetres', ZDELY)
+(  386) 
+(  387)   CALL IGRIB_SET_VALUE (KGRIBH, 'iScansNegatively', 0)
+(  388)   CALL IGRIB_SET_VALUE (KGRIBH, 'jScansPositively', 1)
+(  389)   CALL IGRIB_SET_VALUE (KGRIBH, 'jPointsAreConsecutive', 0)
+(  390)   CALL IGRIB_SET_VALUE (KGRIBH, 'uvRelativeToGrid', 1)
+(  391) 
+(  392) ELSEIF (ZRPK == 0._JPDBLR) THEN
+(  393) 
+(  394) ! Mercator
+(  395) 
+(  396)   CALL IGRIB_SET_VALUE (KGRIBH, 'gridType', TRIM ('mercator'//CLEXT))
+(  397) 
+(  398)   CALL IGRIB_SET_VALUE (KGRIBH, 'Nx', ILONS)
+(  399)   CALL IGRIB_SET_VALUE (KGRIBH, 'Ny', ILATS)
+(  400)   CALL IGRIB_SET_VALUE (KGRIBH, 'DiInMetres', ZDELX)
+(  401)   CALL IGRIB_SET_VALUE (KGRIBH, 'DjInMetres', ZDELY)
+(  402) 
+(  403)   CALL IGRIB_SET_VALUE (KGRIBH, 'iScansNegatively', 0)
+(  404)   CALL IGRIB_SET_VALUE (KGRIBH, 'jScansPositively', 1)
+(  405)   CALL IGRIB_SET_VALUE (KGRIBH, 'jPointsAreConsecutive', 0)
+(  406)   CALL IGRIB_SET_VALUE (KGRIBH, 'uvRelativeToGrid', 1)
+(  407) 
+(  408) ELSEIF (ZRPK == 1._JPDBLR) THEN
+(  409) 
+(  410) ! Polar stereographic
+(  411) 
+(  412)   CALL IGRIB_SET_VALUE (KGRIBH, 'gridType', TRIM ('polar_stereographic'//CLEXT))
+(  413) 
+(  414)   CALL IGRIB_SET_VALUE (KGRIBH, 'Nx', ILONS)
+(  415)   CALL IGRIB_SET_VALUE (KGRIBH, 'Ny', ILATS)
+(  416)   CALL IGRIB_SET_VALUE (KGRIBH, 'DxInMetres', ZDELX)
+(  417)   CALL IGRIB_SET_VALUE (KGRIBH, 'DyInMetres', ZDELY)
+(  418) 
+(  419)   CALL IGRIB_SET_VALUE (KGRIBH, 'iScansNegatively', 0)
+(  420)   CALL IGRIB_SET_VALUE (KGRIBH, 'jScansPositively', 1)
+(  421)   CALL IGRIB_SET_VALUE (KGRIBH, 'jPointsAreConsecutive', 0)
+(  422) 
+(  423) ENDIF
+(  424) 
+(  425) IF (LGRIB2_LAM_EX) THEN
+(  426)   CALL IGRIB_SET_VALUE (KGRIBH, 'Nux', YLCADR%NLOPAR (4))
+(  427)   CALL IGRIB_SET_VALUE (KGRIBH, 'Nuy', YLCADR%NLOPAR (6))
+(  428)   CALL IGRIB_SET_VALUE (KGRIBH, 'Ncx', YLCADR%NLOPAR (7))
+(  429)   CALL IGRIB_SET_VALUE (KGRIBH, 'Ncy', YLCADR%NLOPAR (8))
+(  430) ENDIF
+(  431) 
+(  432) CALL FAGRIB_API_HGEOM_LAM_PR 
+(  433) 
+(  434) END SUBROUTINE FAGRIB_API_HGEOM_LAM_GP
+(  435) 
+(  436) SUBROUTINE FAGRIB_API_HGEOM_LAM_PR 
+(  437) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 9
+
+(  438) REAL (KIND=JPDBLR) :: ZRPK
+(  439) 
+(  440) ZRPK  = YLCADR%SINLAT (2)
+(  441) 
+(  442) IF (0._JPDBLR < ZRPK .AND. ZRPK < 1._JPDBLR) THEN
+(  443) 
+(  444) ! Lambert
+(  445) 
+(  446)   CALL IGRIB_SET_VALUE (KGRIBH, 'latitudeOfFirstGridPointInDegrees',  LATRAD2DEG (YLCADR%SINLAT(14)))
+(  447)   CALL IGRIB_SET_VALUE (KGRIBH, 'longitudeOfFirstGridPointInDegrees', LONRAD2DEG (YLCADR%SINLAT(13)))
+(  448)   CALL IGRIB_SET_VALUE (KGRIBH, 'latitudeOfSouthernPoleInDegrees',                         0._JPDBLR)
+(  449)   CALL IGRIB_SET_VALUE (KGRIBH, 'longitudeOfSouthernPoleInDegrees',                        0._JPDBLR)
+(  450)   CALL IGRIB_SET_VALUE (KGRIBH, 'LaDInDegrees',                       LATRAD2DEG (YLCADR%SINLAT (4)))
+(  451)   CALL IGRIB_SET_VALUE (KGRIBH, 'LoVInDegrees',                       LONRAD2DEG (YLCADR%SINLAT (3)))
+(  452)   CALL IGRIB_SET_VALUE (KGRIBH, 'Latin1InDegrees',                    LATRAD2DEG (YLCADR%SINLAT (4)))
+(  453)   CALL IGRIB_SET_VALUE (KGRIBH, 'Latin2InDegrees',                    LATRAD2DEG (YLCADR%SINLAT (4)))
+(  454) 
+(  455)   IF (YLCADR%SINLAT (4) > 0) THEN
+(  456)   CALL IGRIB_SET_VALUE (KGRIBH, 'projectionCentreFlag',                                            0)
+(  457)   ELSE
+(  458)   CALL IGRIB_SET_VALUE (KGRIBH, 'projectionCentreFlag',                                          128)
+(  459)   ENDIF
+(  460) 
+(  461) ELSEIF (ZRPK == 0._JPDBLR) THEN
+(  462) 
+(  463) ! Mercator
+(  464) 
+(  465)   CALL IGRIB_SET_VALUE (KGRIBH, 'latitudeOfFirstGridPointInDegrees',  LATRAD2DEG (YLCADR%SINLAT(14)))
+(  466)   CALL IGRIB_SET_VALUE (KGRIBH, 'longitudeOfFirstGridPointInDegrees', LONRAD2DEG (YLCADR%SINLAT(13)))
+(  467)   CALL IGRIB_SET_VALUE (KGRIBH, 'LaDInDegrees',                       LATRAD2DEG (YLCADR%SINLAT (4)))
+(  468)   CALL IGRIB_SET_VALUE (KGRIBH, 'latitudeOfLastGridPointInDegrees',   LATRAD2DEG (YLCADR%SINLAT(16)))
+(  469)   CALL IGRIB_SET_VALUE (KGRIBH, 'longitudeOfLastGridPointInDegrees',  LONRAD2DEG (YLCADR%SINLAT(15)))
+(  470)   CALL IGRIB_SET_VALUE (KGRIBH, 'orientationOfTheGridInDegrees',                           0._JPDBLR)
+(  471) 
+(  472) ELSEIF (ZRPK == 1._JPDBLR) THEN
+(  473) 
+(  474) ! Polar stereographic
+(  475) 
+(  476)   CALL IGRIB_SET_VALUE (KGRIBH, 'latitudeOfFirstGridPointInDegrees',  LATRAD2DEG (YLCADR%SINLAT(14)))
+(  477)   CALL IGRIB_SET_VALUE (KGRIBH, 'longitudeOfFirstGridPointInDegrees', LONRAD2DEG (YLCADR%SINLAT(13)))
+(  478) 
+(  479)   CALL IGRIB_SET_VALUE (KGRIBH, 'LaDInDegrees',                       LATRAD2DEG (YLCADR%SINLAT (4)))
+(  480)   CALL IGRIB_SET_VALUE (KGRIBH, 'orientationOfTheGridInDegrees',      LONRAD2DEG (YLCADR%SINLAT (3)))
+(  481) 
+(  482)   IF (YLCADR%SINLAT (4) > 0) THEN
+(  483)   CALL IGRIB_SET_VALUE (KGRIBH, 'projectionCentreFlag',                                            0)
+(  484)   ELSE
+(  485)   CALL IGRIB_SET_VALUE (KGRIBH, 'projectionCentreFlag',                                          128)
+(  486)   ENDIF
+(  487) 
+(  488) ENDIF
+(  489) 
+(  490) END SUBROUTINE FAGRIB_API_HGEOM_LAM_PR
+(  491) 
+(  492) 
+(  493) REAL (KIND=JPDBLR) FUNCTION LONRAD2DEG (PLON)
+(  494) REAL (KIND=JPDBLR), INTENT (IN) :: PLON
+(  495) LONRAD2DEG = MODULO (180._JPDBLR/RPI * PLON, 360._JPDBLR)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 10
+
+(  496) END FUNCTION LONRAD2DEG
+(  497) 
+(  498) REAL (KIND=JPDBLR) FUNCTION LATRAD2DEG (PLAT)
+(  499) REAL (KIND=JPDBLR), INTENT (IN) :: PLAT
+(  500) LATRAD2DEG = 180._JPDBLR/RPI * PLAT
+(  501) END FUNCTION LATRAD2DEG
+(  502) 
+(  503) SUBROUTINE FAGRIB_API_HGEOM_GLO_GP 
+(  504) 
+(  505) INTEGER (KIND=JPLIKB) :: ILATS, IDGNH, ILONS
+(  506) INTEGER (KIND=JPLIKB), ALLOCATABLE :: ILOENG (:)
+(  507) REAL (KIND=JPDBLR) :: ZNLAT, ZSLAT, ZVAL, ZLOCEN, ZMUCEN, ZSTRET
+(  508) CHARACTER (LEN=32), PARAMETER :: CLGGGRIDTYPES (0:1,0:1,0:1) =                &
+(  509)   & RESHAPE (                                                                 & 
+(  510)   & (/ 'regular_gg                    ', 'reduced_gg                    ',    &
+(  511)   &    'regular_stretched_gg          ', 'reduced_stretched_gg          ',    &
+(  512)   &    'regular_rotated_gg            ', 'reduced_rotated_gg            ',    &
+(  513)   &    'regular_stretched_rotated_gg  ', 'reduced_stretched_rotated_gg  ' /), &
+(  514)   & (/ 2, 2, 2 /))
+(  515) INTEGER (KIND=JPLIKB) :: ISTR, IROT, IRED, I
+(  516) 
+(  517) ISTR = MIN (YLCADR%NTYPTR, 1)
+(  518) IROT = MAX (YLCADR%NTYPTR-1, 0)
+(  519) 
+(  520) ZMUCEN = YLCADR%SSLAPO
+(  521) ZLOCEN = SIGN (ACOS (YLCADR%SCLOPO), YLCADR%SSLOPO) 
+(  522) ZSTRET = YLCADR%SCODIL
+(  523) 
+(  524) CALL IGRIB_SET_VALUE (KGRIBH, 'interpretationOfNumberOfPoints', 1)
+(  525) CALL IGRIB_SET_VALUE (KGRIBH, 'global',                         1)
+(  526) 
+(  527) ILATS = YLCADR%NLATIT
+(  528) ILONS = YLCADR%NXLOPA
+(  529) IDGNH = (ILATS+1) / 2
+(  530) ZNLAT = ASIN (YLCADR%SINLAT (1))
+(  531) ZSLAT = - ZNLAT
+(  532) 
+(  533) ALLOCATE (ILOENG (ILATS))
+(  534) 
+(  535) DO I = 1, ILATS
+(  536)   IF (I <= IDGNH) THEN
+(  537)     ILOENG (I) = YLCADR%NLOPAR (I)
+(  538)   ELSE
+(  539)     ILOENG (I) = YLCADR%NLOPAR (ILATS-I+1)
+(  540)   ENDIF
+(  541) ENDDO
+(  542) 
+(  543) IF (ANY (ILOENG /= ILOENG (1))) THEN
+(  544)   IRED = 1
+(  545) ELSE
+(  546)   IRED = 0
+(  547) ENDIF
+(  548) 
+(  549) CALL IGRIB_SET_VALUE (KGRIBH, 'gridType', TRIM (CLGGGRIDTYPES (IRED, ISTR, IROT)))
+(  550) 
+(  551) IF (IRED == 0) THEN
+(  552)   CALL IGRIB_SET_VALUE(KGRIBH,'numberOfPointsAlongAParallel',ILONS)
+(  553)   ZVAL = 360.0_JPDBLR/REAL (ILONS, JPDBLR)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 11
+
+(  554)   CALL IGRIB_SET_VALUE(KGRIBH,'iDirectionIncrementInDegrees',ZVAL)
+(  555) ELSE
+(  556)   CALL IGRIB_SET_VALUE(KGRIBH,'pl',ILOENG(1:ILATS))
+(  557) ENDIF
+(  558) 
+(  559) DEALLOCATE (ILOENG)
+(  560) 
+(  561) CALL IGRIB_SET_VALUE(KGRIBH,'truncateDegrees',1)
+(  562) CALL IGRIB_SET_VALUE(KGRIBH,'numberOfPointsAlongAMeridian',ILATS)
+(  563) ZVAL = LATRAD2DEG (ZNLAT)
+(  564) CALL IGRIB_SET_VALUE(KGRIBH,'latitudeOfFirstGridPointInDegrees',ZVAL)
+(  565) CALL IGRIB_SET_VALUE(KGRIBH,'longitudeOfFirstGridPointInDegrees',0)
+(  566) ZVAL = LATRAD2DEG (ZSLAT)
+(  567) CALL IGRIB_SET_VALUE(KGRIBH,'latitudeOfLastGridPointInDegrees',ZVAL)
+(  568) ZVAL=360._JPDBLR-360._JPDBLR/REAL(ILONS,JPDBLR)
+(  569) CALL IGRIB_SET_VALUE(KGRIBH,'longitudeOfLastGridPointInDegrees',ZVAL)
+(  570) CALL IGRIB_SET_VALUE(KGRIBH,'numberOfParallelsBetweenAPoleAndTheEquator',IDGNH)
+(  571) 
+(  572) 
+(  573) IF (ISTR > 0) THEN
+(  574)   CALL IGRIB_SET_VALUE(KGRIBH,'stretchingFactor',ZSTRET)
+(  575) ENDIF
+(  576) 
+(  577) IF (IROT > 0) THEN
+(  578)   CALL IGRIB_SET_VALUE(KGRIBH,'latitudeOfStretchingPoleInDegrees', LATRAD2DEG (ASIN(ZMUCEN)))
+(  579)   CALL IGRIB_SET_VALUE(KGRIBH,'longitudeOfStretchingPoleInDegrees', LONRAD2DEG (ZLOCEN))
+(  580) ENDIF
+(  581) 
+(  582) END SUBROUTINE FAGRIB_API_HGEOM_GLO_GP
+(  583) 
+(  584) SUBROUTINE FAGRIB_API_HGEOM_GLO_SH 
+(  585) 
+(  586) REAL (KIND=JPDBLR) :: ZLOCEN, ZMUCEN, ZSTRET
+(  587) CHARACTER (LEN=32), PARAMETER :: CLSHGRIDTYPES (0:1,0:1) =                    &
+(  588)   & RESHAPE (                                                                 &
+(  589)   & (/ 'sh                            ', 'stretched_sh                  ',    &
+(  590)   &    'rotated_sh                    ', 'stretched_rotated_sh          ' /), &
+(  591)   & (/ 2, 2 /))
+(  592) INTEGER (KIND=JPLIKB) :: ISTR, IROT, IRED, ISMAX
+(  593) 
+(  594) ISTR = MIN (YLCADR%NTYPTR, 1)
+(  595) IROT = MAX (YLCADR%NTYPTR-1, 0)
+(  596) 
+(  597) ZMUCEN = YLCADR%SSLAPO
+(  598) ZLOCEN = SIGN (ACOS (YLCADR%SCLOPO), YLCADR%SSLOPO) 
+(  599) ZSTRET = YLCADR%SCODIL
+(  600) 
+(  601) CALL IGRIB_SET_VALUE (KGRIBH, 'gridType', TRIM (CLSHGRIDTYPES (ISTR, IROT)))
+(  602) 
+(  603) ISMAX = YLCADR%MTRONC
+(  604) CALL IGRIB_SET_VALUE (KGRIBH, 'pentagonalResolutionParameterJ', ISMAX)
+(  605) CALL IGRIB_SET_VALUE (KGRIBH, 'pentagonalResolutionParameterK', ISMAX)
+(  606) CALL IGRIB_SET_VALUE (KGRIBH, 'pentagonalResolutionParameterM', ISMAX)
+(  607) 
+(  608) IF (ISTR > 0) THEN
+(  609)   CALL IGRIB_SET_VALUE(KGRIBH,'stretchingFactor',ZSTRET)
+(  610) ENDIF
+(  611) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 12
+
+(  612) IF (IROT > 0) THEN
+(  613)   CALL IGRIB_SET_VALUE(KGRIBH,'latitudeOfStretchingPoleInDegrees', LATRAD2DEG (ASIN(ZMUCEN)))
+(  614)   CALL IGRIB_SET_VALUE(KGRIBH,'longitudeOfStretchingPoleInDegrees', LONRAD2DEG (ZLOCEN))
+(  615) ENDIF
+(  616) 
+(  617) END SUBROUTINE FAGRIB_API_HGEOM_GLO_SH
+(  618) 
+(  619) SUBROUTINE FAGRIB_API_VGEOM 
+(  620) 
+(  621) REAL (KIND=JPDBLR), ALLOCATABLE :: ZVERT (:)
+(  622) INTEGER (KIND=JPLIKB) :: IFLEVG
+(  623) 
+(  624) IF (CDPREF == 'S') THEN
+(  625)   IFLEVG = YLCADR%NNIVER
+(  626)   ALLOCATE (ZVERT (2*(IFLEVG+1)))
+(  627)   ZVERT (1:IFLEVG+1)            = YLCADR%SFOHYB (1,0:IFLEVG) * YLCADR%SPREFE
+(  628)   ZVERT (IFLEVG+2:2*(IFLEVG+1)) = YLCADR%SFOHYB (2,0:IFLEVG)
+(  629)   CALL IGRIB_SET_VALUE (KGRIBH, 'pv', ZVERT)                        
+(  630)   DEALLOCATE (ZVERT)
+(  631) ELSE
+(  632)   CALL IGRIB_SET_VALUE (KGRIBH, 'NV', 0)
+(  633) ENDIF
+(  634) 
+(  635) END SUBROUTINE FAGRIB_API_VGEOM
+(  636) 
+(  637) SUBROUTINE FAGRIB_API_DATE 
+(  638) 
+(  639) INTEGER (KIND=JPLIKB) :: IDATEF (22)
+(  640) INTEGER (KIND=JPLIKB) :: ITRI
+(  641) 
+(  642) CHARACTER (LEN=16) :: CTERMU
+(  643) 
+(  644) 
+(  645) IDATEF(1:FA%JPLDAT)             = YLFICH%MADATE(:)
+(  646) IDATEF(FA%JPLDAT+1:FA%JPLDAT*2) = YLFICH%MADATX(:)
+(  647) 
+(  648) IF (LLGRIB1) THEN
+(  649)   CALL IGRIB_SET_VALUE (KGRIBH, 'yearOfCentury',  IDATEF ( 1)-2000)
+(  650) ELSE
+(  651)   CALL IGRIB_SET_VALUE (KGRIBH, 'year',  IDATEF ( 1))
+(  652) ENDIF
+(  653) 
+(  654) CALL IGRIB_SET_VALUE (KGRIBH, 'month', IDATEF ( 2))
+(  655) CALL IGRIB_SET_VALUE (KGRIBH, 'day',   IDATEF ( 3))
+(  656) CALL IGRIB_SET_VALUE (KGRIBH, 'hour',  IDATEF ( 4))
+(  657) CALL IGRIB_SET_VALUE (KGRIBH, 'minute',IDATEF ( 5))
+(  658) CALL IGRIB_SET_VALUE (KGRIBH, 'second',IDATEF (14)-60*(IDATEF (5)+60*IDATEF (4)))
+(  659) 
+(  660) CALL IGRIB_GET_VALUE (KGRIBH, 'indicatorOfUnitOfTimeRange', CTERMU)
+(  661) CALL IGRIB_SET_VALUE (KGRIBH, 'stepUnits', CTERMU)
+(  662) CALL IGRIB_GET_VALUE (KGRIBH, 'LSTCUM', ISTCUM)
+(  663) 
+(  664) IF (LLGRIB1) THEN
+(  665) 
+(  666)   CALL IGRIB_GET_VALUE (KGRIBH, 'timeRangeIndicator', ITRI)
+(  667) 
+(  668)   IF (ITRI /= 0 .AND. ISTCUM == 0) THEN
+(  669)     CALL FAGRIB_SETTIME ('P1', IDATEF (16), CTERMU)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 13
+
+(  670)     CALL FAGRIB_SETTIME ('P2', IDATEF (15), CTERMU)
+(  671)   ELSEIF (ITRI /= 0 .AND. ISTCUM == 1) THEN
+(  672)     CALL FAGRIB_SETTIME ('P1',           0_JPLIKB, CTERMU)
+(  673)     CALL FAGRIB_SETTIME ('P2', IDATEF (15), CTERMU)
+(  674)   ELSEIF (ITRI == 0 .AND. IDATEF (15) == 0) THEN
+(  675)     CALL IGRIB_SET_VALUE (KGRIBH, 'timeRangeIndicator', 1_JPIM)
+(  676)   ELSEIF (ITRI == 0) THEN
+(  677)     CALL FAGRIB_SETTIME ('P1', IDATEF (15), CTERMU)
+(  678)   ELSE
+(  679)     KREP = -82
+(  680)     RETURN
+(  681)   ENDIF
+(  682) ELSE
+(  683) 
+(  684)   CALL IGRIB_GET_VALUE (KGRIBH, 'productDefinitionTemplateNumber', ITRI)
+(  685) 
+(  686)   IF (ITRI /= 0 .AND. ISTCUM == 0) THEN
+(  687)     CALL FAGRIB_SETTIME ('startStep', IDATEF (16), CTERMU)
+(  688)     CALL FAGRIB_SETTIME ('endStep',   IDATEF (15), CTERMU)
+(  689)   ELSEIF (ITRI /= 0 .AND. ISTCUM == 1) THEN
+(  690)     CALL FAGRIB_SETTIME ('startStep',           0_JPLIKB, CTERMU)
+(  691)     CALL FAGRIB_SETTIME ('endStep',   IDATEF (15), CTERMU)
+(  692)   ELSEIF (ITRI == 0) THEN
+(  693)     CALL FAGRIB_SETTIME ('endStep',   IDATEF (15), CTERMU)
+(  694)   ELSE
+(  695)     KREP = -82
+(  696)     RETURN
+(  697)   ENDIF
+(  698) 
+(  699) ENDIF
+(  700) 
+(  701) END SUBROUTINE FAGRIB_API_DATE
+(  702) 
+(  703) SUBROUTINE FAGRIB_SETTIME (CDKEY, KSECS, CDUNIT)
+(  704) 
+(  705) CHARACTER (LEN=*)     :: CDKEY, CDUNIT
+(  706) INTEGER (KIND=JPLIKB) :: KSECS
+(  707) INTEGER (KIND=JPLIKB) :: IVALUE
+(  708) 
+(  709) IVALUE = 0
+(  710) 
+(  711) SELECT CASE (CDUNIT)
+(  712)   CASE ('s')
+(  713)     IVALUE = KSECS 
+(  714)   CASE ('D')
+(  715)     IVALUE = KSECS / (  1 *   1 * 24 * 60 * 60)
+(  716)   CASE ('M')
+(  717)     IVALUE = KSECS / (  1 *  30 * 24 * 60 * 60)
+(  718)   CASE ('Y')
+(  719)     IVALUE = KSECS / (  1 * 365 * 24 * 60 * 60)
+(  720)   CASE ('10Y')
+(  721)     IVALUE = KSECS / ( 10 * 365 * 24 * 60 * 60)
+(  722)   CASE ('30Y')
+(  723)     IVALUE = KSECS / ( 30 * 365 * 24 * 60 * 60)
+(  724)   CASE ('C')
+(  725)     IVALUE = KSECS / (100_JPLIKB * 365_JPLIKB * 24_JPLIKB * 60_JPLIKB * 60_JPLIKB)
+(  726)   CASE ('h')
+(  727)     IVALUE = KSECS / (  1 *   1 *  1 * 60 * 60)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 14
+
+(  728)   CASE ('3h')
+(  729)     IVALUE = KSECS / (  1 *   1 *  3 * 60 * 60)
+(  730)   CASE ('6h')
+(  731)     IVALUE = KSECS / (  1 *   1 *  6 * 60 * 60)
+(  732)   CASE ('12h')
+(  733)     IVALUE = KSECS / (  1 *   1 * 12 * 60 * 60)
+(  734)   CASE ('m')
+(  735)     IVALUE = KSECS / (  1 *   1 *  1 *  1 * 60)
+(  736)   CASE ('15m')
+(  737)     IVALUE = KSECS / (  1 *   1 *  1 * 15 * 60)
+(  738)   CASE ('30m')
+(  739)     IVALUE = KSECS / (  1 *   1 *  1 * 30 * 60)
+(  740)   CASE DEFAULT
+(  741)     KREP = -82
+(  742)     RETURN
+(  743) END SELECT
+(  744) 
+(  745) CALL IGRIB_SET_VALUE (KGRIBH, CDKEY, IVALUE)
+(  746) 
+(  747) END SUBROUTINE FAGRIB_SETTIME
+(  748) 
+(  749) SUBROUTINE FAGRIB_API_SET_VALUES 
+(  750) 
+(  751) REAL (KIND=JPDBLR), TARGET, ALLOCATABLE :: ZCHAMT (:) ! Temporary array for swapping directions of lat/lon fields
+(  752) REAL (KIND=JPDBLR), TARGET, ALLOCATABLE :: ZCHAMS (:) ! PCHAMP * FMULTI
+(  753) REAL (KIND=JPDBLR), POINTER             :: ZCHAMP (:) ! Point either to PCHAMP or ZCHAMS
+(  754) 
+(  755) 
+(  756) INTEGER (KIND=JPLIKB) :: ISMAX, IISMAX
+(  757) INTEGER (KIND=JPLIKB) :: JN, IDX, JLON, JLAT, ILCHAM, ISTRF, ICUNDF
+(  758) INTEGER (KIND=JPLIKB) :: IDECOPT
+(  759) INTEGER (KIND=JPLIKB) :: INBITSMAX, IMAXIPREC
+(  760) REAL (KIND=JPDBLR) :: ZUNDF, ZRNG, ZMIN, ZMAX
+(  761) LOGICAL :: LLHSDF
+(  762) 
+(  763) IF (LLDOUBLE) THEN
+(  764)   INBITSMAX = 64
+(  765)   IMAXIPREC =  2
+(  766) ELSE
+(  767)   INBITSMAX = 32
+(  768)   IMAXIPREC =  1
+(  769) ENDIF
+(  770) 
+(  771) IF (LLCOSP) THEN
+(  772)   IF (LLMLAM) THEN
+(  773)     ILCHAM = YLCADR%NSFLAM
+(  774)   ELSE    
+(  775)     ILCHAM=(1+YLCADR%MTRONC)*(2+YLCADR%MTRONC)
+(  776)   ENDIF   
+(  777) ELSE
+(  778)   ILCHAM = YLCADR%NVAPDG
+(  779) ENDIF
+(  780) 
+(  781) ! Changement d'echelle pour certains champs
+(  782) 
+(  783) ZUNDF = PUNDF
+(  784) IF (ZMULTI /= REAL (1._4, JPDBLR)) THEN
+(  785)   ALLOCATE (ZCHAMS (ILCHAM))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 15
+
+(  786)   ZCHAMS =  PCHAMP (1:ILCHAM) * ZMULTI
+(  787)   ZUNDF  =  ZUNDF             * ZMULTI
+(  788)   ZCHAMP => ZCHAMS (1:ILCHAM)
+(  789) ELSE
+(  790)   ZCHAMP => PCHAMP (1:ILCHAM)
+(  791) ENDIF
+(  792) 
+(  793) !
+(  794) ! Traitement des valeurs indefinies; on verifie d'abord que le champ
+(  795) ! contient de telles valeurs afin d'eviter de polluer le resultat
+(  796) ! final avec un bitmap inutile
+(  797) !
+(  798) LLHSDF = .TRUE.
+(  799) IF (LLUNDF) THEN
+(  800)   ICUNDF = COUNT (ZCHAMP == ZUNDF)
+(  801)   LLUNDF = ICUNDF > 0
+(  802)   LLHSDF = ICUNDF < ILCHAM
+(  803) ELSE
+(  804)   ICUNDF = 0
+(  805) ENDIF
+(  806) 
+(  807) 
+(  808) IF (LLCOSP) THEN
+(  809) 
+(  810)   INBITS = MIN (YLFICH%NBFCSP, INBITSMAX)
+(  811) 
+(  812)   IF (LLMGLO) THEN
+(  813) 
+(  814)     IF (INBITS == INBITSMAX) THEN
+(  815)       ISTRF = YLCADR%MTRONC
+(  816)     ELSE
+(  817)       ISTRF = YLFICH%NSTROF
+(  818)     ENDIF
+(  819)    
+(  820)     CALL IGRIB_SET_VALUE (KGRIBH, 'bitsPerValue', INBITS)
+(  821)     CALL IGRIB_SET_VALUE (KGRIBH, 'packingType', 'spectral_complex')
+(  822)     CALL IGRIB_SET_VALUE (KGRIBH, 'optimizeScaleFactor', 1)
+(  823)    
+(  824)     CALL IGRIB_SET_VALUE (KGRIBH, 'subSetJ', ISTRF)
+(  825)     CALL IGRIB_SET_VALUE (KGRIBH, 'subSetK', ISTRF)
+(  826)     CALL IGRIB_SET_VALUE (KGRIBH, 'subSetM', ISTRF)
+(  827) 
+(  828)     CALL IGRIB_SET_VALUE (KGRIBH, 'unpackedSubsetPrecision', IMAXIPREC)
+(  829)    
+(  830)     CALL IGRIB_SET_VALUE (KGRIBH, 'values', ZCHAMP (1:ILCHAM))
+(  831) 
+(  832)   ELSEIF (LLMLAM) THEN
+(  833) 
+(  834)     ISTRF = YLFICH%NSTROF
+(  835) 
+(  836)     CALL IGRIB_SET_VALUE (KGRIBH, "bitsPerValue", INBITS)
+(  837)     CALL IGRIB_SET_VALUE (KGRIBH, "packingType", "bifourier_complex")
+(  838)     CALL IGRIB_SET_VALUE (KGRIBH, 'optimizeScaleFactor', 1)
+(  839) 
+(  840)     IF (INBITS == INBITSMAX) THEN
+(  841)       ISMAX  = YLCADR%NSMAX
+(  842)       IISMAX = YLCADR%MTRONC
+(  843)       CALL IGRIB_SET_VALUE (KGRIBH, "biFourierResolutionSubSetParameterN", ISMAX)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 16
+
+(  844)       CALL IGRIB_SET_VALUE (KGRIBH, "biFourierResolutionSubSetParameterM", IISMAX)
+(  845)       CALL IGRIB_SET_VALUE (KGRIBH, "biFourierSubTruncationType", 99) 
+(  846)     ELSE
+(  847)       CALL IGRIB_SET_VALUE (KGRIBH, "biFourierResolutionSubSetParameterN", ISTRF)
+(  848)       CALL IGRIB_SET_VALUE (KGRIBH, "biFourierResolutionSubSetParameterM", ISTRF)
+(  849)       CALL IGRIB_SET_VALUE (KGRIBH, "biFourierSubTruncationType", 77) 
+(  850)     ENDIF
+(  851) 
+(  852)     CALL IGRIB_SET_VALUE (KGRIBH, "biFourierDoNotPackAxes", 1)
+(  853)   
+(  854)     CALL IGRIB_SET_VALUE (KGRIBH, "unpackedSubsetPrecision", IMAXIPREC)
+(  855) 
+(  856)     CALL IGRIB_SET_VALUE (KGRIBH, 'values', ZCHAMP (1:ILCHAM))
+(  857) 
+(  858)   ENDIF
+(  859) 
+(  860) ELSE
+(  861) 
+(  862)   INBITS = MIN (YLFICH%NBFPDG, INBITSMAX)
+(  863) 
+(  864)   IF (INBITS == INBITSMAX) THEN
+(  865)     IF (LLGRIB1) THEN
+(  866)       IF (LLDOUBLE) THEN
+(  867)         INBITS = 63 ! 64bit simple packing does not work with grib_api
+(  868)       ENDIF
+(  869)       CALL IGRIB_SET_VALUE (KGRIBH, 'bitsPerValue', INBITS)
+(  870)       CALL IGRIB_SET_VALUE (KGRIBH, 'packingType', 'grid_simple')
+(  871)       CALL IGRIB_SET_VALUE (KGRIBH, 'optimizeScaleFactor', 1)
+(  872)     ELSE
+(  873)       CALL IGRIB_SET_VALUE (KGRIBH, 'packingType', 'grid_ieee')
+(  874)       CALL IGRIB_SET_VALUE (KGRIBH, 'precision', IMAXIPREC)
+(  875)     ENDIF
+(  876)   ELSE
+(  877)     CALL IGRIB_SET_VALUE (KGRIBH, 'bitsPerValue', INBITS)
+(  878)     SELECT CASE (INGRIB)
+(  879)       CASE (120, 160)
+(  880)         CALL IGRIB_SET_VALUE (KGRIBH, 'packingType', 'grid_simple')
+(  881)       CASE (140, 180) 
+(  882)         IF (INBITS > 30) THEN ! grib_api does appear to support 2nd order packing with more than 30 bits
+(  883)           CALL IGRIB_SET_VALUE (KGRIBH, 'packingType', 'grid_simple')
+(  884)         ELSE
+(  885)           CALL IGRIB_SET_VALUE (KGRIBH, 'packingType', 'grid_second_order')
+(  886)         ENDIF
+(  887)       CASE (200)
+(  888)         CALL IGRIB_SET_VALUE (KGRIBH, 'packingType', 'grid_complex_spatial_differencing')
+(  889)         CALL IGRIB_SET_VALUE (KGRIBH, 'orderOfSpatialDifferencing', 2)
+(  890)       CASE DEFAULT
+(  891)         KREP = -96
+(  892)         RETURN
+(  893)     END SELECT
+(  894)     CALL IGRIB_SET_VALUE (KGRIBH, 'optimizeScaleFactor', 1)
+(  895)   ENDIF
+(  896) 
+(  897)   IF (LLUNDF) THEN
+(  898)     CALL IGRIB_SET_VALUE (KGRIBH, 'bitmapPresent', 1)
+(  899)     CALL IGRIB_SET_VALUE (KGRIBH, 'missingValue', ZUNDF)
+(  900)   ENDIF
+(  901) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 17
+
+(  902)   IF (.NOT. LLGRIB1) THEN
+(  903) ! This line should not be necessary, but sometimes grib_api fails to update numberOfDataPoints
+(  904)     CALL IGRIB_SET_VALUE (KGRIBH, 'numberOfDataPoints', ILCHAM-ICUNDF) 
+(  905)   ENDIF
+(  906) 
+(  907)   IF (LLLTLN) THEN
+(  908) 
+(  909)     ALLOCATE (ZCHAMT (ILCHAM))
+(  910) 
+(  911)     DO JLAT = 1, YLCADR%NLATIT
+(  912)       DO JLON = 1, YLCADR%NXLOPA
+(  913)         JN  = JLON+YLCADR%NXLOPA*(JLAT-1)
+(  914)         IDX = JLON+YLCADR%NXLOPA*(YLCADR%NLATIT-JLAT)
+(  915)         ZCHAMT (IDX) = ZCHAMP (JN)
+(  916)       ENDDO
+(  917)     ENDDO
+(  918) 
+(  919) 
+(  920)     CALL IGRIB_SET_VALUE (KGRIBH, 'values', ZCHAMT)
+(  921) 
+(  922)     DEALLOCATE (ZCHAMT)
+(  923) 
+(  924)   ELSE
+(  925)     CALL IGRIB_SET_VALUE (KGRIBH, 'values', ZCHAMP (1:ILCHAM))
+(  926)   ENDIF
+(  927) 
+(  928) ENDIF
+(  929) 
+(  930) IF (ALLOCATED (ZCHAMS)) DEALLOCATE (ZCHAMS)
+(  931) 
+(  932) END SUBROUTINE FAGRIB_API_SET_VALUES
+(  933) 
+(  934) SUBROUTINE FAGRIB_SET_LOCAL_SECTION 
+(  935) 
+(  936) CALL IGRIB_SET_VALUE (KGRIBH, 'CLNOMA', TRIM (CLNOMA (1:ILNOMA)))
+(  937) CALL IGRIB_SET_VALUE (KGRIBH, 'INGRIB', INGRIB)
+(  938) IF (LLCOSP) THEN
+(  939)   CALL IGRIB_SET_VALUE (KGRIBH, 'LLCOSP', 1)
+(  940) ELSE
+(  941)   CALL IGRIB_SET_VALUE (KGRIBH, 'LLCOSP', 0)
+(  942) ENDIF
+(  943) CALL IGRIB_SET_VALUE (KGRIBH, 'INBITS', INBITS)
+(  944) 
+(  945) END SUBROUTINE FAGRIB_SET_LOCAL_SECTION
+(  946) 
+(  947) END SUBROUTINE
+(  948) 
+(  949) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 18
+
+(    1) # 1 "facgrm.F90"
+(    1) SUBROUTINE FACGRM_MT64                                              &
+(    2) &                     (FA, KREP, KRANG, CDPREF, KNIVAU, CDSUFF,     &
+(    3) &                      PCHAMP, LDCOSP, KGRIBH, LDUNDF,              &
+(    4) &                      PUNDF, KLOCSN)
+(    5) USE FA_MOD, ONLY : FA_COM, JPNIIL, FACADR, FAFICH,                  &
+(    6)                  & NGRIB2_GLO_SH, NGRIB2_GLO_GP, NGRIB2_LAM_GP,     &
+(    7)                  & NGRIB2_LAM_BF, NGRIB2_LATLON, NGRIB1_LATLON,     &
+(    8)                  & LGRIB2_LAM_EX, NUNDEF
+(    9) USE PARKIND1, ONLY : JPRB
+(   10) USE YOMHOOK , ONLY : LHOOK, DR_HOOK
+(   11) USE LFI_PRECISION
+(   12) USE GRIB_API_INTERFACE
+(   13) USE GRIB_API
+(   14) IMPLICIT NONE
+(   15) !****
+(   16) !      Sous-programme INTERNE du logiciel de Fichiers ARPEGE:
+(   17) !      PREPARATION (codage GRIB_API) d'un CHAMP HORIZONTAL
+(   18) !      destine a etre ecrit sur un fichier ARPEGE/ALADIN.
+(   19) !**
+(   20) !    Arguments : KREP   (Sortie) ==> Code-reponse du sous-programme;
+(   21) !                KRANG  (Entree) ==> Rang de l'unite logique;
+(   22) !                CDPREF (Entree) ==> Prefixe eventuel du nom d'article;
+(   23) !                KNIVAU (Entree) ==> Niveau vertical eventuel;
+(   24) !                CDSUFF (Entree) ==> Suffixe eventuel du nom d'article;
+(   25) !    ( Tableau ) PCHAMP (Entree) ==> Valeurs REELLES du champ a ecrire;
+(   26) !                LDCOSP (Entree) ==> Vrai si le champ est represente
+(   27) !                                    par des coefficients spectraux;
+(   28) !    ( Tableau ) KGRIBH (Sortie) ==> Message GRIB
+(   29) !*
+(   30) !
+(   31) TYPE(FA_COM)   :: FA
+(   32) INTEGER (KIND=JPLIKB) KREP, KRANG, KNIVAU, KLOCSN
+(   33) !
+(   34) INTEGER (KIND=JPLIKM) KGRIBH
+(   35) REAL (KIND=JPDBLR), TARGET :: PCHAMP(*)
+(   36) REAL (KIND=JPDBLR) PUNDF, ZUNDF
+(   37) !
+(   38) LOGICAL LDCOSP, LDUNDF, LLCOSP, LLUNDF
+(   39) !
+(   40) CHARACTER CDPREF*(*), CDSUFF*(*)
+(   41) !
+(   42) REAL (KIND=JPDBLR), PARAMETER :: RPI = 2.0_JPDBLR * ASIN (1.0_JPDBLR)
+(   43) !
+(   44) TYPE (FACADR), POINTER :: YLCADR
+(   45) TYPE (FAFICH), POINTER :: YLFICH
+(   46) INTEGER (KIND=JPLIKB) :: IRANGC, INIMES, INUMER
+(   47) INTEGER (KIND=JPLIKB) INGRIB, INBITS
+(   48) CHARACTER(LEN=FA%JPLSPX)   CLNSPR
+(   49) CHARACTER(LEN=FA%JPXNOM)   CLACTI 
+(   50) CHARACTER(LEN=FA%JPLMES)   CLMESS 
+(   51) CHARACTER(LEN=FA%JPXNOM)   CLNOMA
+(   52) LOGICAL LLMLAM, LLLTLN, LLFATA, LLMGLO
+(   53) INTEGER (KIND=JPLIKB) :: ILNOMA
+(   54) INTEGER (KIND=JPLIKB) :: INGRIB_GP, INGRIB_SP
+(   55) INTEGER (KIND=JPLIKB) :: IVERSI
+(   56) REAL (KIND=JPDBLR)    :: ZMULTI  ! Facteur multiplicatif
+(   57) INTEGER               :: ISTCUM  ! Cumul depuis le debut
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 19
+
+(   58) INTEGER               :: ILOCAL
+(   59) INTEGER               :: IOUT
+(   60) LOGICAL               :: LLGRIB1
+(   61) LOGICAL,PARAMETER     :: LLDOUBLE = (JPDBLR == JPDBLD)
+(   62) # 63 "facgrm.F90"
+(   63) REAL (KIND=JPRB) :: ZHOOK_HANDLE
+(   64) # 65 "facgrm.F90"
+(   65) IF (LHOOK) CALL DR_HOOK('FACGRM_MT',0,ZHOOK_HANDLE)
+(   66) # 67 "facgrm.F90"
+(   67) LLFATA=LLMOER (KREP,KRANG)
+(   68) # 69 "facgrm.F90"
+(   69) CALL FAIGRA_MT64 (FA)
+(   70) # 71 "facgrm.F90"
+(   71) KREP = 0
+(   72) # 73 "facgrm.F90"
+(   73) YLFICH => FA%FICHIER(KRANG)
+(   74) IRANGC = YLFICH%NUCADR
+(   75) YLCADR => FA%CADRE(IRANGC)
+(   76) !
+(   77) LLMLAM = YLCADR%LIMLAM
+(   78) LLLTLN = YLCADR%SINLAT(2) < 0 .AND. LLMLAM
+(   79) LLMGLO = (.NOT. LLMLAM) .AND. (.NOT. LLLTLN)
+(   80) !
+(   81) LLUNDF = LDUNDF
+(   82) LLCOSP = LDCOSP
+(   83) !
+(   84) INUMER = YLFICH%NULOGI
+(   85) !
+(   86) # 87 "facgrm.F90"
+(   87) INGRIB    = YLFICH%NFGRIB
+(   88) INGRIB_GP = FALGRA_GP (INGRIB)
+(   89) INGRIB_SP = FALGRA_SP (INGRIB)
+(   90) # 91 "facgrm.F90"
+(   91) CALL GRIB_GET_API_VERSION (IVERSI)
+(   92) # 93 "facgrm.F90"
+(   93) IF (LDCOSP .AND. (IVERSI /= 11400) .AND. (INGRIB_SP == 101)) THEN
+(   94)   LLFATA = .TRUE.
+(   95)   KREP   = -125
+(   96)   GOTO 1001
+(   97) ELSE IF (LDCOSP .AND. (IVERSI == 11400) .AND. (INGRIB_SP /= 101)) THEN
+(   98)   LLFATA = .TRUE.
+(   99)   KREP   = -125
+(  100)   GOTO 1001
+(  101) ENDIF
+(  102) # 103 "facgrm.F90"
+(  103) IF (LLCOSP) THEN
+(  104)   INGRIB = INGRIB_SP
+(  105) ELSE
+(  106)   INGRIB = INGRIB_GP
+(  107) ENDIF
+(  108) # 110 "facgrm.F90"
+(  110) LLGRIB1 = FALGRA_ED (INGRIB) == 1
+(  111) # 112 "facgrm.F90"
+(  112) IF (LLLTLN) THEN
+(  113)   IF (LLGRIB1) THEN
+(  114)     CALL IGRIB_CLONE (NGRIB1_LATLON, KGRIBH)
+(  115)   ELSE
+(  116)     CALL IGRIB_CLONE (NGRIB2_LATLON, KGRIBH)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 20
+
+(  117)   ENDIF
+(  118) ELSEIF (LLMLAM) THEN
+(  119)   IF (LLCOSP) THEN
+(  120)     CALL IGRIB_CLONE (NGRIB2_LAM_BF, KGRIBH)
+(  121)   ELSE
+(  122)     CALL IGRIB_CLONE (NGRIB2_LAM_GP, KGRIBH)
+(  123)   ENDIF
+(  124) ELSEIF (LLMGLO) THEN
+(  125)   IF (LLCOSP) THEN
+(  126)     CALL IGRIB_CLONE (NGRIB2_GLO_SH, KGRIBH)
+(  127)   ELSE
+(  128)     CALL IGRIB_CLONE (NGRIB2_GLO_GP, KGRIBH)
+(  129)   ENDIF
+(  130) ENDIF
+(  131) # 132 "facgrm.F90"
+(  132) ! Set parameter
+(  133) # 134 "facgrm.F90"
+(  134) CALL FAGRIB_API_SET_PARAM 
+(  135) # 136 "facgrm.F90"
+(  136) ! Horizontal geometry
+(  137) # 138 "facgrm.F90"
+(  138) CALL FAGRIB_API_HGEOM 
+(  139) # 140 "facgrm.F90"
+(  140) ! Vertical geometry
+(  141) # 142 "facgrm.F90"
+(  142) CALL FAGRIB_API_VGEOM 
+(  143) # 144 "facgrm.F90"
+(  144) ! Date
+(  145) # 146 "facgrm.F90"
+(  146) CALL FAGRIB_API_DATE 
+(  147) # 148 "facgrm.F90"
+(  148) ! Set values
+(  149) # 150 "facgrm.F90"
+(  150) CALL FAGRIB_API_SET_VALUES 
+(  151) # 152 "facgrm.F90"
+(  152) ! Set local section
+(  153) # 154 "facgrm.F90"
+(  154) CALL FAGRIB_SET_LOCAL_SECTION 
+(  155) # 156 "facgrm.F90"
+(  156) 1001 CONTINUE
+(  157) !
+(  158) IF (FA%LFAMOP.OR.LLFATA) THEN
+(  159)   INIMES=2
+(  160)   CLNSPR='FACGRM'
+(  161)   INUMER=JPNIIL
+(  162) !
+(  163)   WRITE (UNIT=CLMESS,FMT='(''KREP='',I5,'', KRANG='',I4,  &
+(  164) &         '', CDPREF='''''',A,'''''', KNIVAU='',I6,       &
+(  165) &         '', CDSUFF='''''',A,'''''', LLCOSP= '',L1)')    &
+(  166) &     KREP, KRANG, CDPREF(1:LEN_TRIM(CDPREF)), KNIVAU,    &
+(  167) &     CDSUFF(1:LEN_TRIM(CDSUFF)), LLCOSP
+(  168) # 169 "facgrm.F90"
+(  169)   CALL FAIPAR_MT64                                        &
+(  170) &                 (FA, INUMER,INIMES,KREP,.FALSE.,CLMESS, &
+(  171) &                  CLNSPR,CLACTI,.FALSE.)
+(  172) ENDIF
+(  173) # 174 "facgrm.F90"
+(  174) IF (LHOOK) CALL DR_HOOK('FACGRM_MT',1,ZHOOK_HANDLE)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 21
+
+(  175) !
+(  176) CONTAINS
+(  177) # 178 "facgrm.F90"
+(  178) SUBROUTINE STRU (CDS, CDU)
+(  179) CHARACTER (LEN=*) :: CDS, CDU
+(  180) INTEGER (KIND=JPLIKB) :: J
+(  181) # 182 "facgrm.F90"
+(  182) DO J = 1, LEN (CDU)
+(  183)   CDU (J:J) = ' '
+(  184) ENDDO
+(  185) # 186 "facgrm.F90"
+(  186) DO J = 1, LEN_TRIM (CDS)
+(  187)   IF (CDS (J:J) == ' ') THEN
+(  188)     CDU (J:J) = '_'
+(  189)   ELSE
+(  190)     CDU (J:J) = CDS (J:J)
+(  191)   ENDIF
+(  192) ENDDO
+(  193) # 194 "facgrm.F90"
+(  194) END SUBROUTINE STRU
+(  195) # 196 "facgrm.F90"
+(  196) # 1 ".D[17]/facom2.llmoer.h"
+(    1) !
+(    2) !       Fonction servant a rendre fatale ou non une erreur detectee,
+(    3) !       a l'aide du code reponse courant, du niveau de filtrage global,
+(    4) !       et de l'option d'erreur fatale propre au fichier.
+(    5) !       s'il n'y a pas de fichier (I5678=0, d'ou dimensionnement de
+(    6) !          *LERRFA*), le niveau de filtrage joue le role principal.
+(    7) !
+(    8) LOGICAL FUNCTION LLMOER (I1234,I5678)
+(    9) INTEGER (KIND=JPLIKB) :: I1234,I5678
+(   10) LLMOER=I1234.EQ.-66_JPLIKB .OR. (I1234.NE.0_JPLIKB .AND.(FA%NRFAGA.EQ.0_JPLIKB &
+(   11)      & .OR. (FA%NRFAGA.EQ.1_JPLIKB .AND.FA%FICHIER(I5678)%LERRFA)))
+(   12) END FUNCTION
+(   13) # 197 "facgrm.F90"
+(  197) # 197 "facgrm.F90"
+(  197) # 1 ".D[17]/falgra.h"
+(    1) LOGICAL FUNCTION FALGRA (KNGRIB)
+(    2) !****
+(    3) !    Cette fonction renvoie une valeur vraie si la methode d'encodage passee en argument fait appel a grib_api
+(    4) !**
+(    5) !    Arguments : KNGRIB (Entree) ==> Methode d'encodage
+(    6) !
+(    7) !
+(    8) INTEGER (KIND=JPLIKB) KNGRIB
+(    9) INTEGER (KIND=JPLIKB) INGRIB_SP, INGRIB_GP
+(   10) LOGICAL LLFALGRA_SP, LLFALGRA_GP
+(   11) # 12 ".D[17]/falgra.h"
+(   12) FALGRA = .FALSE.
+(   13) # 14 ".D[17]/falgra.h"
+(   14) IF (100 <= KNGRIB .AND. KNGRIB <= 200) THEN
+(   15) # 16 ".D[17]/falgra.h"
+(   16)   INGRIB_SP = FALGRA_SP (KNGRIB)
+(   17)   INGRIB_GP = FALGRA_GP (KNGRIB)
+(   18)   
+(   19)   LLFALGRA_SP = &
+(   20)    & (INGRIB_SP - 100 ==  1) .OR. &      ! GRIB2 complex packing (bug)
+(   21)    & (INGRIB_SP - 100 ==  2) .OR. &      ! GRIB0 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 22
+
+(   22)    & (INGRIB_SP - 100 ==  3)             ! GRIB2 complex packing
+(   23)   
+(   24)   LLFALGRA_GP = &
+(   25)    & ((INGRIB_GP-100) / 20 ==  1) .OR. & ! GRIB2 simple packing
+(   26)    & ((INGRIB_GP-100) / 20 ==  2) .OR. & ! GRIB2 second order packing
+(   27)    & ((INGRIB_GP-100) / 20 ==  3) .OR. & ! GRIB1 simple packing
+(   28)    & ((INGRIB_GP-100) / 20 ==  4) .OR. & ! GRIB1 second order packing
+(   29)    & ((INGRIB_GP-100) / 20 ==  5)        ! GRIB2 complex packing
+(   30)    
+(   31) # 32 ".D[17]/falgra.h"
+(   32)   IF (LLFALGRA_GP .AND. LLFALGRA_SP) THEN
+(   33)     FALGRA = .TRUE.
+(   34)   ELSEIF (LLFALGRA_GP) THEN
+(   35)     FALGRA = INGRIB_SP == 100
+(   36)   ELSEIF (LLFALGRA_SP) THEN
+(   37)     FALGRA = INGRIB_GP == 100
+(   38)   ENDIF
+(   39) # 40 ".D[17]/falgra.h"
+(   40) ENDIF
+(   41) # 42 ".D[17]/falgra.h"
+(   42) END FUNCTION FALGRA
+(   43) # 44 ".D[17]/falgra.h"
+(   44) INTEGER (KIND=JPLIKB) FUNCTION FALGRA_SP (KNGRIB)
+(   45) INTEGER (KIND=JPLIKB) KNGRIB
+(   46) FALGRA_SP = 100+MODULO ((KNGRIB-100),20)
+(   47) END FUNCTION FALGRA_SP
+(   48) # 49 ".D[17]/falgra.h"
+(   49) INTEGER (KIND=JPLIKB) FUNCTION FALGRA_GP (KNGRIB)
+(   50) INTEGER (KIND=JPLIKB) KNGRIB
+(   51) FALGRA_GP = 100+20*((KNGRIB-100)/20)
+(   52) END FUNCTION FALGRA_GP
+(   53) # 54 ".D[17]/falgra.h"
+(   54) INTEGER (KIND=JPLIKB) FUNCTION FALGRA_ED (KNGRIB)
+(   55) INTEGER (KIND=JPLIKB) KNGRIB
+(   56) # 57 ".D[17]/falgra.h"
+(   57) SELECT CASE (KNGRIB)
+(   58)   CASE (160, 180)
+(   59)     FALGRA_ED = 1
+(   60)   CASE DEFAULT
+(   61)     FALGRA_ED = 2
+(   62) END SELECT 
+(   63) # 64 ".D[17]/falgra.h"
+(   64) END FUNCTION FALGRA_ED
+(   65) # 198 "facgrm.F90"
+(  198) # 199 "facgrm.F90"
+(  199) SUBROUTINE FAGRIB_API_SET_PARAM 
+(  200) # 201 "facgrm.F90"
+(  201) CHARACTER(LEN=FA%JPXNOM)  CLPREF, CLSUFF, CLNOMU
+(  202) INTEGER(KIND=JPLIKB)      INIVAU, IPARAM, IDPROC
+(  203) INTEGER(KIND=JPLIKB)      IMULTM, IMULTE
+(  204) REAL (KIND=JPDBLR)        ZLBASE, ZLMULT, ZLEVEL
+(  205) # 207 "facgrm.F90"
+(  207) CALL IGRIB_SET_VALUE (KGRIBH, 'centre', YLFICH%NIDCEN)
+(  208) # 209 "facgrm.F90"
+(  209) IF (LLGRIB1) THEN
+(  210)   CALL IGRIB_SET_VALUE (KGRIBH, 'setLocalDefinition', 1)
+(  211) ELSE
+(  212)   CALL IGRIB_SET_VALUE (KGRIBH, 'grib2LocalSectionPresent', 1)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 23
+
+(  213)   CALL IGRIB_SET_VALUE (KGRIBH, 'grib2LocalSectionNumber', KLOCSN)
+(  214) ENDIF
+(  215) # 216 "facgrm.F90"
+(  216) IF (YLFICH%CMODEL /= '') THEN
+(  217)   CALL IGRIB_SET_VALUE (KGRIBH, 'faModelName', TRIM (YLFICH%CMODEL))
+(  218)   CALL IGRIB_GET_VALUE (KGRIBH, 'generatingProcessIdentifier', IDPROC)
+(  219)   IF (IDPROC == 255) THEN
+(  220)     WRITE (FA%NULOUT, '(" FACGRM: Model `",A,"'' is not &
+(  221)          &declared in `faModelName.def''")') TRIM (YLFICH%CMODEL)
+(  222)   ENDIF
+(  223) ENDIF
+(  224) # 225 "facgrm.F90"
+(  225) CALL FANFAN_MT64 (FA, KREP, INUMER, CDPREF, KNIVAU, CDSUFF, CLNOMA, ILNOMA)
+(  226) CALL FAQUIN_MT64 (FA, KREP, INUMER, CLPREF, INIVAU, CLSUFF, CLNOMA, ILNOMA)
+(  227) # 228 "facgrm.F90"
+(  228) IF (KNIVAU > 0) THEN
+(  229)   CALL STRU (CLPREF, CLNOMU)
+(  230)   CALL IGRIB_SET_VALUE (KGRIBH, 'faLevelName', TRIM (CLNOMU))
+(  231)   CALL STRU (CLSUFF, CLNOMU)
+(  232)   CALL IGRIB_SET_VALUE (KGRIBH, 'faFieldName', TRIM (CLNOMU))
+(  233)   CALL IGRIB_GET_VALUE (KGRIBH, 'ZLMULT', ZLMULT)
+(  234)   CALL IGRIB_GET_VALUE (KGRIBH, 'ZLBASE', ZLBASE)
+(  235)   ZLEVEL = ZLMULT * INIVAU + ZLBASE
+(  236)   CALL IGRIB_SET_VALUE (KGRIBH, 'level', ZLEVEL)
+(  237) ELSE
+(  238)   CALL STRU (CLNOMA, CLNOMU)
+(  239)   CALL IGRIB_SET_VALUE (KGRIBH, 'faFieldName', CLNOMU (1:ILNOMA))
+(  240) ENDIF
+(  241) # 242 "facgrm.F90"
+(  242) IF (LLGRIB1) THEN
+(  243)   CALL IGRIB_GET_VALUE (KGRIBH, 'indicatorOfParameter', IPARAM)
+(  244) ELSE
+(  245)   CALL IGRIB_GET_VALUE (KGRIBH, 'parameterNumber', IPARAM)
+(  246) ENDIF
+(  247) # 248 "facgrm.F90"
+(  248) IF (IPARAM == 255) THEN
+(  249)   WRITE (FA%NULOUT, '(" FACGRM: Field `",A,"'' is not &
+(  250)        &declared in `faFieldName.def''")') TRIM (CLNOMA)
+(  251) ENDIF
+(  252) # 253 "facgrm.F90"
+(  253) CALL IGRIB_GET_VALUE (KGRIBH, 'FMULTM', IMULTM)
+(  254) CALL IGRIB_GET_VALUE (KGRIBH, 'FMULTE', IMULTE)
+(  255) ZMULTI = REAL (IMULTM, JPDBLR) * 10._JPDBLR ** IMULTE
+(  256) # 257 "facgrm.F90"
+(  257) END SUBROUTINE FAGRIB_API_SET_PARAM
+(  258) # 259 "facgrm.F90"
+(  259) SUBROUTINE FAGRIB_API_HGEOM 
+(  260) # 261 "facgrm.F90"
+(  261) IF (LLLTLN) THEN
+(  262)   CALL FAGRIB_API_HGEOM_LATLON 
+(  263) ELSEIF (LLMLAM) THEN
+(  264)   IF (LLCOSP) THEN
+(  265)     CALL FAGRIB_API_HGEOM_LAM_BF 
+(  266)   ELSE
+(  267)     CALL FAGRIB_API_HGEOM_LAM_GP 
+(  268)   ENDIF
+(  269) ELSEIF (LLMGLO) THEN
+(  270)   IF (LLCOSP) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 24
+
+(  271)     CALL FAGRIB_API_HGEOM_GLO_SH 
+(  272)   ELSE
+(  273)     CALL FAGRIB_API_HGEOM_GLO_GP 
+(  274)   ENDIF
+(  275) ENDIF
+(  276) # 277 "facgrm.F90"
+(  277) END SUBROUTINE FAGRIB_API_HGEOM
+(  278) # 279 "facgrm.F90"
+(  279) SUBROUTINE FAGRIB_API_HGEOM_LAM_BF 
+(  280) # 281 "facgrm.F90"
+(  281) REAL (KIND=JPDBLR) :: ZDELX, ZDELY, ZRPK
+(  282) INTEGER (KIND=JPLIKB) :: ILONS, ILATS
+(  283) # 284 "facgrm.F90"
+(  284) ILATS = YLCADR%NLATIT
+(  285) ILONS = YLCADR%NXLOPA
+(  286) ZDELX = YLCADR%SINLAT (7)
+(  287) ZDELY = YLCADR%SINLAT (8)
+(  288) ZRPK  = YLCADR%SINLAT (2)
+(  289) # 290 "facgrm.F90"
+(  290) IF (0._JPDBLR < ZRPK .AND. ZRPK < 1._JPDBLR) THEN
+(  291) # 292 "facgrm.F90"
+(  292) ! Lambert
+(  293) # 294 "facgrm.F90"
+(  294)   CALL IGRIB_SET_VALUE (KGRIBH, 'gridType', 'lambert_bf')
+(  295) # 296 "facgrm.F90"
+(  296) ELSEIF (ZRPK == 0._JPDBLR) THEN
+(  297) # 298 "facgrm.F90"
+(  298) ! Mercator
+(  299) # 300 "facgrm.F90"
+(  300)   CALL IGRIB_SET_VALUE (KGRIBH, 'gridType', 'mercator_bf')
+(  301) # 302 "facgrm.F90"
+(  302) ELSEIF (ZRPK == 1._JPDBLR) THEN
+(  303) # 304 "facgrm.F90"
+(  304) ! Polar stereographic
+(  305) # 306 "facgrm.F90"
+(  306)   CALL IGRIB_SET_VALUE (KGRIBH, 'gridType', 'polar_stereographic_bf')
+(  307) # 308 "facgrm.F90"
+(  308) ENDIF
+(  309) # 310 "facgrm.F90"
+(  310) CALL IGRIB_SET_VALUE (KGRIBH, "biFourierResolutionParameterN", YLCADR%NSMAX)
+(  311) CALL IGRIB_SET_VALUE (KGRIBH, "biFourierResolutionParameterM", YLCADR%NMSMAX)
+(  312) # 313 "facgrm.F90"
+(  313) CALL IGRIB_SET_VALUE (KGRIBH, 'LxInMetres', ZDELX * (ILONS-1))
+(  314) CALL IGRIB_SET_VALUE (KGRIBH, 'LyInMetres', ZDELY * (ILATS-1))
+(  315) # 316 "facgrm.F90"
+(  316) CALL IGRIB_SET_VALUE (KGRIBH, 'LuxInMetres', ZDELX * (YLCADR%NLOPAR (4)-1))
+(  317) CALL IGRIB_SET_VALUE (KGRIBH, 'LuyInMetres', ZDELY * (YLCADR%NLOPAR (6)-1))
+(  318) # 319 "facgrm.F90"
+(  319) CALL IGRIB_SET_VALUE (KGRIBH, 'LcxInMetres', ZDELX * MAX (1, YLCADR%NLOPAR (7)-1))
+(  320) CALL IGRIB_SET_VALUE (KGRIBH, 'LcyInMetres', ZDELY * MAX (1, YLCADR%NLOPAR (8)-1))
+(  321) # 322 "facgrm.F90"
+(  322) CALL IGRIB_SET_VALUE (KGRIBH, "biFourierTruncationType", 99) 
+(  323) # 324 "facgrm.F90"
+(  324) CALL FAGRIB_API_HGEOM_LAM_PR
+(  325) # 326 "facgrm.F90"
+(  326) END SUBROUTINE FAGRIB_API_HGEOM_LAM_BF
+(  327) # 328 "facgrm.F90"
+(  328) SUBROUTINE FAGRIB_API_HGEOM_LATLON 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 25
+
+(  329) # 330 "facgrm.F90"
+(  330) INTEGER (KIND=JPLIKB) :: ILONS, ILATS
+(  331) REAL (KIND=JPDBLR)    :: ZLONW, ZLATS, ZLONE, ZLATN, ZLOND, ZLATD
+(  332) # 333 "facgrm.F90"
+(  333) ILATS = YLCADR%NLATIT
+(  334) ILONS = YLCADR%NXLOPA
+(  335) # 336 "facgrm.F90"
+(  336) ZLONW = LONRAD2DEG (YLCADR%SINLAT(13))
+(  337) ZLATS = LATRAD2DEG (YLCADR%SINLAT(14))
+(  338) ZLONE = LONRAD2DEG (YLCADR%SINLAT(15))
+(  339) ZLATN = LATRAD2DEG (YLCADR%SINLAT(16))
+(  340) # 341 "facgrm.F90"
+(  341) ZLOND = MODULO (ZLONE-ZLONW, 360._JPDBLR) / (ILONS-1)
+(  342) ZLATD = (ZLATN-ZLATS)/(ILATS-1)
+(  343) # 344 "facgrm.F90"
+(  344) CALL IGRIB_SET_VALUE (KGRIBH, 'Ni', ILONS)
+(  345) CALL IGRIB_SET_VALUE (KGRIBH, 'Nj', ILATS)
+(  346) CALL IGRIB_SET_VALUE (KGRIBH, 'longitudeOfFirstGridPointInDegrees', ZLONW)
+(  347) CALL IGRIB_SET_VALUE (KGRIBH, 'latitudeOfLastGridPointInDegrees',   ZLATS)
+(  348) CALL IGRIB_SET_VALUE (KGRIBH, 'longitudeOfLastGridPointInDegrees',  ZLONE)
+(  349) CALL IGRIB_SET_VALUE (KGRIBH, 'latitudeOfFirstGridPointInDegrees',  ZLATN)
+(  350) CALL IGRIB_SET_VALUE (KGRIBH, 'iScansNegatively', 0)
+(  351) CALL IGRIB_SET_VALUE (KGRIBH, 'jScansPositively', 0)
+(  352) CALL IGRIB_SET_VALUE (KGRIBH, 'iDirectionIncrementInDegrees', ZLOND)
+(  353) CALL IGRIB_SET_VALUE (KGRIBH, 'jDirectionIncrementInDegrees', ZLATD)
+(  354) # 355 "facgrm.F90"
+(  355) END SUBROUTINE FAGRIB_API_HGEOM_LATLON
+(  356) # 357 "facgrm.F90"
+(  357) SUBROUTINE FAGRIB_API_HGEOM_LAM_GP 
+(  358) # 359 "facgrm.F90"
+(  359) REAL (KIND=JPDBLR) :: ZRPK, ZDELX, ZDELY
+(  360) INTEGER (KIND=JPLIKB) :: ILONS, ILATS
+(  361) INTEGER               :: IRET
+(  362) CHARACTER (LEN=4)     :: CLEXT
+(  363) # 364 "facgrm.F90"
+(  364) ILATS = YLCADR%NLATIT
+(  365) ILONS = YLCADR%NXLOPA
+(  366) ZRPK  = YLCADR%SINLAT (2)
+(  367) ZDELX = YLCADR%SINLAT (7)
+(  368) ZDELY = YLCADR%SINLAT (8)
+(  369) # 370 "facgrm.F90"
+(  370) IF (LGRIB2_LAM_EX) THEN
+(  371)   CLEXT = '_lam'
+(  372) ELSE
+(  373)   CLEXT = ''
+(  374) ENDIF
+(  375) # 376 "facgrm.F90"
+(  376) IF (0._JPDBLR < ZRPK .AND. ZRPK < 1._JPDBLR) THEN
+(  377) # 378 "facgrm.F90"
+(  378) ! Lambert
+(  379) # 380 "facgrm.F90"
+(  380)   CALL IGRIB_SET_VALUE (KGRIBH, 'gridType', TRIM ('lambert'//CLEXT))
+(  381) # 382 "facgrm.F90"
+(  382)   CALL IGRIB_SET_VALUE (KGRIBH, 'Nx', ILONS)
+(  383)   CALL IGRIB_SET_VALUE (KGRIBH, 'Ny', ILATS)
+(  384)   CALL IGRIB_SET_VALUE (KGRIBH, 'DxInMetres', ZDELX)
+(  385)   CALL IGRIB_SET_VALUE (KGRIBH, 'DyInMetres', ZDELY)
+(  386) # 387 "facgrm.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 26
+
+(  387)   CALL IGRIB_SET_VALUE (KGRIBH, 'iScansNegatively', 0)
+(  388)   CALL IGRIB_SET_VALUE (KGRIBH, 'jScansPositively', 1)
+(  389)   CALL IGRIB_SET_VALUE (KGRIBH, 'jPointsAreConsecutive', 0)
+(  390)   CALL IGRIB_SET_VALUE (KGRIBH, 'uvRelativeToGrid', 1)
+(  391) # 392 "facgrm.F90"
+(  392) ELSEIF (ZRPK == 0._JPDBLR) THEN
+(  393) # 394 "facgrm.F90"
+(  394) ! Mercator
+(  395) # 396 "facgrm.F90"
+(  396)   CALL IGRIB_SET_VALUE (KGRIBH, 'gridType', TRIM ('mercator'//CLEXT))
+(  397) # 398 "facgrm.F90"
+(  398)   CALL IGRIB_SET_VALUE (KGRIBH, 'Nx', ILONS)
+(  399)   CALL IGRIB_SET_VALUE (KGRIBH, 'Ny', ILATS)
+(  400)   CALL IGRIB_SET_VALUE (KGRIBH, 'DiInMetres', ZDELX)
+(  401)   CALL IGRIB_SET_VALUE (KGRIBH, 'DjInMetres', ZDELY)
+(  402) # 403 "facgrm.F90"
+(  403)   CALL IGRIB_SET_VALUE (KGRIBH, 'iScansNegatively', 0)
+(  404)   CALL IGRIB_SET_VALUE (KGRIBH, 'jScansPositively', 1)
+(  405)   CALL IGRIB_SET_VALUE (KGRIBH, 'jPointsAreConsecutive', 0)
+(  406)   CALL IGRIB_SET_VALUE (KGRIBH, 'uvRelativeToGrid', 1)
+(  407) # 408 "facgrm.F90"
+(  408) ELSEIF (ZRPK == 1._JPDBLR) THEN
+(  409) # 410 "facgrm.F90"
+(  410) ! Polar stereographic
+(  411) # 412 "facgrm.F90"
+(  412)   CALL IGRIB_SET_VALUE (KGRIBH, 'gridType', TRIM ('polar_stereographic'//CLEXT))
+(  413) # 414 "facgrm.F90"
+(  414)   CALL IGRIB_SET_VALUE (KGRIBH, 'Nx', ILONS)
+(  415)   CALL IGRIB_SET_VALUE (KGRIBH, 'Ny', ILATS)
+(  416)   CALL IGRIB_SET_VALUE (KGRIBH, 'DxInMetres', ZDELX)
+(  417)   CALL IGRIB_SET_VALUE (KGRIBH, 'DyInMetres', ZDELY)
+(  418) # 419 "facgrm.F90"
+(  419)   CALL IGRIB_SET_VALUE (KGRIBH, 'iScansNegatively', 0)
+(  420)   CALL IGRIB_SET_VALUE (KGRIBH, 'jScansPositively', 1)
+(  421)   CALL IGRIB_SET_VALUE (KGRIBH, 'jPointsAreConsecutive', 0)
+(  422) # 423 "facgrm.F90"
+(  423) ENDIF
+(  424) # 425 "facgrm.F90"
+(  425) IF (LGRIB2_LAM_EX) THEN
+(  426)   CALL IGRIB_SET_VALUE (KGRIBH, 'Nux', YLCADR%NLOPAR (4))
+(  427)   CALL IGRIB_SET_VALUE (KGRIBH, 'Nuy', YLCADR%NLOPAR (6))
+(  428)   CALL IGRIB_SET_VALUE (KGRIBH, 'Ncx', YLCADR%NLOPAR (7))
+(  429)   CALL IGRIB_SET_VALUE (KGRIBH, 'Ncy', YLCADR%NLOPAR (8))
+(  430) ENDIF
+(  431) # 432 "facgrm.F90"
+(  432) CALL FAGRIB_API_HGEOM_LAM_PR 
+(  433) # 434 "facgrm.F90"
+(  434) END SUBROUTINE FAGRIB_API_HGEOM_LAM_GP
+(  435) # 436 "facgrm.F90"
+(  436) SUBROUTINE FAGRIB_API_HGEOM_LAM_PR 
+(  437) # 438 "facgrm.F90"
+(  438) REAL (KIND=JPDBLR) :: ZRPK
+(  439) # 440 "facgrm.F90"
+(  440) ZRPK  = YLCADR%SINLAT (2)
+(  441) # 442 "facgrm.F90"
+(  442) IF (0._JPDBLR < ZRPK .AND. ZRPK < 1._JPDBLR) THEN
+(  443) # 444 "facgrm.F90"
+(  444) ! Lambert
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 27
+
+(  445) # 446 "facgrm.F90"
+(  446)   CALL IGRIB_SET_VALUE (KGRIBH, 'latitudeOfFirstGridPointInDegrees',  LATRAD2DEG (YLCADR%SINLAT(14)))
+(  447)   CALL IGRIB_SET_VALUE (KGRIBH, 'longitudeOfFirstGridPointInDegrees', LONRAD2DEG (YLCADR%SINLAT(13)))
+(  448)   CALL IGRIB_SET_VALUE (KGRIBH, 'latitudeOfSouthernPoleInDegrees',                         0._JPDBLR)
+(  449)   CALL IGRIB_SET_VALUE (KGRIBH, 'longitudeOfSouthernPoleInDegrees',                        0._JPDBLR)
+(  450)   CALL IGRIB_SET_VALUE (KGRIBH, 'LaDInDegrees',                       LATRAD2DEG (YLCADR%SINLAT (4)))
+(  451)   CALL IGRIB_SET_VALUE (KGRIBH, 'LoVInDegrees',                       LONRAD2DEG (YLCADR%SINLAT (3)))
+(  452)   CALL IGRIB_SET_VALUE (KGRIBH, 'Latin1InDegrees',                    LATRAD2DEG (YLCADR%SINLAT (4)))
+(  453)   CALL IGRIB_SET_VALUE (KGRIBH, 'Latin2InDegrees',                    LATRAD2DEG (YLCADR%SINLAT (4)))
+(  454) # 455 "facgrm.F90"
+(  455)   IF (YLCADR%SINLAT (4) > 0) THEN
+(  456)   CALL IGRIB_SET_VALUE (KGRIBH, 'projectionCentreFlag',                                            0)
+(  457)   ELSE
+(  458)   CALL IGRIB_SET_VALUE (KGRIBH, 'projectionCentreFlag',                                          128)
+(  459)   ENDIF
+(  460) # 461 "facgrm.F90"
+(  461) ELSEIF (ZRPK == 0._JPDBLR) THEN
+(  462) # 463 "facgrm.F90"
+(  463) ! Mercator
+(  464) # 465 "facgrm.F90"
+(  465)   CALL IGRIB_SET_VALUE (KGRIBH, 'latitudeOfFirstGridPointInDegrees',  LATRAD2DEG (YLCADR%SINLAT(14)))
+(  466)   CALL IGRIB_SET_VALUE (KGRIBH, 'longitudeOfFirstGridPointInDegrees', LONRAD2DEG (YLCADR%SINLAT(13)))
+(  467)   CALL IGRIB_SET_VALUE (KGRIBH, 'LaDInDegrees',                       LATRAD2DEG (YLCADR%SINLAT (4)))
+(  468)   CALL IGRIB_SET_VALUE (KGRIBH, 'latitudeOfLastGridPointInDegrees',   LATRAD2DEG (YLCADR%SINLAT(16)))
+(  469)   CALL IGRIB_SET_VALUE (KGRIBH, 'longitudeOfLastGridPointInDegrees',  LONRAD2DEG (YLCADR%SINLAT(15)))
+(  470)   CALL IGRIB_SET_VALUE (KGRIBH, 'orientationOfTheGridInDegrees',                           0._JPDBLR)
+(  471) # 472 "facgrm.F90"
+(  472) ELSEIF (ZRPK == 1._JPDBLR) THEN
+(  473) # 474 "facgrm.F90"
+(  474) ! Polar stereographic
+(  475) # 476 "facgrm.F90"
+(  476)   CALL IGRIB_SET_VALUE (KGRIBH, 'latitudeOfFirstGridPointInDegrees',  LATRAD2DEG (YLCADR%SINLAT(14)))
+(  477)   CALL IGRIB_SET_VALUE (KGRIBH, 'longitudeOfFirstGridPointInDegrees', LONRAD2DEG (YLCADR%SINLAT(13)))
+(  478) # 479 "facgrm.F90"
+(  479)   CALL IGRIB_SET_VALUE (KGRIBH, 'LaDInDegrees',                       LATRAD2DEG (YLCADR%SINLAT (4)))
+(  480)   CALL IGRIB_SET_VALUE (KGRIBH, 'orientationOfTheGridInDegrees',      LONRAD2DEG (YLCADR%SINLAT (3)))
+(  481) # 482 "facgrm.F90"
+(  482)   IF (YLCADR%SINLAT (4) > 0) THEN
+(  483)   CALL IGRIB_SET_VALUE (KGRIBH, 'projectionCentreFlag',                                            0)
+(  484)   ELSE
+(  485)   CALL IGRIB_SET_VALUE (KGRIBH, 'projectionCentreFlag',                                          128)
+(  486)   ENDIF
+(  487) # 488 "facgrm.F90"
+(  488) ENDIF
+(  489) # 490 "facgrm.F90"
+(  490) END SUBROUTINE FAGRIB_API_HGEOM_LAM_PR
+(  491) # 493 "facgrm.F90"
+(  493) REAL (KIND=JPDBLR) FUNCTION LONRAD2DEG (PLON)
+(  494) REAL (KIND=JPDBLR), INTENT (IN) :: PLON
+(  495) LONRAD2DEG = MODULO (180._JPDBLR/RPI * PLON, 360._JPDBLR)
+(  496) END FUNCTION LONRAD2DEG
+(  497) # 498 "facgrm.F90"
+(  498) REAL (KIND=JPDBLR) FUNCTION LATRAD2DEG (PLAT)
+(  499) REAL (KIND=JPDBLR), INTENT (IN) :: PLAT
+(  500) LATRAD2DEG = 180._JPDBLR/RPI * PLAT
+(  501) END FUNCTION LATRAD2DEG
+(  502) # 503 "facgrm.F90"
+(  503) SUBROUTINE FAGRIB_API_HGEOM_GLO_GP 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 28
+
+(  504) # 505 "facgrm.F90"
+(  505) INTEGER (KIND=JPLIKB) :: ILATS, IDGNH, ILONS
+(  506) INTEGER (KIND=JPLIKB), ALLOCATABLE :: ILOENG (:)
+(  507) REAL (KIND=JPDBLR) :: ZNLAT, ZSLAT, ZVAL, ZLOCEN, ZMUCEN, ZSTRET
+(  508) CHARACTER (LEN=32), PARAMETER :: CLGGGRIDTYPES (0:1,0:1,0:1) =                &
+(  509)   & RESHAPE (                                                                 & 
+(  510)   & (/ 'regular_gg                    ', 'reduced_gg                    ',    &
+(  511)   &    'regular_stretched_gg          ', 'reduced_stretched_gg          ',    &
+(  512)   &    'regular_rotated_gg            ', 'reduced_rotated_gg            ',    &
+(  513)   &    'regular_stretched_rotated_gg  ', 'reduced_stretched_rotated_gg  ' /), &
+(  514)   & (/ 2, 2, 2 /))
+(  515) INTEGER (KIND=JPLIKB) :: ISTR, IROT, IRED, I
+(  516) # 517 "facgrm.F90"
+(  517) ISTR = MIN (YLCADR%NTYPTR, 1)
+(  518) IROT = MAX (YLCADR%NTYPTR-1, 0)
+(  519) # 520 "facgrm.F90"
+(  520) ZMUCEN = YLCADR%SSLAPO
+(  521) ZLOCEN = SIGN (ACOS (YLCADR%SCLOPO), YLCADR%SSLOPO) 
+(  522) ZSTRET = YLCADR%SCODIL
+(  523) # 524 "facgrm.F90"
+(  524) CALL IGRIB_SET_VALUE (KGRIBH, 'interpretationOfNumberOfPoints', 1)
+(  525) CALL IGRIB_SET_VALUE (KGRIBH, 'global',                         1)
+(  526) # 527 "facgrm.F90"
+(  527) ILATS = YLCADR%NLATIT
+(  528) ILONS = YLCADR%NXLOPA
+(  529) IDGNH = (ILATS+1) / 2
+(  530) ZNLAT = ASIN (YLCADR%SINLAT (1))
+(  531) ZSLAT = - ZNLAT
+(  532) # 533 "facgrm.F90"
+(  533) ALLOCATE (ILOENG (ILATS))
+(  534) # 535 "facgrm.F90"
+(  535) DO I = 1, ILATS
+(  536)   IF (I <= IDGNH) THEN
+(  537)     ILOENG (I) = YLCADR%NLOPAR (I)
+(  538)   ELSE
+(  539)     ILOENG (I) = YLCADR%NLOPAR (ILATS-I+1)
+(  540)   ENDIF
+(  541) ENDDO
+(  542) # 543 "facgrm.F90"
+(  543) IF (ANY (ILOENG /= ILOENG (1))) THEN
+(  544)   IRED = 1
+(  545) ELSE
+(  546)   IRED = 0
+(  547) ENDIF
+(  548) # 549 "facgrm.F90"
+(  549) CALL IGRIB_SET_VALUE (KGRIBH, 'gridType', TRIM (CLGGGRIDTYPES (IRED, ISTR, IROT)))
+(  550) # 551 "facgrm.F90"
+(  551) IF (IRED == 0) THEN
+(  552)   CALL IGRIB_SET_VALUE(KGRIBH,'numberOfPointsAlongAParallel',ILONS)
+(  553)   ZVAL = 360.0_JPDBLR/REAL (ILONS, JPDBLR)
+(  554)   CALL IGRIB_SET_VALUE(KGRIBH,'iDirectionIncrementInDegrees',ZVAL)
+(  555) ELSE
+(  556)   CALL IGRIB_SET_VALUE(KGRIBH,'pl',ILOENG(1:ILATS))
+(  557) ENDIF
+(  558) # 559 "facgrm.F90"
+(  559) DEALLOCATE (ILOENG)
+(  560) # 561 "facgrm.F90"
+(  561) CALL IGRIB_SET_VALUE(KGRIBH,'truncateDegrees',1)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 29
+
+(  562) CALL IGRIB_SET_VALUE(KGRIBH,'numberOfPointsAlongAMeridian',ILATS)
+(  563) ZVAL = LATRAD2DEG (ZNLAT)
+(  564) CALL IGRIB_SET_VALUE(KGRIBH,'latitudeOfFirstGridPointInDegrees',ZVAL)
+(  565) CALL IGRIB_SET_VALUE(KGRIBH,'longitudeOfFirstGridPointInDegrees',0)
+(  566) ZVAL = LATRAD2DEG (ZSLAT)
+(  567) CALL IGRIB_SET_VALUE(KGRIBH,'latitudeOfLastGridPointInDegrees',ZVAL)
+(  568) ZVAL=360._JPDBLR-360._JPDBLR/REAL(ILONS,JPDBLR)
+(  569) CALL IGRIB_SET_VALUE(KGRIBH,'longitudeOfLastGridPointInDegrees',ZVAL)
+(  570) CALL IGRIB_SET_VALUE(KGRIBH,'numberOfParallelsBetweenAPoleAndTheEquator',IDGNH)
+(  571) # 573 "facgrm.F90"
+(  573) IF (ISTR > 0) THEN
+(  574)   CALL IGRIB_SET_VALUE(KGRIBH,'stretchingFactor',ZSTRET)
+(  575) ENDIF
+(  576) # 577 "facgrm.F90"
+(  577) IF (IROT > 0) THEN
+(  578)   CALL IGRIB_SET_VALUE(KGRIBH,'latitudeOfStretchingPoleInDegrees', LATRAD2DEG (ASIN(ZMUCEN)))
+(  579)   CALL IGRIB_SET_VALUE(KGRIBH,'longitudeOfStretchingPoleInDegrees', LONRAD2DEG (ZLOCEN))
+(  580) ENDIF
+(  581) # 582 "facgrm.F90"
+(  582) END SUBROUTINE FAGRIB_API_HGEOM_GLO_GP
+(  583) # 584 "facgrm.F90"
+(  584) SUBROUTINE FAGRIB_API_HGEOM_GLO_SH 
+(  585) # 586 "facgrm.F90"
+(  586) REAL (KIND=JPDBLR) :: ZLOCEN, ZMUCEN, ZSTRET
+(  587) CHARACTER (LEN=32), PARAMETER :: CLSHGRIDTYPES (0:1,0:1) =                    &
+(  588)   & RESHAPE (                                                                 &
+(  589)   & (/ 'sh                            ', 'stretched_sh                  ',    &
+(  590)   &    'rotated_sh                    ', 'stretched_rotated_sh          ' /), &
+(  591)   & (/ 2, 2 /))
+(  592) INTEGER (KIND=JPLIKB) :: ISTR, IROT, IRED, ISMAX
+(  593) # 594 "facgrm.F90"
+(  594) ISTR = MIN (YLCADR%NTYPTR, 1)
+(  595) IROT = MAX (YLCADR%NTYPTR-1, 0)
+(  596) # 597 "facgrm.F90"
+(  597) ZMUCEN = YLCADR%SSLAPO
+(  598) ZLOCEN = SIGN (ACOS (YLCADR%SCLOPO), YLCADR%SSLOPO) 
+(  599) ZSTRET = YLCADR%SCODIL
+(  600) # 601 "facgrm.F90"
+(  601) CALL IGRIB_SET_VALUE (KGRIBH, 'gridType', TRIM (CLSHGRIDTYPES (ISTR, IROT)))
+(  602) # 603 "facgrm.F90"
+(  603) ISMAX = YLCADR%MTRONC
+(  604) CALL IGRIB_SET_VALUE (KGRIBH, 'pentagonalResolutionParameterJ', ISMAX)
+(  605) CALL IGRIB_SET_VALUE (KGRIBH, 'pentagonalResolutionParameterK', ISMAX)
+(  606) CALL IGRIB_SET_VALUE (KGRIBH, 'pentagonalResolutionParameterM', ISMAX)
+(  607) # 608 "facgrm.F90"
+(  608) IF (ISTR > 0) THEN
+(  609)   CALL IGRIB_SET_VALUE(KGRIBH,'stretchingFactor',ZSTRET)
+(  610) ENDIF
+(  611) # 612 "facgrm.F90"
+(  612) IF (IROT > 0) THEN
+(  613)   CALL IGRIB_SET_VALUE(KGRIBH,'latitudeOfStretchingPoleInDegrees', LATRAD2DEG (ASIN(ZMUCEN)))
+(  614)   CALL IGRIB_SET_VALUE(KGRIBH,'longitudeOfStretchingPoleInDegrees', LONRAD2DEG (ZLOCEN))
+(  615) ENDIF
+(  616) # 617 "facgrm.F90"
+(  617) END SUBROUTINE FAGRIB_API_HGEOM_GLO_SH
+(  618) # 619 "facgrm.F90"
+(  619) SUBROUTINE FAGRIB_API_VGEOM 
+(  620) # 621 "facgrm.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 30
+
+(  621) REAL (KIND=JPDBLR), ALLOCATABLE :: ZVERT (:)
+(  622) INTEGER (KIND=JPLIKB) :: IFLEVG
+(  623) # 624 "facgrm.F90"
+(  624) IF (CDPREF == 'S') THEN
+(  625)   IFLEVG = YLCADR%NNIVER
+(  626)   ALLOCATE (ZVERT (2*(IFLEVG+1)))
+(  627)   ZVERT (1:IFLEVG+1)            = YLCADR%SFOHYB (1,0:IFLEVG) * YLCADR%SPREFE
+(  628)   ZVERT (IFLEVG+2:2*(IFLEVG+1)) = YLCADR%SFOHYB (2,0:IFLEVG)
+(  629)   CALL IGRIB_SET_VALUE (KGRIBH, 'pv', ZVERT)                        
+(  630)   DEALLOCATE (ZVERT)
+(  631) ELSE
+(  632)   CALL IGRIB_SET_VALUE (KGRIBH, 'NV', 0)
+(  633) ENDIF
+(  634) # 635 "facgrm.F90"
+(  635) END SUBROUTINE FAGRIB_API_VGEOM
+(  636) # 637 "facgrm.F90"
+(  637) SUBROUTINE FAGRIB_API_DATE 
+(  638) # 639 "facgrm.F90"
+(  639) INTEGER (KIND=JPLIKB) :: IDATEF (22)
+(  640) INTEGER (KIND=JPLIKB) :: ITRI
+(  641) # 642 "facgrm.F90"
+(  642) CHARACTER (LEN=16) :: CTERMU
+(  643) # 645 "facgrm.F90"
+(  645) IDATEF(1:FA%JPLDAT)             = YLFICH%MADATE(:)
+(  646) IDATEF(FA%JPLDAT+1:FA%JPLDAT*2) = YLFICH%MADATX(:)
+(  647) # 648 "facgrm.F90"
+(  648) IF (LLGRIB1) THEN
+(  649)   CALL IGRIB_SET_VALUE (KGRIBH, 'yearOfCentury',  IDATEF ( 1)-2000)
+(  650) ELSE
+(  651)   CALL IGRIB_SET_VALUE (KGRIBH, 'year',  IDATEF ( 1))
+(  652) ENDIF
+(  653) # 654 "facgrm.F90"
+(  654) CALL IGRIB_SET_VALUE (KGRIBH, 'month', IDATEF ( 2))
+(  655) CALL IGRIB_SET_VALUE (KGRIBH, 'day',   IDATEF ( 3))
+(  656) CALL IGRIB_SET_VALUE (KGRIBH, 'hour',  IDATEF ( 4))
+(  657) CALL IGRIB_SET_VALUE (KGRIBH, 'minute',IDATEF ( 5))
+(  658) CALL IGRIB_SET_VALUE (KGRIBH, 'second',IDATEF (14)-60*(IDATEF (5)+60*IDATEF (4)))
+(  659) # 660 "facgrm.F90"
+(  660) CALL IGRIB_GET_VALUE (KGRIBH, 'indicatorOfUnitOfTimeRange', CTERMU)
+(  661) CALL IGRIB_SET_VALUE (KGRIBH, 'stepUnits', CTERMU)
+(  662) CALL IGRIB_GET_VALUE (KGRIBH, 'LSTCUM', ISTCUM)
+(  663) # 664 "facgrm.F90"
+(  664) IF (LLGRIB1) THEN
+(  665) # 666 "facgrm.F90"
+(  666)   CALL IGRIB_GET_VALUE (KGRIBH, 'timeRangeIndicator', ITRI)
+(  667) # 668 "facgrm.F90"
+(  668)   IF (ITRI /= 0 .AND. ISTCUM == 0) THEN
+(  669)     CALL FAGRIB_SETTIME ('P1', IDATEF (16), CTERMU)
+(  670)     CALL FAGRIB_SETTIME ('P2', IDATEF (15), CTERMU)
+(  671)   ELSEIF (ITRI /= 0 .AND. ISTCUM == 1) THEN
+(  672)     CALL FAGRIB_SETTIME ('P1',           0_JPLIKB, CTERMU)
+(  673)     CALL FAGRIB_SETTIME ('P2', IDATEF (15), CTERMU)
+(  674)   ELSEIF (ITRI == 0 .AND. IDATEF (15) == 0) THEN
+(  675)     CALL IGRIB_SET_VALUE (KGRIBH, 'timeRangeIndicator', 1_JPIM)
+(  676)   ELSEIF (ITRI == 0) THEN
+(  677)     CALL FAGRIB_SETTIME ('P1', IDATEF (15), CTERMU)
+(  678)   ELSE
+(  679)     KREP = -82
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 31
+
+(  680)     RETURN
+(  681)   ENDIF
+(  682) ELSE
+(  683) # 684 "facgrm.F90"
+(  684)   CALL IGRIB_GET_VALUE (KGRIBH, 'productDefinitionTemplateNumber', ITRI)
+(  685) # 686 "facgrm.F90"
+(  686)   IF (ITRI /= 0 .AND. ISTCUM == 0) THEN
+(  687)     CALL FAGRIB_SETTIME ('startStep', IDATEF (16), CTERMU)
+(  688)     CALL FAGRIB_SETTIME ('endStep',   IDATEF (15), CTERMU)
+(  689)   ELSEIF (ITRI /= 0 .AND. ISTCUM == 1) THEN
+(  690)     CALL FAGRIB_SETTIME ('startStep',           0_JPLIKB, CTERMU)
+(  691)     CALL FAGRIB_SETTIME ('endStep',   IDATEF (15), CTERMU)
+(  692)   ELSEIF (ITRI == 0) THEN
+(  693)     CALL FAGRIB_SETTIME ('endStep',   IDATEF (15), CTERMU)
+(  694)   ELSE
+(  695)     KREP = -82
+(  696)     RETURN
+(  697)   ENDIF
+(  698) # 699 "facgrm.F90"
+(  699) ENDIF
+(  700) # 701 "facgrm.F90"
+(  701) END SUBROUTINE FAGRIB_API_DATE
+(  702) # 703 "facgrm.F90"
+(  703) SUBROUTINE FAGRIB_SETTIME (CDKEY, KSECS, CDUNIT)
+(  704) # 705 "facgrm.F90"
+(  705) CHARACTER (LEN=*)     :: CDKEY, CDUNIT
+(  706) INTEGER (KIND=JPLIKB) :: KSECS
+(  707) INTEGER (KIND=JPLIKB) :: IVALUE
+(  708) # 709 "facgrm.F90"
+(  709) IVALUE = 0
+(  710) # 711 "facgrm.F90"
+(  711) SELECT CASE (CDUNIT)
+(  712)   CASE ('s')
+(  713)     IVALUE = KSECS 
+(  714)   CASE ('D')
+(  715)     IVALUE = KSECS / (  1 *   1 * 24 * 60 * 60)
+(  716)   CASE ('M')
+(  717)     IVALUE = KSECS / (  1 *  30 * 24 * 60 * 60)
+(  718)   CASE ('Y')
+(  719)     IVALUE = KSECS / (  1 * 365 * 24 * 60 * 60)
+(  720)   CASE ('10Y')
+(  721)     IVALUE = KSECS / ( 10 * 365 * 24 * 60 * 60)
+(  722)   CASE ('30Y')
+(  723)     IVALUE = KSECS / ( 30 * 365 * 24 * 60 * 60)
+(  724)   CASE ('C')
+(  725)     IVALUE = KSECS / (100_JPLIKB * 365_JPLIKB * 24_JPLIKB * 60_JPLIKB * 60_JPLIKB)
+(  726)   CASE ('h')
+(  727)     IVALUE = KSECS / (  1 *   1 *  1 * 60 * 60)
+(  728)   CASE ('3h')
+(  729)     IVALUE = KSECS / (  1 *   1 *  3 * 60 * 60)
+(  730)   CASE ('6h')
+(  731)     IVALUE = KSECS / (  1 *   1 *  6 * 60 * 60)
+(  732)   CASE ('12h')
+(  733)     IVALUE = KSECS / (  1 *   1 * 12 * 60 * 60)
+(  734)   CASE ('m')
+(  735)     IVALUE = KSECS / (  1 *   1 *  1 *  1 * 60)
+(  736)   CASE ('15m')
+(  737)     IVALUE = KSECS / (  1 *   1 *  1 * 15 * 60)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 32
+
+(  738)   CASE ('30m')
+(  739)     IVALUE = KSECS / (  1 *   1 *  1 * 30 * 60)
+(  740)   CASE DEFAULT
+(  741)     KREP = -82
+(  742)     RETURN
+(  743) END SELECT
+(  744) # 745 "facgrm.F90"
+(  745) CALL IGRIB_SET_VALUE (KGRIBH, CDKEY, IVALUE)
+(  746) # 747 "facgrm.F90"
+(  747) END SUBROUTINE FAGRIB_SETTIME
+(  748) # 749 "facgrm.F90"
+(  749) SUBROUTINE FAGRIB_API_SET_VALUES 
+(  750) # 751 "facgrm.F90"
+(  751) REAL (KIND=JPDBLR), TARGET, ALLOCATABLE :: ZCHAMT (:) ! Temporary array for swapping directions of lat/lon fields
+(  752) REAL (KIND=JPDBLR), TARGET, ALLOCATABLE :: ZCHAMS (:) ! PCHAMP * FMULTI
+(  753) REAL (KIND=JPDBLR), POINTER             :: ZCHAMP (:) ! Point either to PCHAMP or ZCHAMS
+(  754) # 756 "facgrm.F90"
+(  756) INTEGER (KIND=JPLIKB) :: ISMAX, IISMAX
+(  757) INTEGER (KIND=JPLIKB) :: JN, IDX, JLON, JLAT, ILCHAM, ISTRF, ICUNDF
+(  758) INTEGER (KIND=JPLIKB) :: IDECOPT
+(  759) INTEGER (KIND=JPLIKB) :: INBITSMAX, IMAXIPREC
+(  760) REAL (KIND=JPDBLR) :: ZUNDF, ZRNG, ZMIN, ZMAX
+(  761) LOGICAL :: LLHSDF
+(  762) # 763 "facgrm.F90"
+(  763) IF (LLDOUBLE) THEN
+(  764)   INBITSMAX = 64
+(  765)   IMAXIPREC =  2
+(  766) ELSE
+(  767)   INBITSMAX = 32
+(  768)   IMAXIPREC =  1
+(  769) ENDIF
+(  770) # 771 "facgrm.F90"
+(  771) IF (LLCOSP) THEN
+(  772)   IF (LLMLAM) THEN
+(  773)     ILCHAM = YLCADR%NSFLAM
+(  774)   ELSE    
+(  775)     ILCHAM=(1+YLCADR%MTRONC)*(2+YLCADR%MTRONC)
+(  776)   ENDIF   
+(  777) ELSE
+(  778)   ILCHAM = YLCADR%NVAPDG
+(  779) ENDIF
+(  780) # 781 "facgrm.F90"
+(  781) ! Changement d'echelle pour certains champs
+(  782) # 783 "facgrm.F90"
+(  783) ZUNDF = PUNDF
+(  784) IF (ZMULTI /= REAL (1._4, JPDBLR)) THEN
+(  785)   ALLOCATE (ZCHAMS (ILCHAM))
+(  786)   ZCHAMS =  PCHAMP (1:ILCHAM) * ZMULTI
+(  787)   ZUNDF  =  ZUNDF             * ZMULTI
+(  788)   ZCHAMP => ZCHAMS (1:ILCHAM)
+(  789) ELSE
+(  790)   ZCHAMP => PCHAMP (1:ILCHAM)
+(  791) ENDIF
+(  792) # 793 "facgrm.F90"
+(  793) !
+(  794) ! Traitement des valeurs indefinies; on verifie d'abord que le champ
+(  795) ! contient de telles valeurs afin d'eviter de polluer le resultat
+(  796) ! final avec un bitmap inutile
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 33
+
+(  797) !
+(  798) LLHSDF = .TRUE.
+(  799) IF (LLUNDF) THEN
+(  800)   ICUNDF = COUNT (ZCHAMP == ZUNDF)
+(  801)   LLUNDF = ICUNDF > 0
+(  802)   LLHSDF = ICUNDF < ILCHAM
+(  803) ELSE
+(  804)   ICUNDF = 0
+(  805) ENDIF
+(  806) # 808 "facgrm.F90"
+(  808) IF (LLCOSP) THEN
+(  809) # 810 "facgrm.F90"
+(  810)   INBITS = MIN (YLFICH%NBFCSP, INBITSMAX)
+(  811) # 812 "facgrm.F90"
+(  812)   IF (LLMGLO) THEN
+(  813) # 814 "facgrm.F90"
+(  814)     IF (INBITS == INBITSMAX) THEN
+(  815)       ISTRF = YLCADR%MTRONC
+(  816)     ELSE
+(  817)       ISTRF = YLFICH%NSTROF
+(  818)     ENDIF
+(  819)    
+(  820)     CALL IGRIB_SET_VALUE (KGRIBH, 'bitsPerValue', INBITS)
+(  821)     CALL IGRIB_SET_VALUE (KGRIBH, 'packingType', 'spectral_complex')
+(  822)     CALL IGRIB_SET_VALUE (KGRIBH, 'optimizeScaleFactor', 1)
+(  823)    
+(  824)     CALL IGRIB_SET_VALUE (KGRIBH, 'subSetJ', ISTRF)
+(  825)     CALL IGRIB_SET_VALUE (KGRIBH, 'subSetK', ISTRF)
+(  826)     CALL IGRIB_SET_VALUE (KGRIBH, 'subSetM', ISTRF)
+(  827) # 828 "facgrm.F90"
+(  828)     CALL IGRIB_SET_VALUE (KGRIBH, 'unpackedSubsetPrecision', IMAXIPREC)
+(  829)    
+(  830)     CALL IGRIB_SET_VALUE (KGRIBH, 'values', ZCHAMP (1:ILCHAM))
+(  831) # 832 "facgrm.F90"
+(  832)   ELSEIF (LLMLAM) THEN
+(  833) # 834 "facgrm.F90"
+(  834)     ISTRF = YLFICH%NSTROF
+(  835) # 836 "facgrm.F90"
+(  836)     CALL IGRIB_SET_VALUE (KGRIBH, "bitsPerValue", INBITS)
+(  837)     CALL IGRIB_SET_VALUE (KGRIBH, "packingType", "bifourier_complex")
+(  838)     CALL IGRIB_SET_VALUE (KGRIBH, 'optimizeScaleFactor', 1)
+(  839) # 840 "facgrm.F90"
+(  840)     IF (INBITS == INBITSMAX) THEN
+(  841)       ISMAX  = YLCADR%NSMAX
+(  842)       IISMAX = YLCADR%MTRONC
+(  843)       CALL IGRIB_SET_VALUE (KGRIBH, "biFourierResolutionSubSetParameterN", ISMAX)
+(  844)       CALL IGRIB_SET_VALUE (KGRIBH, "biFourierResolutionSubSetParameterM", IISMAX)
+(  845)       CALL IGRIB_SET_VALUE (KGRIBH, "biFourierSubTruncationType", 99) 
+(  846)     ELSE
+(  847)       CALL IGRIB_SET_VALUE (KGRIBH, "biFourierResolutionSubSetParameterN", ISTRF)
+(  848)       CALL IGRIB_SET_VALUE (KGRIBH, "biFourierResolutionSubSetParameterM", ISTRF)
+(  849)       CALL IGRIB_SET_VALUE (KGRIBH, "biFourierSubTruncationType", 77) 
+(  850)     ENDIF
+(  851) # 852 "facgrm.F90"
+(  852)     CALL IGRIB_SET_VALUE (KGRIBH, "biFourierDoNotPackAxes", 1)
+(  853)   
+(  854)     CALL IGRIB_SET_VALUE (KGRIBH, "unpackedSubsetPrecision", IMAXIPREC)
+(  855) # 856 "facgrm.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 34
+
+(  856)     CALL IGRIB_SET_VALUE (KGRIBH, 'values', ZCHAMP (1:ILCHAM))
+(  857) # 858 "facgrm.F90"
+(  858)   ENDIF
+(  859) # 860 "facgrm.F90"
+(  860) ELSE
+(  861) # 862 "facgrm.F90"
+(  862)   INBITS = MIN (YLFICH%NBFPDG, INBITSMAX)
+(  863) # 864 "facgrm.F90"
+(  864)   IF (INBITS == INBITSMAX) THEN
+(  865)     IF (LLGRIB1) THEN
+(  866)       IF (LLDOUBLE) THEN
+(  867)         INBITS = 63 ! 64bit simple packing does not work with grib_api
+(  868)       ENDIF
+(  869)       CALL IGRIB_SET_VALUE (KGRIBH, 'bitsPerValue', INBITS)
+(  870)       CALL IGRIB_SET_VALUE (KGRIBH, 'packingType', 'grid_simple')
+(  871)       CALL IGRIB_SET_VALUE (KGRIBH, 'optimizeScaleFactor', 1)
+(  872)     ELSE
+(  873)       CALL IGRIB_SET_VALUE (KGRIBH, 'packingType', 'grid_ieee')
+(  874)       CALL IGRIB_SET_VALUE (KGRIBH, 'precision', IMAXIPREC)
+(  875)     ENDIF
+(  876)   ELSE
+(  877)     CALL IGRIB_SET_VALUE (KGRIBH, 'bitsPerValue', INBITS)
+(  878)     SELECT CASE (INGRIB)
+(  879)       CASE (120, 160)
+(  880)         CALL IGRIB_SET_VALUE (KGRIBH, 'packingType', 'grid_simple')
+(  881)       CASE (140, 180) 
+(  882)         IF (INBITS > 30) THEN ! grib_api does appear to support 2nd order packing with more than 30 bits
+(  883)           CALL IGRIB_SET_VALUE (KGRIBH, 'packingType', 'grid_simple')
+(  884)         ELSE
+(  885)           CALL IGRIB_SET_VALUE (KGRIBH, 'packingType', 'grid_second_order')
+(  886)         ENDIF
+(  887)       CASE (200)
+(  888)         CALL IGRIB_SET_VALUE (KGRIBH, 'packingType', 'grid_complex_spatial_differencing')
+(  889)         CALL IGRIB_SET_VALUE (KGRIBH, 'orderOfSpatialDifferencing', 2)
+(  890)       CASE DEFAULT
+(  891)         KREP = -96
+(  892)         RETURN
+(  893)     END SELECT
+(  894)     CALL IGRIB_SET_VALUE (KGRIBH, 'optimizeScaleFactor', 1)
+(  895)   ENDIF
+(  896) # 897 "facgrm.F90"
+(  897)   IF (LLUNDF) THEN
+(  898)     CALL IGRIB_SET_VALUE (KGRIBH, 'bitmapPresent', 1)
+(  899)     CALL IGRIB_SET_VALUE (KGRIBH, 'missingValue', ZUNDF)
+(  900)   ENDIF
+(  901) # 902 "facgrm.F90"
+(  902)   IF (.NOT. LLGRIB1) THEN
+(  903) ! This line should not be necessary, but sometimes grib_api fails to update numberOfDataPoints
+(  904)     CALL IGRIB_SET_VALUE (KGRIBH, 'numberOfDataPoints', ILCHAM-ICUNDF) 
+(  905)   ENDIF
+(  906) # 907 "facgrm.F90"
+(  907)   IF (LLLTLN) THEN
+(  908) # 909 "facgrm.F90"
+(  909)     ALLOCATE (ZCHAMT (ILCHAM))
+(  910) # 911 "facgrm.F90"
+(  911)     DO JLAT = 1, YLCADR%NLATIT
+(  912)       DO JLON = 1, YLCADR%NXLOPA
+(  913)         JN  = JLON+YLCADR%NXLOPA*(JLAT-1)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:20      page 35
+
+(  914)         IDX = JLON+YLCADR%NXLOPA*(YLCADR%NLATIT-JLAT)
+(  915)         ZCHAMT (IDX) = ZCHAMP (JN)
+(  916)       ENDDO
+(  917)     ENDDO
+(  918) # 920 "facgrm.F90"
+(  920)     CALL IGRIB_SET_VALUE (KGRIBH, 'values', ZCHAMT)
+(  921) # 922 "facgrm.F90"
+(  922)     DEALLOCATE (ZCHAMT)
+(  923) # 924 "facgrm.F90"
+(  924)   ELSE
+(  925)     CALL IGRIB_SET_VALUE (KGRIBH, 'values', ZCHAMP (1:ILCHAM))
+(  926)   ENDIF
+(  927) # 928 "facgrm.F90"
+(  928) ENDIF
+(  929) # 930 "facgrm.F90"
+(  930) IF (ALLOCATED (ZCHAMS)) DEALLOCATE (ZCHAMS)
+(  931) # 932 "facgrm.F90"
+(  932) END SUBROUTINE FAGRIB_API_SET_VALUES
+(  933) # 934 "facgrm.F90"
+(  934) SUBROUTINE FAGRIB_SET_LOCAL_SECTION 
+(  935) # 936 "facgrm.F90"
+(  936) CALL IGRIB_SET_VALUE (KGRIBH, 'CLNOMA', TRIM (CLNOMA (1:ILNOMA)))
+(  937) CALL IGRIB_SET_VALUE (KGRIBH, 'INGRIB', INGRIB)
+(  938) IF (LLCOSP) THEN
+(  939)   CALL IGRIB_SET_VALUE (KGRIBH, 'LLCOSP', 1)
+(  940) ELSE
+(  941)   CALL IGRIB_SET_VALUE (KGRIBH, 'LLCOSP', 0)
+(  942) ENDIF
+(  943) CALL IGRIB_SET_VALUE (KGRIBH, 'INBITS', INBITS)
+(  944) # 945 "facgrm.F90"
+(  945) END SUBROUTINE FAGRIB_SET_LOCAL_SECTION
+(  946) # 947 "facgrm.F90"
+(  947) END SUBROUTINE

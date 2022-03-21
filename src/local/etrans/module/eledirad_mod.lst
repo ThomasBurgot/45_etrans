@@ -1,0 +1,312 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:54      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eledirad_mod.F90
+
+(    1) MODULE ELEDIRAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ELEDIRAD(KM,KFC,KLED2,PFFT)
+(    4) 
+(    5) !**** *ELEDIRAD* - Direct Legendre transform.
+(    6) 
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Direct Legendre tranform of state variables.
+(   10) 
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        CALL ELEDIRAD(...)
+(   14) 
+(   15) !        Explicit arguments :  KM - zonal wavenumber
+(   16) !        --------------------  KFC - number of field to transform
+(   17) !                              PAIA - antisymmetric part of Fourier
+(   18) !                              fields for zonal wavenumber KM
+(   19) !                              PSIA - symmetric part of Fourier
+(   20) !                              fields for zonal wavenumber KM
+(   21) !                              POA1 -  spectral
+(   22) !                              fields for zonal wavenumber KM
+(   23) !                              PLEPO - Legendre polonomials
+(   24) 
+(   25) !        Implicit arguments :  None.
+(   26) !        --------------------
+(   27) 
+(   28) !     Method.
+(   29) !     -------
+(   30) 
+(   31) !     Externals.   MXMAOP - matrix multiply
+(   32) !     ----------
+(   33) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:54      page 2
+
+(   34) !     Reference.
+(   35) !     ----------
+(   36) !        ECMWF Research Department documentation of the IFS
+(   37) 
+(   38) !     Author.
+(   39) !     -------
+(   40) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   41) 
+(   42) !     Modifications.
+(   43) !     --------------
+(   44) !        Original : 88-01-28
+(   45) !        Modified : 91-07-01 Philippe Courtier/Mats Hamrud - Rewrite
+(   46) !                            for uv formulation
+(   47) !        Modified : 93-03-19 D. Giard - NTMAX instead of NSMAX
+(   48) !        Modified : 04/06/99 D.Salmond : change order of AIA and SIA
+(   49) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   50) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   51) 
+(   52) !     ------------------------------------------------------------------
+(   53) 
+(   54) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   55) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   56) 
+(   57) USE TPM_DIM         ,ONLY : R
+(   58) !USE TPM_GEOMETRY
+(   59) !USE TPM_TRANS
+(   60) 
+(   61) USE TPMALD_FFT      ,ONLY : TALD
+(   62) USE TPMALD_DIM      ,ONLY : RALD
+(   63) !
+(   64) 
+(   65) IMPLICIT NONE
+(   66) 
+(   67) INTEGER(KIND=JPIM), INTENT(IN)  :: KM
+(   68) INTEGER(KIND=JPIM), INTENT(IN)  :: KFC
+(   69) INTEGER(KIND=JPIM), INTENT(IN)  :: KLED2
+(   70) 
+(   71) REAL(KIND=JPRB),   INTENT(INOUT)  :: PFFT(:,:)
+(   72) 
+(   73) INTEGER(KIND=JPIM) :: JF, JJ
+(   74) REAL(KIND=JPRB) :: ZNORM
+(   75) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   76) 
+(   77) !     ------------------------------------------------------------------
+(   78) 
+(   79) IF (LHOOK) CALL DR_HOOK('ELEDIRAD_MOD:ELEDIRAD',0,ZHOOK_HANDLE)
+(   80) DO JJ=1,1
+(   81)   DO JF=1,KFC
+(   82)     PFFT(JJ,JF) = 2.0_JPRB * PFFT(JJ,JF)
+(   83)   ENDDO
+(   84) ENDDO
+(   85) 
+(   86) CALL FFT992(PFFT,TALD%TRIGSE,TALD%NFAXE,1,RALD%NDGLSUR+R%NNOEXTZG,R%NDGL+R%NNOEXTZG,KFC,1)
+(   87) 
+(   88) ZNORM=1.0_JPRB/(2.0_JPRB*REAL(R%NDGL+R%NNOEXTZG,JPRB))
+(   89) DO JJ=1,R%NDGL+R%NNOEXTZG
+(   90)   DO JF=1,KFC
+(   91)     PFFT(JJ,JF) = ZNORM * PFFT(JJ,JF)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:54      page 3
+
+(   92)   ENDDO
+(   93) ENDDO
+(   94) IF (LHOOK) CALL DR_HOOK('ELEDIRAD_MOD:ELEDIRAD',1,ZHOOK_HANDLE)
+(   95) 
+(   96) !     ------------------------------------------------------------------
+(   97) 
+(   98) END SUBROUTINE ELEDIRAD
+(   99) END MODULE ELEDIRAD_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:54      page 4
+
+(    1) # 1 "eledirad_mod.F90"
+(    1) MODULE ELEDIRAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ELEDIRAD(KM,KFC,KLED2,PFFT)
+(    4) # 5 "eledirad_mod.F90"
+(    5) !**** *ELEDIRAD* - Direct Legendre transform.
+(    6) # 7 "eledirad_mod.F90"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Direct Legendre tranform of state variables.
+(   10) # 11 "eledirad_mod.F90"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        CALL ELEDIRAD(...)
+(   14) # 15 "eledirad_mod.F90"
+(   15) !        Explicit arguments :  KM - zonal wavenumber
+(   16) !        --------------------  KFC - number of field to transform
+(   17) !                              PAIA - antisymmetric part of Fourier
+(   18) !                              fields for zonal wavenumber KM
+(   19) !                              PSIA - symmetric part of Fourier
+(   20) !                              fields for zonal wavenumber KM
+(   21) !                              POA1 -  spectral
+(   22) !                              fields for zonal wavenumber KM
+(   23) !                              PLEPO - Legendre polonomials
+(   24) # 25 "eledirad_mod.F90"
+(   25) !        Implicit arguments :  None.
+(   26) !        --------------------
+(   27) # 28 "eledirad_mod.F90"
+(   28) !     Method.
+(   29) !     -------
+(   30) # 31 "eledirad_mod.F90"
+(   31) !     Externals.   MXMAOP - matrix multiply
+(   32) !     ----------
+(   33) # 34 "eledirad_mod.F90"
+(   34) !     Reference.
+(   35) !     ----------
+(   36) !        ECMWF Research Department documentation of the IFS
+(   37) # 38 "eledirad_mod.F90"
+(   38) !     Author.
+(   39) !     -------
+(   40) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   41) # 42 "eledirad_mod.F90"
+(   42) !     Modifications.
+(   43) !     --------------
+(   44) !        Original : 88-01-28
+(   45) !        Modified : 91-07-01 Philippe Courtier/Mats Hamrud - Rewrite
+(   46) !                            for uv formulation
+(   47) !        Modified : 93-03-19 D. Giard - NTMAX instead of NSMAX
+(   48) !        Modified : 04/06/99 D.Salmond : change order of AIA and SIA
+(   49) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   50) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   51) # 52 "eledirad_mod.F90"
+(   52) !     ------------------------------------------------------------------
+(   53) # 54 "eledirad_mod.F90"
+(   54) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   55) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   56) # 57 "eledirad_mod.F90"
+(   57) USE TPM_DIM         ,ONLY : R
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:54      page 5
+
+(   58) !USE TPM_GEOMETRY
+(   59) !USE TPM_TRANS
+(   60) # 61 "eledirad_mod.F90"
+(   61) USE TPMALD_FFT      ,ONLY : TALD
+(   62) USE TPMALD_DIM      ,ONLY : RALD
+(   63) !
+(   64) # 65 "eledirad_mod.F90"
+(   65) IMPLICIT NONE
+(   66) # 67 "eledirad_mod.F90"
+(   67) INTEGER(KIND=JPIM), INTENT(IN)  :: KM
+(   68) INTEGER(KIND=JPIM), INTENT(IN)  :: KFC
+(   69) INTEGER(KIND=JPIM), INTENT(IN)  :: KLED2
+(   70) # 71 "eledirad_mod.F90"
+(   71) REAL(KIND=JPRB),   INTENT(INOUT)  :: PFFT(:,:)
+(   72) # 73 "eledirad_mod.F90"
+(   73) INTEGER(KIND=JPIM) :: JF, JJ
+(   74) REAL(KIND=JPRB) :: ZNORM
+(   75) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   76) # 77 "eledirad_mod.F90"
+(   77) !     ------------------------------------------------------------------
+(   78) # 79 "eledirad_mod.F90"
+(   79) IF (LHOOK) CALL DR_HOOK('ELEDIRAD_MOD:ELEDIRAD',0,ZHOOK_HANDLE)
+(   80) DO JJ=1,1
+(   81)   DO JF=1,KFC
+(   82)     PFFT(JJ,JF) = 2.0_JPRB * PFFT(JJ,JF)
+(   83)   ENDDO
+(   84) ENDDO
+(   85) # 86 "eledirad_mod.F90"
+(   86) CALL FFT992(PFFT,TALD%TRIGSE,TALD%NFAXE,1,RALD%NDGLSUR+R%NNOEXTZG,R%NDGL+R%NNOEXTZG,KFC,1)
+(   87) # 88 "eledirad_mod.F90"
+(   88) ZNORM=1.0_JPRB/(2.0_JPRB*REAL(R%NDGL+R%NNOEXTZG,JPRB))
+(   89) DO JJ=1,R%NDGL+R%NNOEXTZG
+(   90)   DO JF=1,KFC
+(   91)     PFFT(JJ,JF) = ZNORM * PFFT(JJ,JF)
+(   92)   ENDDO
+(   93) ENDDO
+(   94) IF (LHOOK) CALL DR_HOOK('ELEDIRAD_MOD:ELEDIRAD',1,ZHOOK_HANDLE)
+(   95) # 96 "eledirad_mod.F90"
+(   96) !     ------------------------------------------------------------------
+(   97) # 98 "eledirad_mod.F90"
+(   98) END SUBROUTINE ELEDIRAD
+(   99) END MODULE ELEDIRAD_MOD

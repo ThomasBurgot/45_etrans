@@ -1,0 +1,3336 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: tpm_fftw.F90
+
+(    1) MODULE TPM_FFTW
+(    2) !   Author.
+(    3) !   -------
+(    4) !     George Mozdzynski
+(    5) !
+(    6) !   Modifications.
+(    7) !   -------------- 
+(    8) !     Original      October 2014
+(    9) !     R. El Khatib 01-Sep-2015 More subroutines for better modularity
+(   10) 
+(   11) USE, INTRINSIC :: ISO_C_BINDING
+(   12) 
+(   13) USE PARKIND1   ,ONLY : JPIB, JPIM, JPRB, JPRBT, JPRD
+(   14) USE MPL_MODULE ,ONLY : MPL_MYRANK
+(   15) USE YOMHOOK    ,ONLY : LHOOK, DR_HOOK
+(   16) 
+(   17) IMPLICIT NONE
+(   18) 
+(   19) SAVE
+(   20) 
+(   21) #ifdef ECMWF
+(   22) !-- We should pull the include file from the FFTW3 installation rather than use our fixed include
+(   23) 
+(   24) #ifdef __NEC__
+(   25) ! From NLC (NEC Numeric Library Collection)
+(   26) #include "aslfftw3.f03"
+(   27) #define FFTW_NO_SIMD 0
+(   28) #else
+(   29) #include "fftw3.f03"
+(   30) #endif
+(   31) 
+(   32) #else
+(   33) #include "fftw3.f03.h"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 2
+
+(   34) #endif
+(   35) 
+(   36) PRIVATE
+(   37) PUBLIC CREATE_PLAN_FFTW, DESTROY_PLAN_FFTW, DESTROY_PLANS_FFTW, INIT_PLANS_FFTW, &
+(   38)       & FFTW_RESOL, TW, EXEC_FFTW, EXEC_EFFTW
+(   39) 
+(   40) TYPE FFTW_TYPE
+(   41)   INTEGER(KIND=JPIM),ALLOCATABLE :: N_PLANS(:)
+(   42)   TYPE(FFTW_PLAN),POINTER :: FFTW_PLANS(:)
+(   43)   INTEGER(KIND=JPIM) :: N_MAX=0         ! maximum number of latitudes
+(   44)   INTEGER(KIND=JPIM) :: N_MAX_PLANS=4   ! maximum number of plans for each active latitude
+(   45)   LOGICAL            :: LFFTW=.FALSE. 
+(   46) END TYPE FFTW_TYPE
+(   47) 
+(   48) 
+(   49) TYPE FFTW_PLAN
+(   50)   INTEGER(KIND=JPIM) :: NPLAN_ID=123456
+(   51)   INTEGER(KIND=JPIB) :: NPLAN
+(   52)   INTEGER(KIND=JPIM) :: NLOT
+(   53)   INTEGER(KIND=JPIM) :: NTYPE
+(   54)   TYPE(FFTW_PLAN),POINTER :: NEXT_PLAN => NULL()
+(   55) END TYPE FFTW_PLAN
+(   56) 
+(   57) TYPE(FFTW_TYPE),ALLOCATABLE,TARGET :: FFTW_RESOL(:)
+(   58) TYPE(FFTW_TYPE),POINTER     :: TW
+(   59) 
+(   60) 
+(   61) 
+(   62) ! ------------------------------------------------------------------
+(   63) CONTAINS
+(   64) ! ------------------------------------------------------------------
+(   65) 
+(   66) 
+(   67) SUBROUTINE INIT_PLANS_FFTW(KDLON)
+(   68) INTEGER(KIND=JPIM),INTENT(IN) :: KDLON
+(   69) 
+(   70) #include "abor1.intfb.h"
+(   71) 
+(   72) TW%N_MAX=KDLON
+(   73) ALLOCATE(TW%FFTW_PLANS(TW%N_MAX))
+(   74) ALLOCATE(TW%N_PLANS(TW%N_MAX))
+(   75) TW%N_PLANS(:)=0
+(   76) RETURN  
+(   77) END SUBROUTINE INIT_PLANS_FFTW
+(   78) 
+(   79) 
+(   80) SUBROUTINE CREATE_PLAN_FFTW(KPLAN,KTYPE,KN,KLOT)
+(   81) INTEGER(KIND=JPIB),INTENT(OUT) :: KPLAN
+(   82) INTEGER(KIND=JPIM),INTENT(IN) :: KTYPE,KN,KLOT
+(   83) 
+(   84) INTEGER(KIND=JPIB) :: IPLAN
+(   85) INTEGER(KIND=JPIM) :: IRANK, ISTRIDE
+(   86) INTEGER(KIND=JPIM) :: JL, JN
+(   87) INTEGER(KIND=JPIM) :: IRDIST,ICDIST,IN(1),IEMBED(1)
+(   88) REAL(KIND=JPRBT), POINTER :: ZDUM(:)
+(   89) TYPE(C_PTR) :: ZDUMP
+(   90) LOGICAL :: LLFOUND
+(   91) LOGICAL :: LLRESTRICT_PLANS=.TRUE.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 3
+
+(   92) TYPE(FFTW_PLAN),POINTER :: CURR_FFTW_PLAN,START_FFTW_PLAN
+(   93) REAL(KIND=JPRB) :: ZHOOK_HANDLE, ZHOOK_HANDLE2
+(   94) IF (LHOOK) CALL DR_HOOK('CREATE_PLAN_FFTW',0,ZHOOK_HANDLE)
+(   95) 
+(   96) IF( KN > TW%N_MAX )THEN
+(   97)   CALL ABOR1('CREATE_PLAN_FFTW: KN > N_MAX THAT WAS INITIALISED IN INIT_PLANS_FFTW')
+(   98) ENDIF
+(   99) 
+(  100) IRANK=1
+(  101) ISTRIDE=1
+(  102) IN(1)=KN
+(  103) IEMBED(1)=IN(1)
+(  104) ICDIST=KN/2+1
+(  105) IRDIST=ICDIST*2
+(  106) 
+(  107) !$OMP CRITICAL (FFTW_CREATE)
+(  108) LLFOUND=.FALSE.
+(  109) IF( TW%FFTW_PLANS(KN)%NPLAN_ID /= 123456 )THEN
+(  110)   WRITE(*,'("CREATE_PLAN_FFTW.1: PLAN_ID=",I10)')TW%FFTW_PLANS(KN)%NPLAN_ID
+(  111)   CALL ABOR1('CREATE_PLAN_FFTW.1: NPLAN_ID /= 123456')
+(  112) ENDIF
+(  113) CURR_FFTW_PLAN=>TW%FFTW_PLANS(KN)
+(  114) IF( CURR_FFTW_PLAN%NPLAN_ID /= 123456 )THEN
+(  115)   WRITE(*,'("CREATE_PLAN_FFTW.2: PLAN_ID=",I10)')CURR_FFTW_PLAN%NPLAN_ID
+(  116)   CALL ABOR1('CREATE_PLAN_FFTW.2: NPLAN_ID /= 123456')
+(  117) ENDIF
+(  118) ! search for plan in existing plans
+(  119) DO JL=1,TW%N_PLANS(KN)
+(  120)   IF( KLOT == CURR_FFTW_PLAN%NLOT .AND. KTYPE == CURR_FFTW_PLAN%NTYPE )THEN
+(  121)     LLFOUND=.TRUE.
+(  122)     IPLAN=CURR_FFTW_PLAN%NPLAN
+(  123)     EXIT
+(  124)   ELSEIF( JL /= TW%N_PLANS(KN) )THEN
+(  125)     CURR_FFTW_PLAN=>CURR_FFTW_PLAN%NEXT_PLAN
+(  126)     IF( CURR_FFTW_PLAN%NPLAN_ID /= 123456 )THEN
+(  127)       WRITE(*,'("CREATE_PLAN_FFTW.3: PLAN_ID=",I10)')CURR_FFTW_PLAN%NPLAN_ID
+(  128)       CALL ABOR1('CREATE_PLAN_FFTW.3: NPLAN_ID /= 123456')
+(  129)     ENDIF
+(  130)   ENDIF
+(  131) ENDDO
+(  132) IF( .NOT.LLFOUND )THEN
+(  133)   IF( LLRESTRICT_PLANS )THEN
+(  134)     IF( TW%N_PLANS(KN) == TW%N_MAX_PLANS )THEN
+(  135)       ! destroy the plan at the start of the list
+(  136) !     WRITE(*,'("CREATE_PLAN_FFTW: BEG: DESTROYING A PLAN AT THE START OF THE LIST")')
+(  137)        IF (JPRBT == JPRD) THEN
+(  138)           !**CALL DFFTW_DESTROY_PLAN(TW%FFTW_PLANS(KN)%NPLAN)
+(  139)        ELSE
+(  140)           !**CALL SFFTW_DESTROY_PLAN(TW%FFTW_PLANS(KN)%NPLAN)
+(  141)        END IF
+(  142)       TW%FFTW_PLANS(KN)%NPLAN_ID=999999
+(  143)       START_FFTW_PLAN=>TW%FFTW_PLANS(KN)
+(  144)       TW%FFTW_PLANS(KN)=TW%FFTW_PLANS(KN)%NEXT_PLAN
+(  145)       ! DEALLOCATE(START_FFTW_PLAN)
+(  146)       TW%N_PLANS(KN)=TW%N_PLANS(KN)-1
+(  147) !     WRITE(*,'("CREATE_PLAN_FFTW: END: DESTROYING A PLAN AT THE START OF THE LIST")')
+(  148)     ENDIF
+(  149)   ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 4
+
+(  150)   IF (JPRBT == JPRD) THEN
+(  151)      !**ZDUMP=FFTW_ALLOC_COMPLEX(INT(1,C_SIZE_T))
+(  152)   ELSE
+(  153)      !**ZDUMP=FFTWF_ALLOC_COMPLEX(INT(1,C_SIZE_T))
+(  154)   END IF
+(  155)   CALL C_F_POINTER(ZDUMP,ZDUM,[2])
+(  156)   IF( KTYPE==1 )THEN
+(  157)      IF (LHOOK) CALL DR_HOOK('FFTW_PLAN_MANY_DFT_C2R',0,ZHOOK_HANDLE2)
+(  158)      IF (JPRBT == JPRD) THEN
+(  159)         !**CALL DFFTW_PLAN_MANY_DFT_C2R(IPLAN,IRANK,IN,KLOT,ZDUM,IEMBED,ISTRIDE,ICDIST,&
+(  160)         !**     & ZDUM,IEMBED,ISTRIDE,IRDIST,FFTW_ESTIMATE+FFTW_NO_SIMD)
+(  161)      ELSE
+(  162)         !**CALL SFFTW_PLAN_MANY_DFT_C2R(IPLAN,IRANK,IN,KLOT,ZDUM,IEMBED,ISTRIDE,ICDIST,&
+(  163)         !**     & ZDUM,IEMBED,ISTRIDE,IRDIST,FFTW_ESTIMATE+FFTW_NO_SIMD)
+(  164)      END IF
+(  165)      IF (LHOOK) CALL DR_HOOK('FFTW_PLAN_MANY_DFT_C2R',1,ZHOOK_HANDLE2)
+(  166)   ELSEIF( KTYPE==-1 )THEN
+(  167)      IF (LHOOK) CALL DR_HOOK('FFTW_PLAN_MANY_DFT_R2C',0,ZHOOK_HANDLE2)
+(  168)      IF (JPRBT == JPRD) THEN
+(  169)         !**CALL DFFTW_PLAN_MANY_DFT_R2C(IPLAN,IRANK,IN,KLOT,ZDUM,IEMBED,ISTRIDE,IRDIST,&
+(  170)         !**     & ZDUM,IEMBED,ISTRIDE,ICDIST,FFTW_ESTIMATE+FFTW_NO_SIMD)
+(  171)      ELSE
+(  172)         !**CALL SFFTW_PLAN_MANY_DFT_R2C(IPLAN,IRANK,IN,KLOT,ZDUM,IEMBED,ISTRIDE,IRDIST,&
+(  173)         !**     & ZDUM,IEMBED,ISTRIDE,ICDIST,FFTW_ESTIMATE+FFTW_NO_SIMD)       
+(  174)      END IF
+(  175)      IF (LHOOK) CALL DR_HOOK('FFTW_PLAN_MANY_DFT_R2C',1,ZHOOK_HANDLE2)
+(  176)   ELSE
+(  177)     CALL ABOR1('FFTW_PLAN: INVALID KTYPE')
+(  178)   ENDIF
+(  179)   IF (JPRBT == JPRD) THEN
+(  180)      !**CALL FFTW_FREE(ZDUMP)
+(  181)   ELSE
+(  182)      !**CALL FFTWF_FREE(ZDUMP)
+(  183)   END IF
+(  184)   KPLAN=IPLAN
+(  185)   TW%N_PLANS(KN)=TW%N_PLANS(KN)+1
+(  186)   IF( TW%N_PLANS(KN) /= 1 )THEN
+(  187)     ALLOCATE(CURR_FFTW_PLAN%NEXT_PLAN)
+(  188)     CURR_FFTW_PLAN=>CURR_FFTW_PLAN%NEXT_PLAN
+(  189)   ENDIF
+(  190)   IF( CURR_FFTW_PLAN%NPLAN_ID /= 123456 )THEN
+(  191)     WRITE(*,'("CREATE_PLAN_FFTW.4: PLAN_ID=",I10)')CURR_FFTW_PLAN%NPLAN_ID
+(  192)     CALL ABOR1('CREATE_PLAN_FFTW.4: NPLAN_ID /= 123456')
+(  193)   ENDIF
+(  194)   CURR_FFTW_PLAN%NPLAN=IPLAN
+(  195)   CURR_FFTW_PLAN%NLOT=KLOT
+(  196)   CURR_FFTW_PLAN%NTYPE=KTYPE
+(  197)   CURR_FFTW_PLAN%NEXT_PLAN=>NULL()
+(  198) ! write(*,'("CREATE_PLAN_FFTW: KN=",I5," NPLANS=",I3," KLOT=",I6," KTYPE=",I2,&
+(  199) !  & " NEW IPLAN=",Z16)')KN,TW%N_PLANS(KN),KLOT,KTYPE,IPLAN
+(  200) ELSE
+(  201)   KPLAN=IPLAN
+(  202) ! write(*,'("CREATE_PLAN_FFTW: KN=",I5," NPLANS=",I3," KLOT=",I6," KTYPE=",I2,&
+(  203) !  & " CUR IPLAN=",Z16)')KN,TW%N_PLANS(KN),KLOT,KTYPE,IPLAN
+(  204) ENDIF
+(  205) !$OMP END CRITICAL (FFTW_CREATE)
+(  206) 
+(  207) IF (LHOOK) CALL DR_HOOK('CREATE_PLAN_FFTW',1,ZHOOK_HANDLE)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 5
+
+(  208) RETURN
+(  209) END SUBROUTINE CREATE_PLAN_FFTW
+(  210) 
+(  211) 
+(  212) SUBROUTINE DESTROY_PLAN_FFTW(KPLAN)
+(  213) INTEGER(KIND=JPIB),INTENT(IN) :: KPLAN
+(  214) !$OMP CRITICAL (FFTW_DESTROY)
+(  215) IF (JPRBT == JPRD) THEN
+(  216)    !**CALL DFFTW_DESTROY_PLAN(KPLAN)
+(  217) ELSE
+(  218)    !**CALL SFFTW_DESTROY_PLAN(KPLAN)
+(  219) END IF
+(  220) !$OMP END CRITICAL (FFTW_DESTROY)
+(  221) RETURN
+(  222) END SUBROUTINE DESTROY_PLAN_FFTW
+(  223) 
+(  224) 
+(  225) SUBROUTINE DESTROY_PLANS_FFTW
+(  226) INTEGER(KIND=JPIM) :: JL, JN
+(  227) TYPE(FFTW_PLAN),POINTER :: CURR_FFTW_PLAN
+(  228) DO JN=1,TW%N_MAX
+(  229)   CURR_FFTW_PLAN=>TW%FFTW_PLANS(JN)
+(  230)   DO JL=1,TW%N_PLANS(JN)
+(  231)     !**CALL DESTROY_PLAN_FFTW(CURR_FFTW_PLAN%NPLAN)
+(  232)     CURR_FFTW_PLAN=>CURR_FFTW_PLAN%NEXT_PLAN 
+(  233)   ENDDO
+(  234) ENDDO
+(  235) IF( ASSOCIATED(TW) ) THEN
+(  236)   IF( ASSOCIATED(TW%FFTW_PLANS) )  DEALLOCATE(TW%FFTW_PLANS)
+(  237)   IF( ALLOCATED(TW%N_PLANS) )     DEALLOCATE(TW%N_PLANS)
+(  238) ENDIF
+(  239) RETURN
+(  240) END SUBROUTINE DESTROY_PLANS_FFTW
+(  241) 
+(  242) SUBROUTINE EXEC_FFTW(KTYPE,KRLEN,KCLEN,KOFF,KFIELDS,LD_ALL,PREEL)
+(  243) 
+(  244) INTEGER(KIND=JPIM),INTENT(IN)   :: KTYPE
+(  245) INTEGER(KIND=JPIM),INTENT(IN)   :: KRLEN
+(  246) INTEGER(KIND=JPIM),INTENT(IN)   :: KCLEN
+(  247) INTEGER(KIND=JPIM),INTENT(IN)   :: KOFF
+(  248) INTEGER(KIND=JPIM),INTENT(IN)   :: KFIELDS
+(  249) LOGICAL           ,INTENT(IN)   :: LD_ALL
+(  250) REAL(KIND=JPRBT), INTENT(INOUT)  :: PREEL(:,:)
+(  251) 
+(  252) REAL(KIND=JPRBT), POINTER :: ZFFT(:,:)
+(  253) REAL(KIND=JPRBT), POINTER :: ZFFT1(:)
+(  254) TYPE(C_PTR) :: ZFFTP, ZFFT1P
+(  255) 
+(  256) INTEGER(KIND=JPIM) :: JJ,JF
+(  257) 
+(  258) INTEGER(KIND=JPIB) :: IPLAN_C2R, IPLAN_C2R1
+(  259) REAL(KIND=JPRB) :: ZHOOK_HANDLE, ZHOOK_HANDLE2
+(  260) 
+(  261) #include "abor1.intfb.h"
+(  262) 
+(  263) IF (LHOOK) CALL DR_HOOK('EXEC_FFTW',0,ZHOOK_HANDLE)
+(  264) 
+(  265) IF ( (KTYPE /= -1) .AND. (KTYPE /=1) ) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 6
+
+(  266)   CALL ABOR1('TPM_FFTW:EXEC_FFTW : WRONG VALUE KTYPE')
+(  267) ENDIF
+(  268) 
+(  269) IF( LD_ALL )THEN
+(  270)   !**CALL CREATE_PLAN_FFTW(IPLAN_C2R,KTYPE,KRLEN,KFIELDS)
+(  271)   IF (JPRBT == JPRD) THEN
+(  272)      !**ZFFTP=FFTW_ALLOC_COMPLEX(INT(KCLEN/2*KFIELDS,C_SIZE_T))
+(  273)   ELSE
+(  274)      !**ZFFTP=FFTWF_ALLOC_COMPLEX(INT(KCLEN/2*KFIELDS,C_SIZE_T))
+(  275)   END IF
+(  276)   CALL C_F_POINTER(ZFFTP,ZFFT,[KCLEN,KFIELDS])
+(  277)   IF (KTYPE==1) THEN
+(  278)     DO JF=1,KFIELDS
+(  279)       DO JJ=1,KCLEN
+(  280)         ZFFT(JJ,JF) =PREEL(JF,KOFF+JJ-1)
+(  281)       ENDDO
+(  282)     ENDDO
+(  283)     IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_C2R',0,ZHOOK_HANDLE2)
+(  284)     IF (JPRBT == JPRD) THEN
+(  285)        !**CALL DFFTW_EXECUTE_DFT_C2R(IPLAN_C2R,ZFFT,ZFFT)
+(  286)     ELSE
+(  287)        !**CALL SFFTW_EXECUTE_DFT_C2R(IPLAN_C2R,ZFFT,ZFFT)
+(  288)     END IF
+(  289)     IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_C2R',1,ZHOOK_HANDLE2)
+(  290)     DO JJ=1,KRLEN
+(  291)       DO JF=1,KFIELDS
+(  292)         PREEL(JF,KOFF+JJ-1)=ZFFT(JJ,JF)
+(  293)       ENDDO
+(  294)     ENDDO
+(  295)   ELSE
+(  296)     DO JF=1,KFIELDS
+(  297)       DO JJ=1,KRLEN
+(  298)         ZFFT(JJ,JF) =PREEL(JF,KOFF+JJ-1)
+(  299)       ENDDO
+(  300)     ENDDO
+(  301)     IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_R2C',0,ZHOOK_HANDLE2)
+(  302)     IF (JPRBT == JPRD) THEN
+(  303)        !**CALL DFFTW_EXECUTE_DFT_R2C(IPLAN_C2R,ZFFT,ZFFT)
+(  304)     ELSE
+(  305)        !**CALL SFFTW_EXECUTE_DFT_R2C(IPLAN_C2R,ZFFT,ZFFT)
+(  306)     END IF
+(  307)     IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_R2C',1,ZHOOK_HANDLE2)
+(  308)     DO JJ=1,KCLEN
+(  309)       DO JF=1,KFIELDS
+(  310)         PREEL(JF,KOFF+JJ-1)=ZFFT(JJ,JF)/REAL(KRLEN,JPRBT)
+(  311)       ENDDO
+(  312)     ENDDO
+(  313)   ENDIF
+(  314)   IF (JPRBT == JPRD) THEN
+(  315)      !**CALL FFTW_FREE(ZFFTP)
+(  316)   ELSE
+(  317)      !**CALL FFTWF_FREE(ZFFTP)
+(  318)   END IF
+(  319) ELSE
+(  320)   !**CALL CREATE_PLAN_FFTW(IPLAN_C2R1,KTYPE,KRLEN,1)
+(  321)   IF (JPRBT == JPRD) THEN
+(  322)      !**ZFFT1P=FFTW_ALLOC_COMPLEX(INT(KCLEN/2,C_SIZE_T))
+(  323)   ELSE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 7
+
+(  324)      !**ZFFT1P=FFTWF_ALLOC_COMPLEX(INT(KCLEN/2,C_SIZE_T))
+(  325)   END IF
+(  326)   CALL C_F_POINTER(ZFFT1P,ZFFT1,[KCLEN])
+(  327)   IF (KTYPE==1) THEN
+(  328)     DO JF=1,KFIELDS
+(  329)       DO JJ=1,KCLEN
+(  330)         ZFFT1(JJ) =PREEL(JF,KOFF+JJ-1)
+(  331)       ENDDO
+(  332)       IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_C2R',0,ZHOOK_HANDLE2)
+(  333)       IF (JPRBT == JPRD) THEN
+(  334)          !**CALL DFFTW_EXECUTE_DFT_C2R(IPLAN_C2R1,ZFFT1,ZFFT1)
+(  335)       ELSE
+(  336)          !**CALL SFFTW_EXECUTE_DFT_C2R(IPLAN_C2R1,ZFFT1,ZFFT1)
+(  337)       END IF
+(  338)       IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_C2R',1,ZHOOK_HANDLE2)
+(  339)       DO JJ=1,KRLEN
+(  340)         PREEL(JF,KOFF+JJ-1)=ZFFT1(JJ)
+(  341)       ENDDO
+(  342)     ENDDO
+(  343)   ELSE
+(  344)     DO JF=1,KFIELDS
+(  345)       DO JJ=1,KRLEN
+(  346)         ZFFT1(JJ) =PREEL(JF,KOFF+JJ-1)
+(  347)       ENDDO
+(  348)       IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_R2C',0,ZHOOK_HANDLE2)
+(  349)       IF (JPRBT == JPRD) THEN
+(  350)          !**CALL DFFTW_EXECUTE_DFT_R2C(IPLAN_C2R1,ZFFT1,ZFFT1)
+(  351)       ELSE
+(  352)          !**CALL SFFTW_EXECUTE_DFT_R2C(IPLAN_C2R1,ZFFT1,ZFFT1)
+(  353)       END IF
+(  354)       IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_R2C',1,ZHOOK_HANDLE2)
+(  355)       DO JJ=1,KCLEN
+(  356)         PREEL(JF,KOFF+JJ-1)=ZFFT1(JJ)/REAL(KRLEN,JPRBT)
+(  357)       ENDDO
+(  358)     ENDDO
+(  359)   ENDIF
+(  360)   IF (JPRBT == JPRD) THEN
+(  361)      !**CALL FFTW_FREE(ZFFT1P)
+(  362)   ELSE 
+(  363)      !**CALL FFTWF_FREE(ZFFT1P)
+(  364)   END IF  
+(  365) ENDIF
+(  366) 
+(  367) IF (LHOOK) CALL DR_HOOK('EXEC_FFTW',1,ZHOOK_HANDLE)
+(  368) END SUBROUTINE EXEC_FFTW
+(  369) 
+(  370) SUBROUTINE EXEC_EFFTW(KTYPE,KRLEN,KCLEN,KOFF,KFIELDS,LD_ALL,PREEL)
+(  371) 
+(  372) INTEGER(KIND=JPIM),INTENT(IN)   :: KTYPE
+(  373) INTEGER(KIND=JPIM),INTENT(IN)   :: KRLEN
+(  374) INTEGER(KIND=JPIM),INTENT(IN)   :: KCLEN
+(  375) INTEGER(KIND=JPIM),INTENT(IN)   :: KOFF
+(  376) INTEGER(KIND=JPIM),INTENT(IN)   :: KFIELDS
+(  377) LOGICAL           ,INTENT(IN)   :: LD_ALL
+(  378) REAL(KIND=JPRBT), INTENT(INOUT)  :: PREEL(:,:)
+(  379) 
+(  380) REAL(KIND=JPRBT), POINTER :: ZFFT(:,:)
+(  381) REAL(KIND=JPRBT), POINTER :: ZFFT1(:)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 8
+
+(  382) TYPE(C_PTR) :: ZFFTP, ZFFT1P
+(  383) 
+(  384) INTEGER(KIND=JPIM) :: JJ,JF
+(  385) 
+(  386) INTEGER(KIND=JPIB) :: IPLAN_C2R, IPLAN_C2R1
+(  387) REAL(KIND=JPRB) :: ZHOOK_HANDLE, ZHOOK_HANDLE2
+(  388) 
+(  389) #include "abor1.intfb.h"
+(  390) 
+(  391) IF (LHOOK) CALL DR_HOOK('EXEC_EFFTW',0,ZHOOK_HANDLE)
+(  392) 
+(  393) IF ( (KTYPE /= -1) .AND. (KTYPE /=1) ) THEN
+(  394)   CALL ABOR1('TPM_FFTW:EXEC_EFFTW : WRONG VALUE KTYPE')
+(  395) ENDIF
+(  396) 
+(  397) IF( LD_ALL )THEN
+(  398)   !**CALL CREATE_PLAN_FFTW(IPLAN_C2R,KTYPE,KRLEN,KFIELDS)
+(  399)   IF  (JPRBT == JPRD) THEN
+(  400)      !**ZFFTP=FFTW_ALLOC_COMPLEX(INT(KCLEN/2*KFIELDS,C_SIZE_T))
+(  401)   ELSE
+(  402)      !**ZFFTP=FFTWF_ALLOC_COMPLEX(INT(KCLEN/2*KFIELDS,C_SIZE_T))
+(  403)   END IF
+(  404)   CALL C_F_POINTER(ZFFTP,ZFFT,[KCLEN,KFIELDS])
+(  405)   IF (KTYPE==1) THEN
+(  406)     DO JF=1,KFIELDS
+(  407)       DO JJ=1,KCLEN
+(  408)         ZFFT(JJ,JF) =PREEL(KOFF+JJ-1,JF)
+(  409)       ENDDO
+(  410)     ENDDO
+(  411)     IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_C2R',0,ZHOOK_HANDLE2)
+(  412)     IF (JPRBT == JPRD) THEN
+(  413)        !**CALL DFFTW_EXECUTE_DFT_C2R(IPLAN_C2R,ZFFT,ZFFT)
+(  414)     ELSE
+(  415)        !**CALL SFFTW_EXECUTE_DFT_C2R(IPLAN_C2R,ZFFT,ZFFT)
+(  416)     END IF
+(  417)     IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_C2R',1,ZHOOK_HANDLE2)
+(  418)     DO JJ=1,KRLEN
+(  419)       DO JF=1,KFIELDS
+(  420)         PREEL(KOFF+JJ-1,JF)=ZFFT(JJ,JF)
+(  421)       ENDDO
+(  422)     ENDDO
+(  423)   ELSE
+(  424)     DO JF=1,KFIELDS
+(  425)       DO JJ=1,KRLEN
+(  426)         ZFFT(JJ,JF) =PREEL(KOFF+JJ-1,JF)
+(  427)       ENDDO
+(  428)     ENDDO
+(  429)     IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_R2C',0,ZHOOK_HANDLE2)
+(  430)     IF (JPRBT == JPRD) THEN
+(  431)        !**CALL DFFTW_EXECUTE_DFT_R2C(IPLAN_C2R,ZFFT,ZFFT)
+(  432)     ELSE
+(  433)        !**CALL SFFTW_EXECUTE_DFT_R2C(IPLAN_C2R,ZFFT,ZFFT)
+(  434)     END IF
+(  435)     IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_R2C',1,ZHOOK_HANDLE2)
+(  436)     DO JJ=1,KCLEN
+(  437)       DO JF=1,KFIELDS
+(  438)         PREEL(KOFF+JJ-1,JF)=ZFFT(JJ,JF)/REAL(KRLEN,JPRBT)
+(  439)       ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 9
+
+(  440)     ENDDO
+(  441)   ENDIF
+(  442)   IF (JPRBT == JPRD) THEN
+(  443)      !**CALL FFTW_FREE(ZFFTP)
+(  444)   ELSE
+(  445)      !**CALL FFTWF_FREE(ZFFTP)
+(  446)   END IF 
+(  447) ELSE
+(  448)   !**CALL CREATE_PLAN_FFTW(IPLAN_C2R1,KTYPE,KRLEN,1)
+(  449)   IF (JPRBT == JPRD) THEN
+(  450)      !**ZFFT1P=FFTW_ALLOC_COMPLEX(INT(KCLEN/2,C_SIZE_T))
+(  451)   ELSE
+(  452)      !**ZFFT1P=FFTWF_ALLOC_COMPLEX(INT(KCLEN/2,C_SIZE_T))
+(  453)   END IF
+(  454)   CALL C_F_POINTER(ZFFT1P,ZFFT1,[KCLEN])
+(  455)   IF (KTYPE==1) THEN
+(  456)     DO JF=1,KFIELDS
+(  457)       DO JJ=1,KCLEN
+(  458)         ZFFT1(JJ) =PREEL(KOFF+JJ-1,JF)
+(  459)       ENDDO
+(  460)       IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_C2R',0,ZHOOK_HANDLE2)
+(  461)       IF (JPRBT == JPRD) THEN
+(  462)          !**CALL DFFTW_EXECUTE_DFT_C2R(IPLAN_C2R1,ZFFT1,ZFFT1)
+(  463)       ELSE
+(  464)          !**CALL SFFTW_EXECUTE_DFT_C2R(IPLAN_C2R1,ZFFT1,ZFFT1)
+(  465)       END IF
+(  466)       IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_C2R',1,ZHOOK_HANDLE2)
+(  467)       DO JJ=1,KRLEN
+(  468)         PREEL(KOFF+JJ-1,JF)=ZFFT1(JJ)
+(  469)       ENDDO
+(  470)     ENDDO
+(  471)   ELSE
+(  472)     DO JF=1,KFIELDS
+(  473)       DO JJ=1,KRLEN
+(  474)         ZFFT1(JJ) =PREEL(KOFF+JJ-1,JF)
+(  475)       ENDDO
+(  476)       IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_R2C',0,ZHOOK_HANDLE2)
+(  477)       IF (JPRBT == JPRD) THEN
+(  478)          !**CALL DFFTW_EXECUTE_DFT_R2C(IPLAN_C2R1,ZFFT1,ZFFT1)
+(  479)       ELSE
+(  480)          !**CALL SFFTW_EXECUTE_DFT_R2C(IPLAN_C2R1,ZFFT1,ZFFT1)
+(  481)       END IF
+(  482)       IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_R2C',1,ZHOOK_HANDLE2)
+(  483)       DO JJ=1,KCLEN
+(  484)         PREEL(KOFF+JJ-1,JF)=ZFFT1(JJ)/REAL(KRLEN,JPRBT)
+(  485)       ENDDO
+(  486)     ENDDO
+(  487)   ENDIF
+(  488)   IF (JPRBT == JPRD) THEN
+(  489)      !**CALL FFTW_FREE(ZFFT1P)
+(  490)   ELSE
+(  491)      !**CALL FFTWF_FREE(ZFFT1P)
+(  492)   END IF
+(  493) ENDIF
+(  494) 
+(  495) IF (LHOOK) CALL DR_HOOK('EXEC_EFFTW',1,ZHOOK_HANDLE)
+(  496) END SUBROUTINE EXEC_EFFTW
+(  497) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 10
+
+(  498) END MODULE TPM_FFTW
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 11
+
+(    1) # 1 "tpm_fftw.F90"
+(    1) MODULE TPM_FFTW
+(    2) !   Author.
+(    3) !   -------
+(    4) !     George Mozdzynski
+(    5) !
+(    6) !   Modifications.
+(    7) !   -------------- 
+(    8) !     Original      October 2014
+(    9) !     R. El Khatib 01-Sep-2015 More subroutines for better modularity
+(   10) # 11 "tpm_fftw.F90"
+(   11) USE, INTRINSIC :: ISO_C_BINDING
+(   12) # 13 "tpm_fftw.F90"
+(   13) USE PARKIND1   ,ONLY : JPIB, JPIM, JPRB, JPRBT, JPRD
+(   14) USE MPL_MODULE ,ONLY : MPL_MYRANK
+(   15) USE YOMHOOK    ,ONLY : LHOOK, DR_HOOK
+(   16) # 17 "tpm_fftw.F90"
+(   17) IMPLICIT NONE
+(   18) # 19 "tpm_fftw.F90"
+(   19) SAVE
+(   20) # 33 "tpm_fftw.F90"
+(   33) # 1 ".D[14]/fftw3.f03.h"
+(    1) ! Generated automatically.  DO NOT EDIT!
+(    2) # 3 ".D[14]/fftw3.f03.h"
+(    3)   integer, parameter :: C_FFTW_R2R_KIND = C_INT32_T
+(    4) # 5 ".D[14]/fftw3.f03.h"
+(    5)   integer(C_INT), parameter :: FFTW_R2HC = 0
+(    6)   integer(C_INT), parameter :: FFTW_HC2R = 1
+(    7)   integer(C_INT), parameter :: FFTW_DHT = 2
+(    8)   integer(C_INT), parameter :: FFTW_REDFT00 = 3
+(    9)   integer(C_INT), parameter :: FFTW_REDFT01 = 4
+(   10)   integer(C_INT), parameter :: FFTW_REDFT10 = 5
+(   11)   integer(C_INT), parameter :: FFTW_REDFT11 = 6
+(   12)   integer(C_INT), parameter :: FFTW_RODFT00 = 7
+(   13)   integer(C_INT), parameter :: FFTW_RODFT01 = 8
+(   14)   integer(C_INT), parameter :: FFTW_RODFT10 = 9
+(   15)   integer(C_INT), parameter :: FFTW_RODFT11 = 10
+(   16)   integer(C_INT), parameter :: FFTW_FORWARD = -1
+(   17)   integer(C_INT), parameter :: FFTW_BACKWARD = +1
+(   18)   integer(C_INT), parameter :: FFTW_MEASURE = 0
+(   19)   integer(C_INT), parameter :: FFTW_DESTROY_INPUT = 1
+(   20)   integer(C_INT), parameter :: FFTW_UNALIGNED = 2
+(   21)   integer(C_INT), parameter :: FFTW_CONSERVE_MEMORY = 4
+(   22)   integer(C_INT), parameter :: FFTW_EXHAUSTIVE = 8
+(   23)   integer(C_INT), parameter :: FFTW_PRESERVE_INPUT = 16
+(   24)   integer(C_INT), parameter :: FFTW_PATIENT = 32
+(   25)   integer(C_INT), parameter :: FFTW_ESTIMATE = 64
+(   26)   integer(C_INT), parameter :: FFTW_ESTIMATE_PATIENT = 128
+(   27)   integer(C_INT), parameter :: FFTW_BELIEVE_PCOST = 256
+(   28)   integer(C_INT), parameter :: FFTW_NO_DFT_R2HC = 512
+(   29)   integer(C_INT), parameter :: FFTW_NO_NONTHREADED = 1024
+(   30)   integer(C_INT), parameter :: FFTW_NO_BUFFERING = 2048
+(   31)   integer(C_INT), parameter :: FFTW_NO_INDIRECT_OP = 4096
+(   32)   integer(C_INT), parameter :: FFTW_ALLOW_LARGE_GENERIC = 8192
+(   33)   integer(C_INT), parameter :: FFTW_NO_RANK_SPLITS = 16384
+(   34)   integer(C_INT), parameter :: FFTW_NO_VRANK_SPLITS = 32768
+(   35)   integer(C_INT), parameter :: FFTW_NO_VRECURSE = 65536
+(   36)   integer(C_INT), parameter :: FFTW_NO_SIMD = 131072
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 12
+
+(   37)   integer(C_INT), parameter :: FFTW_NO_SLOW = 262144
+(   38)   integer(C_INT), parameter :: FFTW_NO_FIXED_RADIX_LARGE_N = 524288
+(   39)   integer(C_INT), parameter :: FFTW_ALLOW_PRUNING = 1048576
+(   40)   integer(C_INT), parameter :: FFTW_WISDOM_ONLY = 2097152
+(   41) # 42 ".D[14]/fftw3.f03.h"
+(   42)   type, bind(C) :: fftw_iodim
+(   43)      integer(C_INT) n, is, os
+(   44)   end type fftw_iodim
+(   45)   type, bind(C) :: fftw_iodim64
+(   46)      integer(C_INTPTR_T) n, is, os
+(   47)   end type fftw_iodim64
+(   48) # 49 ".D[14]/fftw3.f03.h"
+(   49)   interface
+(   50)     type(C_PTR) function fftw_plan_dft(rank,n,in,out,sign,flags) bind(C, name='fftw_plan_dft')
+(   51)       import
+(   52)       integer(C_INT), value :: rank
+(   53)       integer(C_INT), dimension(*), intent(in) :: n
+(   54)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+(   55)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+(   56)       integer(C_INT), value :: sign
+(   57)       integer(C_INT), value :: flags
+(   58)     end function fftw_plan_dft
+(   59)     
+(   60)     type(C_PTR) function fftw_plan_dft_1d(n,in,out,sign,flags) bind(C, name='fftw_plan_dft_1d')
+(   61)       import
+(   62)       integer(C_INT), value :: n
+(   63)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+(   64)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+(   65)       integer(C_INT), value :: sign
+(   66)       integer(C_INT), value :: flags
+(   67)     end function fftw_plan_dft_1d
+(   68)     
+(   69)     type(C_PTR) function fftw_plan_dft_2d(n0,n1,in,out,sign,flags) bind(C, name='fftw_plan_dft_2d')
+(   70)       import
+(   71)       integer(C_INT), value :: n0
+(   72)       integer(C_INT), value :: n1
+(   73)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+(   74)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+(   75)       integer(C_INT), value :: sign
+(   76)       integer(C_INT), value :: flags
+(   77)     end function fftw_plan_dft_2d
+(   78)     
+(   79)     type(C_PTR) function fftw_plan_dft_3d(n0,n1,n2,in,out,sign,flags) bind(C, name='fftw_plan_dft_3d')
+(   80)       import
+(   81)       integer(C_INT), value :: n0
+(   82)       integer(C_INT), value :: n1
+(   83)       integer(C_INT), value :: n2
+(   84)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+(   85)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+(   86)       integer(C_INT), value :: sign
+(   87)       integer(C_INT), value :: flags
+(   88)     end function fftw_plan_dft_3d
+(   89)     
+(   90)     type(C_PTR) function fftw_plan_many_dft(rank,n,howmany,in,inembed,istride,idist,out,onembed,ostride,odist,sign,flags) &
+(   91)                          bind(C, name='fftw_plan_many_dft')
+(   92)       import
+(   93)       integer(C_INT), value :: rank
+(   94)       integer(C_INT), dimension(*), intent(in) :: n
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 13
+
+(   95)       integer(C_INT), value :: howmany
+(   96)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+(   97)       integer(C_INT), dimension(*), intent(in) :: inembed
+(   98)       integer(C_INT), value :: istride
+(   99)       integer(C_INT), value :: idist
+(  100)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+(  101)       integer(C_INT), dimension(*), intent(in) :: onembed
+(  102)       integer(C_INT), value :: ostride
+(  103)       integer(C_INT), value :: odist
+(  104)       integer(C_INT), value :: sign
+(  105)       integer(C_INT), value :: flags
+(  106)     end function fftw_plan_many_dft
+(  107)     
+(  108)     type(C_PTR) function fftw_plan_guru_dft(rank,dims,howmany_rank,howmany_dims,in,out,sign,flags) &
+(  109)                          bind(C, name='fftw_plan_guru_dft')
+(  110)       import
+(  111)       integer(C_INT), value :: rank
+(  112)       type(fftw_iodim), dimension(*), intent(in) :: dims
+(  113)       integer(C_INT), value :: howmany_rank
+(  114)       type(fftw_iodim), dimension(*), intent(in) :: howmany_dims
+(  115)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+(  116)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+(  117)       integer(C_INT), value :: sign
+(  118)       integer(C_INT), value :: flags
+(  119)     end function fftw_plan_guru_dft
+(  120)     
+(  121)     type(C_PTR) function fftw_plan_guru_split_dft(rank,dims,howmany_rank,howmany_dims,ri,ii,ro,io,flags) &
+(  122)                          bind(C, name='fftw_plan_guru_split_dft')
+(  123)       import
+(  124)       integer(C_INT), value :: rank
+(  125)       type(fftw_iodim), dimension(*), intent(in) :: dims
+(  126)       integer(C_INT), value :: howmany_rank
+(  127)       type(fftw_iodim), dimension(*), intent(in) :: howmany_dims
+(  128)       real(C_DOUBLE), dimension(*), intent(out) :: ri
+(  129)       real(C_DOUBLE), dimension(*), intent(out) :: ii
+(  130)       real(C_DOUBLE), dimension(*), intent(out) :: ro
+(  131)       real(C_DOUBLE), dimension(*), intent(out) :: io
+(  132)       integer(C_INT), value :: flags
+(  133)     end function fftw_plan_guru_split_dft
+(  134)     
+(  135)     type(C_PTR) function fftw_plan_guru64_dft(rank,dims,howmany_rank,howmany_dims,in,out,sign,flags) &
+(  136)                          bind(C, name='fftw_plan_guru64_dft')
+(  137)       import
+(  138)       integer(C_INT), value :: rank
+(  139)       type(fftw_iodim64), dimension(*), intent(in) :: dims
+(  140)       integer(C_INT), value :: howmany_rank
+(  141)       type(fftw_iodim64), dimension(*), intent(in) :: howmany_dims
+(  142)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+(  143)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+(  144)       integer(C_INT), value :: sign
+(  145)       integer(C_INT), value :: flags
+(  146)     end function fftw_plan_guru64_dft
+(  147)     
+(  148)     type(C_PTR) function fftw_plan_guru64_split_dft(rank,dims,howmany_rank,howmany_dims,ri,ii,ro,io,flags) &
+(  149)                          bind(C, name='fftw_plan_guru64_split_dft')
+(  150)       import
+(  151)       integer(C_INT), value :: rank
+(  152)       type(fftw_iodim64), dimension(*), intent(in) :: dims
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 14
+
+(  153)       integer(C_INT), value :: howmany_rank
+(  154)       type(fftw_iodim64), dimension(*), intent(in) :: howmany_dims
+(  155)       real(C_DOUBLE), dimension(*), intent(out) :: ri
+(  156)       real(C_DOUBLE), dimension(*), intent(out) :: ii
+(  157)       real(C_DOUBLE), dimension(*), intent(out) :: ro
+(  158)       real(C_DOUBLE), dimension(*), intent(out) :: io
+(  159)       integer(C_INT), value :: flags
+(  160)     end function fftw_plan_guru64_split_dft
+(  161)     
+(  162)     subroutine fftw_execute_dft(p,in,out) bind(C, name='fftw_execute_dft')
+(  163)       import
+(  164)       type(C_PTR), value :: p
+(  165)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(inout) :: in
+(  166)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+(  167)     end subroutine fftw_execute_dft
+(  168)     
+(  169)     subroutine fftw_execute_split_dft(p,ri,ii,ro,io) bind(C, name='fftw_execute_split_dft')
+(  170)       import
+(  171)       type(C_PTR), value :: p
+(  172)       real(C_DOUBLE), dimension(*), intent(inout) :: ri
+(  173)       real(C_DOUBLE), dimension(*), intent(inout) :: ii
+(  174)       real(C_DOUBLE), dimension(*), intent(out) :: ro
+(  175)       real(C_DOUBLE), dimension(*), intent(out) :: io
+(  176)     end subroutine fftw_execute_split_dft
+(  177)     
+(  178)     type(C_PTR) function fftw_plan_many_dft_r2c(rank,n,howmany,in,inembed,istride,idist,out,onembed,ostride,odist,flags) &
+(  179)                          bind(C, name='fftw_plan_many_dft_r2c')
+(  180)       import
+(  181)       integer(C_INT), value :: rank
+(  182)       integer(C_INT), dimension(*), intent(in) :: n
+(  183)       integer(C_INT), value :: howmany
+(  184)       real(C_DOUBLE), dimension(*), intent(out) :: in
+(  185)       integer(C_INT), dimension(*), intent(in) :: inembed
+(  186)       integer(C_INT), value :: istride
+(  187)       integer(C_INT), value :: idist
+(  188)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+(  189)       integer(C_INT), dimension(*), intent(in) :: onembed
+(  190)       integer(C_INT), value :: ostride
+(  191)       integer(C_INT), value :: odist
+(  192)       integer(C_INT), value :: flags
+(  193)     end function fftw_plan_many_dft_r2c
+(  194)     
+(  195)     type(C_PTR) function fftw_plan_dft_r2c(rank,n,in,out,flags) bind(C, name='fftw_plan_dft_r2c')
+(  196)       import
+(  197)       integer(C_INT), value :: rank
+(  198)       integer(C_INT), dimension(*), intent(in) :: n
+(  199)       real(C_DOUBLE), dimension(*), intent(out) :: in
+(  200)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+(  201)       integer(C_INT), value :: flags
+(  202)     end function fftw_plan_dft_r2c
+(  203)     
+(  204)     type(C_PTR) function fftw_plan_dft_r2c_1d(n,in,out,flags) bind(C, name='fftw_plan_dft_r2c_1d')
+(  205)       import
+(  206)       integer(C_INT), value :: n
+(  207)       real(C_DOUBLE), dimension(*), intent(out) :: in
+(  208)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+(  209)       integer(C_INT), value :: flags
+(  210)     end function fftw_plan_dft_r2c_1d
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 15
+
+(  211)     
+(  212)     type(C_PTR) function fftw_plan_dft_r2c_2d(n0,n1,in,out,flags) bind(C, name='fftw_plan_dft_r2c_2d')
+(  213)       import
+(  214)       integer(C_INT), value :: n0
+(  215)       integer(C_INT), value :: n1
+(  216)       real(C_DOUBLE), dimension(*), intent(out) :: in
+(  217)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+(  218)       integer(C_INT), value :: flags
+(  219)     end function fftw_plan_dft_r2c_2d
+(  220)     
+(  221)     type(C_PTR) function fftw_plan_dft_r2c_3d(n0,n1,n2,in,out,flags) bind(C, name='fftw_plan_dft_r2c_3d')
+(  222)       import
+(  223)       integer(C_INT), value :: n0
+(  224)       integer(C_INT), value :: n1
+(  225)       integer(C_INT), value :: n2
+(  226)       real(C_DOUBLE), dimension(*), intent(out) :: in
+(  227)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+(  228)       integer(C_INT), value :: flags
+(  229)     end function fftw_plan_dft_r2c_3d
+(  230)     
+(  231)     type(C_PTR) function fftw_plan_many_dft_c2r(rank,n,howmany,in,inembed,istride,idist,out,onembed,ostride,odist,flags) &
+(  232)                          bind(C, name='fftw_plan_many_dft_c2r')
+(  233)       import
+(  234)       integer(C_INT), value :: rank
+(  235)       integer(C_INT), dimension(*), intent(in) :: n
+(  236)       integer(C_INT), value :: howmany
+(  237)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+(  238)       integer(C_INT), dimension(*), intent(in) :: inembed
+(  239)       integer(C_INT), value :: istride
+(  240)       integer(C_INT), value :: idist
+(  241)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  242)       integer(C_INT), dimension(*), intent(in) :: onembed
+(  243)       integer(C_INT), value :: ostride
+(  244)       integer(C_INT), value :: odist
+(  245)       integer(C_INT), value :: flags
+(  246)     end function fftw_plan_many_dft_c2r
+(  247)     
+(  248)     type(C_PTR) function fftw_plan_dft_c2r(rank,n,in,out,flags) bind(C, name='fftw_plan_dft_c2r')
+(  249)       import
+(  250)       integer(C_INT), value :: rank
+(  251)       integer(C_INT), dimension(*), intent(in) :: n
+(  252)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+(  253)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  254)       integer(C_INT), value :: flags
+(  255)     end function fftw_plan_dft_c2r
+(  256)     
+(  257)     type(C_PTR) function fftw_plan_dft_c2r_1d(n,in,out,flags) bind(C, name='fftw_plan_dft_c2r_1d')
+(  258)       import
+(  259)       integer(C_INT), value :: n
+(  260)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+(  261)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  262)       integer(C_INT), value :: flags
+(  263)     end function fftw_plan_dft_c2r_1d
+(  264)     
+(  265)     type(C_PTR) function fftw_plan_dft_c2r_2d(n0,n1,in,out,flags) bind(C, name='fftw_plan_dft_c2r_2d')
+(  266)       import
+(  267)       integer(C_INT), value :: n0
+(  268)       integer(C_INT), value :: n1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 16
+
+(  269)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+(  270)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  271)       integer(C_INT), value :: flags
+(  272)     end function fftw_plan_dft_c2r_2d
+(  273)     
+(  274)     type(C_PTR) function fftw_plan_dft_c2r_3d(n0,n1,n2,in,out,flags) bind(C, name='fftw_plan_dft_c2r_3d')
+(  275)       import
+(  276)       integer(C_INT), value :: n0
+(  277)       integer(C_INT), value :: n1
+(  278)       integer(C_INT), value :: n2
+(  279)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+(  280)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  281)       integer(C_INT), value :: flags
+(  282)     end function fftw_plan_dft_c2r_3d
+(  283)     
+(  284)     type(C_PTR) function fftw_plan_guru_dft_r2c(rank,dims,howmany_rank,howmany_dims,in,out,flags) &
+(  285)                          bind(C, name='fftw_plan_guru_dft_r2c')
+(  286)       import
+(  287)       integer(C_INT), value :: rank
+(  288)       type(fftw_iodim), dimension(*), intent(in) :: dims
+(  289)       integer(C_INT), value :: howmany_rank
+(  290)       type(fftw_iodim), dimension(*), intent(in) :: howmany_dims
+(  291)       real(C_DOUBLE), dimension(*), intent(out) :: in
+(  292)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+(  293)       integer(C_INT), value :: flags
+(  294)     end function fftw_plan_guru_dft_r2c
+(  295)     
+(  296)     type(C_PTR) function fftw_plan_guru_dft_c2r(rank,dims,howmany_rank,howmany_dims,in,out,flags) &
+(  297)                          bind(C, name='fftw_plan_guru_dft_c2r')
+(  298)       import
+(  299)       integer(C_INT), value :: rank
+(  300)       type(fftw_iodim), dimension(*), intent(in) :: dims
+(  301)       integer(C_INT), value :: howmany_rank
+(  302)       type(fftw_iodim), dimension(*), intent(in) :: howmany_dims
+(  303)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+(  304)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  305)       integer(C_INT), value :: flags
+(  306)     end function fftw_plan_guru_dft_c2r
+(  307)     
+(  308)     type(C_PTR) function fftw_plan_guru_split_dft_r2c(rank,dims,howmany_rank,howmany_dims,in,ro,io,flags) &
+(  309)                          bind(C, name='fftw_plan_guru_split_dft_r2c')
+(  310)       import
+(  311)       integer(C_INT), value :: rank
+(  312)       type(fftw_iodim), dimension(*), intent(in) :: dims
+(  313)       integer(C_INT), value :: howmany_rank
+(  314)       type(fftw_iodim), dimension(*), intent(in) :: howmany_dims
+(  315)       real(C_DOUBLE), dimension(*), intent(out) :: in
+(  316)       real(C_DOUBLE), dimension(*), intent(out) :: ro
+(  317)       real(C_DOUBLE), dimension(*), intent(out) :: io
+(  318)       integer(C_INT), value :: flags
+(  319)     end function fftw_plan_guru_split_dft_r2c
+(  320)     
+(  321)     type(C_PTR) function fftw_plan_guru_split_dft_c2r(rank,dims,howmany_rank,howmany_dims,ri,ii,out,flags) &
+(  322)                          bind(C, name='fftw_plan_guru_split_dft_c2r')
+(  323)       import
+(  324)       integer(C_INT), value :: rank
+(  325)       type(fftw_iodim), dimension(*), intent(in) :: dims
+(  326)       integer(C_INT), value :: howmany_rank
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 17
+
+(  327)       type(fftw_iodim), dimension(*), intent(in) :: howmany_dims
+(  328)       real(C_DOUBLE), dimension(*), intent(out) :: ri
+(  329)       real(C_DOUBLE), dimension(*), intent(out) :: ii
+(  330)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  331)       integer(C_INT), value :: flags
+(  332)     end function fftw_plan_guru_split_dft_c2r
+(  333)     
+(  334)     type(C_PTR) function fftw_plan_guru64_dft_r2c(rank,dims,howmany_rank,howmany_dims,in,out,flags) &
+(  335)                          bind(C, name='fftw_plan_guru64_dft_r2c')
+(  336)       import
+(  337)       integer(C_INT), value :: rank
+(  338)       type(fftw_iodim64), dimension(*), intent(in) :: dims
+(  339)       integer(C_INT), value :: howmany_rank
+(  340)       type(fftw_iodim64), dimension(*), intent(in) :: howmany_dims
+(  341)       real(C_DOUBLE), dimension(*), intent(out) :: in
+(  342)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+(  343)       integer(C_INT), value :: flags
+(  344)     end function fftw_plan_guru64_dft_r2c
+(  345)     
+(  346)     type(C_PTR) function fftw_plan_guru64_dft_c2r(rank,dims,howmany_rank,howmany_dims,in,out,flags) &
+(  347)                          bind(C, name='fftw_plan_guru64_dft_c2r')
+(  348)       import
+(  349)       integer(C_INT), value :: rank
+(  350)       type(fftw_iodim64), dimension(*), intent(in) :: dims
+(  351)       integer(C_INT), value :: howmany_rank
+(  352)       type(fftw_iodim64), dimension(*), intent(in) :: howmany_dims
+(  353)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+(  354)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  355)       integer(C_INT), value :: flags
+(  356)     end function fftw_plan_guru64_dft_c2r
+(  357)     
+(  358)     type(C_PTR) function fftw_plan_guru64_split_dft_r2c(rank,dims,howmany_rank,howmany_dims,in,ro,io,flags) &
+(  359)                          bind(C, name='fftw_plan_guru64_split_dft_r2c')
+(  360)       import
+(  361)       integer(C_INT), value :: rank
+(  362)       type(fftw_iodim64), dimension(*), intent(in) :: dims
+(  363)       integer(C_INT), value :: howmany_rank
+(  364)       type(fftw_iodim64), dimension(*), intent(in) :: howmany_dims
+(  365)       real(C_DOUBLE), dimension(*), intent(out) :: in
+(  366)       real(C_DOUBLE), dimension(*), intent(out) :: ro
+(  367)       real(C_DOUBLE), dimension(*), intent(out) :: io
+(  368)       integer(C_INT), value :: flags
+(  369)     end function fftw_plan_guru64_split_dft_r2c
+(  370)     
+(  371)     type(C_PTR) function fftw_plan_guru64_split_dft_c2r(rank,dims,howmany_rank,howmany_dims,ri,ii,out,flags) &
+(  372)                          bind(C, name='fftw_plan_guru64_split_dft_c2r')
+(  373)       import
+(  374)       integer(C_INT), value :: rank
+(  375)       type(fftw_iodim64), dimension(*), intent(in) :: dims
+(  376)       integer(C_INT), value :: howmany_rank
+(  377)       type(fftw_iodim64), dimension(*), intent(in) :: howmany_dims
+(  378)       real(C_DOUBLE), dimension(*), intent(out) :: ri
+(  379)       real(C_DOUBLE), dimension(*), intent(out) :: ii
+(  380)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  381)       integer(C_INT), value :: flags
+(  382)     end function fftw_plan_guru64_split_dft_c2r
+(  383)     
+(  384)     subroutine fftw_execute_dft_r2c(p,in,out) bind(C, name='fftw_execute_dft_r2c')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 18
+
+(  385)       import
+(  386)       type(C_PTR), value :: p
+(  387)       real(C_DOUBLE), dimension(*), intent(inout) :: in
+(  388)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+(  389)     end subroutine fftw_execute_dft_r2c
+(  390)     
+(  391)     subroutine fftw_execute_dft_c2r(p,in,out) bind(C, name='fftw_execute_dft_c2r')
+(  392)       import
+(  393)       type(C_PTR), value :: p
+(  394)       complex(C_DOUBLE_COMPLEX), dimension(*), intent(inout) :: in
+(  395)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  396)     end subroutine fftw_execute_dft_c2r
+(  397)     
+(  398)     subroutine fftw_execute_split_dft_r2c(p,in,ro,io) bind(C, name='fftw_execute_split_dft_r2c')
+(  399)       import
+(  400)       type(C_PTR), value :: p
+(  401)       real(C_DOUBLE), dimension(*), intent(inout) :: in
+(  402)       real(C_DOUBLE), dimension(*), intent(out) :: ro
+(  403)       real(C_DOUBLE), dimension(*), intent(out) :: io
+(  404)     end subroutine fftw_execute_split_dft_r2c
+(  405)     
+(  406)     subroutine fftw_execute_split_dft_c2r(p,ri,ii,out) bind(C, name='fftw_execute_split_dft_c2r')
+(  407)       import
+(  408)       type(C_PTR), value :: p
+(  409)       real(C_DOUBLE), dimension(*), intent(inout) :: ri
+(  410)       real(C_DOUBLE), dimension(*), intent(inout) :: ii
+(  411)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  412)     end subroutine fftw_execute_split_dft_c2r
+(  413)     
+(  414)     type(C_PTR) function fftw_plan_many_r2r(rank,n,howmany,in,inembed,istride,idist,out,onembed,ostride,odist,kind,flags) &
+(  415)                          bind(C, name='fftw_plan_many_r2r')
+(  416)       import
+(  417)       integer(C_INT), value :: rank
+(  418)       integer(C_INT), dimension(*), intent(in) :: n
+(  419)       integer(C_INT), value :: howmany
+(  420)       real(C_DOUBLE), dimension(*), intent(out) :: in
+(  421)       integer(C_INT), dimension(*), intent(in) :: inembed
+(  422)       integer(C_INT), value :: istride
+(  423)       integer(C_INT), value :: idist
+(  424)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  425)       integer(C_INT), dimension(*), intent(in) :: onembed
+(  426)       integer(C_INT), value :: ostride
+(  427)       integer(C_INT), value :: odist
+(  428)       integer(C_FFTW_R2R_KIND), dimension(*), intent(in) :: kind
+(  429)       integer(C_INT), value :: flags
+(  430)     end function fftw_plan_many_r2r
+(  431)     
+(  432)     type(C_PTR) function fftw_plan_r2r(rank,n,in,out,kind,flags) bind(C, name='fftw_plan_r2r')
+(  433)       import
+(  434)       integer(C_INT), value :: rank
+(  435)       integer(C_INT), dimension(*), intent(in) :: n
+(  436)       real(C_DOUBLE), dimension(*), intent(out) :: in
+(  437)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  438)       integer(C_FFTW_R2R_KIND), dimension(*), intent(in) :: kind
+(  439)       integer(C_INT), value :: flags
+(  440)     end function fftw_plan_r2r
+(  441)     
+(  442)     type(C_PTR) function fftw_plan_r2r_1d(n,in,out,kind,flags) bind(C, name='fftw_plan_r2r_1d')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 19
+
+(  443)       import
+(  444)       integer(C_INT), value :: n
+(  445)       real(C_DOUBLE), dimension(*), intent(out) :: in
+(  446)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  447)       integer(C_FFTW_R2R_KIND), value :: kind
+(  448)       integer(C_INT), value :: flags
+(  449)     end function fftw_plan_r2r_1d
+(  450)     
+(  451)     type(C_PTR) function fftw_plan_r2r_2d(n0,n1,in,out,kind0,kind1,flags) bind(C, name='fftw_plan_r2r_2d')
+(  452)       import
+(  453)       integer(C_INT), value :: n0
+(  454)       integer(C_INT), value :: n1
+(  455)       real(C_DOUBLE), dimension(*), intent(out) :: in
+(  456)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  457)       integer(C_FFTW_R2R_KIND), value :: kind0
+(  458)       integer(C_FFTW_R2R_KIND), value :: kind1
+(  459)       integer(C_INT), value :: flags
+(  460)     end function fftw_plan_r2r_2d
+(  461)     
+(  462)     type(C_PTR) function fftw_plan_r2r_3d(n0,n1,n2,in,out,kind0,kind1,kind2,flags) bind(C, name='fftw_plan_r2r_3d')
+(  463)       import
+(  464)       integer(C_INT), value :: n0
+(  465)       integer(C_INT), value :: n1
+(  466)       integer(C_INT), value :: n2
+(  467)       real(C_DOUBLE), dimension(*), intent(out) :: in
+(  468)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  469)       integer(C_FFTW_R2R_KIND), value :: kind0
+(  470)       integer(C_FFTW_R2R_KIND), value :: kind1
+(  471)       integer(C_FFTW_R2R_KIND), value :: kind2
+(  472)       integer(C_INT), value :: flags
+(  473)     end function fftw_plan_r2r_3d
+(  474)     
+(  475)     type(C_PTR) function fftw_plan_guru_r2r(rank,dims,howmany_rank,howmany_dims,in,out,kind,flags) &
+(  476)                          bind(C, name='fftw_plan_guru_r2r')
+(  477)       import
+(  478)       integer(C_INT), value :: rank
+(  479)       type(fftw_iodim), dimension(*), intent(in) :: dims
+(  480)       integer(C_INT), value :: howmany_rank
+(  481)       type(fftw_iodim), dimension(*), intent(in) :: howmany_dims
+(  482)       real(C_DOUBLE), dimension(*), intent(out) :: in
+(  483)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  484)       integer(C_FFTW_R2R_KIND), dimension(*), intent(in) :: kind
+(  485)       integer(C_INT), value :: flags
+(  486)     end function fftw_plan_guru_r2r
+(  487)     
+(  488)     type(C_PTR) function fftw_plan_guru64_r2r(rank,dims,howmany_rank,howmany_dims,in,out,kind,flags) &
+(  489)                          bind(C, name='fftw_plan_guru64_r2r')
+(  490)       import
+(  491)       integer(C_INT), value :: rank
+(  492)       type(fftw_iodim64), dimension(*), intent(in) :: dims
+(  493)       integer(C_INT), value :: howmany_rank
+(  494)       type(fftw_iodim64), dimension(*), intent(in) :: howmany_dims
+(  495)       real(C_DOUBLE), dimension(*), intent(out) :: in
+(  496)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  497)       integer(C_FFTW_R2R_KIND), dimension(*), intent(in) :: kind
+(  498)       integer(C_INT), value :: flags
+(  499)     end function fftw_plan_guru64_r2r
+(  500)     
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 20
+
+(  501)     subroutine fftw_execute_r2r(p,in,out) bind(C, name='fftw_execute_r2r')
+(  502)       import
+(  503)       type(C_PTR), value :: p
+(  504)       real(C_DOUBLE), dimension(*), intent(inout) :: in
+(  505)       real(C_DOUBLE), dimension(*), intent(out) :: out
+(  506)     end subroutine fftw_execute_r2r
+(  507)     
+(  508)     subroutine fftw_destroy_plan(p) bind(C, name='fftw_destroy_plan')
+(  509)       import
+(  510)       type(C_PTR), value :: p
+(  511)     end subroutine fftw_destroy_plan
+(  512)     
+(  513)     subroutine fftw_forget_wisdom() bind(C, name='fftw_forget_wisdom')
+(  514)       import
+(  515)     end subroutine fftw_forget_wisdom
+(  516)     
+(  517)     subroutine fftw_cleanup() bind(C, name='fftw_cleanup')
+(  518)       import
+(  519)     end subroutine fftw_cleanup
+(  520)     
+(  521)     subroutine fftw_set_timelimit(t) bind(C, name='fftw_set_timelimit')
+(  522)       import
+(  523)       real(C_DOUBLE), value :: t
+(  524)     end subroutine fftw_set_timelimit
+(  525)     
+(  526)     subroutine fftw_plan_with_nthreads(nthreads) bind(C, name='fftw_plan_with_nthreads')
+(  527)       import
+(  528)       integer(C_INT), value :: nthreads
+(  529)     end subroutine fftw_plan_with_nthreads
+(  530)     
+(  531)     integer(C_INT) function fftw_init_threads() bind(C, name='fftw_init_threads')
+(  532)       import
+(  533)     end function fftw_init_threads
+(  534)     
+(  535)     subroutine fftw_cleanup_threads() bind(C, name='fftw_cleanup_threads')
+(  536)       import
+(  537)     end subroutine fftw_cleanup_threads
+(  538)     
+(  539)     integer(C_INT) function fftw_export_wisdom_to_filename(filename) bind(C, name='fftw_export_wisdom_to_filename')
+(  540)       import
+(  541)       character(C_CHAR), dimension(*), intent(in) :: filename
+(  542)     end function fftw_export_wisdom_to_filename
+(  543)     
+(  544)     subroutine fftw_export_wisdom_to_file(output_file) bind(C, name='fftw_export_wisdom_to_file')
+(  545)       import
+(  546)       type(C_PTR), value :: output_file
+(  547)     end subroutine fftw_export_wisdom_to_file
+(  548)     
+(  549)     type(C_PTR) function fftw_export_wisdom_to_string() bind(C, name='fftw_export_wisdom_to_string')
+(  550)       import
+(  551)     end function fftw_export_wisdom_to_string
+(  552)     
+(  553)     subroutine fftw_export_wisdom(write_char,data) bind(C, name='fftw_export_wisdom')
+(  554)       import
+(  555)       type(C_FUNPTR), value :: write_char
+(  556)       type(C_PTR), value :: data
+(  557)     end subroutine fftw_export_wisdom
+(  558)     
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 21
+
+(  559)     integer(C_INT) function fftw_import_system_wisdom() bind(C, name='fftw_import_system_wisdom')
+(  560)       import
+(  561)     end function fftw_import_system_wisdom
+(  562)     
+(  563)     integer(C_INT) function fftw_import_wisdom_from_filename(filename) bind(C, name='fftw_import_wisdom_from_filename')
+(  564)       import
+(  565)       character(C_CHAR), dimension(*), intent(in) :: filename
+(  566)     end function fftw_import_wisdom_from_filename
+(  567)     
+(  568)     integer(C_INT) function fftw_import_wisdom_from_file(input_file) bind(C, name='fftw_import_wisdom_from_file')
+(  569)       import
+(  570)       type(C_PTR), value :: input_file
+(  571)     end function fftw_import_wisdom_from_file
+(  572)     
+(  573)     integer(C_INT) function fftw_import_wisdom_from_string(input_string) bind(C, name='fftw_import_wisdom_from_string')
+(  574)       import
+(  575)       character(C_CHAR), dimension(*), intent(in) :: input_string
+(  576)     end function fftw_import_wisdom_from_string
+(  577)     
+(  578)     integer(C_INT) function fftw_import_wisdom(read_char,data) bind(C, name='fftw_import_wisdom')
+(  579)       import
+(  580)       type(C_FUNPTR), value :: read_char
+(  581)       type(C_PTR), value :: data
+(  582)     end function fftw_import_wisdom
+(  583)     
+(  584)     subroutine fftw_fprint_plan(p,output_file) bind(C, name='fftw_fprint_plan')
+(  585)       import
+(  586)       type(C_PTR), value :: p
+(  587)       type(C_PTR), value :: output_file
+(  588)     end subroutine fftw_fprint_plan
+(  589)     
+(  590)     subroutine fftw_print_plan(p) bind(C, name='fftw_print_plan')
+(  591)       import
+(  592)       type(C_PTR), value :: p
+(  593)     end subroutine fftw_print_plan
+(  594)     
+(  595)     type(C_PTR) function fftw_malloc(n) bind(C, name='fftw_malloc')
+(  596)       import
+(  597)       integer(C_SIZE_T), value :: n
+(  598)     end function fftw_malloc
+(  599)     
+(  600)     type(C_PTR) function fftw_alloc_real(n) bind(C, name='fftw_alloc_real')
+(  601)       import
+(  602)       integer(C_SIZE_T), value :: n
+(  603)     end function fftw_alloc_real
+(  604)     
+(  605)     type(C_PTR) function fftw_alloc_complex(n) bind(C, name='fftw_alloc_complex')
+(  606)       import
+(  607)       integer(C_SIZE_T), value :: n
+(  608)     end function fftw_alloc_complex
+(  609)     
+(  610)     subroutine fftw_free(p) bind(C, name='fftw_free')
+(  611)       import
+(  612)       type(C_PTR), value :: p
+(  613)     end subroutine fftw_free
+(  614)     
+(  615)     subroutine fftw_flops(p,add,mul,fmas) bind(C, name='fftw_flops')
+(  616)       import
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 22
+
+(  617)       type(C_PTR), value :: p
+(  618)       real(C_DOUBLE), intent(out) :: add
+(  619)       real(C_DOUBLE), intent(out) :: mul
+(  620)       real(C_DOUBLE), intent(out) :: fmas
+(  621)     end subroutine fftw_flops
+(  622)     
+(  623)     real(C_DOUBLE) function fftw_estimate_cost(p) bind(C, name='fftw_estimate_cost')
+(  624)       import
+(  625)       type(C_PTR), value :: p
+(  626)     end function fftw_estimate_cost
+(  627)     
+(  628)     real(C_DOUBLE) function fftw_cost(p) bind(C, name='fftw_cost')
+(  629)       import
+(  630)       type(C_PTR), value :: p
+(  631)     end function fftw_cost
+(  632)     
+(  633)   end interface
+(  634) # 635 ".D[14]/fftw3.f03.h"
+(  635)   type, bind(C) :: fftwf_iodim
+(  636)      integer(C_INT) n, is, os
+(  637)   end type fftwf_iodim
+(  638)   type, bind(C) :: fftwf_iodim64
+(  639)      integer(C_INTPTR_T) n, is, os
+(  640)   end type fftwf_iodim64
+(  641) # 642 ".D[14]/fftw3.f03.h"
+(  642)   interface
+(  643)     type(C_PTR) function fftwf_plan_dft(rank,n,in,out,sign,flags) bind(C, name='fftwf_plan_dft')
+(  644)       import
+(  645)       integer(C_INT), value :: rank
+(  646)       integer(C_INT), dimension(*), intent(in) :: n
+(  647)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: in
+(  648)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: out
+(  649)       integer(C_INT), value :: sign
+(  650)       integer(C_INT), value :: flags
+(  651)     end function fftwf_plan_dft
+(  652)     
+(  653)     type(C_PTR) function fftwf_plan_dft_1d(n,in,out,sign,flags) bind(C, name='fftwf_plan_dft_1d')
+(  654)       import
+(  655)       integer(C_INT), value :: n
+(  656)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: in
+(  657)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: out
+(  658)       integer(C_INT), value :: sign
+(  659)       integer(C_INT), value :: flags
+(  660)     end function fftwf_plan_dft_1d
+(  661)     
+(  662)     type(C_PTR) function fftwf_plan_dft_2d(n0,n1,in,out,sign,flags) bind(C, name='fftwf_plan_dft_2d')
+(  663)       import
+(  664)       integer(C_INT), value :: n0
+(  665)       integer(C_INT), value :: n1
+(  666)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: in
+(  667)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: out
+(  668)       integer(C_INT), value :: sign
+(  669)       integer(C_INT), value :: flags
+(  670)     end function fftwf_plan_dft_2d
+(  671)     
+(  672)     type(C_PTR) function fftwf_plan_dft_3d(n0,n1,n2,in,out,sign,flags) bind(C, name='fftwf_plan_dft_3d')
+(  673)       import
+(  674)       integer(C_INT), value :: n0
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 23
+
+(  675)       integer(C_INT), value :: n1
+(  676)       integer(C_INT), value :: n2
+(  677)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: in
+(  678)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: out
+(  679)       integer(C_INT), value :: sign
+(  680)       integer(C_INT), value :: flags
+(  681)     end function fftwf_plan_dft_3d
+(  682)     
+(  683)     type(C_PTR) function fftwf_plan_many_dft(rank,n,howmany,in,inembed,istride,idist,out,onembed,ostride,odist,sign,flags) &
+(  684)                          bind(C, name='fftwf_plan_many_dft')
+(  685)       import
+(  686)       integer(C_INT), value :: rank
+(  687)       integer(C_INT), dimension(*), intent(in) :: n
+(  688)       integer(C_INT), value :: howmany
+(  689)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: in
+(  690)       integer(C_INT), dimension(*), intent(in) :: inembed
+(  691)       integer(C_INT), value :: istride
+(  692)       integer(C_INT), value :: idist
+(  693)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: out
+(  694)       integer(C_INT), dimension(*), intent(in) :: onembed
+(  695)       integer(C_INT), value :: ostride
+(  696)       integer(C_INT), value :: odist
+(  697)       integer(C_INT), value :: sign
+(  698)       integer(C_INT), value :: flags
+(  699)     end function fftwf_plan_many_dft
+(  700)     
+(  701)     type(C_PTR) function fftwf_plan_guru_dft(rank,dims,howmany_rank,howmany_dims,in,out,sign,flags) &
+(  702)                          bind(C, name='fftwf_plan_guru_dft')
+(  703)       import
+(  704)       integer(C_INT), value :: rank
+(  705)       type(fftwf_iodim), dimension(*), intent(in) :: dims
+(  706)       integer(C_INT), value :: howmany_rank
+(  707)       type(fftwf_iodim), dimension(*), intent(in) :: howmany_dims
+(  708)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: in
+(  709)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: out
+(  710)       integer(C_INT), value :: sign
+(  711)       integer(C_INT), value :: flags
+(  712)     end function fftwf_plan_guru_dft
+(  713)     
+(  714)     type(C_PTR) function fftwf_plan_guru_split_dft(rank,dims,howmany_rank,howmany_dims,ri,ii,ro,io,flags) &
+(  715)                          bind(C, name='fftwf_plan_guru_split_dft')
+(  716)       import
+(  717)       integer(C_INT), value :: rank
+(  718)       type(fftwf_iodim), dimension(*), intent(in) :: dims
+(  719)       integer(C_INT), value :: howmany_rank
+(  720)       type(fftwf_iodim), dimension(*), intent(in) :: howmany_dims
+(  721)       real(C_FLOAT), dimension(*), intent(out) :: ri
+(  722)       real(C_FLOAT), dimension(*), intent(out) :: ii
+(  723)       real(C_FLOAT), dimension(*), intent(out) :: ro
+(  724)       real(C_FLOAT), dimension(*), intent(out) :: io
+(  725)       integer(C_INT), value :: flags
+(  726)     end function fftwf_plan_guru_split_dft
+(  727)     
+(  728)     type(C_PTR) function fftwf_plan_guru64_dft(rank,dims,howmany_rank,howmany_dims,in,out,sign,flags) &
+(  729)                          bind(C, name='fftwf_plan_guru64_dft')
+(  730)       import
+(  731)       integer(C_INT), value :: rank
+(  732)       type(fftwf_iodim64), dimension(*), intent(in) :: dims
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 24
+
+(  733)       integer(C_INT), value :: howmany_rank
+(  734)       type(fftwf_iodim64), dimension(*), intent(in) :: howmany_dims
+(  735)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: in
+(  736)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: out
+(  737)       integer(C_INT), value :: sign
+(  738)       integer(C_INT), value :: flags
+(  739)     end function fftwf_plan_guru64_dft
+(  740)     
+(  741)     type(C_PTR) function fftwf_plan_guru64_split_dft(rank,dims,howmany_rank,howmany_dims,ri,ii,ro,io,flags) &
+(  742)                          bind(C, name='fftwf_plan_guru64_split_dft')
+(  743)       import
+(  744)       integer(C_INT), value :: rank
+(  745)       type(fftwf_iodim64), dimension(*), intent(in) :: dims
+(  746)       integer(C_INT), value :: howmany_rank
+(  747)       type(fftwf_iodim64), dimension(*), intent(in) :: howmany_dims
+(  748)       real(C_FLOAT), dimension(*), intent(out) :: ri
+(  749)       real(C_FLOAT), dimension(*), intent(out) :: ii
+(  750)       real(C_FLOAT), dimension(*), intent(out) :: ro
+(  751)       real(C_FLOAT), dimension(*), intent(out) :: io
+(  752)       integer(C_INT), value :: flags
+(  753)     end function fftwf_plan_guru64_split_dft
+(  754)     
+(  755)     subroutine fftwf_execute_dft(p,in,out) bind(C, name='fftwf_execute_dft')
+(  756)       import
+(  757)       type(C_PTR), value :: p
+(  758)       complex(C_FLOAT_COMPLEX), dimension(*), intent(inout) :: in
+(  759)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: out
+(  760)     end subroutine fftwf_execute_dft
+(  761)     
+(  762)     subroutine fftwf_execute_split_dft(p,ri,ii,ro,io) bind(C, name='fftwf_execute_split_dft')
+(  763)       import
+(  764)       type(C_PTR), value :: p
+(  765)       real(C_FLOAT), dimension(*), intent(inout) :: ri
+(  766)       real(C_FLOAT), dimension(*), intent(inout) :: ii
+(  767)       real(C_FLOAT), dimension(*), intent(out) :: ro
+(  768)       real(C_FLOAT), dimension(*), intent(out) :: io
+(  769)     end subroutine fftwf_execute_split_dft
+(  770)     
+(  771)     type(C_PTR) function fftwf_plan_many_dft_r2c(rank,n,howmany,in,inembed,istride,idist,out,onembed,ostride,odist,flags) &
+(  772)                          bind(C, name='fftwf_plan_many_dft_r2c')
+(  773)       import
+(  774)       integer(C_INT), value :: rank
+(  775)       integer(C_INT), dimension(*), intent(in) :: n
+(  776)       integer(C_INT), value :: howmany
+(  777)       real(C_FLOAT), dimension(*), intent(out) :: in
+(  778)       integer(C_INT), dimension(*), intent(in) :: inembed
+(  779)       integer(C_INT), value :: istride
+(  780)       integer(C_INT), value :: idist
+(  781)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: out
+(  782)       integer(C_INT), dimension(*), intent(in) :: onembed
+(  783)       integer(C_INT), value :: ostride
+(  784)       integer(C_INT), value :: odist
+(  785)       integer(C_INT), value :: flags
+(  786)     end function fftwf_plan_many_dft_r2c
+(  787)     
+(  788)     type(C_PTR) function fftwf_plan_dft_r2c(rank,n,in,out,flags) bind(C, name='fftwf_plan_dft_r2c')
+(  789)       import
+(  790)       integer(C_INT), value :: rank
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 25
+
+(  791)       integer(C_INT), dimension(*), intent(in) :: n
+(  792)       real(C_FLOAT), dimension(*), intent(out) :: in
+(  793)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: out
+(  794)       integer(C_INT), value :: flags
+(  795)     end function fftwf_plan_dft_r2c
+(  796)     
+(  797)     type(C_PTR) function fftwf_plan_dft_r2c_1d(n,in,out,flags) bind(C, name='fftwf_plan_dft_r2c_1d')
+(  798)       import
+(  799)       integer(C_INT), value :: n
+(  800)       real(C_FLOAT), dimension(*), intent(out) :: in
+(  801)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: out
+(  802)       integer(C_INT), value :: flags
+(  803)     end function fftwf_plan_dft_r2c_1d
+(  804)     
+(  805)     type(C_PTR) function fftwf_plan_dft_r2c_2d(n0,n1,in,out,flags) bind(C, name='fftwf_plan_dft_r2c_2d')
+(  806)       import
+(  807)       integer(C_INT), value :: n0
+(  808)       integer(C_INT), value :: n1
+(  809)       real(C_FLOAT), dimension(*), intent(out) :: in
+(  810)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: out
+(  811)       integer(C_INT), value :: flags
+(  812)     end function fftwf_plan_dft_r2c_2d
+(  813)     
+(  814)     type(C_PTR) function fftwf_plan_dft_r2c_3d(n0,n1,n2,in,out,flags) bind(C, name='fftwf_plan_dft_r2c_3d')
+(  815)       import
+(  816)       integer(C_INT), value :: n0
+(  817)       integer(C_INT), value :: n1
+(  818)       integer(C_INT), value :: n2
+(  819)       real(C_FLOAT), dimension(*), intent(out) :: in
+(  820)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: out
+(  821)       integer(C_INT), value :: flags
+(  822)     end function fftwf_plan_dft_r2c_3d
+(  823)     
+(  824)     type(C_PTR) function fftwf_plan_many_dft_c2r(rank,n,howmany,in,inembed,istride,idist,out,onembed,ostride,odist,flags) &
+(  825)                          bind(C, name='fftwf_plan_many_dft_c2r')
+(  826)       import
+(  827)       integer(C_INT), value :: rank
+(  828)       integer(C_INT), dimension(*), intent(in) :: n
+(  829)       integer(C_INT), value :: howmany
+(  830)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: in
+(  831)       integer(C_INT), dimension(*), intent(in) :: inembed
+(  832)       integer(C_INT), value :: istride
+(  833)       integer(C_INT), value :: idist
+(  834)       real(C_FLOAT), dimension(*), intent(out) :: out
+(  835)       integer(C_INT), dimension(*), intent(in) :: onembed
+(  836)       integer(C_INT), value :: ostride
+(  837)       integer(C_INT), value :: odist
+(  838)       integer(C_INT), value :: flags
+(  839)     end function fftwf_plan_many_dft_c2r
+(  840)     
+(  841)     type(C_PTR) function fftwf_plan_dft_c2r(rank,n,in,out,flags) bind(C, name='fftwf_plan_dft_c2r')
+(  842)       import
+(  843)       integer(C_INT), value :: rank
+(  844)       integer(C_INT), dimension(*), intent(in) :: n
+(  845)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: in
+(  846)       real(C_FLOAT), dimension(*), intent(out) :: out
+(  847)       integer(C_INT), value :: flags
+(  848)     end function fftwf_plan_dft_c2r
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 26
+
+(  849)     
+(  850)     type(C_PTR) function fftwf_plan_dft_c2r_1d(n,in,out,flags) bind(C, name='fftwf_plan_dft_c2r_1d')
+(  851)       import
+(  852)       integer(C_INT), value :: n
+(  853)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: in
+(  854)       real(C_FLOAT), dimension(*), intent(out) :: out
+(  855)       integer(C_INT), value :: flags
+(  856)     end function fftwf_plan_dft_c2r_1d
+(  857)     
+(  858)     type(C_PTR) function fftwf_plan_dft_c2r_2d(n0,n1,in,out,flags) bind(C, name='fftwf_plan_dft_c2r_2d')
+(  859)       import
+(  860)       integer(C_INT), value :: n0
+(  861)       integer(C_INT), value :: n1
+(  862)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: in
+(  863)       real(C_FLOAT), dimension(*), intent(out) :: out
+(  864)       integer(C_INT), value :: flags
+(  865)     end function fftwf_plan_dft_c2r_2d
+(  866)     
+(  867)     type(C_PTR) function fftwf_plan_dft_c2r_3d(n0,n1,n2,in,out,flags) bind(C, name='fftwf_plan_dft_c2r_3d')
+(  868)       import
+(  869)       integer(C_INT), value :: n0
+(  870)       integer(C_INT), value :: n1
+(  871)       integer(C_INT), value :: n2
+(  872)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: in
+(  873)       real(C_FLOAT), dimension(*), intent(out) :: out
+(  874)       integer(C_INT), value :: flags
+(  875)     end function fftwf_plan_dft_c2r_3d
+(  876)     
+(  877)     type(C_PTR) function fftwf_plan_guru_dft_r2c(rank,dims,howmany_rank,howmany_dims,in,out,flags) &
+(  878)                          bind(C, name='fftwf_plan_guru_dft_r2c')
+(  879)       import
+(  880)       integer(C_INT), value :: rank
+(  881)       type(fftwf_iodim), dimension(*), intent(in) :: dims
+(  882)       integer(C_INT), value :: howmany_rank
+(  883)       type(fftwf_iodim), dimension(*), intent(in) :: howmany_dims
+(  884)       real(C_FLOAT), dimension(*), intent(out) :: in
+(  885)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: out
+(  886)       integer(C_INT), value :: flags
+(  887)     end function fftwf_plan_guru_dft_r2c
+(  888)     
+(  889)     type(C_PTR) function fftwf_plan_guru_dft_c2r(rank,dims,howmany_rank,howmany_dims,in,out,flags) &
+(  890)                          bind(C, name='fftwf_plan_guru_dft_c2r')
+(  891)       import
+(  892)       integer(C_INT), value :: rank
+(  893)       type(fftwf_iodim), dimension(*), intent(in) :: dims
+(  894)       integer(C_INT), value :: howmany_rank
+(  895)       type(fftwf_iodim), dimension(*), intent(in) :: howmany_dims
+(  896)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: in
+(  897)       real(C_FLOAT), dimension(*), intent(out) :: out
+(  898)       integer(C_INT), value :: flags
+(  899)     end function fftwf_plan_guru_dft_c2r
+(  900)     
+(  901)     type(C_PTR) function fftwf_plan_guru_split_dft_r2c(rank,dims,howmany_rank,howmany_dims,in,ro,io,flags) &
+(  902)                          bind(C, name='fftwf_plan_guru_split_dft_r2c')
+(  903)       import
+(  904)       integer(C_INT), value :: rank
+(  905)       type(fftwf_iodim), dimension(*), intent(in) :: dims
+(  906)       integer(C_INT), value :: howmany_rank
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 27
+
+(  907)       type(fftwf_iodim), dimension(*), intent(in) :: howmany_dims
+(  908)       real(C_FLOAT), dimension(*), intent(out) :: in
+(  909)       real(C_FLOAT), dimension(*), intent(out) :: ro
+(  910)       real(C_FLOAT), dimension(*), intent(out) :: io
+(  911)       integer(C_INT), value :: flags
+(  912)     end function fftwf_plan_guru_split_dft_r2c
+(  913)     
+(  914)     type(C_PTR) function fftwf_plan_guru_split_dft_c2r(rank,dims,howmany_rank,howmany_dims,ri,ii,out,flags) &
+(  915)                          bind(C, name='fftwf_plan_guru_split_dft_c2r')
+(  916)       import
+(  917)       integer(C_INT), value :: rank
+(  918)       type(fftwf_iodim), dimension(*), intent(in) :: dims
+(  919)       integer(C_INT), value :: howmany_rank
+(  920)       type(fftwf_iodim), dimension(*), intent(in) :: howmany_dims
+(  921)       real(C_FLOAT), dimension(*), intent(out) :: ri
+(  922)       real(C_FLOAT), dimension(*), intent(out) :: ii
+(  923)       real(C_FLOAT), dimension(*), intent(out) :: out
+(  924)       integer(C_INT), value :: flags
+(  925)     end function fftwf_plan_guru_split_dft_c2r
+(  926)     
+(  927)     type(C_PTR) function fftwf_plan_guru64_dft_r2c(rank,dims,howmany_rank,howmany_dims,in,out,flags) &
+(  928)                          bind(C, name='fftwf_plan_guru64_dft_r2c')
+(  929)       import
+(  930)       integer(C_INT), value :: rank
+(  931)       type(fftwf_iodim64), dimension(*), intent(in) :: dims
+(  932)       integer(C_INT), value :: howmany_rank
+(  933)       type(fftwf_iodim64), dimension(*), intent(in) :: howmany_dims
+(  934)       real(C_FLOAT), dimension(*), intent(out) :: in
+(  935)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: out
+(  936)       integer(C_INT), value :: flags
+(  937)     end function fftwf_plan_guru64_dft_r2c
+(  938)     
+(  939)     type(C_PTR) function fftwf_plan_guru64_dft_c2r(rank,dims,howmany_rank,howmany_dims,in,out,flags) &
+(  940)                          bind(C, name='fftwf_plan_guru64_dft_c2r')
+(  941)       import
+(  942)       integer(C_INT), value :: rank
+(  943)       type(fftwf_iodim64), dimension(*), intent(in) :: dims
+(  944)       integer(C_INT), value :: howmany_rank
+(  945)       type(fftwf_iodim64), dimension(*), intent(in) :: howmany_dims
+(  946)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: in
+(  947)       real(C_FLOAT), dimension(*), intent(out) :: out
+(  948)       integer(C_INT), value :: flags
+(  949)     end function fftwf_plan_guru64_dft_c2r
+(  950)     
+(  951)     type(C_PTR) function fftwf_plan_guru64_split_dft_r2c(rank,dims,howmany_rank,howmany_dims,in,ro,io,flags) &
+(  952)                          bind(C, name='fftwf_plan_guru64_split_dft_r2c')
+(  953)       import
+(  954)       integer(C_INT), value :: rank
+(  955)       type(fftwf_iodim64), dimension(*), intent(in) :: dims
+(  956)       integer(C_INT), value :: howmany_rank
+(  957)       type(fftwf_iodim64), dimension(*), intent(in) :: howmany_dims
+(  958)       real(C_FLOAT), dimension(*), intent(out) :: in
+(  959)       real(C_FLOAT), dimension(*), intent(out) :: ro
+(  960)       real(C_FLOAT), dimension(*), intent(out) :: io
+(  961)       integer(C_INT), value :: flags
+(  962)     end function fftwf_plan_guru64_split_dft_r2c
+(  963)     
+(  964)     type(C_PTR) function fftwf_plan_guru64_split_dft_c2r(rank,dims,howmany_rank,howmany_dims,ri,ii,out,flags) &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 28
+
+(  965)                          bind(C, name='fftwf_plan_guru64_split_dft_c2r')
+(  966)       import
+(  967)       integer(C_INT), value :: rank
+(  968)       type(fftwf_iodim64), dimension(*), intent(in) :: dims
+(  969)       integer(C_INT), value :: howmany_rank
+(  970)       type(fftwf_iodim64), dimension(*), intent(in) :: howmany_dims
+(  971)       real(C_FLOAT), dimension(*), intent(out) :: ri
+(  972)       real(C_FLOAT), dimension(*), intent(out) :: ii
+(  973)       real(C_FLOAT), dimension(*), intent(out) :: out
+(  974)       integer(C_INT), value :: flags
+(  975)     end function fftwf_plan_guru64_split_dft_c2r
+(  976)     
+(  977)     subroutine fftwf_execute_dft_r2c(p,in,out) bind(C, name='fftwf_execute_dft_r2c')
+(  978)       import
+(  979)       type(C_PTR), value :: p
+(  980)       real(C_FLOAT), dimension(*), intent(inout) :: in
+(  981)       complex(C_FLOAT_COMPLEX), dimension(*), intent(out) :: out
+(  982)     end subroutine fftwf_execute_dft_r2c
+(  983)     
+(  984)     subroutine fftwf_execute_dft_c2r(p,in,out) bind(C, name='fftwf_execute_dft_c2r')
+(  985)       import
+(  986)       type(C_PTR), value :: p
+(  987)       complex(C_FLOAT_COMPLEX), dimension(*), intent(inout) :: in
+(  988)       real(C_FLOAT), dimension(*), intent(out) :: out
+(  989)     end subroutine fftwf_execute_dft_c2r
+(  990)     
+(  991)     subroutine fftwf_execute_split_dft_r2c(p,in,ro,io) bind(C, name='fftwf_execute_split_dft_r2c')
+(  992)       import
+(  993)       type(C_PTR), value :: p
+(  994)       real(C_FLOAT), dimension(*), intent(inout) :: in
+(  995)       real(C_FLOAT), dimension(*), intent(out) :: ro
+(  996)       real(C_FLOAT), dimension(*), intent(out) :: io
+(  997)     end subroutine fftwf_execute_split_dft_r2c
+(  998)     
+(  999)     subroutine fftwf_execute_split_dft_c2r(p,ri,ii,out) bind(C, name='fftwf_execute_split_dft_c2r')
+( 1000)       import
+( 1001)       type(C_PTR), value :: p
+( 1002)       real(C_FLOAT), dimension(*), intent(inout) :: ri
+( 1003)       real(C_FLOAT), dimension(*), intent(inout) :: ii
+( 1004)       real(C_FLOAT), dimension(*), intent(out) :: out
+( 1005)     end subroutine fftwf_execute_split_dft_c2r
+( 1006)     
+( 1007)     type(C_PTR) function fftwf_plan_many_r2r(rank,n,howmany,in,inembed,istride,idist,out,onembed,ostride,odist,kind,flags) &
+( 1008)                          bind(C, name='fftwf_plan_many_r2r')
+( 1009)       import
+( 1010)       integer(C_INT), value :: rank
+( 1011)       integer(C_INT), dimension(*), intent(in) :: n
+( 1012)       integer(C_INT), value :: howmany
+( 1013)       real(C_FLOAT), dimension(*), intent(out) :: in
+( 1014)       integer(C_INT), dimension(*), intent(in) :: inembed
+( 1015)       integer(C_INT), value :: istride
+( 1016)       integer(C_INT), value :: idist
+( 1017)       real(C_FLOAT), dimension(*), intent(out) :: out
+( 1018)       integer(C_INT), dimension(*), intent(in) :: onembed
+( 1019)       integer(C_INT), value :: ostride
+( 1020)       integer(C_INT), value :: odist
+( 1021)       integer(C_FFTW_R2R_KIND), dimension(*), intent(in) :: kind
+( 1022)       integer(C_INT), value :: flags
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 29
+
+( 1023)     end function fftwf_plan_many_r2r
+( 1024)     
+( 1025)     type(C_PTR) function fftwf_plan_r2r(rank,n,in,out,kind,flags) bind(C, name='fftwf_plan_r2r')
+( 1026)       import
+( 1027)       integer(C_INT), value :: rank
+( 1028)       integer(C_INT), dimension(*), intent(in) :: n
+( 1029)       real(C_FLOAT), dimension(*), intent(out) :: in
+( 1030)       real(C_FLOAT), dimension(*), intent(out) :: out
+( 1031)       integer(C_FFTW_R2R_KIND), dimension(*), intent(in) :: kind
+( 1032)       integer(C_INT), value :: flags
+( 1033)     end function fftwf_plan_r2r
+( 1034)     
+( 1035)     type(C_PTR) function fftwf_plan_r2r_1d(n,in,out,kind,flags) bind(C, name='fftwf_plan_r2r_1d')
+( 1036)       import
+( 1037)       integer(C_INT), value :: n
+( 1038)       real(C_FLOAT), dimension(*), intent(out) :: in
+( 1039)       real(C_FLOAT), dimension(*), intent(out) :: out
+( 1040)       integer(C_FFTW_R2R_KIND), value :: kind
+( 1041)       integer(C_INT), value :: flags
+( 1042)     end function fftwf_plan_r2r_1d
+( 1043)     
+( 1044)     type(C_PTR) function fftwf_plan_r2r_2d(n0,n1,in,out,kind0,kind1,flags) bind(C, name='fftwf_plan_r2r_2d')
+( 1045)       import
+( 1046)       integer(C_INT), value :: n0
+( 1047)       integer(C_INT), value :: n1
+( 1048)       real(C_FLOAT), dimension(*), intent(out) :: in
+( 1049)       real(C_FLOAT), dimension(*), intent(out) :: out
+( 1050)       integer(C_FFTW_R2R_KIND), value :: kind0
+( 1051)       integer(C_FFTW_R2R_KIND), value :: kind1
+( 1052)       integer(C_INT), value :: flags
+( 1053)     end function fftwf_plan_r2r_2d
+( 1054)     
+( 1055)     type(C_PTR) function fftwf_plan_r2r_3d(n0,n1,n2,in,out,kind0,kind1,kind2,flags) bind(C, name='fftwf_plan_r2r_3d')
+( 1056)       import
+( 1057)       integer(C_INT), value :: n0
+( 1058)       integer(C_INT), value :: n1
+( 1059)       integer(C_INT), value :: n2
+( 1060)       real(C_FLOAT), dimension(*), intent(out) :: in
+( 1061)       real(C_FLOAT), dimension(*), intent(out) :: out
+( 1062)       integer(C_FFTW_R2R_KIND), value :: kind0
+( 1063)       integer(C_FFTW_R2R_KIND), value :: kind1
+( 1064)       integer(C_FFTW_R2R_KIND), value :: kind2
+( 1065)       integer(C_INT), value :: flags
+( 1066)     end function fftwf_plan_r2r_3d
+( 1067)     
+( 1068)     type(C_PTR) function fftwf_plan_guru_r2r(rank,dims,howmany_rank,howmany_dims,in,out,kind,flags) &
+( 1069)                          bind(C, name='fftwf_plan_guru_r2r')
+( 1070)       import
+( 1071)       integer(C_INT), value :: rank
+( 1072)       type(fftwf_iodim), dimension(*), intent(in) :: dims
+( 1073)       integer(C_INT), value :: howmany_rank
+( 1074)       type(fftwf_iodim), dimension(*), intent(in) :: howmany_dims
+( 1075)       real(C_FLOAT), dimension(*), intent(out) :: in
+( 1076)       real(C_FLOAT), dimension(*), intent(out) :: out
+( 1077)       integer(C_FFTW_R2R_KIND), dimension(*), intent(in) :: kind
+( 1078)       integer(C_INT), value :: flags
+( 1079)     end function fftwf_plan_guru_r2r
+( 1080)     
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 30
+
+( 1081)     type(C_PTR) function fftwf_plan_guru64_r2r(rank,dims,howmany_rank,howmany_dims,in,out,kind,flags) &
+( 1082)                          bind(C, name='fftwf_plan_guru64_r2r')
+( 1083)       import
+( 1084)       integer(C_INT), value :: rank
+( 1085)       type(fftwf_iodim64), dimension(*), intent(in) :: dims
+( 1086)       integer(C_INT), value :: howmany_rank
+( 1087)       type(fftwf_iodim64), dimension(*), intent(in) :: howmany_dims
+( 1088)       real(C_FLOAT), dimension(*), intent(out) :: in
+( 1089)       real(C_FLOAT), dimension(*), intent(out) :: out
+( 1090)       integer(C_FFTW_R2R_KIND), dimension(*), intent(in) :: kind
+( 1091)       integer(C_INT), value :: flags
+( 1092)     end function fftwf_plan_guru64_r2r
+( 1093)     
+( 1094)     subroutine fftwf_execute_r2r(p,in,out) bind(C, name='fftwf_execute_r2r')
+( 1095)       import
+( 1096)       type(C_PTR), value :: p
+( 1097)       real(C_FLOAT), dimension(*), intent(inout) :: in
+( 1098)       real(C_FLOAT), dimension(*), intent(out) :: out
+( 1099)     end subroutine fftwf_execute_r2r
+( 1100)     
+( 1101)     subroutine fftwf_destroy_plan(p) bind(C, name='fftwf_destroy_plan')
+( 1102)       import
+( 1103)       type(C_PTR), value :: p
+( 1104)     end subroutine fftwf_destroy_plan
+( 1105)     
+( 1106)     subroutine fftwf_forget_wisdom() bind(C, name='fftwf_forget_wisdom')
+( 1107)       import
+( 1108)     end subroutine fftwf_forget_wisdom
+( 1109)     
+( 1110)     subroutine fftwf_cleanup() bind(C, name='fftwf_cleanup')
+( 1111)       import
+( 1112)     end subroutine fftwf_cleanup
+( 1113)     
+( 1114)     subroutine fftwf_set_timelimit(t) bind(C, name='fftwf_set_timelimit')
+( 1115)       import
+( 1116)       real(C_DOUBLE), value :: t
+( 1117)     end subroutine fftwf_set_timelimit
+( 1118)     
+( 1119)     subroutine fftwf_plan_with_nthreads(nthreads) bind(C, name='fftwf_plan_with_nthreads')
+( 1120)       import
+( 1121)       integer(C_INT), value :: nthreads
+( 1122)     end subroutine fftwf_plan_with_nthreads
+( 1123)     
+( 1124)     integer(C_INT) function fftwf_init_threads() bind(C, name='fftwf_init_threads')
+( 1125)       import
+( 1126)     end function fftwf_init_threads
+( 1127)     
+( 1128)     subroutine fftwf_cleanup_threads() bind(C, name='fftwf_cleanup_threads')
+( 1129)       import
+( 1130)     end subroutine fftwf_cleanup_threads
+( 1131)     
+( 1132)     integer(C_INT) function fftwf_export_wisdom_to_filename(filename) bind(C, name='fftwf_export_wisdom_to_filename')
+( 1133)       import
+( 1134)       character(C_CHAR), dimension(*), intent(in) :: filename
+( 1135)     end function fftwf_export_wisdom_to_filename
+( 1136)     
+( 1137)     subroutine fftwf_export_wisdom_to_file(output_file) bind(C, name='fftwf_export_wisdom_to_file')
+( 1138)       import
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 31
+
+( 1139)       type(C_PTR), value :: output_file
+( 1140)     end subroutine fftwf_export_wisdom_to_file
+( 1141)     
+( 1142)     type(C_PTR) function fftwf_export_wisdom_to_string() bind(C, name='fftwf_export_wisdom_to_string')
+( 1143)       import
+( 1144)     end function fftwf_export_wisdom_to_string
+( 1145)     
+( 1146)     subroutine fftwf_export_wisdom(write_char,data) bind(C, name='fftwf_export_wisdom')
+( 1147)       import
+( 1148)       type(C_FUNPTR), value :: write_char
+( 1149)       type(C_PTR), value :: data
+( 1150)     end subroutine fftwf_export_wisdom
+( 1151)     
+( 1152)     integer(C_INT) function fftwf_import_system_wisdom() bind(C, name='fftwf_import_system_wisdom')
+( 1153)       import
+( 1154)     end function fftwf_import_system_wisdom
+( 1155)     
+( 1156)     integer(C_INT) function fftwf_import_wisdom_from_filename(filename) bind(C, name='fftwf_import_wisdom_from_filename')
+( 1157)       import
+( 1158)       character(C_CHAR), dimension(*), intent(in) :: filename
+( 1159)     end function fftwf_import_wisdom_from_filename
+( 1160)     
+( 1161)     integer(C_INT) function fftwf_import_wisdom_from_file(input_file) bind(C, name='fftwf_import_wisdom_from_file')
+( 1162)       import
+( 1163)       type(C_PTR), value :: input_file
+( 1164)     end function fftwf_import_wisdom_from_file
+( 1165)     
+( 1166)     integer(C_INT) function fftwf_import_wisdom_from_string(input_string) bind(C, name='fftwf_import_wisdom_from_string')
+( 1167)       import
+( 1168)       character(C_CHAR), dimension(*), intent(in) :: input_string
+( 1169)     end function fftwf_import_wisdom_from_string
+( 1170)     
+( 1171)     integer(C_INT) function fftwf_import_wisdom(read_char,data) bind(C, name='fftwf_import_wisdom')
+( 1172)       import
+( 1173)       type(C_FUNPTR), value :: read_char
+( 1174)       type(C_PTR), value :: data
+( 1175)     end function fftwf_import_wisdom
+( 1176)     
+( 1177)     subroutine fftwf_fprint_plan(p,output_file) bind(C, name='fftwf_fprint_plan')
+( 1178)       import
+( 1179)       type(C_PTR), value :: p
+( 1180)       type(C_PTR), value :: output_file
+( 1181)     end subroutine fftwf_fprint_plan
+( 1182)     
+( 1183)     subroutine fftwf_print_plan(p) bind(C, name='fftwf_print_plan')
+( 1184)       import
+( 1185)       type(C_PTR), value :: p
+( 1186)     end subroutine fftwf_print_plan
+( 1187)     
+( 1188)     type(C_PTR) function fftwf_malloc(n) bind(C, name='fftwf_malloc')
+( 1189)       import
+( 1190)       integer(C_SIZE_T), value :: n
+( 1191)     end function fftwf_malloc
+( 1192)     
+( 1193)     type(C_PTR) function fftwf_alloc_real(n) bind(C, name='fftwf_alloc_real')
+( 1194)       import
+( 1195)       integer(C_SIZE_T), value :: n
+( 1196)     end function fftwf_alloc_real
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 32
+
+( 1197)     
+( 1198)     type(C_PTR) function fftwf_alloc_complex(n) bind(C, name='fftwf_alloc_complex')
+( 1199)       import
+( 1200)       integer(C_SIZE_T), value :: n
+( 1201)     end function fftwf_alloc_complex
+( 1202)     
+( 1203)     subroutine fftwf_free(p) bind(C, name='fftwf_free')
+( 1204)       import
+( 1205)       type(C_PTR), value :: p
+( 1206)     end subroutine fftwf_free
+( 1207)     
+( 1208)     subroutine fftwf_flops(p,add,mul,fmas) bind(C, name='fftwf_flops')
+( 1209)       import
+( 1210)       type(C_PTR), value :: p
+( 1211)       real(C_DOUBLE), intent(out) :: add
+( 1212)       real(C_DOUBLE), intent(out) :: mul
+( 1213)       real(C_DOUBLE), intent(out) :: fmas
+( 1214)     end subroutine fftwf_flops
+( 1215)     
+( 1216)     real(C_DOUBLE) function fftwf_estimate_cost(p) bind(C, name='fftwf_estimate_cost')
+( 1217)       import
+( 1218)       type(C_PTR), value :: p
+( 1219)     end function fftwf_estimate_cost
+( 1220)     
+( 1221)     real(C_DOUBLE) function fftwf_cost(p) bind(C, name='fftwf_cost')
+( 1222)       import
+( 1223)       type(C_PTR), value :: p
+( 1224)     end function fftwf_cost
+( 1225)     
+( 1226)   end interface
+( 1227) # 1228 ".D[14]/fftw3.f03.h"
+( 1228)   type, bind(C) :: fftwl_iodim
+( 1229)      integer(C_INT) n, is, os
+( 1230)   end type fftwl_iodim
+( 1231)   type, bind(C) :: fftwl_iodim64
+( 1232)      integer(C_INTPTR_T) n, is, os
+( 1233)   end type fftwl_iodim64
+( 1234) # 1235 ".D[14]/fftw3.f03.h"
+( 1235)   interface
+( 1236)     type(C_PTR) function fftwl_plan_dft(rank,n,in,out,sign,flags) bind(C, name='fftwl_plan_dft')
+( 1237)       import
+( 1238)       integer(C_INT), value :: rank
+( 1239)       integer(C_INT), dimension(*), intent(in) :: n
+( 1240)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+( 1241)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+( 1242)       integer(C_INT), value :: sign
+( 1243)       integer(C_INT), value :: flags
+( 1244)     end function fftwl_plan_dft
+( 1245)     
+( 1246)     type(C_PTR) function fftwl_plan_dft_1d(n,in,out,sign,flags) bind(C, name='fftwl_plan_dft_1d')
+( 1247)       import
+( 1248)       integer(C_INT), value :: n
+( 1249)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+( 1250)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+( 1251)       integer(C_INT), value :: sign
+( 1252)       integer(C_INT), value :: flags
+( 1253)     end function fftwl_plan_dft_1d
+( 1254)     
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 33
+
+( 1255)     type(C_PTR) function fftwl_plan_dft_2d(n0,n1,in,out,sign,flags) bind(C, name='fftwl_plan_dft_2d')
+( 1256)       import
+( 1257)       integer(C_INT), value :: n0
+( 1258)       integer(C_INT), value :: n1
+( 1259)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+( 1260)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+( 1261)       integer(C_INT), value :: sign
+( 1262)       integer(C_INT), value :: flags
+( 1263)     end function fftwl_plan_dft_2d
+( 1264)     
+( 1265)     type(C_PTR) function fftwl_plan_dft_3d(n0,n1,n2,in,out,sign,flags) bind(C, name='fftwl_plan_dft_3d')
+( 1266)       import
+( 1267)       integer(C_INT), value :: n0
+( 1268)       integer(C_INT), value :: n1
+( 1269)       integer(C_INT), value :: n2
+( 1270)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+( 1271)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+( 1272)       integer(C_INT), value :: sign
+( 1273)       integer(C_INT), value :: flags
+( 1274)     end function fftwl_plan_dft_3d
+( 1275)     
+( 1276)     type(C_PTR) function fftwl_plan_many_dft(rank,n,howmany,in,inembed,istride,idist,out,onembed,ostride,odist,sign,flags) &
+( 1277)                          bind(C, name='fftwl_plan_many_dft')
+( 1278)       import
+( 1279)       integer(C_INT), value :: rank
+( 1280)       integer(C_INT), dimension(*), intent(in) :: n
+( 1281)       integer(C_INT), value :: howmany
+( 1282)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+( 1283)       integer(C_INT), dimension(*), intent(in) :: inembed
+( 1284)       integer(C_INT), value :: istride
+( 1285)       integer(C_INT), value :: idist
+( 1286)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+( 1287)       integer(C_INT), dimension(*), intent(in) :: onembed
+( 1288)       integer(C_INT), value :: ostride
+( 1289)       integer(C_INT), value :: odist
+( 1290)       integer(C_INT), value :: sign
+( 1291)       integer(C_INT), value :: flags
+( 1292)     end function fftwl_plan_many_dft
+( 1293)     
+( 1294)     type(C_PTR) function fftwl_plan_guru_dft(rank,dims,howmany_rank,howmany_dims,in,out,sign,flags) &
+( 1295)                          bind(C, name='fftwl_plan_guru_dft')
+( 1296)       import
+( 1297)       integer(C_INT), value :: rank
+( 1298)       type(fftwl_iodim), dimension(*), intent(in) :: dims
+( 1299)       integer(C_INT), value :: howmany_rank
+( 1300)       type(fftwl_iodim), dimension(*), intent(in) :: howmany_dims
+( 1301)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+( 1302)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+( 1303)       integer(C_INT), value :: sign
+( 1304)       integer(C_INT), value :: flags
+( 1305)     end function fftwl_plan_guru_dft
+( 1306)     
+( 1307)     type(C_PTR) function fftwl_plan_guru_split_dft(rank,dims,howmany_rank,howmany_dims,ri,ii,ro,io,flags) &
+( 1308)                          bind(C, name='fftwl_plan_guru_split_dft')
+( 1309)       import
+( 1310)       integer(C_INT), value :: rank
+( 1311)       type(fftwl_iodim), dimension(*), intent(in) :: dims
+( 1312)       integer(C_INT), value :: howmany_rank
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 34
+
+( 1313)       type(fftwl_iodim), dimension(*), intent(in) :: howmany_dims
+( 1314)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: ri
+( 1315)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: ii
+( 1316)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: ro
+( 1317)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: io
+( 1318)       integer(C_INT), value :: flags
+( 1319)     end function fftwl_plan_guru_split_dft
+( 1320)     
+( 1321)     type(C_PTR) function fftwl_plan_guru64_dft(rank,dims,howmany_rank,howmany_dims,in,out,sign,flags) &
+( 1322)                          bind(C, name='fftwl_plan_guru64_dft')
+( 1323)       import
+( 1324)       integer(C_INT), value :: rank
+( 1325)       type(fftwl_iodim64), dimension(*), intent(in) :: dims
+( 1326)       integer(C_INT), value :: howmany_rank
+( 1327)       type(fftwl_iodim64), dimension(*), intent(in) :: howmany_dims
+( 1328)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+( 1329)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+( 1330)       integer(C_INT), value :: sign
+( 1331)       integer(C_INT), value :: flags
+( 1332)     end function fftwl_plan_guru64_dft
+( 1333)     
+( 1334)     type(C_PTR) function fftwl_plan_guru64_split_dft(rank,dims,howmany_rank,howmany_dims,ri,ii,ro,io,flags) &
+( 1335)                          bind(C, name='fftwl_plan_guru64_split_dft')
+( 1336)       import
+( 1337)       integer(C_INT), value :: rank
+( 1338)       type(fftwl_iodim64), dimension(*), intent(in) :: dims
+( 1339)       integer(C_INT), value :: howmany_rank
+( 1340)       type(fftwl_iodim64), dimension(*), intent(in) :: howmany_dims
+( 1341)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: ri
+( 1342)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: ii
+( 1343)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: ro
+( 1344)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: io
+( 1345)       integer(C_INT), value :: flags
+( 1346)     end function fftwl_plan_guru64_split_dft
+( 1347)     
+( 1348)     subroutine fftwl_execute_dft(p,in,out) bind(C, name='fftwl_execute_dft')
+( 1349)       import
+( 1350)       type(C_PTR), value :: p
+( 1351)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(inout) :: in
+( 1352)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+( 1353)     end subroutine fftwl_execute_dft
+( 1354)     
+( 1355)     subroutine fftwl_execute_split_dft(p,ri,ii,ro,io) bind(C, name='fftwl_execute_split_dft')
+( 1356)       import
+( 1357)       type(C_PTR), value :: p
+( 1358)       real(C_LONG_DOUBLE), dimension(*), intent(inout) :: ri
+( 1359)       real(C_LONG_DOUBLE), dimension(*), intent(inout) :: ii
+( 1360)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: ro
+( 1361)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: io
+( 1362)     end subroutine fftwl_execute_split_dft
+( 1363)     
+( 1364)     type(C_PTR) function fftwl_plan_many_dft_r2c(rank,n,howmany,in,inembed,istride,idist,out,onembed,ostride,odist,flags) &
+( 1365)                          bind(C, name='fftwl_plan_many_dft_r2c')
+( 1366)       import
+( 1367)       integer(C_INT), value :: rank
+( 1368)       integer(C_INT), dimension(*), intent(in) :: n
+( 1369)       integer(C_INT), value :: howmany
+( 1370)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: in
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 35
+
+( 1371)       integer(C_INT), dimension(*), intent(in) :: inembed
+( 1372)       integer(C_INT), value :: istride
+( 1373)       integer(C_INT), value :: idist
+( 1374)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+( 1375)       integer(C_INT), dimension(*), intent(in) :: onembed
+( 1376)       integer(C_INT), value :: ostride
+( 1377)       integer(C_INT), value :: odist
+( 1378)       integer(C_INT), value :: flags
+( 1379)     end function fftwl_plan_many_dft_r2c
+( 1380)     
+( 1381)     type(C_PTR) function fftwl_plan_dft_r2c(rank,n,in,out,flags) bind(C, name='fftwl_plan_dft_r2c')
+( 1382)       import
+( 1383)       integer(C_INT), value :: rank
+( 1384)       integer(C_INT), dimension(*), intent(in) :: n
+( 1385)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: in
+( 1386)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+( 1387)       integer(C_INT), value :: flags
+( 1388)     end function fftwl_plan_dft_r2c
+( 1389)     
+( 1390)     type(C_PTR) function fftwl_plan_dft_r2c_1d(n,in,out,flags) bind(C, name='fftwl_plan_dft_r2c_1d')
+( 1391)       import
+( 1392)       integer(C_INT), value :: n
+( 1393)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: in
+( 1394)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+( 1395)       integer(C_INT), value :: flags
+( 1396)     end function fftwl_plan_dft_r2c_1d
+( 1397)     
+( 1398)     type(C_PTR) function fftwl_plan_dft_r2c_2d(n0,n1,in,out,flags) bind(C, name='fftwl_plan_dft_r2c_2d')
+( 1399)       import
+( 1400)       integer(C_INT), value :: n0
+( 1401)       integer(C_INT), value :: n1
+( 1402)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: in
+( 1403)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+( 1404)       integer(C_INT), value :: flags
+( 1405)     end function fftwl_plan_dft_r2c_2d
+( 1406)     
+( 1407)     type(C_PTR) function fftwl_plan_dft_r2c_3d(n0,n1,n2,in,out,flags) bind(C, name='fftwl_plan_dft_r2c_3d')
+( 1408)       import
+( 1409)       integer(C_INT), value :: n0
+( 1410)       integer(C_INT), value :: n1
+( 1411)       integer(C_INT), value :: n2
+( 1412)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: in
+( 1413)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+( 1414)       integer(C_INT), value :: flags
+( 1415)     end function fftwl_plan_dft_r2c_3d
+( 1416)     
+( 1417)     type(C_PTR) function fftwl_plan_many_dft_c2r(rank,n,howmany,in,inembed,istride,idist,out,onembed,ostride,odist,flags) &
+( 1418)                          bind(C, name='fftwl_plan_many_dft_c2r')
+( 1419)       import
+( 1420)       integer(C_INT), value :: rank
+( 1421)       integer(C_INT), dimension(*), intent(in) :: n
+( 1422)       integer(C_INT), value :: howmany
+( 1423)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+( 1424)       integer(C_INT), dimension(*), intent(in) :: inembed
+( 1425)       integer(C_INT), value :: istride
+( 1426)       integer(C_INT), value :: idist
+( 1427)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1428)       integer(C_INT), dimension(*), intent(in) :: onembed
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 36
+
+( 1429)       integer(C_INT), value :: ostride
+( 1430)       integer(C_INT), value :: odist
+( 1431)       integer(C_INT), value :: flags
+( 1432)     end function fftwl_plan_many_dft_c2r
+( 1433)     
+( 1434)     type(C_PTR) function fftwl_plan_dft_c2r(rank,n,in,out,flags) bind(C, name='fftwl_plan_dft_c2r')
+( 1435)       import
+( 1436)       integer(C_INT), value :: rank
+( 1437)       integer(C_INT), dimension(*), intent(in) :: n
+( 1438)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+( 1439)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1440)       integer(C_INT), value :: flags
+( 1441)     end function fftwl_plan_dft_c2r
+( 1442)     
+( 1443)     type(C_PTR) function fftwl_plan_dft_c2r_1d(n,in,out,flags) bind(C, name='fftwl_plan_dft_c2r_1d')
+( 1444)       import
+( 1445)       integer(C_INT), value :: n
+( 1446)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+( 1447)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1448)       integer(C_INT), value :: flags
+( 1449)     end function fftwl_plan_dft_c2r_1d
+( 1450)     
+( 1451)     type(C_PTR) function fftwl_plan_dft_c2r_2d(n0,n1,in,out,flags) bind(C, name='fftwl_plan_dft_c2r_2d')
+( 1452)       import
+( 1453)       integer(C_INT), value :: n0
+( 1454)       integer(C_INT), value :: n1
+( 1455)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+( 1456)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1457)       integer(C_INT), value :: flags
+( 1458)     end function fftwl_plan_dft_c2r_2d
+( 1459)     
+( 1460)     type(C_PTR) function fftwl_plan_dft_c2r_3d(n0,n1,n2,in,out,flags) bind(C, name='fftwl_plan_dft_c2r_3d')
+( 1461)       import
+( 1462)       integer(C_INT), value :: n0
+( 1463)       integer(C_INT), value :: n1
+( 1464)       integer(C_INT), value :: n2
+( 1465)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+( 1466)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1467)       integer(C_INT), value :: flags
+( 1468)     end function fftwl_plan_dft_c2r_3d
+( 1469)     
+( 1470)     type(C_PTR) function fftwl_plan_guru_dft_r2c(rank,dims,howmany_rank,howmany_dims,in,out,flags) &
+( 1471)                          bind(C, name='fftwl_plan_guru_dft_r2c')
+( 1472)       import
+( 1473)       integer(C_INT), value :: rank
+( 1474)       type(fftwl_iodim), dimension(*), intent(in) :: dims
+( 1475)       integer(C_INT), value :: howmany_rank
+( 1476)       type(fftwl_iodim), dimension(*), intent(in) :: howmany_dims
+( 1477)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: in
+( 1478)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+( 1479)       integer(C_INT), value :: flags
+( 1480)     end function fftwl_plan_guru_dft_r2c
+( 1481)     
+( 1482)     type(C_PTR) function fftwl_plan_guru_dft_c2r(rank,dims,howmany_rank,howmany_dims,in,out,flags) &
+( 1483)                          bind(C, name='fftwl_plan_guru_dft_c2r')
+( 1484)       import
+( 1485)       integer(C_INT), value :: rank
+( 1486)       type(fftwl_iodim), dimension(*), intent(in) :: dims
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 37
+
+( 1487)       integer(C_INT), value :: howmany_rank
+( 1488)       type(fftwl_iodim), dimension(*), intent(in) :: howmany_dims
+( 1489)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+( 1490)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1491)       integer(C_INT), value :: flags
+( 1492)     end function fftwl_plan_guru_dft_c2r
+( 1493)     
+( 1494)     type(C_PTR) function fftwl_plan_guru_split_dft_r2c(rank,dims,howmany_rank,howmany_dims,in,ro,io,flags) &
+( 1495)                          bind(C, name='fftwl_plan_guru_split_dft_r2c')
+( 1496)       import
+( 1497)       integer(C_INT), value :: rank
+( 1498)       type(fftwl_iodim), dimension(*), intent(in) :: dims
+( 1499)       integer(C_INT), value :: howmany_rank
+( 1500)       type(fftwl_iodim), dimension(*), intent(in) :: howmany_dims
+( 1501)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: in
+( 1502)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: ro
+( 1503)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: io
+( 1504)       integer(C_INT), value :: flags
+( 1505)     end function fftwl_plan_guru_split_dft_r2c
+( 1506)     
+( 1507)     type(C_PTR) function fftwl_plan_guru_split_dft_c2r(rank,dims,howmany_rank,howmany_dims,ri,ii,out,flags) &
+( 1508)                          bind(C, name='fftwl_plan_guru_split_dft_c2r')
+( 1509)       import
+( 1510)       integer(C_INT), value :: rank
+( 1511)       type(fftwl_iodim), dimension(*), intent(in) :: dims
+( 1512)       integer(C_INT), value :: howmany_rank
+( 1513)       type(fftwl_iodim), dimension(*), intent(in) :: howmany_dims
+( 1514)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: ri
+( 1515)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: ii
+( 1516)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1517)       integer(C_INT), value :: flags
+( 1518)     end function fftwl_plan_guru_split_dft_c2r
+( 1519)     
+( 1520)     type(C_PTR) function fftwl_plan_guru64_dft_r2c(rank,dims,howmany_rank,howmany_dims,in,out,flags) &
+( 1521)                          bind(C, name='fftwl_plan_guru64_dft_r2c')
+( 1522)       import
+( 1523)       integer(C_INT), value :: rank
+( 1524)       type(fftwl_iodim64), dimension(*), intent(in) :: dims
+( 1525)       integer(C_INT), value :: howmany_rank
+( 1526)       type(fftwl_iodim64), dimension(*), intent(in) :: howmany_dims
+( 1527)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: in
+( 1528)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+( 1529)       integer(C_INT), value :: flags
+( 1530)     end function fftwl_plan_guru64_dft_r2c
+( 1531)     
+( 1532)     type(C_PTR) function fftwl_plan_guru64_dft_c2r(rank,dims,howmany_rank,howmany_dims,in,out,flags) &
+( 1533)                          bind(C, name='fftwl_plan_guru64_dft_c2r')
+( 1534)       import
+( 1535)       integer(C_INT), value :: rank
+( 1536)       type(fftwl_iodim64), dimension(*), intent(in) :: dims
+( 1537)       integer(C_INT), value :: howmany_rank
+( 1538)       type(fftwl_iodim64), dimension(*), intent(in) :: howmany_dims
+( 1539)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: in
+( 1540)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1541)       integer(C_INT), value :: flags
+( 1542)     end function fftwl_plan_guru64_dft_c2r
+( 1543)     
+( 1544)     type(C_PTR) function fftwl_plan_guru64_split_dft_r2c(rank,dims,howmany_rank,howmany_dims,in,ro,io,flags) &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 38
+
+( 1545)                          bind(C, name='fftwl_plan_guru64_split_dft_r2c')
+( 1546)       import
+( 1547)       integer(C_INT), value :: rank
+( 1548)       type(fftwl_iodim64), dimension(*), intent(in) :: dims
+( 1549)       integer(C_INT), value :: howmany_rank
+( 1550)       type(fftwl_iodim64), dimension(*), intent(in) :: howmany_dims
+( 1551)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: in
+( 1552)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: ro
+( 1553)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: io
+( 1554)       integer(C_INT), value :: flags
+( 1555)     end function fftwl_plan_guru64_split_dft_r2c
+( 1556)     
+( 1557)     type(C_PTR) function fftwl_plan_guru64_split_dft_c2r(rank,dims,howmany_rank,howmany_dims,ri,ii,out,flags) &
+( 1558)                          bind(C, name='fftwl_plan_guru64_split_dft_c2r')
+( 1559)       import
+( 1560)       integer(C_INT), value :: rank
+( 1561)       type(fftwl_iodim64), dimension(*), intent(in) :: dims
+( 1562)       integer(C_INT), value :: howmany_rank
+( 1563)       type(fftwl_iodim64), dimension(*), intent(in) :: howmany_dims
+( 1564)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: ri
+( 1565)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: ii
+( 1566)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1567)       integer(C_INT), value :: flags
+( 1568)     end function fftwl_plan_guru64_split_dft_c2r
+( 1569)     
+( 1570)     subroutine fftwl_execute_dft_r2c(p,in,out) bind(C, name='fftwl_execute_dft_r2c')
+( 1571)       import
+( 1572)       type(C_PTR), value :: p
+( 1573)       real(C_LONG_DOUBLE), dimension(*), intent(inout) :: in
+( 1574)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(out) :: out
+( 1575)     end subroutine fftwl_execute_dft_r2c
+( 1576)     
+( 1577)     subroutine fftwl_execute_dft_c2r(p,in,out) bind(C, name='fftwl_execute_dft_c2r')
+( 1578)       import
+( 1579)       type(C_PTR), value :: p
+( 1580)       complex(C_LONG_DOUBLE_COMPLEX), dimension(*), intent(inout) :: in
+( 1581)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1582)     end subroutine fftwl_execute_dft_c2r
+( 1583)     
+( 1584)     subroutine fftwl_execute_split_dft_r2c(p,in,ro,io) bind(C, name='fftwl_execute_split_dft_r2c')
+( 1585)       import
+( 1586)       type(C_PTR), value :: p
+( 1587)       real(C_LONG_DOUBLE), dimension(*), intent(inout) :: in
+( 1588)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: ro
+( 1589)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: io
+( 1590)     end subroutine fftwl_execute_split_dft_r2c
+( 1591)     
+( 1592)     subroutine fftwl_execute_split_dft_c2r(p,ri,ii,out) bind(C, name='fftwl_execute_split_dft_c2r')
+( 1593)       import
+( 1594)       type(C_PTR), value :: p
+( 1595)       real(C_LONG_DOUBLE), dimension(*), intent(inout) :: ri
+( 1596)       real(C_LONG_DOUBLE), dimension(*), intent(inout) :: ii
+( 1597)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1598)     end subroutine fftwl_execute_split_dft_c2r
+( 1599)     
+( 1600)     type(C_PTR) function fftwl_plan_many_r2r(rank,n,howmany,in,inembed,istride,idist,out,onembed,ostride,odist,kind,flags) &
+( 1601)                          bind(C, name='fftwl_plan_many_r2r')
+( 1602)       import
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 39
+
+( 1603)       integer(C_INT), value :: rank
+( 1604)       integer(C_INT), dimension(*), intent(in) :: n
+( 1605)       integer(C_INT), value :: howmany
+( 1606)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: in
+( 1607)       integer(C_INT), dimension(*), intent(in) :: inembed
+( 1608)       integer(C_INT), value :: istride
+( 1609)       integer(C_INT), value :: idist
+( 1610)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1611)       integer(C_INT), dimension(*), intent(in) :: onembed
+( 1612)       integer(C_INT), value :: ostride
+( 1613)       integer(C_INT), value :: odist
+( 1614)       integer(C_FFTW_R2R_KIND), dimension(*), intent(in) :: kind
+( 1615)       integer(C_INT), value :: flags
+( 1616)     end function fftwl_plan_many_r2r
+( 1617)     
+( 1618)     type(C_PTR) function fftwl_plan_r2r(rank,n,in,out,kind,flags) bind(C, name='fftwl_plan_r2r')
+( 1619)       import
+( 1620)       integer(C_INT), value :: rank
+( 1621)       integer(C_INT), dimension(*), intent(in) :: n
+( 1622)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: in
+( 1623)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1624)       integer(C_FFTW_R2R_KIND), dimension(*), intent(in) :: kind
+( 1625)       integer(C_INT), value :: flags
+( 1626)     end function fftwl_plan_r2r
+( 1627)     
+( 1628)     type(C_PTR) function fftwl_plan_r2r_1d(n,in,out,kind,flags) bind(C, name='fftwl_plan_r2r_1d')
+( 1629)       import
+( 1630)       integer(C_INT), value :: n
+( 1631)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: in
+( 1632)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1633)       integer(C_FFTW_R2R_KIND), value :: kind
+( 1634)       integer(C_INT), value :: flags
+( 1635)     end function fftwl_plan_r2r_1d
+( 1636)     
+( 1637)     type(C_PTR) function fftwl_plan_r2r_2d(n0,n1,in,out,kind0,kind1,flags) bind(C, name='fftwl_plan_r2r_2d')
+( 1638)       import
+( 1639)       integer(C_INT), value :: n0
+( 1640)       integer(C_INT), value :: n1
+( 1641)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: in
+( 1642)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1643)       integer(C_FFTW_R2R_KIND), value :: kind0
+( 1644)       integer(C_FFTW_R2R_KIND), value :: kind1
+( 1645)       integer(C_INT), value :: flags
+( 1646)     end function fftwl_plan_r2r_2d
+( 1647)     
+( 1648)     type(C_PTR) function fftwl_plan_r2r_3d(n0,n1,n2,in,out,kind0,kind1,kind2,flags) bind(C, name='fftwl_plan_r2r_3d')
+( 1649)       import
+( 1650)       integer(C_INT), value :: n0
+( 1651)       integer(C_INT), value :: n1
+( 1652)       integer(C_INT), value :: n2
+( 1653)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: in
+( 1654)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1655)       integer(C_FFTW_R2R_KIND), value :: kind0
+( 1656)       integer(C_FFTW_R2R_KIND), value :: kind1
+( 1657)       integer(C_FFTW_R2R_KIND), value :: kind2
+( 1658)       integer(C_INT), value :: flags
+( 1659)     end function fftwl_plan_r2r_3d
+( 1660)     
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 40
+
+( 1661)     type(C_PTR) function fftwl_plan_guru_r2r(rank,dims,howmany_rank,howmany_dims,in,out,kind,flags) &
+( 1662)                          bind(C, name='fftwl_plan_guru_r2r')
+( 1663)       import
+( 1664)       integer(C_INT), value :: rank
+( 1665)       type(fftwl_iodim), dimension(*), intent(in) :: dims
+( 1666)       integer(C_INT), value :: howmany_rank
+( 1667)       type(fftwl_iodim), dimension(*), intent(in) :: howmany_dims
+( 1668)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: in
+( 1669)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1670)       integer(C_FFTW_R2R_KIND), dimension(*), intent(in) :: kind
+( 1671)       integer(C_INT), value :: flags
+( 1672)     end function fftwl_plan_guru_r2r
+( 1673)     
+( 1674)     type(C_PTR) function fftwl_plan_guru64_r2r(rank,dims,howmany_rank,howmany_dims,in,out,kind,flags) &
+( 1675)                          bind(C, name='fftwl_plan_guru64_r2r')
+( 1676)       import
+( 1677)       integer(C_INT), value :: rank
+( 1678)       type(fftwl_iodim64), dimension(*), intent(in) :: dims
+( 1679)       integer(C_INT), value :: howmany_rank
+( 1680)       type(fftwl_iodim64), dimension(*), intent(in) :: howmany_dims
+( 1681)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: in
+( 1682)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1683)       integer(C_FFTW_R2R_KIND), dimension(*), intent(in) :: kind
+( 1684)       integer(C_INT), value :: flags
+( 1685)     end function fftwl_plan_guru64_r2r
+( 1686)     
+( 1687)     subroutine fftwl_execute_r2r(p,in,out) bind(C, name='fftwl_execute_r2r')
+( 1688)       import
+( 1689)       type(C_PTR), value :: p
+( 1690)       real(C_LONG_DOUBLE), dimension(*), intent(inout) :: in
+( 1691)       real(C_LONG_DOUBLE), dimension(*), intent(out) :: out
+( 1692)     end subroutine fftwl_execute_r2r
+( 1693)     
+( 1694)     subroutine fftwl_destroy_plan(p) bind(C, name='fftwl_destroy_plan')
+( 1695)       import
+( 1696)       type(C_PTR), value :: p
+( 1697)     end subroutine fftwl_destroy_plan
+( 1698)     
+( 1699)     subroutine fftwl_forget_wisdom() bind(C, name='fftwl_forget_wisdom')
+( 1700)       import
+( 1701)     end subroutine fftwl_forget_wisdom
+( 1702)     
+( 1703)     subroutine fftwl_cleanup() bind(C, name='fftwl_cleanup')
+( 1704)       import
+( 1705)     end subroutine fftwl_cleanup
+( 1706)     
+( 1707)     subroutine fftwl_set_timelimit(t) bind(C, name='fftwl_set_timelimit')
+( 1708)       import
+( 1709)       real(C_DOUBLE), value :: t
+( 1710)     end subroutine fftwl_set_timelimit
+( 1711)     
+( 1712)     subroutine fftwl_plan_with_nthreads(nthreads) bind(C, name='fftwl_plan_with_nthreads')
+( 1713)       import
+( 1714)       integer(C_INT), value :: nthreads
+( 1715)     end subroutine fftwl_plan_with_nthreads
+( 1716)     
+( 1717)     integer(C_INT) function fftwl_init_threads() bind(C, name='fftwl_init_threads')
+( 1718)       import
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 41
+
+( 1719)     end function fftwl_init_threads
+( 1720)     
+( 1721)     subroutine fftwl_cleanup_threads() bind(C, name='fftwl_cleanup_threads')
+( 1722)       import
+( 1723)     end subroutine fftwl_cleanup_threads
+( 1724)     
+( 1725)     integer(C_INT) function fftwl_export_wisdom_to_filename(filename) bind(C, name='fftwl_export_wisdom_to_filename')
+( 1726)       import
+( 1727)       character(C_CHAR), dimension(*), intent(in) :: filename
+( 1728)     end function fftwl_export_wisdom_to_filename
+( 1729)     
+( 1730)     subroutine fftwl_export_wisdom_to_file(output_file) bind(C, name='fftwl_export_wisdom_to_file')
+( 1731)       import
+( 1732)       type(C_PTR), value :: output_file
+( 1733)     end subroutine fftwl_export_wisdom_to_file
+( 1734)     
+( 1735)     type(C_PTR) function fftwl_export_wisdom_to_string() bind(C, name='fftwl_export_wisdom_to_string')
+( 1736)       import
+( 1737)     end function fftwl_export_wisdom_to_string
+( 1738)     
+( 1739)     subroutine fftwl_export_wisdom(write_char,data) bind(C, name='fftwl_export_wisdom')
+( 1740)       import
+( 1741)       type(C_FUNPTR), value :: write_char
+( 1742)       type(C_PTR), value :: data
+( 1743)     end subroutine fftwl_export_wisdom
+( 1744)     
+( 1745)     integer(C_INT) function fftwl_import_system_wisdom() bind(C, name='fftwl_import_system_wisdom')
+( 1746)       import
+( 1747)     end function fftwl_import_system_wisdom
+( 1748)     
+( 1749)     integer(C_INT) function fftwl_import_wisdom_from_filename(filename) bind(C, name='fftwl_import_wisdom_from_filename')
+( 1750)       import
+( 1751)       character(C_CHAR), dimension(*), intent(in) :: filename
+( 1752)     end function fftwl_import_wisdom_from_filename
+( 1753)     
+( 1754)     integer(C_INT) function fftwl_import_wisdom_from_file(input_file) bind(C, name='fftwl_import_wisdom_from_file')
+( 1755)       import
+( 1756)       type(C_PTR), value :: input_file
+( 1757)     end function fftwl_import_wisdom_from_file
+( 1758)     
+( 1759)     integer(C_INT) function fftwl_import_wisdom_from_string(input_string) bind(C, name='fftwl_import_wisdom_from_string')
+( 1760)       import
+( 1761)       character(C_CHAR), dimension(*), intent(in) :: input_string
+( 1762)     end function fftwl_import_wisdom_from_string
+( 1763)     
+( 1764)     integer(C_INT) function fftwl_import_wisdom(read_char,data) bind(C, name='fftwl_import_wisdom')
+( 1765)       import
+( 1766)       type(C_FUNPTR), value :: read_char
+( 1767)       type(C_PTR), value :: data
+( 1768)     end function fftwl_import_wisdom
+( 1769)     
+( 1770)     subroutine fftwl_fprint_plan(p,output_file) bind(C, name='fftwl_fprint_plan')
+( 1771)       import
+( 1772)       type(C_PTR), value :: p
+( 1773)       type(C_PTR), value :: output_file
+( 1774)     end subroutine fftwl_fprint_plan
+( 1775)     
+( 1776)     subroutine fftwl_print_plan(p) bind(C, name='fftwl_print_plan')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 42
+
+( 1777)       import
+( 1778)       type(C_PTR), value :: p
+( 1779)     end subroutine fftwl_print_plan
+( 1780)     
+( 1781)     type(C_PTR) function fftwl_malloc(n) bind(C, name='fftwl_malloc')
+( 1782)       import
+( 1783)       integer(C_SIZE_T), value :: n
+( 1784)     end function fftwl_malloc
+( 1785)     
+( 1786)     type(C_PTR) function fftwl_alloc_real(n) bind(C, name='fftwl_alloc_real')
+( 1787)       import
+( 1788)       integer(C_SIZE_T), value :: n
+( 1789)     end function fftwl_alloc_real
+( 1790)     
+( 1791)     type(C_PTR) function fftwl_alloc_complex(n) bind(C, name='fftwl_alloc_complex')
+( 1792)       import
+( 1793)       integer(C_SIZE_T), value :: n
+( 1794)     end function fftwl_alloc_complex
+( 1795)     
+( 1796)     subroutine fftwl_free(p) bind(C, name='fftwl_free')
+( 1797)       import
+( 1798)       type(C_PTR), value :: p
+( 1799)     end subroutine fftwl_free
+( 1800)     
+( 1801)     subroutine fftwl_flops(p,add,mul,fmas) bind(C, name='fftwl_flops')
+( 1802)       import
+( 1803)       type(C_PTR), value :: p
+( 1804)       real(C_DOUBLE), intent(out) :: add
+( 1805)       real(C_DOUBLE), intent(out) :: mul
+( 1806)       real(C_DOUBLE), intent(out) :: fmas
+( 1807)     end subroutine fftwl_flops
+( 1808)     
+( 1809)     real(C_DOUBLE) function fftwl_estimate_cost(p) bind(C, name='fftwl_estimate_cost')
+( 1810)       import
+( 1811)       type(C_PTR), value :: p
+( 1812)     end function fftwl_estimate_cost
+( 1813)     
+( 1814)     real(C_DOUBLE) function fftwl_cost(p) bind(C, name='fftwl_cost')
+( 1815)       import
+( 1816)       type(C_PTR), value :: p
+( 1817)     end function fftwl_cost
+( 1818)     
+( 1819)   end interface
+( 1820) # 34 "tpm_fftw.F90"
+(   34) # 36 "tpm_fftw.F90"
+(   36) PRIVATE
+(   37) PUBLIC CREATE_PLAN_FFTW, DESTROY_PLAN_FFTW, DESTROY_PLANS_FFTW, INIT_PLANS_FFTW, &
+(   38)       & FFTW_RESOL, TW, EXEC_FFTW, EXEC_EFFTW
+(   39) # 40 "tpm_fftw.F90"
+(   40) TYPE FFTW_TYPE
+(   41)   INTEGER(KIND=JPIM),ALLOCATABLE :: N_PLANS(:)
+(   42)   TYPE(FFTW_PLAN),POINTER :: FFTW_PLANS(:)
+(   43)   INTEGER(KIND=JPIM) :: N_MAX=0         ! maximum number of latitudes
+(   44)   INTEGER(KIND=JPIM) :: N_MAX_PLANS=4   ! maximum number of plans for each active latitude
+(   45)   LOGICAL            :: LFFTW=.FALSE. 
+(   46) END TYPE FFTW_TYPE
+(   47) # 49 "tpm_fftw.F90"
+(   49) TYPE FFTW_PLAN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 43
+
+(   50)   INTEGER(KIND=JPIM) :: NPLAN_ID=123456
+(   51)   INTEGER(KIND=JPIB) :: NPLAN
+(   52)   INTEGER(KIND=JPIM) :: NLOT
+(   53)   INTEGER(KIND=JPIM) :: NTYPE
+(   54)   TYPE(FFTW_PLAN),POINTER :: NEXT_PLAN => NULL()
+(   55) END TYPE FFTW_PLAN
+(   56) # 57 "tpm_fftw.F90"
+(   57) TYPE(FFTW_TYPE),ALLOCATABLE,TARGET :: FFTW_RESOL(:)
+(   58) TYPE(FFTW_TYPE),POINTER     :: TW
+(   59) # 62 "tpm_fftw.F90"
+(   62) ! ------------------------------------------------------------------
+(   63) CONTAINS
+(   64) ! ------------------------------------------------------------------
+(   65) # 67 "tpm_fftw.F90"
+(   67) SUBROUTINE INIT_PLANS_FFTW(KDLON)
+(   68) INTEGER(KIND=JPIM),INTENT(IN) :: KDLON
+(   69) # 70 "tpm_fftw.F90"
+(   70) # 1 ".D[15]/abor1.intfb.h"
+(    1) INTERFACE
+(    2) # 3 ".D[15]/abor1.intfb.h"
+(    3) SUBROUTINE ABOR1(CDTEXT)
+(    4) CHARACTER(LEN=*), INTENT(IN) :: CDTEXT
+(    5) END SUBROUTINE ABOR1
+(    6) # 7 ".D[15]/abor1.intfb.h"
+(    7) SUBROUTINE ABOR1FL(CDFILE, KLINENUM, CDTEXT)
+(    8) USE PARKIND1  ,ONLY : JPIM
+(    9) CHARACTER(LEN=*), INTENT(IN) :: CDFILE,CDTEXT
+(   10) INTEGER(KIND=JPIM), INTENT(IN) :: KLINENUM
+(   11) END SUBROUTINE ABOR1FL
+(   12) # 13 ".D[15]/abor1.intfb.h"
+(   13) SUBROUTINE ABOR1_EXCEPTION_HANDLER()
+(   14) END SUBROUTINE ABOR1_EXCEPTION_HANDLER
+(   15) # 16 ".D[15]/abor1.intfb.h"
+(   16) END INTERFACE
+(   17) # 71 "tpm_fftw.F90"
+(   71) # 72 "tpm_fftw.F90"
+(   72) TW%N_MAX=KDLON
+(   73) ALLOCATE(TW%FFTW_PLANS(TW%N_MAX))
+(   74) ALLOCATE(TW%N_PLANS(TW%N_MAX))
+(   75) TW%N_PLANS(:)=0
+(   76) RETURN  
+(   77) END SUBROUTINE INIT_PLANS_FFTW
+(   78) # 80 "tpm_fftw.F90"
+(   80) SUBROUTINE CREATE_PLAN_FFTW(KPLAN,KTYPE,KN,KLOT)
+(   81) INTEGER(KIND=JPIB),INTENT(OUT) :: KPLAN
+(   82) INTEGER(KIND=JPIM),INTENT(IN) :: KTYPE,KN,KLOT
+(   83) # 84 "tpm_fftw.F90"
+(   84) INTEGER(KIND=JPIB) :: IPLAN
+(   85) INTEGER(KIND=JPIM) :: IRANK, ISTRIDE
+(   86) INTEGER(KIND=JPIM) :: JL, JN
+(   87) INTEGER(KIND=JPIM) :: IRDIST,ICDIST,IN(1),IEMBED(1)
+(   88) REAL(KIND=JPRBT), POINTER :: ZDUM(:)
+(   89) TYPE(C_PTR) :: ZDUMP
+(   90) LOGICAL :: LLFOUND
+(   91) LOGICAL :: LLRESTRICT_PLANS=.TRUE.
+(   92) TYPE(FFTW_PLAN),POINTER :: CURR_FFTW_PLAN,START_FFTW_PLAN
+(   93) REAL(KIND=JPRB) :: ZHOOK_HANDLE, ZHOOK_HANDLE2
+(   94) IF (LHOOK) CALL DR_HOOK('CREATE_PLAN_FFTW',0,ZHOOK_HANDLE)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 44
+
+(   95) # 96 "tpm_fftw.F90"
+(   96) IF( KN > TW%N_MAX )THEN
+(   97)   CALL ABOR1('CREATE_PLAN_FFTW: KN > N_MAX THAT WAS INITIALISED IN INIT_PLANS_FFTW')
+(   98) ENDIF
+(   99) # 100 "tpm_fftw.F90"
+(  100) IRANK=1
+(  101) ISTRIDE=1
+(  102) IN(1)=KN
+(  103) IEMBED(1)=IN(1)
+(  104) ICDIST=KN/2+1
+(  105) IRDIST=ICDIST*2
+(  106) # 107 "tpm_fftw.F90"
+(  107) !$OMP CRITICAL (FFTW_CREATE)
+(  108) LLFOUND=.FALSE.
+(  109) IF( TW%FFTW_PLANS(KN)%NPLAN_ID /= 123456 )THEN
+(  110)   WRITE(*,'("CREATE_PLAN_FFTW.1: PLAN_ID=",I10)')TW%FFTW_PLANS(KN)%NPLAN_ID
+(  111)   CALL ABOR1('CREATE_PLAN_FFTW.1: NPLAN_ID /= 123456')
+(  112) ENDIF
+(  113) CURR_FFTW_PLAN=>TW%FFTW_PLANS(KN)
+(  114) IF( CURR_FFTW_PLAN%NPLAN_ID /= 123456 )THEN
+(  115)   WRITE(*,'("CREATE_PLAN_FFTW.2: PLAN_ID=",I10)')CURR_FFTW_PLAN%NPLAN_ID
+(  116)   CALL ABOR1('CREATE_PLAN_FFTW.2: NPLAN_ID /= 123456')
+(  117) ENDIF
+(  118) ! search for plan in existing plans
+(  119) DO JL=1,TW%N_PLANS(KN)
+(  120)   IF( KLOT == CURR_FFTW_PLAN%NLOT .AND. KTYPE == CURR_FFTW_PLAN%NTYPE )THEN
+(  121)     LLFOUND=.TRUE.
+(  122)     IPLAN=CURR_FFTW_PLAN%NPLAN
+(  123)     EXIT
+(  124)   ELSEIF( JL /= TW%N_PLANS(KN) )THEN
+(  125)     CURR_FFTW_PLAN=>CURR_FFTW_PLAN%NEXT_PLAN
+(  126)     IF( CURR_FFTW_PLAN%NPLAN_ID /= 123456 )THEN
+(  127)       WRITE(*,'("CREATE_PLAN_FFTW.3: PLAN_ID=",I10)')CURR_FFTW_PLAN%NPLAN_ID
+(  128)       CALL ABOR1('CREATE_PLAN_FFTW.3: NPLAN_ID /= 123456')
+(  129)     ENDIF
+(  130)   ENDIF
+(  131) ENDDO
+(  132) IF( .NOT.LLFOUND )THEN
+(  133)   IF( LLRESTRICT_PLANS )THEN
+(  134)     IF( TW%N_PLANS(KN) == TW%N_MAX_PLANS )THEN
+(  135)       ! destroy the plan at the start of the list
+(  136) !     WRITE(*,'("CREATE_PLAN_FFTW: BEG: DESTROYING A PLAN AT THE START OF THE LIST")')
+(  137)        IF (JPRBT == JPRD) THEN
+(  138)           !**CALL DFFTW_DESTROY_PLAN(TW%FFTW_PLANS(KN)%NPLAN)
+(  139)        ELSE
+(  140)           !**CALL SFFTW_DESTROY_PLAN(TW%FFTW_PLANS(KN)%NPLAN)
+(  141)        END IF
+(  142)       TW%FFTW_PLANS(KN)%NPLAN_ID=999999
+(  143)       START_FFTW_PLAN=>TW%FFTW_PLANS(KN)
+(  144)       TW%FFTW_PLANS(KN)=TW%FFTW_PLANS(KN)%NEXT_PLAN
+(  145)       ! DEALLOCATE(START_FFTW_PLAN)
+(  146)       TW%N_PLANS(KN)=TW%N_PLANS(KN)-1
+(  147) !     WRITE(*,'("CREATE_PLAN_FFTW: END: DESTROYING A PLAN AT THE START OF THE LIST")')
+(  148)     ENDIF
+(  149)   ENDIF
+(  150)   IF (JPRBT == JPRD) THEN
+(  151)      !**ZDUMP=FFTW_ALLOC_COMPLEX(INT(1,C_SIZE_T))
+(  152)   ELSE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 45
+
+(  153)      !**ZDUMP=FFTWF_ALLOC_COMPLEX(INT(1,C_SIZE_T))
+(  154)   END IF
+(  155)   CALL C_F_POINTER(ZDUMP,ZDUM,[2])
+(  156)   IF( KTYPE==1 )THEN
+(  157)      IF (LHOOK) CALL DR_HOOK('FFTW_PLAN_MANY_DFT_C2R',0,ZHOOK_HANDLE2)
+(  158)      IF (JPRBT == JPRD) THEN
+(  159)         !**CALL DFFTW_PLAN_MANY_DFT_C2R(IPLAN,IRANK,IN,KLOT,ZDUM,IEMBED,ISTRIDE,ICDIST,&
+(  160)         !**     & ZDUM,IEMBED,ISTRIDE,IRDIST,FFTW_ESTIMATE+FFTW_NO_SIMD)
+(  161)      ELSE
+(  162)         !**CALL SFFTW_PLAN_MANY_DFT_C2R(IPLAN,IRANK,IN,KLOT,ZDUM,IEMBED,ISTRIDE,ICDIST,&
+(  163)         !**     & ZDUM,IEMBED,ISTRIDE,IRDIST,FFTW_ESTIMATE+FFTW_NO_SIMD)
+(  164)      END IF
+(  165)      IF (LHOOK) CALL DR_HOOK('FFTW_PLAN_MANY_DFT_C2R',1,ZHOOK_HANDLE2)
+(  166)   ELSEIF( KTYPE==-1 )THEN
+(  167)      IF (LHOOK) CALL DR_HOOK('FFTW_PLAN_MANY_DFT_R2C',0,ZHOOK_HANDLE2)
+(  168)      IF (JPRBT == JPRD) THEN
+(  169)         !**CALL DFFTW_PLAN_MANY_DFT_R2C(IPLAN,IRANK,IN,KLOT,ZDUM,IEMBED,ISTRIDE,IRDIST,&
+(  170)         !**     & ZDUM,IEMBED,ISTRIDE,ICDIST,FFTW_ESTIMATE+FFTW_NO_SIMD)
+(  171)      ELSE
+(  172)         !**CALL SFFTW_PLAN_MANY_DFT_R2C(IPLAN,IRANK,IN,KLOT,ZDUM,IEMBED,ISTRIDE,IRDIST,&
+(  173)         !**     & ZDUM,IEMBED,ISTRIDE,ICDIST,FFTW_ESTIMATE+FFTW_NO_SIMD)       
+(  174)      END IF
+(  175)      IF (LHOOK) CALL DR_HOOK('FFTW_PLAN_MANY_DFT_R2C',1,ZHOOK_HANDLE2)
+(  176)   ELSE
+(  177)     CALL ABOR1('FFTW_PLAN: INVALID KTYPE')
+(  178)   ENDIF
+(  179)   IF (JPRBT == JPRD) THEN
+(  180)      !**CALL FFTW_FREE(ZDUMP)
+(  181)   ELSE
+(  182)      !**CALL FFTWF_FREE(ZDUMP)
+(  183)   END IF
+(  184)   KPLAN=IPLAN
+(  185)   TW%N_PLANS(KN)=TW%N_PLANS(KN)+1
+(  186)   IF( TW%N_PLANS(KN) /= 1 )THEN
+(  187)     ALLOCATE(CURR_FFTW_PLAN%NEXT_PLAN)
+(  188)     CURR_FFTW_PLAN=>CURR_FFTW_PLAN%NEXT_PLAN
+(  189)   ENDIF
+(  190)   IF( CURR_FFTW_PLAN%NPLAN_ID /= 123456 )THEN
+(  191)     WRITE(*,'("CREATE_PLAN_FFTW.4: PLAN_ID=",I10)')CURR_FFTW_PLAN%NPLAN_ID
+(  192)     CALL ABOR1('CREATE_PLAN_FFTW.4: NPLAN_ID /= 123456')
+(  193)   ENDIF
+(  194)   CURR_FFTW_PLAN%NPLAN=IPLAN
+(  195)   CURR_FFTW_PLAN%NLOT=KLOT
+(  196)   CURR_FFTW_PLAN%NTYPE=KTYPE
+(  197)   CURR_FFTW_PLAN%NEXT_PLAN=>NULL()
+(  198) ! write(*,'("CREATE_PLAN_FFTW: KN=",I5," NPLANS=",I3," KLOT=",I6," KTYPE=",I2,&
+(  199) !  & " NEW IPLAN=",Z16)')KN,TW%N_PLANS(KN),KLOT,KTYPE,IPLAN
+(  200) ELSE
+(  201)   KPLAN=IPLAN
+(  202) ! write(*,'("CREATE_PLAN_FFTW: KN=",I5," NPLANS=",I3," KLOT=",I6," KTYPE=",I2,&
+(  203) !  & " CUR IPLAN=",Z16)')KN,TW%N_PLANS(KN),KLOT,KTYPE,IPLAN
+(  204) ENDIF
+(  205) !$OMP END CRITICAL (FFTW_CREATE)
+(  206) # 207 "tpm_fftw.F90"
+(  207) IF (LHOOK) CALL DR_HOOK('CREATE_PLAN_FFTW',1,ZHOOK_HANDLE)
+(  208) RETURN
+(  209) END SUBROUTINE CREATE_PLAN_FFTW
+(  210) # 212 "tpm_fftw.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 46
+
+(  212) SUBROUTINE DESTROY_PLAN_FFTW(KPLAN)
+(  213) INTEGER(KIND=JPIB),INTENT(IN) :: KPLAN
+(  214) !$OMP CRITICAL (FFTW_DESTROY)
+(  215) IF (JPRBT == JPRD) THEN
+(  216)    !**CALL DFFTW_DESTROY_PLAN(KPLAN)
+(  217) ELSE
+(  218)    !**CALL SFFTW_DESTROY_PLAN(KPLAN)
+(  219) END IF
+(  220) !$OMP END CRITICAL (FFTW_DESTROY)
+(  221) RETURN
+(  222) END SUBROUTINE DESTROY_PLAN_FFTW
+(  223) # 225 "tpm_fftw.F90"
+(  225) SUBROUTINE DESTROY_PLANS_FFTW
+(  226) INTEGER(KIND=JPIM) :: JL, JN
+(  227) TYPE(FFTW_PLAN),POINTER :: CURR_FFTW_PLAN
+(  228) DO JN=1,TW%N_MAX
+(  229)   CURR_FFTW_PLAN=>TW%FFTW_PLANS(JN)
+(  230)   DO JL=1,TW%N_PLANS(JN)
+(  231)     !**CALL DESTROY_PLAN_FFTW(CURR_FFTW_PLAN%NPLAN)
+(  232)     CURR_FFTW_PLAN=>CURR_FFTW_PLAN%NEXT_PLAN 
+(  233)   ENDDO
+(  234) ENDDO
+(  235) IF( ASSOCIATED(TW) ) THEN
+(  236)   IF( ASSOCIATED(TW%FFTW_PLANS) )  DEALLOCATE(TW%FFTW_PLANS)
+(  237)   IF( ALLOCATED(TW%N_PLANS) )     DEALLOCATE(TW%N_PLANS)
+(  238) ENDIF
+(  239) RETURN
+(  240) END SUBROUTINE DESTROY_PLANS_FFTW
+(  241) # 242 "tpm_fftw.F90"
+(  242) SUBROUTINE EXEC_FFTW(KTYPE,KRLEN,KCLEN,KOFF,KFIELDS,LD_ALL,PREEL)
+(  243) # 244 "tpm_fftw.F90"
+(  244) INTEGER(KIND=JPIM),INTENT(IN)   :: KTYPE
+(  245) INTEGER(KIND=JPIM),INTENT(IN)   :: KRLEN
+(  246) INTEGER(KIND=JPIM),INTENT(IN)   :: KCLEN
+(  247) INTEGER(KIND=JPIM),INTENT(IN)   :: KOFF
+(  248) INTEGER(KIND=JPIM),INTENT(IN)   :: KFIELDS
+(  249) LOGICAL           ,INTENT(IN)   :: LD_ALL
+(  250) REAL(KIND=JPRBT), INTENT(INOUT)  :: PREEL(:,:)
+(  251) # 252 "tpm_fftw.F90"
+(  252) REAL(KIND=JPRBT), POINTER :: ZFFT(:,:)
+(  253) REAL(KIND=JPRBT), POINTER :: ZFFT1(:)
+(  254) TYPE(C_PTR) :: ZFFTP, ZFFT1P
+(  255) # 256 "tpm_fftw.F90"
+(  256) INTEGER(KIND=JPIM) :: JJ,JF
+(  257) # 258 "tpm_fftw.F90"
+(  258) INTEGER(KIND=JPIB) :: IPLAN_C2R, IPLAN_C2R1
+(  259) REAL(KIND=JPRB) :: ZHOOK_HANDLE, ZHOOK_HANDLE2
+(  260) # 261 "tpm_fftw.F90"
+(  261) # 1 ".D[15]/abor1.intfb.h"
+(    1) INTERFACE
+(    2) # 3 ".D[15]/abor1.intfb.h"
+(    3) SUBROUTINE ABOR1(CDTEXT)
+(    4) CHARACTER(LEN=*), INTENT(IN) :: CDTEXT
+(    5) END SUBROUTINE ABOR1
+(    6) # 7 ".D[15]/abor1.intfb.h"
+(    7) SUBROUTINE ABOR1FL(CDFILE, KLINENUM, CDTEXT)
+(    8) USE PARKIND1  ,ONLY : JPIM
+(    9) CHARACTER(LEN=*), INTENT(IN) :: CDFILE,CDTEXT
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 47
+
+(   10) INTEGER(KIND=JPIM), INTENT(IN) :: KLINENUM
+(   11) END SUBROUTINE ABOR1FL
+(   12) # 13 ".D[15]/abor1.intfb.h"
+(   13) SUBROUTINE ABOR1_EXCEPTION_HANDLER()
+(   14) END SUBROUTINE ABOR1_EXCEPTION_HANDLER
+(   15) # 16 ".D[15]/abor1.intfb.h"
+(   16) END INTERFACE
+(   17) # 262 "tpm_fftw.F90"
+(  262) # 263 "tpm_fftw.F90"
+(  263) IF (LHOOK) CALL DR_HOOK('EXEC_FFTW',0,ZHOOK_HANDLE)
+(  264) # 265 "tpm_fftw.F90"
+(  265) IF ( (KTYPE /= -1) .AND. (KTYPE /=1) ) THEN
+(  266)   CALL ABOR1('TPM_FFTW:EXEC_FFTW : WRONG VALUE KTYPE')
+(  267) ENDIF
+(  268) # 269 "tpm_fftw.F90"
+(  269) IF( LD_ALL )THEN
+(  270)   !**CALL CREATE_PLAN_FFTW(IPLAN_C2R,KTYPE,KRLEN,KFIELDS)
+(  271)   IF (JPRBT == JPRD) THEN
+(  272)      !**ZFFTP=FFTW_ALLOC_COMPLEX(INT(KCLEN/2*KFIELDS,C_SIZE_T))
+(  273)   ELSE
+(  274)      !**ZFFTP=FFTWF_ALLOC_COMPLEX(INT(KCLEN/2*KFIELDS,C_SIZE_T))
+(  275)   END IF
+(  276)   CALL C_F_POINTER(ZFFTP,ZFFT,[KCLEN,KFIELDS])
+(  277)   IF (KTYPE==1) THEN
+(  278)     DO JF=1,KFIELDS
+(  279)       DO JJ=1,KCLEN
+(  280)         ZFFT(JJ,JF) =PREEL(JF,KOFF+JJ-1)
+(  281)       ENDDO
+(  282)     ENDDO
+(  283)     IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_C2R',0,ZHOOK_HANDLE2)
+(  284)     IF (JPRBT == JPRD) THEN
+(  285)        !**CALL DFFTW_EXECUTE_DFT_C2R(IPLAN_C2R,ZFFT,ZFFT)
+(  286)     ELSE
+(  287)        !**CALL SFFTW_EXECUTE_DFT_C2R(IPLAN_C2R,ZFFT,ZFFT)
+(  288)     END IF
+(  289)     IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_C2R',1,ZHOOK_HANDLE2)
+(  290)     DO JJ=1,KRLEN
+(  291)       DO JF=1,KFIELDS
+(  292)         PREEL(JF,KOFF+JJ-1)=ZFFT(JJ,JF)
+(  293)       ENDDO
+(  294)     ENDDO
+(  295)   ELSE
+(  296)     DO JF=1,KFIELDS
+(  297)       DO JJ=1,KRLEN
+(  298)         ZFFT(JJ,JF) =PREEL(JF,KOFF+JJ-1)
+(  299)       ENDDO
+(  300)     ENDDO
+(  301)     IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_R2C',0,ZHOOK_HANDLE2)
+(  302)     IF (JPRBT == JPRD) THEN
+(  303)        !**CALL DFFTW_EXECUTE_DFT_R2C(IPLAN_C2R,ZFFT,ZFFT)
+(  304)     ELSE
+(  305)        !**CALL SFFTW_EXECUTE_DFT_R2C(IPLAN_C2R,ZFFT,ZFFT)
+(  306)     END IF
+(  307)     IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_R2C',1,ZHOOK_HANDLE2)
+(  308)     DO JJ=1,KCLEN
+(  309)       DO JF=1,KFIELDS
+(  310)         PREEL(JF,KOFF+JJ-1)=ZFFT(JJ,JF)/REAL(KRLEN,JPRBT)
+(  311)       ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 48
+
+(  312)     ENDDO
+(  313)   ENDIF
+(  314)   IF (JPRBT == JPRD) THEN
+(  315)      !**CALL FFTW_FREE(ZFFTP)
+(  316)   ELSE
+(  317)      !**CALL FFTWF_FREE(ZFFTP)
+(  318)   END IF
+(  319) ELSE
+(  320)   !**CALL CREATE_PLAN_FFTW(IPLAN_C2R1,KTYPE,KRLEN,1)
+(  321)   IF (JPRBT == JPRD) THEN
+(  322)      !**ZFFT1P=FFTW_ALLOC_COMPLEX(INT(KCLEN/2,C_SIZE_T))
+(  323)   ELSE
+(  324)      !**ZFFT1P=FFTWF_ALLOC_COMPLEX(INT(KCLEN/2,C_SIZE_T))
+(  325)   END IF
+(  326)   CALL C_F_POINTER(ZFFT1P,ZFFT1,[KCLEN])
+(  327)   IF (KTYPE==1) THEN
+(  328)     DO JF=1,KFIELDS
+(  329)       DO JJ=1,KCLEN
+(  330)         ZFFT1(JJ) =PREEL(JF,KOFF+JJ-1)
+(  331)       ENDDO
+(  332)       IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_C2R',0,ZHOOK_HANDLE2)
+(  333)       IF (JPRBT == JPRD) THEN
+(  334)          !**CALL DFFTW_EXECUTE_DFT_C2R(IPLAN_C2R1,ZFFT1,ZFFT1)
+(  335)       ELSE
+(  336)          !**CALL SFFTW_EXECUTE_DFT_C2R(IPLAN_C2R1,ZFFT1,ZFFT1)
+(  337)       END IF
+(  338)       IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_C2R',1,ZHOOK_HANDLE2)
+(  339)       DO JJ=1,KRLEN
+(  340)         PREEL(JF,KOFF+JJ-1)=ZFFT1(JJ)
+(  341)       ENDDO
+(  342)     ENDDO
+(  343)   ELSE
+(  344)     DO JF=1,KFIELDS
+(  345)       DO JJ=1,KRLEN
+(  346)         ZFFT1(JJ) =PREEL(JF,KOFF+JJ-1)
+(  347)       ENDDO
+(  348)       IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_R2C',0,ZHOOK_HANDLE2)
+(  349)       IF (JPRBT == JPRD) THEN
+(  350)          !**CALL DFFTW_EXECUTE_DFT_R2C(IPLAN_C2R1,ZFFT1,ZFFT1)
+(  351)       ELSE
+(  352)          !**CALL SFFTW_EXECUTE_DFT_R2C(IPLAN_C2R1,ZFFT1,ZFFT1)
+(  353)       END IF
+(  354)       IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_R2C',1,ZHOOK_HANDLE2)
+(  355)       DO JJ=1,KCLEN
+(  356)         PREEL(JF,KOFF+JJ-1)=ZFFT1(JJ)/REAL(KRLEN,JPRBT)
+(  357)       ENDDO
+(  358)     ENDDO
+(  359)   ENDIF
+(  360)   IF (JPRBT == JPRD) THEN
+(  361)      !**CALL FFTW_FREE(ZFFT1P)
+(  362)   ELSE 
+(  363)      !**CALL FFTWF_FREE(ZFFT1P)
+(  364)   END IF  
+(  365) ENDIF
+(  366) # 367 "tpm_fftw.F90"
+(  367) IF (LHOOK) CALL DR_HOOK('EXEC_FFTW',1,ZHOOK_HANDLE)
+(  368) END SUBROUTINE EXEC_FFTW
+(  369) # 370 "tpm_fftw.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 49
+
+(  370) SUBROUTINE EXEC_EFFTW(KTYPE,KRLEN,KCLEN,KOFF,KFIELDS,LD_ALL,PREEL)
+(  371) # 372 "tpm_fftw.F90"
+(  372) INTEGER(KIND=JPIM),INTENT(IN)   :: KTYPE
+(  373) INTEGER(KIND=JPIM),INTENT(IN)   :: KRLEN
+(  374) INTEGER(KIND=JPIM),INTENT(IN)   :: KCLEN
+(  375) INTEGER(KIND=JPIM),INTENT(IN)   :: KOFF
+(  376) INTEGER(KIND=JPIM),INTENT(IN)   :: KFIELDS
+(  377) LOGICAL           ,INTENT(IN)   :: LD_ALL
+(  378) REAL(KIND=JPRBT), INTENT(INOUT)  :: PREEL(:,:)
+(  379) # 380 "tpm_fftw.F90"
+(  380) REAL(KIND=JPRBT), POINTER :: ZFFT(:,:)
+(  381) REAL(KIND=JPRBT), POINTER :: ZFFT1(:)
+(  382) TYPE(C_PTR) :: ZFFTP, ZFFT1P
+(  383) # 384 "tpm_fftw.F90"
+(  384) INTEGER(KIND=JPIM) :: JJ,JF
+(  385) # 386 "tpm_fftw.F90"
+(  386) INTEGER(KIND=JPIB) :: IPLAN_C2R, IPLAN_C2R1
+(  387) REAL(KIND=JPRB) :: ZHOOK_HANDLE, ZHOOK_HANDLE2
+(  388) # 389 "tpm_fftw.F90"
+(  389) # 1 ".D[15]/abor1.intfb.h"
+(    1) INTERFACE
+(    2) # 3 ".D[15]/abor1.intfb.h"
+(    3) SUBROUTINE ABOR1(CDTEXT)
+(    4) CHARACTER(LEN=*), INTENT(IN) :: CDTEXT
+(    5) END SUBROUTINE ABOR1
+(    6) # 7 ".D[15]/abor1.intfb.h"
+(    7) SUBROUTINE ABOR1FL(CDFILE, KLINENUM, CDTEXT)
+(    8) USE PARKIND1  ,ONLY : JPIM
+(    9) CHARACTER(LEN=*), INTENT(IN) :: CDFILE,CDTEXT
+(   10) INTEGER(KIND=JPIM), INTENT(IN) :: KLINENUM
+(   11) END SUBROUTINE ABOR1FL
+(   12) # 13 ".D[15]/abor1.intfb.h"
+(   13) SUBROUTINE ABOR1_EXCEPTION_HANDLER()
+(   14) END SUBROUTINE ABOR1_EXCEPTION_HANDLER
+(   15) # 16 ".D[15]/abor1.intfb.h"
+(   16) END INTERFACE
+(   17) # 390 "tpm_fftw.F90"
+(  390) # 391 "tpm_fftw.F90"
+(  391) IF (LHOOK) CALL DR_HOOK('EXEC_EFFTW',0,ZHOOK_HANDLE)
+(  392) # 393 "tpm_fftw.F90"
+(  393) IF ( (KTYPE /= -1) .AND. (KTYPE /=1) ) THEN
+(  394)   CALL ABOR1('TPM_FFTW:EXEC_EFFTW : WRONG VALUE KTYPE')
+(  395) ENDIF
+(  396) # 397 "tpm_fftw.F90"
+(  397) IF( LD_ALL )THEN
+(  398)   !**CALL CREATE_PLAN_FFTW(IPLAN_C2R,KTYPE,KRLEN,KFIELDS)
+(  399)   IF  (JPRBT == JPRD) THEN
+(  400)      !**ZFFTP=FFTW_ALLOC_COMPLEX(INT(KCLEN/2*KFIELDS,C_SIZE_T))
+(  401)   ELSE
+(  402)      !**ZFFTP=FFTWF_ALLOC_COMPLEX(INT(KCLEN/2*KFIELDS,C_SIZE_T))
+(  403)   END IF
+(  404)   CALL C_F_POINTER(ZFFTP,ZFFT,[KCLEN,KFIELDS])
+(  405)   IF (KTYPE==1) THEN
+(  406)     DO JF=1,KFIELDS
+(  407)       DO JJ=1,KCLEN
+(  408)         ZFFT(JJ,JF) =PREEL(KOFF+JJ-1,JF)
+(  409)       ENDDO
+(  410)     ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 50
+
+(  411)     IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_C2R',0,ZHOOK_HANDLE2)
+(  412)     IF (JPRBT == JPRD) THEN
+(  413)        !**CALL DFFTW_EXECUTE_DFT_C2R(IPLAN_C2R,ZFFT,ZFFT)
+(  414)     ELSE
+(  415)        !**CALL SFFTW_EXECUTE_DFT_C2R(IPLAN_C2R,ZFFT,ZFFT)
+(  416)     END IF
+(  417)     IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_C2R',1,ZHOOK_HANDLE2)
+(  418)     DO JJ=1,KRLEN
+(  419)       DO JF=1,KFIELDS
+(  420)         PREEL(KOFF+JJ-1,JF)=ZFFT(JJ,JF)
+(  421)       ENDDO
+(  422)     ENDDO
+(  423)   ELSE
+(  424)     DO JF=1,KFIELDS
+(  425)       DO JJ=1,KRLEN
+(  426)         ZFFT(JJ,JF) =PREEL(KOFF+JJ-1,JF)
+(  427)       ENDDO
+(  428)     ENDDO
+(  429)     IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_R2C',0,ZHOOK_HANDLE2)
+(  430)     IF (JPRBT == JPRD) THEN
+(  431)        !**CALL DFFTW_EXECUTE_DFT_R2C(IPLAN_C2R,ZFFT,ZFFT)
+(  432)     ELSE
+(  433)        !**CALL SFFTW_EXECUTE_DFT_R2C(IPLAN_C2R,ZFFT,ZFFT)
+(  434)     END IF
+(  435)     IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_R2C',1,ZHOOK_HANDLE2)
+(  436)     DO JJ=1,KCLEN
+(  437)       DO JF=1,KFIELDS
+(  438)         PREEL(KOFF+JJ-1,JF)=ZFFT(JJ,JF)/REAL(KRLEN,JPRBT)
+(  439)       ENDDO
+(  440)     ENDDO
+(  441)   ENDIF
+(  442)   IF (JPRBT == JPRD) THEN
+(  443)      !**CALL FFTW_FREE(ZFFTP)
+(  444)   ELSE
+(  445)      !**CALL FFTWF_FREE(ZFFTP)
+(  446)   END IF 
+(  447) ELSE
+(  448)   !**CALL CREATE_PLAN_FFTW(IPLAN_C2R1,KTYPE,KRLEN,1)
+(  449)   IF (JPRBT == JPRD) THEN
+(  450)      !**ZFFT1P=FFTW_ALLOC_COMPLEX(INT(KCLEN/2,C_SIZE_T))
+(  451)   ELSE
+(  452)      !**ZFFT1P=FFTWF_ALLOC_COMPLEX(INT(KCLEN/2,C_SIZE_T))
+(  453)   END IF
+(  454)   CALL C_F_POINTER(ZFFT1P,ZFFT1,[KCLEN])
+(  455)   IF (KTYPE==1) THEN
+(  456)     DO JF=1,KFIELDS
+(  457)       DO JJ=1,KCLEN
+(  458)         ZFFT1(JJ) =PREEL(KOFF+JJ-1,JF)
+(  459)       ENDDO
+(  460)       IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_C2R',0,ZHOOK_HANDLE2)
+(  461)       IF (JPRBT == JPRD) THEN
+(  462)          !**CALL DFFTW_EXECUTE_DFT_C2R(IPLAN_C2R1,ZFFT1,ZFFT1)
+(  463)       ELSE
+(  464)          !**CALL SFFTW_EXECUTE_DFT_C2R(IPLAN_C2R1,ZFFT1,ZFFT1)
+(  465)       END IF
+(  466)       IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_C2R',1,ZHOOK_HANDLE2)
+(  467)       DO JJ=1,KRLEN
+(  468)         PREEL(KOFF+JJ-1,JF)=ZFFT1(JJ)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:34      page 51
+
+(  469)       ENDDO
+(  470)     ENDDO
+(  471)   ELSE
+(  472)     DO JF=1,KFIELDS
+(  473)       DO JJ=1,KRLEN
+(  474)         ZFFT1(JJ) =PREEL(KOFF+JJ-1,JF)
+(  475)       ENDDO
+(  476)       IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_R2C',0,ZHOOK_HANDLE2)
+(  477)       IF (JPRBT == JPRD) THEN
+(  478)          !**CALL DFFTW_EXECUTE_DFT_R2C(IPLAN_C2R1,ZFFT1,ZFFT1)
+(  479)       ELSE
+(  480)          !**CALL SFFTW_EXECUTE_DFT_R2C(IPLAN_C2R1,ZFFT1,ZFFT1)
+(  481)       END IF
+(  482)       IF (LHOOK) CALL DR_HOOK('FFTW_EXECUTE_DFT_R2C',1,ZHOOK_HANDLE2)
+(  483)       DO JJ=1,KCLEN
+(  484)         PREEL(KOFF+JJ-1,JF)=ZFFT1(JJ)/REAL(KRLEN,JPRBT)
+(  485)       ENDDO
+(  486)     ENDDO
+(  487)   ENDIF
+(  488)   IF (JPRBT == JPRD) THEN
+(  489)      !**CALL FFTW_FREE(ZFFT1P)
+(  490)   ELSE
+(  491)      !**CALL FFTWF_FREE(ZFFT1P)
+(  492)   END IF
+(  493) ENDIF
+(  494) # 495 "tpm_fftw.F90"
+(  495) IF (LHOOK) CALL DR_HOOK('EXEC_EFFTW',1,ZHOOK_HANDLE)
+(  496) END SUBROUTINE EXEC_EFFTW
+(  497) # 498 "tpm_fftw.F90"
+(  498) END MODULE TPM_FFTW

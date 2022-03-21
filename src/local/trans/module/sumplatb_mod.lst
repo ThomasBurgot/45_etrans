@@ -1,0 +1,573 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:27      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: sumplatb_mod.F90
+
+(    1) MODULE SUMPLATB_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUMPLATB(KDGSA,KDGL,KPROCA,KLOENG,LDSPLIT,LDFOURIER,&
+(    4)                     &KMEDIAP,KRESTM,KINDIC,KLAST)
+(    5) 
+(    6) !**** *SUMPLATB * - Routine to initialize parallel environment
+(    7) 
+(    8) !     Purpose.
+(    9) !     --------
+(   10) 
+(   11) 
+(   12) !**   Interface.
+(   13) !     ----------
+(   14) !        *CALL* *SUMPLATB *
+(   15) 
+(   16) !     Explicit arguments - input :
+(   17) !     --------------------
+(   18) !                          KDGSA      -first latitude (grid-space)
+(   19) !                                      (may be different from NDGSAG)
+(   20) !                          KDGL       -last  latitude
+(   21) !                          KPROCA     -number of processors in A direction
+(   22) !                          KLOENG     -actual number of longitudes per latitude.
+(   23) !                          LDSPLIT    -true for latitudes shared between sets
+(   24) !                          LDFOURIER  -true for fourier space partitioning
+(   25) 
+(   26) !     Explicit arguments - output:
+(   27) !     --------------------
+(   28) !                          KMEDIAP    -mean number of grid points per PE
+(   29) !                          KRESTM     -number of PEs with one extra point
+(   30) !                          KINDIC     -intermediate quantity for 'sumplat'
+(   31) !                          KLAST      -intermediate quantity for 'sumplat'
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:27      page 2
+
+(   32) 
+(   33) !        Implicit arguments :
+(   34) !        --------------------
+(   35) 
+(   36) 
+(   37) !     Method.
+(   38) !     -------
+(   39) !        See documentation
+(   40) 
+(   41) !     Externals.   NONE.
+(   42) !     ----------
+(   43) 
+(   44) !     Reference.
+(   45) !     ----------
+(   46) !        ECMWF Research Department documentation of the IFS
+(   47) 
+(   48) !     Author.
+(   49) !     -------
+(   50) !        K. YESSAD (after old version of sumplat.F).
+(   51) 
+(   52) !     Modifications.
+(   53) !     --------------
+(   54) !        Original : 98-12-07
+(   55) !        G. Mozdzynski (August 2012): rewrite of fourier latitude distribution
+(   56) !     ------------------------------------------------------------------
+(   57) 
+(   58) 
+(   59) USE PARKIND1  ,ONLY : JPIM, JPIB, JPRBT
+(   60) 
+(   61) USE TPM_DISTR
+(   62) USE ABORT_TRANS_MOD
+(   63) 
+(   64) IMPLICIT NONE
+(   65) 
+(   66) 
+(   67) !     * DUMMY:
+(   68) INTEGER(KIND=JPIM),INTENT(IN)  :: KDGSA
+(   69) INTEGER(KIND=JPIM),INTENT(IN)  :: KDGL
+(   70) INTEGER(KIND=JPIM),INTENT(IN)  :: KPROCA
+(   71) INTEGER(KIND=JPIM),INTENT(IN)  :: KLOENG(KDGSA:KDGL)
+(   72) LOGICAL,INTENT(IN)  :: LDSPLIT
+(   73) LOGICAL,INTENT(IN)  :: LDFOURIER
+(   74) INTEGER(KIND=JPIM),INTENT(OUT)  :: KMEDIAP
+(   75) INTEGER(KIND=JPIM),INTENT(OUT)  :: KRESTM
+(   76) INTEGER(KIND=JPIM),INTENT(OUT)  :: KINDIC(KPROCA)
+(   77) INTEGER(KIND=JPIM),INTENT(OUT)  :: KLAST(KPROCA)
+(   78) 
+(   79) !     * LOCAL:
+(   80) INTEGER(KIND=JPIB) :: ICOST(KDGSA:KDGL)
+(   81) INTEGER(KIND=JPIM) :: ILATS(KPROCA)
+(   82) 
+(   83) !     LOCAL INTEGER SCALARS
+(   84) INTEGER(KIND=JPIM) :: ICOMP, IGL, JA, JGL, ILAST, IREST, IA
+(   85) INTEGER(KIND=JPIM) :: ITOT_TOP, ITOT_BOT, IGL_TOP, IGL_BOT
+(   86) INTEGER(KIND=JPIB) :: IMEDIA,ITOT
+(   87) REAL(KIND=JPRBT) :: ZLG
+(   88) LOGICAL   :: LLDONE,LLSIMPLE
+(   89) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:27      page 3
+
+(   90) !      -----------------------------------------------------------------
+(   91) 
+(   92) !*       1.    COMPUTATION OF KMEDIAP, KRESTM, KINDIC, KLAST.
+(   93) !              ----------------------------------------------
+(   94) 
+(   95) !     * Computation of KMEDIAP and KRESTM.
+(   96) 
+(   97) IF( LDFOURIER )THEN
+(   98) 
+(   99) ! DO JGL=1,KDGL
+(  100) !   ZLG=LOG(FLOAT(KLOENG(JGL)))
+(  101) !   ICOST(JGL)=KLOENG(JGL)*ZLG*SQRT(ZLG)
+(  102) ! ENDDO
+(  103) 
+(  104)   DO JGL=1,KDGL
+(  105)     ICOST(JGL)=KLOENG(JGL)
+(  106)   ENDDO
+(  107) 
+(  108) ELSE
+(  109) 
+(  110)   DO JGL=1,KDGL
+(  111)     ICOST(JGL)=KLOENG(JGL)
+(  112)   ENDDO
+(  113) 
+(  114) ENDIF
+(  115)   
+(  116) IMEDIA = SUM(ICOST(KDGSA:KDGL))
+(  117) KMEDIAP = IMEDIA / KPROCA
+(  118) KRESTM = IMEDIA - KMEDIAP * KPROCA
+(  119) IF (KRESTM  >  0) KMEDIAP = KMEDIAP + 1
+(  120) 
+(  121) !     * Computation of intermediate quantities KINDIC and KLAST
+(  122) 
+(  123) KINDIC(:)=0
+(  124) KLAST(:)=0
+(  125) 
+(  126) IF (LDSPLIT) THEN
+(  127) 
+(  128)   IREST = 0
+(  129)   ILAST =0
+(  130)   DO JA=1,KPROCA
+(  131)     IF (JA  <=  KRESTM .OR. KRESTM  ==  0) THEN
+(  132)       ICOMP = KMEDIAP
+(  133)     ELSE
+(  134)       ICOMP = KMEDIAP - 1
+(  135)     ENDIF
+(  136)     ITOT = IREST
+(  137)     IGL = ILAST+1
+(  138)     DO JGL=IGL,KDGL
+(  139)       ILAST = JGL
+(  140)       IF(ITOT+ICOST(JGL) < ICOMP) THEN
+(  141)         ITOT = ITOT+ICOST(JGL)
+(  142)       ELSEIF(ITOT+ICOST(JGL) == ICOMP) THEN
+(  143)         IREST = 0
+(  144)         KLAST(JA) = JGL
+(  145)         KINDIC(JA) = 0
+(  146)         EXIT
+(  147)       ELSE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:27      page 4
+
+(  148)         IREST =  ICOST(JGL) -(ICOMP-ITOT)
+(  149)         KLAST(JA) = JGL
+(  150)         KINDIC(JA) = JGL
+(  151)         EXIT
+(  152)       ENDIF
+(  153)     ENDDO
+(  154)   ENDDO
+(  155)   
+(  156) ELSE
+(  157) 
+(  158)   ITOT_TOP=0
+(  159)   ITOT_BOT=0
+(  160)   IGL_TOP=1
+(  161)   IGL_BOT=KDGL
+(  162)   DO JA=1,(KPROCA-1)/2+1
+(  163)     IF( JA /= KPROCA/2+1 )THEN
+(  164)       LLDONE=.TRUE.
+(  165)       DO WHILE ( LLDONE )
+(  166)         IF( ITOT_TOP+ICOST(IGL_TOP) < KMEDIAP )THEN
+(  167)           KLAST(JA)=IGL_TOP
+(  168)           ITOT_TOP=ITOT_TOP+ICOST(IGL_TOP)
+(  169)           IGL_TOP=IGL_TOP+1
+(  170)         ELSE
+(  171)           ITOT_TOP=ITOT_TOP-KMEDIAP
+(  172)           LLDONE=.FALSE.
+(  173)         ENDIF
+(  174)       ENDDO
+(  175)       KLAST(KPROCA-JA+1)=IGL_BOT
+(  176)       LLDONE=.TRUE.
+(  177)       DO WHILE ( LLDONE )
+(  178)         IF( ITOT_BOT+ICOST(IGL_BOT) < KMEDIAP )THEN
+(  179)           ITOT_BOT=ITOT_BOT+ICOST(IGL_BOT)
+(  180)           IGL_BOT=IGL_BOT-1
+(  181)         ELSE
+(  182)           ITOT_BOT=ITOT_BOT-KMEDIAP
+(  183)           LLDONE=.FALSE.
+(  184)         ENDIF
+(  185)       ENDDO
+(  186)     ELSE
+(  187)       KLAST(JA)=IGL_BOT
+(  188)     ENDIF
+(  189)   ENDDO
+(  190) 
+(  191)   LLSIMPLE=.FALSE.
+(  192)   DO JA=1,KPROCA
+(  193)     IF( KLAST(JA)==0 )THEN
+(  194)       LLSIMPLE=.TRUE.
+(  195)       EXIT
+(  196)     ENDIF
+(  197)   ENDDO
+(  198)   IF( LLSIMPLE )THEN
+(  199) !   WRITE(0,'("SUMPLATB_MOD: REVERTING TO SIMPLE LATITUDE DISTRIBUTION")')
+(  200)     ILATS(:)=0
+(  201)     IA=0
+(  202)     DO JGL=1,KDGL
+(  203)      IA=IA+1
+(  204)      ILATS(IA)=ILATS(IA)+1
+(  205)      IF( IA==KPROCA ) IA=0
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:27      page 5
+
+(  206)     ENDDO
+(  207)     KLAST(1)=ILATS(1)
+(  208)     DO JA=2,KPROCA
+(  209)       KLAST(JA)=KLAST(JA-1)+ILATS(JA)
+(  210)     ENDDO
+(  211)   ENDIF
+(  212) 
+(  213) ENDIF
+(  214)   
+(  215) END SUBROUTINE SUMPLATB
+(  216) END MODULE SUMPLATB_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:27      page 6
+
+(    1) # 1 "sumplatb_mod.F90"
+(    1) MODULE SUMPLATB_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUMPLATB(KDGSA,KDGL,KPROCA,KLOENG,LDSPLIT,LDFOURIER,&
+(    4)                     &KMEDIAP,KRESTM,KINDIC,KLAST)
+(    5) # 6 "sumplatb_mod.F90"
+(    6) !**** *SUMPLATB * - Routine to initialize parallel environment
+(    7) # 8 "sumplatb_mod.F90"
+(    8) !     Purpose.
+(    9) !     --------
+(   10) # 12 "sumplatb_mod.F90"
+(   12) !**   Interface.
+(   13) !     ----------
+(   14) !        *CALL* *SUMPLATB *
+(   15) # 16 "sumplatb_mod.F90"
+(   16) !     Explicit arguments - input :
+(   17) !     --------------------
+(   18) !                          KDGSA      -first latitude (grid-space)
+(   19) !                                      (may be different from NDGSAG)
+(   20) !                          KDGL       -last  latitude
+(   21) !                          KPROCA     -number of processors in A direction
+(   22) !                          KLOENG     -actual number of longitudes per latitude.
+(   23) !                          LDSPLIT    -true for latitudes shared between sets
+(   24) !                          LDFOURIER  -true for fourier space partitioning
+(   25) # 26 "sumplatb_mod.F90"
+(   26) !     Explicit arguments - output:
+(   27) !     --------------------
+(   28) !                          KMEDIAP    -mean number of grid points per PE
+(   29) !                          KRESTM     -number of PEs with one extra point
+(   30) !                          KINDIC     -intermediate quantity for 'sumplat'
+(   31) !                          KLAST      -intermediate quantity for 'sumplat'
+(   32) # 33 "sumplatb_mod.F90"
+(   33) !        Implicit arguments :
+(   34) !        --------------------
+(   35) # 37 "sumplatb_mod.F90"
+(   37) !     Method.
+(   38) !     -------
+(   39) !        See documentation
+(   40) # 41 "sumplatb_mod.F90"
+(   41) !     Externals.   NONE.
+(   42) !     ----------
+(   43) # 44 "sumplatb_mod.F90"
+(   44) !     Reference.
+(   45) !     ----------
+(   46) !        ECMWF Research Department documentation of the IFS
+(   47) # 48 "sumplatb_mod.F90"
+(   48) !     Author.
+(   49) !     -------
+(   50) !        K. YESSAD (after old version of sumplat.F).
+(   51) # 52 "sumplatb_mod.F90"
+(   52) !     Modifications.
+(   53) !     --------------
+(   54) !        Original : 98-12-07
+(   55) !        G. Mozdzynski (August 2012): rewrite of fourier latitude distribution
+(   56) !     ------------------------------------------------------------------
+(   57) # 59 "sumplatb_mod.F90"
+(   59) USE PARKIND1  ,ONLY : JPIM, JPIB, JPRBT
+(   60) # 61 "sumplatb_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:27      page 7
+
+(   61) USE TPM_DISTR
+(   62) USE ABORT_TRANS_MOD
+(   63) # 64 "sumplatb_mod.F90"
+(   64) IMPLICIT NONE
+(   65) # 67 "sumplatb_mod.F90"
+(   67) !     * DUMMY:
+(   68) INTEGER(KIND=JPIM),INTENT(IN)  :: KDGSA
+(   69) INTEGER(KIND=JPIM),INTENT(IN)  :: KDGL
+(   70) INTEGER(KIND=JPIM),INTENT(IN)  :: KPROCA
+(   71) INTEGER(KIND=JPIM),INTENT(IN)  :: KLOENG(KDGSA:KDGL)
+(   72) LOGICAL,INTENT(IN)  :: LDSPLIT
+(   73) LOGICAL,INTENT(IN)  :: LDFOURIER
+(   74) INTEGER(KIND=JPIM),INTENT(OUT)  :: KMEDIAP
+(   75) INTEGER(KIND=JPIM),INTENT(OUT)  :: KRESTM
+(   76) INTEGER(KIND=JPIM),INTENT(OUT)  :: KINDIC(KPROCA)
+(   77) INTEGER(KIND=JPIM),INTENT(OUT)  :: KLAST(KPROCA)
+(   78) # 79 "sumplatb_mod.F90"
+(   79) !     * LOCAL:
+(   80) INTEGER(KIND=JPIB) :: ICOST(KDGSA:KDGL)
+(   81) INTEGER(KIND=JPIM) :: ILATS(KPROCA)
+(   82) # 83 "sumplatb_mod.F90"
+(   83) !     LOCAL INTEGER SCALARS
+(   84) INTEGER(KIND=JPIM) :: ICOMP, IGL, JA, JGL, ILAST, IREST, IA
+(   85) INTEGER(KIND=JPIM) :: ITOT_TOP, ITOT_BOT, IGL_TOP, IGL_BOT
+(   86) INTEGER(KIND=JPIB) :: IMEDIA,ITOT
+(   87) REAL(KIND=JPRBT) :: ZLG
+(   88) LOGICAL   :: LLDONE,LLSIMPLE
+(   89) # 90 "sumplatb_mod.F90"
+(   90) !      -----------------------------------------------------------------
+(   91) # 92 "sumplatb_mod.F90"
+(   92) !*       1.    COMPUTATION OF KMEDIAP, KRESTM, KINDIC, KLAST.
+(   93) !              ----------------------------------------------
+(   94) # 95 "sumplatb_mod.F90"
+(   95) !     * Computation of KMEDIAP and KRESTM.
+(   96) # 97 "sumplatb_mod.F90"
+(   97) IF( LDFOURIER )THEN
+(   98) # 99 "sumplatb_mod.F90"
+(   99) ! DO JGL=1,KDGL
+(  100) !   ZLG=LOG(FLOAT(KLOENG(JGL)))
+(  101) !   ICOST(JGL)=KLOENG(JGL)*ZLG*SQRT(ZLG)
+(  102) ! ENDDO
+(  103) # 104 "sumplatb_mod.F90"
+(  104)   DO JGL=1,KDGL
+(  105)     ICOST(JGL)=KLOENG(JGL)
+(  106)   ENDDO
+(  107) # 108 "sumplatb_mod.F90"
+(  108) ELSE
+(  109) # 110 "sumplatb_mod.F90"
+(  110)   DO JGL=1,KDGL
+(  111)     ICOST(JGL)=KLOENG(JGL)
+(  112)   ENDDO
+(  113) # 114 "sumplatb_mod.F90"
+(  114) ENDIF
+(  115)   
+(  116) IMEDIA = SUM(ICOST(KDGSA:KDGL))
+(  117) KMEDIAP = IMEDIA / KPROCA
+(  118) KRESTM = IMEDIA - KMEDIAP * KPROCA
+(  119) IF (KRESTM  >  0) KMEDIAP = KMEDIAP + 1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:27      page 8
+
+(  120) # 121 "sumplatb_mod.F90"
+(  121) !     * Computation of intermediate quantities KINDIC and KLAST
+(  122) # 123 "sumplatb_mod.F90"
+(  123) KINDIC(:)=0
+(  124) KLAST(:)=0
+(  125) # 126 "sumplatb_mod.F90"
+(  126) IF (LDSPLIT) THEN
+(  127) # 128 "sumplatb_mod.F90"
+(  128)   IREST = 0
+(  129)   ILAST =0
+(  130)   DO JA=1,KPROCA
+(  131)     IF (JA  <=  KRESTM .OR. KRESTM  ==  0) THEN
+(  132)       ICOMP = KMEDIAP
+(  133)     ELSE
+(  134)       ICOMP = KMEDIAP - 1
+(  135)     ENDIF
+(  136)     ITOT = IREST
+(  137)     IGL = ILAST+1
+(  138)     DO JGL=IGL,KDGL
+(  139)       ILAST = JGL
+(  140)       IF(ITOT+ICOST(JGL) < ICOMP) THEN
+(  141)         ITOT = ITOT+ICOST(JGL)
+(  142)       ELSEIF(ITOT+ICOST(JGL) == ICOMP) THEN
+(  143)         IREST = 0
+(  144)         KLAST(JA) = JGL
+(  145)         KINDIC(JA) = 0
+(  146)         EXIT
+(  147)       ELSE
+(  148)         IREST =  ICOST(JGL) -(ICOMP-ITOT)
+(  149)         KLAST(JA) = JGL
+(  150)         KINDIC(JA) = JGL
+(  151)         EXIT
+(  152)       ENDIF
+(  153)     ENDDO
+(  154)   ENDDO
+(  155)   
+(  156) ELSE
+(  157) # 158 "sumplatb_mod.F90"
+(  158)   ITOT_TOP=0
+(  159)   ITOT_BOT=0
+(  160)   IGL_TOP=1
+(  161)   IGL_BOT=KDGL
+(  162)   DO JA=1,(KPROCA-1)/2+1
+(  163)     IF( JA /= KPROCA/2+1 )THEN
+(  164)       LLDONE=.TRUE.
+(  165)       DO WHILE ( LLDONE )
+(  166)         IF( ITOT_TOP+ICOST(IGL_TOP) < KMEDIAP )THEN
+(  167)           KLAST(JA)=IGL_TOP
+(  168)           ITOT_TOP=ITOT_TOP+ICOST(IGL_TOP)
+(  169)           IGL_TOP=IGL_TOP+1
+(  170)         ELSE
+(  171)           ITOT_TOP=ITOT_TOP-KMEDIAP
+(  172)           LLDONE=.FALSE.
+(  173)         ENDIF
+(  174)       ENDDO
+(  175)       KLAST(KPROCA-JA+1)=IGL_BOT
+(  176)       LLDONE=.TRUE.
+(  177)       DO WHILE ( LLDONE )
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:27      page 9
+
+(  178)         IF( ITOT_BOT+ICOST(IGL_BOT) < KMEDIAP )THEN
+(  179)           ITOT_BOT=ITOT_BOT+ICOST(IGL_BOT)
+(  180)           IGL_BOT=IGL_BOT-1
+(  181)         ELSE
+(  182)           ITOT_BOT=ITOT_BOT-KMEDIAP
+(  183)           LLDONE=.FALSE.
+(  184)         ENDIF
+(  185)       ENDDO
+(  186)     ELSE
+(  187)       KLAST(JA)=IGL_BOT
+(  188)     ENDIF
+(  189)   ENDDO
+(  190) # 191 "sumplatb_mod.F90"
+(  191)   LLSIMPLE=.FALSE.
+(  192)   DO JA=1,KPROCA
+(  193)     IF( KLAST(JA)==0 )THEN
+(  194)       LLSIMPLE=.TRUE.
+(  195)       EXIT
+(  196)     ENDIF
+(  197)   ENDDO
+(  198)   IF( LLSIMPLE )THEN
+(  199) !   WRITE(0,'("SUMPLATB_MOD: REVERTING TO SIMPLE LATITUDE DISTRIBUTION")')
+(  200)     ILATS(:)=0
+(  201)     IA=0
+(  202)     DO JGL=1,KDGL
+(  203)      IA=IA+1
+(  204)      ILATS(IA)=ILATS(IA)+1
+(  205)      IF( IA==KPROCA ) IA=0
+(  206)     ENDDO
+(  207)     KLAST(1)=ILATS(1)
+(  208)     DO JA=2,KPROCA
+(  209)       KLAST(JA)=KLAST(JA-1)+ILATS(JA)
+(  210)     ENDDO
+(  211)   ENDIF
+(  212) # 213 "sumplatb_mod.F90"
+(  213) ENDIF
+(  214)   
+(  215) END SUBROUTINE SUMPLATB
+(  216) END MODULE SUMPLATB_MOD

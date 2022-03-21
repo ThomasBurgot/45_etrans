@@ -1,0 +1,226 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:08      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eftdir_mod.F90
+
+(    1) MODULE EFTDIR_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EFTDIR(PREEL, KFIELDS)
+(    4) 
+(    5) 
+(    6) !**** *FTDIR - Direct Fourier transform
+(    7) 
+(    8) !     Purpose. Routine for Grid-point to Fourier transform
+(    9) !     --------
+(   10) 
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        CALL FTDIR(..)
+(   14) 
+(   15) !        Explicit arguments :  PREEL   - Fourier/grid-point array
+(   16) !        --------------------  KFIELDS - number of fields
+(   17) 
+(   18) !     Method.
+(   19) !     -------
+(   20) 
+(   21) !     Externals.  FFT992 - FFT routine
+(   22) !     ----------
+(   23) !
+(   24) 
+(   25) !     Author.
+(   26) !     -------
+(   27) !        Mats Hamrud *ECMWF*
+(   28) 
+(   29) !     Modifications.
+(   30) !     --------------
+(   31) !        Original : 00-03-03
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:08      page 2
+
+(   32) !        G. Radnoti 01-04-24 2D model (NLOEN=1)
+(   33) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   34) !        G. Mozdzynski (Oct 2014): support for FFTW transforms
+(   35) !        G. Mozdzynski (Jun 2015): Support alternative FFTs to FFTW
+(   36) 
+(   37) !     ------------------------------------------------------------------
+(   38) 
+(   39) USE PARKIND1  ,ONLY : JPIM, JPIB, JPRBT, JPRB
+(   40) 
+(   41) USE TPM_DISTR       ,ONLY : D
+(   42) USE TPM_FFTC        ,ONLY : CREATE_PLAN_FFT
+(   43) USE TPM_DIM         ,ONLY : R
+(   44) USE CUDA_DEVICE_MOD
+(   45) !
+(   46) 
+(   47) IMPLICIT NONE
+(   48) 
+(   49) INTEGER(KIND=JPIM),INTENT(IN)  :: KFIELDS
+(   50) REAL(KIND=JPRB), INTENT(INOUT) :: PREEL(:,:)
+(   51) 
+(   52) INTEGER(KIND=JPIM) :: IRLEN,ICLEN
+(   53) INTEGER(KIND=JPIM) :: IPLAN_R2C
+(   54) REAL(KIND=JPRBT)   :: ZSCAL
+(   55) 
+(   56) integer :: istat
+(   57) 
+(   58) !     ------------------------------------------------------------------
+(   59) 
+(   60) IRLEN=R%NDLON+R%NNOEXTZG
+(   61) ICLEN=D%NLENGTF/D%NDGL_FS
+(   62) 
+(   63) CALL CREATE_PLAN_FFT (IPLAN_R2C, -1, KN=IRLEN, KLOT=KFIELDS*D%NDGL_FS, &
+(   64)                     & KISTRIDE=1, KIDIST=ICLEN, KOSTRIDE=1, KODIST=ICLEN/2)
+(   65) !$acc host_data use_device(PREEL)
+(   66) CALL EXECUTE_PLAN_FFTC (IPLAN_R2C, -1, PREEL (1, 1))
+(   67) !$acc end host_data
+(   68) 
+(   69) istat = cuda_Synchronize()
+(   70) 
+(   71) ZSCAL = 1._JPRB / REAL (R%NDLON, JPRB)
+(   72) 
+(   73) !$acc kernels present (PREEL) copyin (ZSCAL)
+(   74) PREEL = ZSCAL * PREEL
+(   75) !$acc end kernels
+(   76) 
+(   77) !     ------------------------------------------------------------------
+(   78) 
+(   79) END SUBROUTINE EFTDIR
+(   80) END MODULE EFTDIR_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:08      page 3
+
+(    1) # 1 "eftdir_mod.F90"
+(    1) MODULE EFTDIR_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EFTDIR(PREEL, KFIELDS)
+(    4) # 6 "eftdir_mod.F90"
+(    6) !**** *FTDIR - Direct Fourier transform
+(    7) # 8 "eftdir_mod.F90"
+(    8) !     Purpose. Routine for Grid-point to Fourier transform
+(    9) !     --------
+(   10) # 11 "eftdir_mod.F90"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        CALL FTDIR(..)
+(   14) # 15 "eftdir_mod.F90"
+(   15) !        Explicit arguments :  PREEL   - Fourier/grid-point array
+(   16) !        --------------------  KFIELDS - number of fields
+(   17) # 18 "eftdir_mod.F90"
+(   18) !     Method.
+(   19) !     -------
+(   20) # 21 "eftdir_mod.F90"
+(   21) !     Externals.  FFT992 - FFT routine
+(   22) !     ----------
+(   23) !
+(   24) # 25 "eftdir_mod.F90"
+(   25) !     Author.
+(   26) !     -------
+(   27) !        Mats Hamrud *ECMWF*
+(   28) # 29 "eftdir_mod.F90"
+(   29) !     Modifications.
+(   30) !     --------------
+(   31) !        Original : 00-03-03
+(   32) !        G. Radnoti 01-04-24 2D model (NLOEN=1)
+(   33) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   34) !        G. Mozdzynski (Oct 2014): support for FFTW transforms
+(   35) !        G. Mozdzynski (Jun 2015): Support alternative FFTs to FFTW
+(   36) # 37 "eftdir_mod.F90"
+(   37) !     ------------------------------------------------------------------
+(   38) # 39 "eftdir_mod.F90"
+(   39) USE PARKIND1  ,ONLY : JPIM, JPIB, JPRBT, JPRB
+(   40) # 41 "eftdir_mod.F90"
+(   41) USE TPM_DISTR       ,ONLY : D
+(   42) USE TPM_FFTC        ,ONLY : CREATE_PLAN_FFT
+(   43) USE TPM_DIM         ,ONLY : R
+(   44) USE CUDA_DEVICE_MOD
+(   45) !
+(   46) # 47 "eftdir_mod.F90"
+(   47) IMPLICIT NONE
+(   48) # 49 "eftdir_mod.F90"
+(   49) INTEGER(KIND=JPIM),INTENT(IN)  :: KFIELDS
+(   50) REAL(KIND=JPRB), INTENT(INOUT) :: PREEL(:,:)
+(   51) # 52 "eftdir_mod.F90"
+(   52) INTEGER(KIND=JPIM) :: IRLEN,ICLEN
+(   53) INTEGER(KIND=JPIM) :: IPLAN_R2C
+(   54) REAL(KIND=JPRBT)   :: ZSCAL
+(   55) # 56 "eftdir_mod.F90"
+(   56) integer :: istat
+(   57) # 58 "eftdir_mod.F90"
+(   58) !     ------------------------------------------------------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:08      page 4
+
+(   59) # 60 "eftdir_mod.F90"
+(   60) IRLEN=R%NDLON+R%NNOEXTZG
+(   61) ICLEN=D%NLENGTF/D%NDGL_FS
+(   62) # 63 "eftdir_mod.F90"
+(   63) CALL CREATE_PLAN_FFT (IPLAN_R2C, -1, KN=IRLEN, KLOT=KFIELDS*D%NDGL_FS, &
+(   64)                     & KISTRIDE=1, KIDIST=ICLEN, KOSTRIDE=1, KODIST=ICLEN/2)
+(   65) !$acc host_data use_device(PREEL)
+(   66) CALL EXECUTE_PLAN_FFTC (IPLAN_R2C, -1, PREEL (1, 1))
+(   67) !$acc end host_data
+(   68) # 69 "eftdir_mod.F90"
+(   69) istat = cuda_Synchronize()
+(   70) # 71 "eftdir_mod.F90"
+(   71) ZSCAL = 1._JPRB / REAL (R%NDLON, JPRB)
+(   72) # 73 "eftdir_mod.F90"
+(   73) !$acc kernels present (PREEL) copyin (ZSCAL)
+(   74) PREEL = ZSCAL * PREEL
+(   75) !$acc end kernels
+(   76) # 77 "eftdir_mod.F90"
+(   77) !     ------------------------------------------------------------------
+(   78) # 79 "eftdir_mod.F90"
+(   79) END SUBROUTINE EFTDIR
+(   80) END MODULE EFTDIR_MOD

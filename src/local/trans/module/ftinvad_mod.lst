@@ -1,0 +1,315 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:24      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: ftinvad_mod.F90
+
+(    1) MODULE FTINVAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE FTINVAD(PREEL,KFIELDS,KGL)
+(    4) 
+(    5) 
+(    6) !**** *FTINVAD - Inverse Fourier transform - adjoint
+(    7) 
+(    8) !     Purpose. Routine for Fourier to Grid-point transform
+(    9) !     --------
+(   10) 
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        CALL FTINVAD(..)
+(   14) 
+(   15) !        Explicit arguments :  PREEL   - Fourier/grid-point array
+(   16) !        --------------------  KFIELDS - number of fields
+(   17) 
+(   18) !     Method.
+(   19) !     -------
+(   20) 
+(   21) !     Externals.  FFT992 - FFT routine
+(   22) !     ----------
+(   23) !
+(   24) 
+(   25) !     Author.
+(   26) !     -------
+(   27) !        Mats Hamrud *ECMWF*
+(   28) 
+(   29) !     Modifications.
+(   30) !     --------------
+(   31) !        Original : 00-03-03
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:24      page 2
+
+(   32) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   33) !        G. Mozdzynski (Oct 2014): support for FFTW transforms
+(   34) !        G. Mozdzynski (Jun 2015): Support alternative FFTs to FFTW
+(   35) 
+(   36) !     ------------------------------------------------------------------
+(   37) 
+(   38) USE PARKIND1  ,ONLY : JPIM, JPIB, JPRBT
+(   39) 
+(   40) USE TPM_DISTR       ,ONLY : D, MYSETW
+(   41) USE TPM_DIM         ,ONLY : R
+(   42) USE TPM_GEOMETRY    ,ONLY : G
+(   43) USE TPM_FFT         ,ONLY : T, TB
+(   44) USE BLUESTEIN_MOD   ,ONLY : BLUESTEIN_FFT
+(   45) #ifdef WITH_FFTW
+(   46) USE TPM_FFTW        ,ONLY : TW, EXEC_FFTW
+(   47) #endif
+(   48) USE TPM_DIM         ,ONLY : R
+(   49) !
+(   50) 
+(   51) IMPLICIT NONE
+(   52) 
+(   53) INTEGER(KIND=JPIM),INTENT(IN) :: KFIELDS,KGL
+(   54) REAL(KIND=JPRBT), INTENT(OUT)  :: PREEL(:,:)
+(   55) 
+(   56) INTEGER(KIND=JPIM) :: IGLG,IST,ILEN,IJUMP,JJ,JF,ILOEN
+(   57) INTEGER(KIND=JPIM) :: IOFF,IRLEN,ICLEN,ITYPE
+(   58) LOGICAL :: LL_ALL=.FALSE. ! T=do kfields ffts in one batch, F=do kfields ffts one at a time
+(   59) 
+(   60) !     ------------------------------------------------------------------
+(   61) 
+(   62) ITYPE =-1
+(   63) IJUMP = 1
+(   64) IGLG  = D%NPTRLS(MYSETW)+KGL-1
+(   65) ILOEN = G%NLOEN(IGLG)+R%NNOEXTZL
+(   66) IST   = 2*(G%NMEN(IGLG)+1)+1
+(   67) ILEN  = ILOEN+3-IST
+(   68) IOFF  = D%NSTAGTF(KGL)+1
+(   69) IRLEN = ILOEN
+(   70) ICLEN = (IRLEN/2+1)*2
+(   71) 
+(   72)   ! Change of metric (not in forward routine)
+(   73) DO JJ=1,ILOEN
+(   74)   DO JF=1,KFIELDS
+(   75)     PREEL(JF,IOFF-1+JJ) = PREEL(JF,IOFF-1+JJ)*ILOEN
+(   76)   ENDDO
+(   77) ENDDO
+(   78)   
+(   79) #ifdef WITH_FFTW
+(   80) IF( .NOT. TW%LFFTW )THEN
+(   81) #endif
+(   82) 
+(   83)   IF( T%LUSEFFT992(KGL) )THEN
+(   84) 
+(   85)     CALL FFT992(PREEL(1,IOFF),T%TRIGS(1,KGL),&
+(   86)      &T%NFAX(1,KGL),KFIELDS,IJUMP,ILOEN,KFIELDS,ITYPE)
+(   87) 
+(   88)   ELSE
+(   89) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:24      page 3
+
+(   90)     CALL BLUESTEIN_FFT(TB,ILOEN,ITYPE,KFIELDS,PREEL(1:KFIELDS,IOFF:IOFF+ICLEN-1))
+(   91)     DO JJ=1,ICLEN
+(   92)       DO JF=1,KFIELDS
+(   93)         PREEL(JF,IOFF-1+JJ)=PREEL(JF,IOFF-1+JJ)/REAL(ILOEN,JPRBT)
+(   94)       ENDDO
+(   95)     ENDDO
+(   96) 
+(   97)   ENDIF
+(   98) 
+(   99) #ifdef WITH_FFTW
+(  100) ELSE
+(  101) 
+(  102) !  CALL EXEC_FFTW(ITYPE,IRLEN,ICLEN,IOFF,KFIELDS,LL_ALL,PREEL)
+(  103) 
+(  104) ENDIF
+(  105) #endif
+(  106) 
+(  107) DO JJ=1,ILEN
+(  108)   DO JF=1,KFIELDS
+(  109)     PREEL(JF,IST+IOFF-1+JJ-1) = 0.0_JPRBT
+(  110)   ENDDO
+(  111) ENDDO
+(  112) 
+(  113) !     ------------------------------------------------------------------
+(  114) 
+(  115) END SUBROUTINE FTINVAD
+(  116) END MODULE FTINVAD_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:24      page 4
+
+(    1) # 1 "ftinvad_mod.F90"
+(    1) MODULE FTINVAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE FTINVAD(PREEL,KFIELDS,KGL)
+(    4) # 6 "ftinvad_mod.F90"
+(    6) !**** *FTINVAD - Inverse Fourier transform - adjoint
+(    7) # 8 "ftinvad_mod.F90"
+(    8) !     Purpose. Routine for Fourier to Grid-point transform
+(    9) !     --------
+(   10) # 11 "ftinvad_mod.F90"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        CALL FTINVAD(..)
+(   14) # 15 "ftinvad_mod.F90"
+(   15) !        Explicit arguments :  PREEL   - Fourier/grid-point array
+(   16) !        --------------------  KFIELDS - number of fields
+(   17) # 18 "ftinvad_mod.F90"
+(   18) !     Method.
+(   19) !     -------
+(   20) # 21 "ftinvad_mod.F90"
+(   21) !     Externals.  FFT992 - FFT routine
+(   22) !     ----------
+(   23) !
+(   24) # 25 "ftinvad_mod.F90"
+(   25) !     Author.
+(   26) !     -------
+(   27) !        Mats Hamrud *ECMWF*
+(   28) # 29 "ftinvad_mod.F90"
+(   29) !     Modifications.
+(   30) !     --------------
+(   31) !        Original : 00-03-03
+(   32) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   33) !        G. Mozdzynski (Oct 2014): support for FFTW transforms
+(   34) !        G. Mozdzynski (Jun 2015): Support alternative FFTs to FFTW
+(   35) # 36 "ftinvad_mod.F90"
+(   36) !     ------------------------------------------------------------------
+(   37) # 38 "ftinvad_mod.F90"
+(   38) USE PARKIND1  ,ONLY : JPIM, JPIB, JPRBT
+(   39) # 40 "ftinvad_mod.F90"
+(   40) USE TPM_DISTR       ,ONLY : D, MYSETW
+(   41) USE TPM_DIM         ,ONLY : R
+(   42) USE TPM_GEOMETRY    ,ONLY : G
+(   43) USE TPM_FFT         ,ONLY : T, TB
+(   44) USE BLUESTEIN_MOD   ,ONLY : BLUESTEIN_FFT
+(   45) # 48 "ftinvad_mod.F90"
+(   48) USE TPM_DIM         ,ONLY : R
+(   49) !
+(   50) # 51 "ftinvad_mod.F90"
+(   51) IMPLICIT NONE
+(   52) # 53 "ftinvad_mod.F90"
+(   53) INTEGER(KIND=JPIM),INTENT(IN) :: KFIELDS,KGL
+(   54) REAL(KIND=JPRBT), INTENT(OUT)  :: PREEL(:,:)
+(   55) # 56 "ftinvad_mod.F90"
+(   56) INTEGER(KIND=JPIM) :: IGLG,IST,ILEN,IJUMP,JJ,JF,ILOEN
+(   57) INTEGER(KIND=JPIM) :: IOFF,IRLEN,ICLEN,ITYPE
+(   58) LOGICAL :: LL_ALL=.FALSE. ! T=do kfields ffts in one batch, F=do kfields ffts one at a time
+(   59) # 60 "ftinvad_mod.F90"
+(   60) !     ------------------------------------------------------------------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:24      page 5
+
+(   61) # 62 "ftinvad_mod.F90"
+(   62) ITYPE =-1
+(   63) IJUMP = 1
+(   64) IGLG  = D%NPTRLS(MYSETW)+KGL-1
+(   65) ILOEN = G%NLOEN(IGLG)+R%NNOEXTZL
+(   66) IST   = 2*(G%NMEN(IGLG)+1)+1
+(   67) ILEN  = ILOEN+3-IST
+(   68) IOFF  = D%NSTAGTF(KGL)+1
+(   69) IRLEN = ILOEN
+(   70) ICLEN = (IRLEN/2+1)*2
+(   71) # 72 "ftinvad_mod.F90"
+(   72)   ! Change of metric (not in forward routine)
+(   73) DO JJ=1,ILOEN
+(   74)   DO JF=1,KFIELDS
+(   75)     PREEL(JF,IOFF-1+JJ) = PREEL(JF,IOFF-1+JJ)*ILOEN
+(   76)   ENDDO
+(   77) ENDDO
+(   78)   
+(   79) # 83 "ftinvad_mod.F90"
+(   83)   IF( T%LUSEFFT992(KGL) )THEN
+(   84) # 85 "ftinvad_mod.F90"
+(   85)     CALL FFT992(PREEL(1,IOFF),T%TRIGS(1,KGL),&
+(   86)      &T%NFAX(1,KGL),KFIELDS,IJUMP,ILOEN,KFIELDS,ITYPE)
+(   87) # 88 "ftinvad_mod.F90"
+(   88)   ELSE
+(   89) # 90 "ftinvad_mod.F90"
+(   90)     CALL BLUESTEIN_FFT(TB,ILOEN,ITYPE,KFIELDS,PREEL(1:KFIELDS,IOFF:IOFF+ICLEN-1))
+(   91)     DO JJ=1,ICLEN
+(   92)       DO JF=1,KFIELDS
+(   93)         PREEL(JF,IOFF-1+JJ)=PREEL(JF,IOFF-1+JJ)/REAL(ILOEN,JPRBT)
+(   94)       ENDDO
+(   95)     ENDDO
+(   96) # 97 "ftinvad_mod.F90"
+(   97)   ENDIF
+(   98) # 107 "ftinvad_mod.F90"
+(  107) DO JJ=1,ILEN
+(  108)   DO JF=1,KFIELDS
+(  109)     PREEL(JF,IST+IOFF-1+JJ-1) = 0.0_JPRBT
+(  110)   ENDDO
+(  111) ENDDO
+(  112) # 113 "ftinvad_mod.F90"
+(  113) !     ------------------------------------------------------------------
+(  114) # 115 "ftinvad_mod.F90"
+(  115) END SUBROUTINE FTINVAD
+(  116) END MODULE FTINVAD_MOD

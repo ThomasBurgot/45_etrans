@@ -1,0 +1,228 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:27      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: inigptr_mod.F90
+
+(    1) MODULE INIGPTR_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE INIGPTR(KGPTRSEND,KGPTRRECV)
+(    4) 
+(    5) !     Compute tables to assist GP to/from Fourier space transpositions
+(    6) 
+(    7) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    8) 
+(    9) USE TPM_GEN         ,ONLY : NOUT
+(   10) USE TPM_DISTR       ,ONLY : D, NPRTRNS
+(   11) USE TPM_TRANS       ,ONLY : NGPBLKS, NPROMA
+(   12) USE EQ_REGIONS_MOD  ,ONLY : MY_REGION_EW
+(   13) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   14) !
+(   15) 
+(   16) IMPLICIT NONE
+(   17) 
+(   18) INTEGER(KIND=JPIM),INTENT(OUT) :: KGPTRSEND(2,NGPBLKS,NPRTRNS)
+(   19) INTEGER(KIND=JPIM),INTENT(OUT) :: KGPTRRECV(NPRTRNS)
+(   20) 
+(   21) INTEGER(KIND=JPIM) :: IBLOCK,IROF,IBFIRST,IPROCLAST,IPROC,IFIRST,ILAST,IBLAST
+(   22) INTEGER(KIND=JPIM) :: JGL,JBL,JPRTRNS,JBLKS
+(   23) !     Compute tables to assist GP to/from Fourier space transpositions
+(   24) 
+(   25) 
+(   26) KGPTRSEND(:,:,:)=0
+(   27) IBLOCK=1
+(   28) IROF=1
+(   29) IBFIRST=1
+(   30) IPROCLAST=D%NPROCL(D%NFRSTLOFF+1)
+(   31) DO JGL=1,D%NDGL_GP
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:27      page 2
+
+(   32)   !   Find processor which deals with this latitude in Fourier distribution
+(   33)   IPROC=D%NPROCL(D%NFRSTLOFF+JGL)
+(   34)   IF(IPROC > NPRTRNS) THEN
+(   35)     WRITE(NOUT,'(A,I8)')&
+(   36)      &' INIGPTR ERROR : exceeding processor limit ',NPRTRNS
+(   37)     CALL ABORT_TRANS(' INIGPTR ERROR : exceeding processor limit ')
+(   38)   ENDIF
+(   39) 
+(   40)   !           for each latitude on this processor, find first and last points
+(   41)   !           for each NPROMA chunk, for each destination processor
+(   42)   IF(IPROC /= IPROCLAST) THEN
+(   43)     IF(IROF > 1) THEN
+(   44)       KGPTRSEND(1,IBLOCK,IPROCLAST)=IBFIRST
+(   45)       KGPTRSEND(2,IBLOCK,IPROCLAST)=IROF-1
+(   46)     ENDIF
+(   47)     IF(IROF <= NPROMA) IBFIRST=IROF
+(   48)     IPROCLAST=IPROC
+(   49)   ENDIF
+(   50)   IFIRST=D%NSTA(D%NPTRFLOFF+JGL,MY_REGION_EW)
+(   51)   ILAST =IFIRST + D%NONL(D%NPTRFLOFF+JGL,MY_REGION_EW) -1
+(   52)   DO JBL=IFIRST,ILAST
+(   53)     IF(IROF == NPROMA) THEN
+(   54)       IBLAST=IROF
+(   55)       KGPTRSEND(1,IBLOCK,IPROC)=IBFIRST
+(   56)       KGPTRSEND(2,IBLOCK,IPROC)=IBLAST
+(   57)       IF(IBLOCK < NGPBLKS) IBLOCK=IBLOCK+1
+(   58)       IROF=0
+(   59)       IBFIRST=1
+(   60)     ENDIF
+(   61)     IROF=IROF+1
+(   62)   ENDDO
+(   63) ENDDO
+(   64) IF(IROF /= 1.AND.IROF /= IBFIRST) THEN
+(   65) !           non-empty residual block after last latitude line
+(   66)   IBLAST=IROF-1
+(   67)   KGPTRSEND(1,IBLOCK,IPROC)=IBFIRST
+(   68)   KGPTRSEND(2,IBLOCK,IPROC)=IBLAST
+(   69) ENDIF
+(   70) !         sum up over blocks
+(   71) KGPTRRECV(:)=0
+(   72) DO JPRTRNS=1,NPRTRNS
+(   73)   DO JBLKS=1,NGPBLKS
+(   74)     IF(KGPTRSEND(1,JBLKS,JPRTRNS) > 0) THEN
+(   75)       KGPTRRECV(JPRTRNS)=KGPTRRECV(JPRTRNS)+&
+(   76)        &KGPTRSEND(2,JBLKS,JPRTRNS)-KGPTRSEND(1,JBLKS,JPRTRNS)+1
+(   77)     ENDIF
+(   78)   ENDDO
+(   79) ENDDO
+(   80) 
+(   81) END SUBROUTINE INIGPTR
+(   82) END MODULE INIGPTR_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:27      page 3
+
+(    1) # 1 "inigptr_mod.F90"
+(    1) MODULE INIGPTR_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE INIGPTR(KGPTRSEND,KGPTRRECV)
+(    4) # 5 "inigptr_mod.F90"
+(    5) !     Compute tables to assist GP to/from Fourier space transpositions
+(    6) # 7 "inigptr_mod.F90"
+(    7) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    8) # 9 "inigptr_mod.F90"
+(    9) USE TPM_GEN         ,ONLY : NOUT
+(   10) USE TPM_DISTR       ,ONLY : D, NPRTRNS
+(   11) USE TPM_TRANS       ,ONLY : NGPBLKS, NPROMA
+(   12) USE EQ_REGIONS_MOD  ,ONLY : MY_REGION_EW
+(   13) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   14) !
+(   15) # 16 "inigptr_mod.F90"
+(   16) IMPLICIT NONE
+(   17) # 18 "inigptr_mod.F90"
+(   18) INTEGER(KIND=JPIM),INTENT(OUT) :: KGPTRSEND(2,NGPBLKS,NPRTRNS)
+(   19) INTEGER(KIND=JPIM),INTENT(OUT) :: KGPTRRECV(NPRTRNS)
+(   20) # 21 "inigptr_mod.F90"
+(   21) INTEGER(KIND=JPIM) :: IBLOCK,IROF,IBFIRST,IPROCLAST,IPROC,IFIRST,ILAST,IBLAST
+(   22) INTEGER(KIND=JPIM) :: JGL,JBL,JPRTRNS,JBLKS
+(   23) !     Compute tables to assist GP to/from Fourier space transpositions
+(   24) # 26 "inigptr_mod.F90"
+(   26) KGPTRSEND(:,:,:)=0
+(   27) IBLOCK=1
+(   28) IROF=1
+(   29) IBFIRST=1
+(   30) IPROCLAST=D%NPROCL(D%NFRSTLOFF+1)
+(   31) DO JGL=1,D%NDGL_GP
+(   32)   !   Find processor which deals with this latitude in Fourier distribution
+(   33)   IPROC=D%NPROCL(D%NFRSTLOFF+JGL)
+(   34)   IF(IPROC > NPRTRNS) THEN
+(   35)     WRITE(NOUT,'(A,I8)')&
+(   36)      &' INIGPTR ERROR : exceeding processor limit ',NPRTRNS
+(   37)     CALL ABORT_TRANS(' INIGPTR ERROR : exceeding processor limit ')
+(   38)   ENDIF
+(   39) # 40 "inigptr_mod.F90"
+(   40)   !           for each latitude on this processor, find first and last points
+(   41)   !           for each NPROMA chunk, for each destination processor
+(   42)   IF(IPROC /= IPROCLAST) THEN
+(   43)     IF(IROF > 1) THEN
+(   44)       KGPTRSEND(1,IBLOCK,IPROCLAST)=IBFIRST
+(   45)       KGPTRSEND(2,IBLOCK,IPROCLAST)=IROF-1
+(   46)     ENDIF
+(   47)     IF(IROF <= NPROMA) IBFIRST=IROF
+(   48)     IPROCLAST=IPROC
+(   49)   ENDIF
+(   50)   IFIRST=D%NSTA(D%NPTRFLOFF+JGL,MY_REGION_EW)
+(   51)   ILAST =IFIRST + D%NONL(D%NPTRFLOFF+JGL,MY_REGION_EW) -1
+(   52)   DO JBL=IFIRST,ILAST
+(   53)     IF(IROF == NPROMA) THEN
+(   54)       IBLAST=IROF
+(   55)       KGPTRSEND(1,IBLOCK,IPROC)=IBFIRST
+(   56)       KGPTRSEND(2,IBLOCK,IPROC)=IBLAST
+(   57)       IF(IBLOCK < NGPBLKS) IBLOCK=IBLOCK+1
+(   58)       IROF=0
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:27      page 4
+
+(   59)       IBFIRST=1
+(   60)     ENDIF
+(   61)     IROF=IROF+1
+(   62)   ENDDO
+(   63) ENDDO
+(   64) IF(IROF /= 1.AND.IROF /= IBFIRST) THEN
+(   65) !           non-empty residual block after last latitude line
+(   66)   IBLAST=IROF-1
+(   67)   KGPTRSEND(1,IBLOCK,IPROC)=IBFIRST
+(   68)   KGPTRSEND(2,IBLOCK,IPROC)=IBLAST
+(   69) ENDIF
+(   70) !         sum up over blocks
+(   71) KGPTRRECV(:)=0
+(   72) DO JPRTRNS=1,NPRTRNS
+(   73)   DO JBLKS=1,NGPBLKS
+(   74)     IF(KGPTRSEND(1,JBLKS,JPRTRNS) > 0) THEN
+(   75)       KGPTRRECV(JPRTRNS)=KGPTRRECV(JPRTRNS)+&
+(   76)        &KGPTRSEND(2,JBLKS,JPRTRNS)-KGPTRSEND(1,JBLKS,JPRTRNS)+1
+(   77)     ENDIF
+(   78)   ENDDO
+(   79) ENDDO
+(   80) # 81 "inigptr_mod.F90"
+(   81) END SUBROUTINE INIGPTR
+(   82) END MODULE INIGPTR_MOD

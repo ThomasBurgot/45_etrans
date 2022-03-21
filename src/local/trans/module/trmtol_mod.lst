@@ -1,0 +1,706 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:00      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: trmtol_mod.F90
+
+(    1) MODULE TRMTOL_MOD
+(    2) 
+(    3) CONTAINS
+(    4) SUBROUTINE TRMTOL_CUDAAWARE(PFBUF_IN,PFBUF,KFIELD)
+(    5) 
+(    6) !**** *trmtol * - transposition in Fourier space
+(    7) 
+(    8) !     Purpose.
+(    9) !     --------
+(   10) !              Transpose Fourier buffer data from partitioning
+(   11) !              over wave numbers to partitioning over latitudes.
+(   12) !              It is called between direct FFT and direct Legendre
+(   13) !              transform.
+(   14) !              This routine is the inverse of TRLTOM.
+(   15) 
+(   16) 
+(   17) !**   Interface.
+(   18) !     ----------
+(   19) !        *call* *trmtol(...)*
+(   20) 
+(   21) !        Explicit arguments : PFBUF  - Fourier coefficient buffer. It is
+(   22) !        --------------------          used for both input and output.
+(   23) !                             KFIELD - Number of fields communicated
+(   24) 
+(   25) !        Implicit arguments :
+(   26) !        --------------------
+(   27) 
+(   28) !     Method.
+(   29) !     -------
+(   30) !        See documentation
+(   31) 
+(   32) !     Externals.
+(   33) !     ----------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:00      page 2
+
+(   34) 
+(   35) !     Reference.
+(   36) !     ----------
+(   37) !        ECMWF Research Department documentation of the IFS
+(   38) 
+(   39) !     Author.
+(   40) !     -------
+(   41) !        MPP Group *ECMWF*
+(   42) 
+(   43) !     Modifications.
+(   44) !     --------------
+(   45) !        Original : 95-10-01
+(   46) !        Modified : 97-06-17 G. Mozdzynski - control MPI mailbox use
+(   47) !                                            (NCOMBFLEN) for nphase.eq.1
+(   48) !        Modified : 99-05-28  D.Salmond - Optimise copies.
+(   49) !        Modified : 00-02-02  M.Hamrud  - Remove NPHASE
+(   50) !        D.Salmond : 01-11-23 LIMP_NOOLAP Option for non-overlapping message
+(   51) !                             passing and buffer packing
+(   52) !        G.Mozdzynski: 08-01-01 Cleanup
+(   53) !        Y.Seity   : 07-08-31 add barrien synchronisation under LSYNC_TRANS
+(   54) !     ------------------------------------------------------------------
+(   55) 
+(   56) 
+(   57) USE PARKIND1  ,ONLY : JPIM     ,JPRBT, JPRB
+(   58) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   59) 
+(   60) USE MPL_MODULE  ,ONLY : MPL_BARRIER, MPL_WAIT, JP_NON_BLOCKING_STANDARD, MPL_ALL_MS_COMM
+(   61) USE MPL_MODULE  ,ONLY : MPL_ALLTOALLV_REAL8, MPL_ALLTOALLV
+(   62) 
+(   63) USE TPM_DISTR       ,ONLY : D, MTAGML, MYSETW, NPRTRW, NPROC, MYPROC
+(   64) USE TPM_GEN         ,ONLY : LSYNC_TRANS
+(   65) 
+(   66) 
+(   67) IMPLICIT NONE
+(   68) 
+(   69) 
+(   70) INTEGER(KIND=JPIM) ,INTENT(IN)    :: KFIELD
+(   71) REAL(KIND=JPRBT)   ,INTENT(INOUT) :: PFBUF(:)
+(   72) REAL(KIND=JPRBT)   ,INTENT(INOUT) :: PFBUF_IN(:)
+(   73) 
+(   74) INTEGER(KIND=JPIM) :: ILENS(NPRTRW),IOFFS(NPRTRW),ILENR(NPRTRW),IOFFR(NPRTRW)
+(   75) 
+(   76) INTEGER(KIND=JPIM) :: ITAG, J, ILEN, ISTA
+(   77)  
+(   78) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   79) REAL(KIND=JPRB) :: ZHOOK_HANDLE_BAR
+(   80) REAL(KIND=JPRB) :: ZHOOK_HANDLE_BAR2
+(   81) 
+(   82) REAL(KIND=JPRBT)    :: ZDUM(1)
+(   83) INTEGER(KIND=JPIM) :: IREQ
+(   84) 
+(   85) 
+(   86) !     ------------------------------------------------------------------
+(   87) 
+(   88) IF (LHOOK) CALL DR_HOOK('TRMTOL_CUDAAWARE',0,ZHOOK_HANDLE)
+(   89) 
+(   90) 
+(   91) ITAG = MTAGML
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:00      page 3
+
+(   92) 
+(   93) DO J=1,NPRTRW
+(   94)   ILENS(J) = D%NLTSFTB(J)*KFIELD
+(   95)   IOFFS(J) = D%NSTAGT0B(J)*KFIELD
+(   96)   ILENR(J) = D%NLTSGTB(J)*KFIELD
+(   97)   IOFFR(J) = D%NSTAGT0B(D%MSTABF(J))*KFIELD
+(   98) ENDDO
+(   99) 
+(  100) IF(NPROC > 1) THEN
+(  101)   CALL GSTATS(807,0)
+(  102) 
+(  103)   ! TODO THIS IS A HACK. SELF COPIES ARE SLOW USING MPI_ALLTOALLV.
+(  104)   ! --> Here I simply do a openacc copy for the self-to-self
+(  105)   !$ACC kernels present(PFBUF, PFBUF_IN)
+(  106)   DO J = IOFFR(MYSETW)+1, IOFFR(MYSETW)+ILENR(MYSETW)+1
+(  107)     PFBUF(J) = PFBUF_IN(J)
+(  108)   ENDDO
+(  109)   !$ACC end kernels
+(  110) 
+(  111)   ILENS(MYSETW) = 0
+(  112)   ILENR(MYSETW) = 0
+(  113)   ! THOMAS
+(  114)   !$ACC host_data use_device(PFBUF_IN,PFBUF)
+(  115)   ! Generic interface does not work with host_data directive
+(  116)   ! To be reported to NVIDIA/PGI
+(  117)   CALL MPL_ALLTOALLV_REAL8(PSENDBUF=PFBUF_IN,KSENDCOUNTS=ILENS,&
+(  118)    & PRECVBUF=PFBUF,KRECVCOUNTS=ILENR,KSENDDISPL=IOFFS,KRECVDISPL=IOFFR,&
+(  119)    & KCOMM=MPL_ALL_MS_COMM,CDSTRING='TRMTOL_CUDAAWARE:')
+(  120)   !$ACC end host_data
+(  121) 
+(  122)   CALL GSTATS(807,1)
+(  123) ELSE
+(  124) 
+(  125)   ILEN = D%NLTSGTB(MYSETW)*KFIELD
+(  126)   ISTA = D%NSTAGT0B(MYSETW)*KFIELD+1
+(  127) 
+(  128)   CALL GSTATS(1608,0)
+(  129)   !$ACC data present(PFBUF_IN,PFBUF)
+(  130)   !$ACC parallel loop
+(  131)   DO J=ISTA,ISTA+ILEN-1
+(  132)     PFBUF(J) = PFBUF_IN(J)
+(  133)   ENDDO
+(  134)   !$ACC end data
+(  135) 
+(  136)   CALL GSTATS(1608,1)
+(  137) ENDIF
+(  138) 
+(  139) IF (LHOOK) CALL DR_HOOK('TRMTOL_CUDAAWARE',1,ZHOOK_HANDLE)
+(  140) 
+(  141) !     ------------------------------------------------------------------
+(  142) 
+(  143) END SUBROUTINE TRMTOL_CUDAAWARE
+(  144) 
+(  145) SUBROUTINE TRMTOL(PFBUF_IN,PFBUF,KFIELD)
+(  146) 
+(  147) !**** *trmtol * - transposition in Fourier space
+(  148) 
+(  149) !     Purpose.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:00      page 4
+
+(  150) !     --------
+(  151) !              Transpose Fourier buffer data from partitioning
+(  152) !              over wave numbers to partitioning over latitudes.
+(  153) !              It is called between direct FFT and direct Legendre
+(  154) !              transform.
+(  155) !              This routine is the inverse of TRLTOM.
+(  156) 
+(  157) 
+(  158) !**   Interface.
+(  159) !     ----------
+(  160) !        *call* *trmtol(...)*
+(  161) 
+(  162) !        Explicit arguments : PFBUF  - Fourier coefficient buffer. It is
+(  163) !        --------------------          used for both input and output.
+(  164) !                             KFIELD - Number of fields communicated
+(  165) 
+(  166) !        Implicit arguments :
+(  167) !        --------------------
+(  168) 
+(  169) !     Method.
+(  170) !     -------
+(  171) !        See documentation
+(  172) 
+(  173) !     Externals.
+(  174) !     ----------
+(  175) 
+(  176) !     Reference.
+(  177) !     ----------
+(  178) !        ECMWF Research Department documentation of the IFS
+(  179) 
+(  180) !     Author.
+(  181) !     -------
+(  182) !        MPP Group *ECMWF*
+(  183) 
+(  184) !     Modifications.
+(  185) !     --------------
+(  186) !        Original : 95-10-01
+(  187) !        Modified : 97-06-17 G. Mozdzynski - control MPI mailbox use
+(  188) !                                            (NCOMBFLEN) for nphase.eq.1
+(  189) !        Modified : 99-05-28  D.Salmond - Optimise copies.
+(  190) !        Modified : 00-02-02  M.Hamrud  - Remove NPHASE
+(  191) !        D.Salmond : 01-11-23 LIMP_NOOLAP Option for non-overlapping message
+(  192) !                             passing and buffer packing
+(  193) !        G.Mozdzynski: 08-01-01 Cleanup
+(  194) !        Y.Seity   : 07-08-31 add barrien synchronisation under LSYNC_TRANS
+(  195) !     ------------------------------------------------------------------
+(  196) 
+(  197) 
+(  198) USE PARKIND1  ,ONLY : JPIM     ,JPRBT, JPRB
+(  199) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(  200) 
+(  201) USE MPL_MODULE  ,ONLY : MPL_ALLTOALLV, MPL_BARRIER, MPL_ALL_MS_COMM, MPL_WAIT, JP_NON_BLOCKING_STANDARD, MPL_MYRANK
+(  202) 
+(  203) USE TPM_DISTR       ,ONLY : D, MTAGML, MYSETW, NPRTRW, NPROC, MYPROC
+(  204) USE TPM_GEN         ,ONLY : LSYNC_TRANS
+(  205) 
+(  206) 
+(  207) IMPLICIT NONE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:00      page 5
+
+(  208) 
+(  209) 
+(  210) INTEGER(KIND=JPIM),INTENT(IN)    :: KFIELD
+(  211) REAL(KIND=JPRBT)   ,INTENT(INOUT) :: PFBUF(:)
+(  212) REAL(KIND=JPRBT)   ,INTENT(INOUT) :: PFBUF_IN(:)
+(  213) 
+(  214) INTEGER(KIND=JPIM) :: ILENS(NPRTRW),IOFFS(NPRTRW),ILENR(NPRTRW),IOFFR(NPRTRW)
+(  215) 
+(  216) INTEGER(KIND=JPIM) :: ITAG, J, ILEN, ISTA
+(  217)  
+(  218) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  219) REAL(KIND=JPRB) :: ZHOOK_HANDLE_BAR
+(  220) REAL(KIND=JPRB) :: ZHOOK_HANDLE_BAR2
+(  221) 
+(  222) REAL(KIND=JPRBT)    :: ZDUM(1)
+(  223) INTEGER(KIND=JPIM) :: IREQ
+(  224) 
+(  225) 
+(  226) !     ------------------------------------------------------------------
+(  227) 
+(  228) IF (LHOOK) CALL DR_HOOK('TRMTOL',0,ZHOOK_HANDLE)
+(  229) 
+(  230) 
+(  231) ITAG = MTAGML
+(  232) 
+(  233) DO J=1,NPRTRW
+(  234)   ILENS(J) = D%NLTSFTB(J)*KFIELD
+(  235)   IOFFS(J) = D%NSTAGT0B(J)*KFIELD
+(  236)   ILENR(J) = D%NLTSGTB(J)*KFIELD
+(  237)   IOFFR(J) = D%NSTAGT0B(D%MSTABF(J))*KFIELD
+(  238) ENDDO
+(  239) 
+(  240) !!!$ACC UPDATE HOST(PFBUF,PFBUF_IN)
+(  241) !write(300+myproc,*)"0:TRMTOL:PFBUF",sum(PFBUF)
+(  242) !write(300+myproc,*)"0:TRMTOL:PFBUF_IN",sum(PFBUF_IN)
+(  243) !call flush(300)
+(  244) IF(NPROC > 1) THEN
+(  245)   IF (LHOOK) CALL DR_HOOK('TRMTOL_BAR',0,ZHOOK_HANDLE_BAR)
+(  246)  ! CALL GSTATS_BARRIER(764)
+(  247)   IF (LHOOK) CALL DR_HOOK('TRMTOL_BAR',1,ZHOOK_HANDLE_BAR)
+(  248) ! IF (LSYNC_TRANS) THEN
+(  249) !   CALL MPL_BARRIER(CDSTRING='TRMTOL')
+(  250) ! ENDIF
+(  251) 
+(  252)   CALL GSTATS(807,0)
+(  253) !$ACC UPDATE HOST(PFBUF_IN)
+(  254)   CALL MPL_ALLTOALLV(PSENDBUF=PFBUF_IN,KSENDCOUNTS=ILENS,&
+(  255)    & PRECVBUF=PFBUF,KRECVCOUNTS=ILENR,KSENDDISPL=IOFFS,KRECVDISPL=IOFFR,&
+(  256)    & KCOMM=MPL_ALL_MS_COMM,CDSTRING='TRMTOL:')
+(  257) !$ACC UPDATE DEVICE (PFBUF)
+(  258)   CALL GSTATS(807,1)
+(  259)   IF (LHOOK) CALL DR_HOOK('TRMTOL_BAR2',0,ZHOOK_HANDLE_BAR2)
+(  260)   !CALL GSTATS_BARRIER2(764)
+(  261)   IF (LHOOK) CALL DR_HOOK('TRMTOL_BAR2',1,ZHOOK_HANDLE_BAR2)
+(  262) ELSE
+(  263)   ILEN = D%NLTSGTB(MYSETW)*KFIELD
+(  264)   ISTA = D%NSTAGT0B(MYSETW)*KFIELD+1
+(  265)   CALL GSTATS(1608,0)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:00      page 6
+
+(  266)   !$ACC DATA present(PFBUF_IN,PFBUF)
+(  267)   !$ACC parallel loop
+(  268)   DO J=ISTA,ISTA+ILEN-1
+(  269)     PFBUF(J) = PFBUF_IN(J)
+(  270)   ENDDO
+(  271)   !$ACC END DATA
+(  272)   CALL GSTATS(1608,1)
+(  273) ENDIF
+(  274) !write(300+myproc,*)"10:TRMTOL:PFBUF",sum(PFBUF), KFIELD, D%NLTSGTB(MYSETW), MYSETW, D%NSTAGT0B(MYSETW), D%NLTSFTB(MYSETW), 
+(  275) !write(300+myproc,*)"10:TRMTOL:PFBUF_IN",sum(PFBUF_IN)
+(  276) !call flush(300+myproc)
+(  277) 
+(  278) IF (LHOOK) CALL DR_HOOK('TRMTOL',1,ZHOOK_HANDLE)
+(  279) 
+(  280) !     ------------------------------------------------------------------
+(  281) 
+(  282) END SUBROUTINE TRMTOL
+(  283) END MODULE TRMTOL_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:00      page 7
+
+(    1) # 1 "trmtol_mod.F90"
+(    1) MODULE TRMTOL_MOD
+(    2) # 3 "trmtol_mod.F90"
+(    3) CONTAINS
+(    4) SUBROUTINE TRMTOL_CUDAAWARE(PFBUF_IN,PFBUF,KFIELD)
+(    5) # 6 "trmtol_mod.F90"
+(    6) !**** *trmtol * - transposition in Fourier space
+(    7) # 8 "trmtol_mod.F90"
+(    8) !     Purpose.
+(    9) !     --------
+(   10) !              Transpose Fourier buffer data from partitioning
+(   11) !              over wave numbers to partitioning over latitudes.
+(   12) !              It is called between direct FFT and direct Legendre
+(   13) !              transform.
+(   14) !              This routine is the inverse of TRLTOM.
+(   15) # 17 "trmtol_mod.F90"
+(   17) !**   Interface.
+(   18) !     ----------
+(   19) !        *call* *trmtol(...)*
+(   20) # 21 "trmtol_mod.F90"
+(   21) !        Explicit arguments : PFBUF  - Fourier coefficient buffer. It is
+(   22) !        --------------------          used for both input and output.
+(   23) !                             KFIELD - Number of fields communicated
+(   24) # 25 "trmtol_mod.F90"
+(   25) !        Implicit arguments :
+(   26) !        --------------------
+(   27) # 28 "trmtol_mod.F90"
+(   28) !     Method.
+(   29) !     -------
+(   30) !        See documentation
+(   31) # 32 "trmtol_mod.F90"
+(   32) !     Externals.
+(   33) !     ----------
+(   34) # 35 "trmtol_mod.F90"
+(   35) !     Reference.
+(   36) !     ----------
+(   37) !        ECMWF Research Department documentation of the IFS
+(   38) # 39 "trmtol_mod.F90"
+(   39) !     Author.
+(   40) !     -------
+(   41) !        MPP Group *ECMWF*
+(   42) # 43 "trmtol_mod.F90"
+(   43) !     Modifications.
+(   44) !     --------------
+(   45) !        Original : 95-10-01
+(   46) !        Modified : 97-06-17 G. Mozdzynski - control MPI mailbox use
+(   47) !                                            (NCOMBFLEN) for nphase.eq.1
+(   48) !        Modified : 99-05-28  D.Salmond - Optimise copies.
+(   49) !        Modified : 00-02-02  M.Hamrud  - Remove NPHASE
+(   50) !        D.Salmond : 01-11-23 LIMP_NOOLAP Option for non-overlapping message
+(   51) !                             passing and buffer packing
+(   52) !        G.Mozdzynski: 08-01-01 Cleanup
+(   53) !        Y.Seity   : 07-08-31 add barrien synchronisation under LSYNC_TRANS
+(   54) !     ------------------------------------------------------------------
+(   55) # 57 "trmtol_mod.F90"
+(   57) USE PARKIND1  ,ONLY : JPIM     ,JPRBT, JPRB
+(   58) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   59) # 60 "trmtol_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:00      page 8
+
+(   60) USE MPL_MODULE  ,ONLY : MPL_BARRIER, MPL_WAIT, JP_NON_BLOCKING_STANDARD, MPL_ALL_MS_COMM
+(   61) USE MPL_MODULE  ,ONLY : MPL_ALLTOALLV_REAL8, MPL_ALLTOALLV
+(   62) # 63 "trmtol_mod.F90"
+(   63) USE TPM_DISTR       ,ONLY : D, MTAGML, MYSETW, NPRTRW, NPROC, MYPROC
+(   64) USE TPM_GEN         ,ONLY : LSYNC_TRANS
+(   65) # 67 "trmtol_mod.F90"
+(   67) IMPLICIT NONE
+(   68) # 70 "trmtol_mod.F90"
+(   70) INTEGER(KIND=JPIM) ,INTENT(IN)    :: KFIELD
+(   71) REAL(KIND=JPRBT)   ,INTENT(INOUT) :: PFBUF(:)
+(   72) REAL(KIND=JPRBT)   ,INTENT(INOUT) :: PFBUF_IN(:)
+(   73) # 74 "trmtol_mod.F90"
+(   74) INTEGER(KIND=JPIM) :: ILENS(NPRTRW),IOFFS(NPRTRW),ILENR(NPRTRW),IOFFR(NPRTRW)
+(   75) # 76 "trmtol_mod.F90"
+(   76) INTEGER(KIND=JPIM) :: ITAG, J, ILEN, ISTA
+(   77)  
+(   78) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   79) REAL(KIND=JPRB) :: ZHOOK_HANDLE_BAR
+(   80) REAL(KIND=JPRB) :: ZHOOK_HANDLE_BAR2
+(   81) # 82 "trmtol_mod.F90"
+(   82) REAL(KIND=JPRBT)    :: ZDUM(1)
+(   83) INTEGER(KIND=JPIM) :: IREQ
+(   84) # 86 "trmtol_mod.F90"
+(   86) !     ------------------------------------------------------------------
+(   87) # 88 "trmtol_mod.F90"
+(   88) IF (LHOOK) CALL DR_HOOK('TRMTOL_CUDAAWARE',0,ZHOOK_HANDLE)
+(   89) # 91 "trmtol_mod.F90"
+(   91) ITAG = MTAGML
+(   92) # 93 "trmtol_mod.F90"
+(   93) DO J=1,NPRTRW
+(   94)   ILENS(J) = D%NLTSFTB(J)*KFIELD
+(   95)   IOFFS(J) = D%NSTAGT0B(J)*KFIELD
+(   96)   ILENR(J) = D%NLTSGTB(J)*KFIELD
+(   97)   IOFFR(J) = D%NSTAGT0B(D%MSTABF(J))*KFIELD
+(   98) ENDDO
+(   99) # 100 "trmtol_mod.F90"
+(  100) IF(NPROC > 1) THEN
+(  101)   CALL GSTATS(807,0)
+(  102) # 103 "trmtol_mod.F90"
+(  103)   ! TODO THIS IS A HACK. SELF COPIES ARE SLOW USING MPI_ALLTOALLV.
+(  104)   ! --> Here I simply do a openacc copy for the self-to-self
+(  105)   !$ACC kernels present(PFBUF, PFBUF_IN)
+(  106)   DO J = IOFFR(MYSETW)+1, IOFFR(MYSETW)+ILENR(MYSETW)+1
+(  107)     PFBUF(J) = PFBUF_IN(J)
+(  108)   ENDDO
+(  109)   !$ACC end kernels
+(  110) # 111 "trmtol_mod.F90"
+(  111)   ILENS(MYSETW) = 0
+(  112)   ILENR(MYSETW) = 0
+(  113)   ! THOMAS
+(  114)   !$ACC host_data use_device(PFBUF_IN,PFBUF)
+(  115)   ! Generic interface does not work with host_data directive
+(  116)   ! To be reported to NVIDIA/PGI
+(  117)   CALL MPL_ALLTOALLV_REAL8(PSENDBUF=PFBUF_IN,KSENDCOUNTS=ILENS,&
+(  118)    & PRECVBUF=PFBUF,KRECVCOUNTS=ILENR,KSENDDISPL=IOFFS,KRECVDISPL=IOFFR,&
+(  119)    & KCOMM=MPL_ALL_MS_COMM,CDSTRING='TRMTOL_CUDAAWARE:')
+(  120)   !$ACC end host_data
+(  121) # 122 "trmtol_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:00      page 9
+
+(  122)   CALL GSTATS(807,1)
+(  123) ELSE
+(  124) # 125 "trmtol_mod.F90"
+(  125)   ILEN = D%NLTSGTB(MYSETW)*KFIELD
+(  126)   ISTA = D%NSTAGT0B(MYSETW)*KFIELD+1
+(  127) # 128 "trmtol_mod.F90"
+(  128)   CALL GSTATS(1608,0)
+(  129)   !$ACC data present(PFBUF_IN,PFBUF)
+(  130)   !$ACC parallel loop
+(  131)   DO J=ISTA,ISTA+ILEN-1
+(  132)     PFBUF(J) = PFBUF_IN(J)
+(  133)   ENDDO
+(  134)   !$ACC end data
+(  135) # 136 "trmtol_mod.F90"
+(  136)   CALL GSTATS(1608,1)
+(  137) ENDIF
+(  138) # 139 "trmtol_mod.F90"
+(  139) IF (LHOOK) CALL DR_HOOK('TRMTOL_CUDAAWARE',1,ZHOOK_HANDLE)
+(  140) # 141 "trmtol_mod.F90"
+(  141) !     ------------------------------------------------------------------
+(  142) # 143 "trmtol_mod.F90"
+(  143) END SUBROUTINE TRMTOL_CUDAAWARE
+(  144) # 145 "trmtol_mod.F90"
+(  145) SUBROUTINE TRMTOL(PFBUF_IN,PFBUF,KFIELD)
+(  146) # 147 "trmtol_mod.F90"
+(  147) !**** *trmtol * - transposition in Fourier space
+(  148) # 149 "trmtol_mod.F90"
+(  149) !     Purpose.
+(  150) !     --------
+(  151) !              Transpose Fourier buffer data from partitioning
+(  152) !              over wave numbers to partitioning over latitudes.
+(  153) !              It is called between direct FFT and direct Legendre
+(  154) !              transform.
+(  155) !              This routine is the inverse of TRLTOM.
+(  156) # 158 "trmtol_mod.F90"
+(  158) !**   Interface.
+(  159) !     ----------
+(  160) !        *call* *trmtol(...)*
+(  161) # 162 "trmtol_mod.F90"
+(  162) !        Explicit arguments : PFBUF  - Fourier coefficient buffer. It is
+(  163) !        --------------------          used for both input and output.
+(  164) !                             KFIELD - Number of fields communicated
+(  165) # 166 "trmtol_mod.F90"
+(  166) !        Implicit arguments :
+(  167) !        --------------------
+(  168) # 169 "trmtol_mod.F90"
+(  169) !     Method.
+(  170) !     -------
+(  171) !        See documentation
+(  172) # 173 "trmtol_mod.F90"
+(  173) !     Externals.
+(  174) !     ----------
+(  175) # 176 "trmtol_mod.F90"
+(  176) !     Reference.
+(  177) !     ----------
+(  178) !        ECMWF Research Department documentation of the IFS
+(  179) # 180 "trmtol_mod.F90"
+(  180) !     Author.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:00      page 10
+
+(  181) !     -------
+(  182) !        MPP Group *ECMWF*
+(  183) # 184 "trmtol_mod.F90"
+(  184) !     Modifications.
+(  185) !     --------------
+(  186) !        Original : 95-10-01
+(  187) !        Modified : 97-06-17 G. Mozdzynski - control MPI mailbox use
+(  188) !                                            (NCOMBFLEN) for nphase.eq.1
+(  189) !        Modified : 99-05-28  D.Salmond - Optimise copies.
+(  190) !        Modified : 00-02-02  M.Hamrud  - Remove NPHASE
+(  191) !        D.Salmond : 01-11-23 LIMP_NOOLAP Option for non-overlapping message
+(  192) !                             passing and buffer packing
+(  193) !        G.Mozdzynski: 08-01-01 Cleanup
+(  194) !        Y.Seity   : 07-08-31 add barrien synchronisation under LSYNC_TRANS
+(  195) !     ------------------------------------------------------------------
+(  196) # 198 "trmtol_mod.F90"
+(  198) USE PARKIND1  ,ONLY : JPIM     ,JPRBT, JPRB
+(  199) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(  200) # 201 "trmtol_mod.F90"
+(  201) USE MPL_MODULE  ,ONLY : MPL_ALLTOALLV, MPL_BARRIER, MPL_ALL_MS_COMM, MPL_WAIT, JP_NON_BLOCKING_STANDARD, MPL_MYRANK
+(  202) # 203 "trmtol_mod.F90"
+(  203) USE TPM_DISTR       ,ONLY : D, MTAGML, MYSETW, NPRTRW, NPROC, MYPROC
+(  204) USE TPM_GEN         ,ONLY : LSYNC_TRANS
+(  205) # 207 "trmtol_mod.F90"
+(  207) IMPLICIT NONE
+(  208) # 210 "trmtol_mod.F90"
+(  210) INTEGER(KIND=JPIM),INTENT(IN)    :: KFIELD
+(  211) REAL(KIND=JPRBT)   ,INTENT(INOUT) :: PFBUF(:)
+(  212) REAL(KIND=JPRBT)   ,INTENT(INOUT) :: PFBUF_IN(:)
+(  213) # 214 "trmtol_mod.F90"
+(  214) INTEGER(KIND=JPIM) :: ILENS(NPRTRW),IOFFS(NPRTRW),ILENR(NPRTRW),IOFFR(NPRTRW)
+(  215) # 216 "trmtol_mod.F90"
+(  216) INTEGER(KIND=JPIM) :: ITAG, J, ILEN, ISTA
+(  217)  
+(  218) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  219) REAL(KIND=JPRB) :: ZHOOK_HANDLE_BAR
+(  220) REAL(KIND=JPRB) :: ZHOOK_HANDLE_BAR2
+(  221) # 222 "trmtol_mod.F90"
+(  222) REAL(KIND=JPRBT)    :: ZDUM(1)
+(  223) INTEGER(KIND=JPIM) :: IREQ
+(  224) # 226 "trmtol_mod.F90"
+(  226) !     ------------------------------------------------------------------
+(  227) # 228 "trmtol_mod.F90"
+(  228) IF (LHOOK) CALL DR_HOOK('TRMTOL',0,ZHOOK_HANDLE)
+(  229) # 231 "trmtol_mod.F90"
+(  231) ITAG = MTAGML
+(  232) # 233 "trmtol_mod.F90"
+(  233) DO J=1,NPRTRW
+(  234)   ILENS(J) = D%NLTSFTB(J)*KFIELD
+(  235)   IOFFS(J) = D%NSTAGT0B(J)*KFIELD
+(  236)   ILENR(J) = D%NLTSGTB(J)*KFIELD
+(  237)   IOFFR(J) = D%NSTAGT0B(D%MSTABF(J))*KFIELD
+(  238) ENDDO
+(  239) # 240 "trmtol_mod.F90"
+(  240) !!!$ACC UPDATE HOST(PFBUF,PFBUF_IN)
+(  241) !write(300+myproc,*)"0:TRMTOL:PFBUF",sum(PFBUF)
+(  242) !write(300+myproc,*)"0:TRMTOL:PFBUF_IN",sum(PFBUF_IN)
+(  243) !call flush(300)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:00      page 11
+
+(  244) IF(NPROC > 1) THEN
+(  245)   IF (LHOOK) CALL DR_HOOK('TRMTOL_BAR',0,ZHOOK_HANDLE_BAR)
+(  246)  ! CALL GSTATS_BARRIER(764)
+(  247)   IF (LHOOK) CALL DR_HOOK('TRMTOL_BAR',1,ZHOOK_HANDLE_BAR)
+(  248) ! IF (LSYNC_TRANS) THEN
+(  249) !   CALL MPL_BARRIER(CDSTRING='TRMTOL')
+(  250) ! ENDIF
+(  251) # 252 "trmtol_mod.F90"
+(  252)   CALL GSTATS(807,0)
+(  253) !$ACC UPDATE HOST(PFBUF_IN)
+(  254)   CALL MPL_ALLTOALLV(PSENDBUF=PFBUF_IN,KSENDCOUNTS=ILENS,&
+(  255)    & PRECVBUF=PFBUF,KRECVCOUNTS=ILENR,KSENDDISPL=IOFFS,KRECVDISPL=IOFFR,&
+(  256)    & KCOMM=MPL_ALL_MS_COMM,CDSTRING='TRMTOL:')
+(  257) !$ACC UPDATE DEVICE (PFBUF)
+(  258)   CALL GSTATS(807,1)
+(  259)   IF (LHOOK) CALL DR_HOOK('TRMTOL_BAR2',0,ZHOOK_HANDLE_BAR2)
+(  260)   !CALL GSTATS_BARRIER2(764)
+(  261)   IF (LHOOK) CALL DR_HOOK('TRMTOL_BAR2',1,ZHOOK_HANDLE_BAR2)
+(  262) ELSE
+(  263)   ILEN = D%NLTSGTB(MYSETW)*KFIELD
+(  264)   ISTA = D%NSTAGT0B(MYSETW)*KFIELD+1
+(  265)   CALL GSTATS(1608,0)
+(  266)   !$ACC DATA present(PFBUF_IN,PFBUF)
+(  267)   !$ACC parallel loop
+(  268)   DO J=ISTA,ISTA+ILEN-1
+(  269)     PFBUF(J) = PFBUF_IN(J)
+(  270)   ENDDO
+(  271)   !$ACC END DATA
+(  272)   CALL GSTATS(1608,1)
+(  273) ENDIF
+(  274) !write(300+myproc,*)"10:TRMTOL:PFBUF",sum(PFBUF), KFIELD, D%NLTSGTB(MYSETW), MYSETW, D%NSTAGT0B(MYSETW), D%NLTSFTB(MYSETW), D%MSTABF(MYSETW)
+(  275) !write(300+myproc,*)"10:TRMTOL:PFBUF_IN",sum(PFBUF_IN)
+(  276) !call flush(300+myproc)
+(  277) # 278 "trmtol_mod.F90"
+(  278) IF (LHOOK) CALL DR_HOOK('TRMTOL',1,ZHOOK_HANDLE)
+(  279) # 280 "trmtol_mod.F90"
+(  280) !     ------------------------------------------------------------------
+(  281) # 282 "trmtol_mod.F90"
+(  282) END SUBROUTINE TRMTOL
+(  283) END MODULE TRMTOL_MOD

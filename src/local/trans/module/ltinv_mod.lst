@@ -1,0 +1,717 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:11      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: ltinv_mod.F90
+
+(    1) MODULE LTINV_MOD
+(    2)   CONTAINS
+(    3)   SUBROUTINE LTINV(KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS,KLEI2,KDIM1,&
+(    4)    & PSPVOR,PSPDIV,PSPSCALAR,&
+(    5)    & PSPSC3A,PSPSC3B,PSPSC2 , &
+(    6)    & KFLDPTRUV,KFLDPTRSC,FSPGL_PROC)
+(    7)   
+(    8)   USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(    9)   USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   10)   
+(   11)   USE TPM_DIM         ,ONLY : R
+(   12)   USE TPM_TRANS       ,ONLY : LDIVGP, LVORGP, NF_SC2, NF_SC3A, NF_SC3B, foubuf_in
+(   13)   USE TPM_FLT
+(   14)   USE TPM_GEOMETRY
+(   15)   USE TPM_DISTR       ,ONLY : D
+(   16)   use tpm_gen, only: nout
+(   17)   !USE PRLE1_MOD
+(   18)   USE PREPSNM_MOD     ,ONLY : PREPSNM
+(   19)   USE PRFI1B_MOD      ,ONLY : PRFI1B
+(   20)   USE VDTUV_MOD       ,ONLY : VDTUV
+(   21)   USE SPNSDE_MOD      ,ONLY : SPNSDE
+(   22)   USE LEINV_MOD       ,ONLY : LEINV
+(   23)   USE ASRE1B_MOD      ,ONLY : ASRE1B
+(   24)   USE FSPGL_INT_MOD   ,ONLY : FSPGL_INT
+(   25)   USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   26)   use ieee_arithmetic
+(   27)   
+(   28)   USE TPM_FIELDS      ,ONLY : F,ZIA,ZSOA1,ZAOA1,ISTAN,ISTAS,ZEPSNM
+(   29)   
+(   30)   !**** *LTINV* - Inverse Legendre transform
+(   31)   !
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:11      page 2
+
+(   32)   !     Purpose.
+(   33)   !     --------
+(   34)   !        Tranform from Laplace space to Fourier space, compute U and V
+(   35)   !        and north/south derivatives of state variables.
+(   36)   
+(   37)   !**   Interface.
+(   38)   !     ----------
+(   39)   !        *CALL* *LTINV(...)
+(   40)   
+(   41)   !        Explicit arguments :
+(   42)   !        --------------------
+(   43)   !          KM        - zonal wavenumber
+(   44)   !          KMLOC     - local zonal wavenumber
+(   45)   !          PSPVOR    - spectral vorticity
+(   46)   !          PSPDIV    - spectral divergence
+(   47)   !          PSPSCALAR - spectral scalar variables
+(   48)   
+(   49)   !        Implicit arguments :  The Laplace arrays of the model.
+(   50)   !        --------------------  The values of the Legendre polynomials
+(   51)   !                              The grid point arrays of the model
+(   52)   !     Method.
+(   53)   !     -------
+(   54)   
+(   55)   !     Externals.
+(   56)   !     ----------
+(   57)   
+(   58)   !         PREPSNM - prepare REPSNM for wavenumber KM
+(   59)   !         PRFI1B  - prepares the spectral fields
+(   60)   !         VDTUV   - compute u and v from vorticity and divergence
+(   61)   !         SPNSDE  - compute north-south derivatives
+(   62)   !         LEINV   - Inverse Legendre transform
+(   63)   !         ASRE1   - recombination of symmetric/antisymmetric part
+(   64)   
+(   65)   !     Reference.
+(   66)   !     ----------
+(   67)   !        ECMWF Research Department documentation of the IFS
+(   68)   !        Temperton, 1991, MWR 119 p1303
+(   69)   
+(   70)   !     Author.
+(   71)   !     -------
+(   72)   !        Mats Hamrud  *ECMWF*
+(   73)   
+(   74)   !     Modifications.
+(   75)   !     --------------
+(   76)   !        Original : 00-02-01 From LTINV in IFS CY22R1
+(   77)   !     ------------------------------------------------------------------
+(   78)   
+(   79)   IMPLICIT NONE
+(   80)   
+(   81)   
+(   82)   INTERFACE
+(   83)     SUBROUTINE cudaProfilerStart() BIND(C,name='cudaProfilerStart')
+(   84)       USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_INT
+(   85)       IMPLICIT NONE
+(   86)     END SUBROUTINE cudaProfilerStart
+(   87)   END INTERFACE
+(   88)   
+(   89)   INTERFACE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:11      page 3
+
+(   90)     SUBROUTINE cudaProfilerStop() BIND(C,name='cudaProfilerStop')
+(   91)       USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_INT
+(   92)       IMPLICIT NONE
+(   93)     END SUBROUTINE cudaProfilerStop
+(   94)   END INTERFACE
+(   95)   
+(   96)   
+(   97)   INTEGER(KIND=JPIM), INTENT(IN) :: KF_OUT_LT
+(   98)   INTEGER(KIND=JPIM), INTENT(IN) :: KF_UV
+(   99)   INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCALARS
+(  100)   INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCDERS
+(  101)   INTEGER(KIND=JPIM), INTENT(IN) :: KLEI2
+(  102)   INTEGER(KIND=JPIM), INTENT(IN) :: KDIM1
+(  103)   
+(  104)   REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)  :: PSPVOR(:,:)
+(  105)   REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)  :: PSPDIV(:,:)
+(  106)   REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)  :: PSPSCALAR(:,:)
+(  107)   REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)  :: PSPSC2(:,:)
+(  108)   REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)  :: PSPSC3A(:,:,:)
+(  109)   REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)  :: PSPSC3B(:,:,:)
+(  110)   INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRUV(:)
+(  111)   INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRSC(:)
+(  112)   
+(  113)   
+(  114)   EXTERNAL  FSPGL_PROC
+(  115)   OPTIONAL  FSPGL_PROC
+(  116)   
+(  117)   !REAL(KIND=JPRBT) :: ZEPSNM(d%nump,0:R%NTMAX+2)
+(  118) 
+(  119)   INTEGER(KIND=JPIM) :: IFC, ISTA, IIFC, IDGLU
+(  120)   INTEGER(KIND=JPIM) :: IVORL,IVORU,IDIVL,IDIVU,IUL,IUU,IVL,IVU,ISL,ISU,IDL,IDU
+(  121)   INTEGER(KIND=JPIM) :: IFIRST, ILAST, IDIM1,IDIM3,J3
+(  122)   
+(  123)   REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  124)   !CHARACTER(LEN=10) :: CLHOOK
+(  125)   
+(  126)   
+(  127)   INTEGER(KIND=JPIM) :: KM
+(  128)   INTEGER(KIND=JPIM) :: KMLOC
+(  129)   
+(  130)   
+(  131)   !call cudaProfilerStart
+(  132)   
+(  133)   
+(  134)   !     ------------------------------------------------------------------
+(  135)   
+(  136)   !*       1.       PERFORM LEGENDRE TRANFORM.
+(  137)   !                 --------------------------
+(  138)   
+(  139)   !WRITE(CLHOOK,FMT='(A,I4.4)') 'LTINV_',KM
+(  140)   IF (LHOOK) CALL DR_HOOK('LTINV_MOD',0,ZHOOK_HANDLE)
+(  141)   
+(  142)   !     ------------------------------------------------------------------
+(  143)   
+(  144)   
+(  145)   !*       3.    SPECTRAL COMPUTATIONS FOR U,V AND DERIVATIVES.
+(  146)   !              ----------------------------------------------
+(  147)   
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:11      page 4
+
+(  148)   IFIRST = 1
+(  149)   ILAST  = 0
+(  150)   
+(  151)   !*       1.    PREPARE ZEPSNM.
+(  152)   !              ---------------
+(  153) 
+(  154)   IF ( KF_UV > 0 .OR. KF_SCDERS > 0 ) THEN
+(  155)     CALL PREPSNM(ZEPSNM)
+(  156)     !$ACC update host(ZEPSNM)
+(  157)   ENDIF
+(  158) 
+(  159)   IF (KF_UV > 0) THEN
+(  160)     IVORL = 1
+(  161)     IVORU = 2*KF_UV
+(  162)     IDIVL = 2*KF_UV+1
+(  163)     IDIVU = 4*KF_UV
+(  164)     IUL   = 4*KF_UV+1
+(  165)     IUU   = 6*KF_UV
+(  166)     IVL   = 6*KF_UV+1
+(  167)     IVU   = 8*KF_UV
+(  168)   
+(  169)     CALL PRFI1B(ZIA(IVORL:IVORU,:,:),PSPVOR,KF_UV,KFLDPTRUV)
+(  170)     !!ACC update host(ZIA)
+(  171)     CALL PRFI1B(ZIA(IDIVL:IDIVU,:,:),PSPDIV,KF_UV,KFLDPTRUV)
+(  172)     !!ACC update host(ZIA)
+(  173)   
+(  174)   !     ------------------------------------------------------------------
+(  175)   
+(  176)     !!acc update host(zepsnm,zia)
+(  177)     CALL VDTUV(KF_UV,ZEPSNM,ZIA(IVORL:IVORU,:,:),ZIA(IDIVL:IDIVU,:,:),&
+(  178)              & ZIA(IUL:IUU,:,:),ZIA(IVL:IVU,:,:))
+(  179)     !!acc update device(zia)
+(  180)     !!!ACC update host(ZIA)
+(  181)     ILAST = ILAST+8*KF_UV
+(  182)   
+(  183)   ENDIF
+(  184)   
+(  185)   IF(KF_SCALARS > 0)THEN
+(  186)     IF(PRESENT(PSPSCALAR)) THEN
+(  187)       IFIRST = ILAST+1
+(  188)       ILAST  = IFIRST - 1 + 2*KF_SCALARS
+(  189)   
+(  190)       CALL PRFI1B(ZIA(IFIRST:ILAST,:,:),PSPSCALAR(:,:),KF_SCALARS,KFLDPTRSC)
+(  191)      !!ACC update host(ZIA)
+(  192)     ELSE
+(  193)       IF(PRESENT(PSPSC2) .AND. NF_SC2 > 0) THEN
+(  194)         IFIRST = ILAST+1
+(  195)         ILAST  = IFIRST-1+2*NF_SC2
+(  196)         CALL PRFI1B(ZIA(IFIRST:ILAST,:,:),PSPSC2(:,:),NF_SC2)
+(  197)      !!ACC update host(ZIA)
+(  198)       ENDIF
+(  199)       IF(PRESENT(PSPSC3A) .AND. NF_SC3A > 0) THEN
+(  200)         IDIM1=NF_SC3A
+(  201)         IDIM3=UBOUND(PSPSC3A,3)
+(  202)         IFIRST = ILAST+1
+(  203)         ILAST  = IFIRST-1+2*IDIM1
+(  204)         DO J3=1,IDIM3
+(  205)           CALL PRFI1B(ZIA(IFIRST:ILAST,:,:),PSPSC3A(:,:,J3),IDIM1)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:11      page 5
+
+(  206)      !!ACC update host(ZIA)
+(  207)         ENDDO
+(  208)       ENDIF
+(  209)       IF(PRESENT(PSPSC3B) .AND. NF_SC3B > 0) THEN
+(  210)         IDIM1=NF_SC3B
+(  211)         IDIM3=UBOUND(PSPSC3B,3)
+(  212)         DO J3=1,IDIM3
+(  213)           IFIRST = ILAST+1
+(  214)           ILAST  = IFIRST-1+2*IDIM1
+(  215)   
+(  216)           CALL PRFI1B(ZIA(IFIRST:ILAST,:,:),PSPSC3B(:,:,J3),IDIM1)
+(  217)      !!ACC update host(ZIA)
+(  218)         ENDDO
+(  219)       ENDIF
+(  220)     ENDIF
+(  221)     IF(ILAST /= 8*KF_UV+2*KF_SCALARS) THEN
+(  222)       WRITE(0,*) 'LTINV:KF_UV,KF_SCALARS,ILAST ',KF_UV,KF_SCALARS,ILAST
+(  223)       CALL ABORT_TRANS('LTINV_MOD:ILAST /= 8*KF_UV+2*KF_SCALARS')
+(  224)     ENDIF
+(  225)   ENDIF
+(  226)   
+(  227)   IF (KF_SCDERS > 0) THEN
+(  228)   !   stop 'Error: code path not (yet) supported in GPU version'
+(  229)      ISL = 2*(4*KF_UV)+1
+(  230)      ISU = ISL+2*KF_SCALARS-1
+(  231)      IDL = 2*(4*KF_UV+KF_SCALARS)+1
+(  232)      IDU = IDL+2*KF_SCDERS-1
+(  233)      CALL SPNSDE(KF_SCALARS,ZEPSNM,ZIA(ISL:ISU,:,:),ZIA(IDL:IDU,:,:))
+(  234)      !!ACC update host(ZIA)
+(  235)  ENDIF
+(  236)   
+(  237)   !     ------------------------------------------------------------------
+(  238)   
+(  239)   
+(  240)   !*       4.    INVERSE LEGENDRE TRANSFORM.
+(  241)   !              ---------------------------
+(  242)   
+(  243)   ISTA = 1
+(  244)   IFC  = 2*KF_OUT_LT
+(  245)   IF(KF_UV > 0 .AND. .NOT. LVORGP) THEN
+(  246)      ISTA = ISTA+2*KF_UV
+(  247)   ENDIF
+(  248)   IF(KF_UV > 0 .AND. .NOT. LDIVGP) THEN
+(  249)      ISTA = ISTA+2*KF_UV
+(  250)   ENDIF
+(  251) 
+(  252)   !call cudaProfilerStart
+(  253)   CALL LEINV(IFC,KF_OUT_LT,ZIA(ISTA:ISTA+IFC-1,:,:),ZAOA1,ZSOA1)
+(  254)   !call cudaProfilerStop
+(  255) 
+(  256)   !     ------------------------------------------------------------------
+(  257)   
+(  258)   !*       5.    RECOMBINATION SYMMETRIC/ANTISYMMETRIC PART.
+(  259)   !              --------------------------------------------
+(  260)    
+(  261)   
+(  262)   CALL ASRE1B(KF_OUT_LT,ZAOA1,ZSOA1,ISTAN,ISTAS)
+(  263)   
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:11      page 6
+
+(  264)   !     ------------------------------------------------------------------
+(  265)   
+(  266)   !     6. OPTIONAL COMPUTATIONS IN FOURIER SPACE
+(  267)   
+(  268)   
+(  269)   IF(PRESENT(FSPGL_PROC)) THEN
+(  270)   !stop 'Error: SPGL_PROC is not (yet) supported in GPU version'
+(  271)     CALL FSPGL_INT(KF_UV,KF_SCALARS,KF_SCDERS,KF_OUT_LT,FSPGL_PROC,&
+(  272)      & KFLDPTRUV,KFLDPTRSC)
+(  273)   ENDIF
+(  274)   
+(  275)   IF (LHOOK) CALL DR_HOOK('LTINV_MOD',1,ZHOOK_HANDLE)
+(  276)   !     ------------------------------------------------------------------
+(  277)   
+(  278)   !call cudaProfilerStop
+(  279)   
+(  280)   END SUBROUTINE LTINV
+(  281)   END MODULE LTINV_MOD
+(  282)   
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:11      page 7
+
+(    1) # 1 "ltinv_mod.F90"
+(    1) MODULE LTINV_MOD
+(    2)   CONTAINS
+(    3)   SUBROUTINE LTINV(KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS,KLEI2,KDIM1,&
+(    4)    & PSPVOR,PSPDIV,PSPSCALAR,&
+(    5)    & PSPSC3A,PSPSC3B,PSPSC2 , &
+(    6)    & KFLDPTRUV,KFLDPTRSC,FSPGL_PROC)
+(    7)   
+(    8)   USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(    9)   USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   10)   
+(   11)   USE TPM_DIM         ,ONLY : R
+(   12)   USE TPM_TRANS       ,ONLY : LDIVGP, LVORGP, NF_SC2, NF_SC3A, NF_SC3B, foubuf_in
+(   13)   USE TPM_FLT
+(   14)   USE TPM_GEOMETRY
+(   15)   USE TPM_DISTR       ,ONLY : D
+(   16)   use tpm_gen, only: nout
+(   17)   !USE PRLE1_MOD
+(   18)   USE PREPSNM_MOD     ,ONLY : PREPSNM
+(   19)   USE PRFI1B_MOD      ,ONLY : PRFI1B
+(   20)   USE VDTUV_MOD       ,ONLY : VDTUV
+(   21)   USE SPNSDE_MOD      ,ONLY : SPNSDE
+(   22)   USE LEINV_MOD       ,ONLY : LEINV
+(   23)   USE ASRE1B_MOD      ,ONLY : ASRE1B
+(   24)   USE FSPGL_INT_MOD   ,ONLY : FSPGL_INT
+(   25)   USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   26)   use ieee_arithmetic
+(   27)   
+(   28)   USE TPM_FIELDS      ,ONLY : F,ZIA,ZSOA1,ZAOA1,ISTAN,ISTAS,ZEPSNM
+(   29)   
+(   30)   !**** *LTINV* - Inverse Legendre transform
+(   31)   !
+(   32)   !     Purpose.
+(   33)   !     --------
+(   34)   !        Tranform from Laplace space to Fourier space, compute U and V
+(   35)   !        and north/south derivatives of state variables.
+(   36)   
+(   37)   !**   Interface.
+(   38)   !     ----------
+(   39)   !        *CALL* *LTINV(...)
+(   40)   
+(   41)   !        Explicit arguments :
+(   42)   !        --------------------
+(   43)   !          KM        - zonal wavenumber
+(   44)   !          KMLOC     - local zonal wavenumber
+(   45)   !          PSPVOR    - spectral vorticity
+(   46)   !          PSPDIV    - spectral divergence
+(   47)   !          PSPSCALAR - spectral scalar variables
+(   48)   
+(   49)   !        Implicit arguments :  The Laplace arrays of the model.
+(   50)   !        --------------------  The values of the Legendre polynomials
+(   51)   !                              The grid point arrays of the model
+(   52)   !     Method.
+(   53)   !     -------
+(   54)   
+(   55)   !     Externals.
+(   56)   !     ----------
+(   57)   
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:11      page 8
+
+(   58)   !         PREPSNM - prepare REPSNM for wavenumber KM
+(   59)   !         PRFI1B  - prepares the spectral fields
+(   60)   !         VDTUV   - compute u and v from vorticity and divergence
+(   61)   !         SPNSDE  - compute north-south derivatives
+(   62)   !         LEINV   - Inverse Legendre transform
+(   63)   !         ASRE1   - recombination of symmetric/antisymmetric part
+(   64)   
+(   65)   !     Reference.
+(   66)   !     ----------
+(   67)   !        ECMWF Research Department documentation of the IFS
+(   68)   !        Temperton, 1991, MWR 119 p1303
+(   69)   
+(   70)   !     Author.
+(   71)   !     -------
+(   72)   !        Mats Hamrud  *ECMWF*
+(   73)   
+(   74)   !     Modifications.
+(   75)   !     --------------
+(   76)   !        Original : 00-02-01 From LTINV in IFS CY22R1
+(   77)   !     ------------------------------------------------------------------
+(   78)   
+(   79)   IMPLICIT NONE
+(   80)   
+(   81)   
+(   82)   INTERFACE
+(   83)     SUBROUTINE cudaProfilerStart() BIND(C,name='cudaProfilerStart')
+(   84)       USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_INT
+(   85)       IMPLICIT NONE
+(   86)     END SUBROUTINE cudaProfilerStart
+(   87)   END INTERFACE
+(   88)   
+(   89)   INTERFACE
+(   90)     SUBROUTINE cudaProfilerStop() BIND(C,name='cudaProfilerStop')
+(   91)       USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_INT
+(   92)       IMPLICIT NONE
+(   93)     END SUBROUTINE cudaProfilerStop
+(   94)   END INTERFACE
+(   95)   
+(   96)   
+(   97)   INTEGER(KIND=JPIM), INTENT(IN) :: KF_OUT_LT
+(   98)   INTEGER(KIND=JPIM), INTENT(IN) :: KF_UV
+(   99)   INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCALARS
+(  100)   INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCDERS
+(  101)   INTEGER(KIND=JPIM), INTENT(IN) :: KLEI2
+(  102)   INTEGER(KIND=JPIM), INTENT(IN) :: KDIM1
+(  103)   
+(  104)   REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)  :: PSPVOR(:,:)
+(  105)   REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)  :: PSPDIV(:,:)
+(  106)   REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)  :: PSPSCALAR(:,:)
+(  107)   REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)  :: PSPSC2(:,:)
+(  108)   REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)  :: PSPSC3A(:,:,:)
+(  109)   REAL(KIND=JPRB)   ,OPTIONAL,INTENT(IN)  :: PSPSC3B(:,:,:)
+(  110)   INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRUV(:)
+(  111)   INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)  :: KFLDPTRSC(:)
+(  112)   
+(  113)   
+(  114)   EXTERNAL  FSPGL_PROC
+(  115)   OPTIONAL  FSPGL_PROC
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:11      page 9
+
+(  116)   
+(  117)   !REAL(KIND=JPRBT) :: ZEPSNM(d%nump,0:R%NTMAX+2)
+(  118) # 119 "ltinv_mod.F90"
+(  119)   INTEGER(KIND=JPIM) :: IFC, ISTA, IIFC, IDGLU
+(  120)   INTEGER(KIND=JPIM) :: IVORL,IVORU,IDIVL,IDIVU,IUL,IUU,IVL,IVU,ISL,ISU,IDL,IDU
+(  121)   INTEGER(KIND=JPIM) :: IFIRST, ILAST, IDIM1,IDIM3,J3
+(  122)   
+(  123)   REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(  124)   !CHARACTER(LEN=10) :: CLHOOK
+(  125)   
+(  126)   
+(  127)   INTEGER(KIND=JPIM) :: KM
+(  128)   INTEGER(KIND=JPIM) :: KMLOC
+(  129)   
+(  130)   
+(  131)   !call cudaProfilerStart
+(  132)   
+(  133)   
+(  134)   !     ------------------------------------------------------------------
+(  135)   
+(  136)   !*       1.       PERFORM LEGENDRE TRANFORM.
+(  137)   !                 --------------------------
+(  138)   
+(  139)   !WRITE(CLHOOK,FMT='(A,I4.4)') 'LTINV_',KM
+(  140)   IF (LHOOK) CALL DR_HOOK('LTINV_MOD',0,ZHOOK_HANDLE)
+(  141)   
+(  142)   !     ------------------------------------------------------------------
+(  143)   
+(  144)   
+(  145)   !*       3.    SPECTRAL COMPUTATIONS FOR U,V AND DERIVATIVES.
+(  146)   !              ----------------------------------------------
+(  147)   
+(  148)   IFIRST = 1
+(  149)   ILAST  = 0
+(  150)   
+(  151)   !*       1.    PREPARE ZEPSNM.
+(  152)   !              ---------------
+(  153) # 154 "ltinv_mod.F90"
+(  154)   IF ( KF_UV > 0 .OR. KF_SCDERS > 0 ) THEN
+(  155)     CALL PREPSNM(ZEPSNM)
+(  156)     !$ACC update host(ZEPSNM)
+(  157)   ENDIF
+(  158) # 159 "ltinv_mod.F90"
+(  159)   IF (KF_UV > 0) THEN
+(  160)     IVORL = 1
+(  161)     IVORU = 2*KF_UV
+(  162)     IDIVL = 2*KF_UV+1
+(  163)     IDIVU = 4*KF_UV
+(  164)     IUL   = 4*KF_UV+1
+(  165)     IUU   = 6*KF_UV
+(  166)     IVL   = 6*KF_UV+1
+(  167)     IVU   = 8*KF_UV
+(  168)   
+(  169)     CALL PRFI1B(ZIA(IVORL:IVORU,:,:),PSPVOR,KF_UV,KFLDPTRUV)
+(  170)     !!ACC update host(ZIA)
+(  171)     CALL PRFI1B(ZIA(IDIVL:IDIVU,:,:),PSPDIV,KF_UV,KFLDPTRUV)
+(  172)     !!ACC update host(ZIA)
+(  173)   
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:11      page 10
+
+(  174)   !     ------------------------------------------------------------------
+(  175)   
+(  176)     !!acc update host(zepsnm,zia)
+(  177)     CALL VDTUV(KF_UV,ZEPSNM,ZIA(IVORL:IVORU,:,:),ZIA(IDIVL:IDIVU,:,:),&
+(  178)              & ZIA(IUL:IUU,:,:),ZIA(IVL:IVU,:,:))
+(  179)     !!acc update device(zia)
+(  180)     !!!ACC update host(ZIA)
+(  181)     ILAST = ILAST+8*KF_UV
+(  182)   
+(  183)   ENDIF
+(  184)   
+(  185)   IF(KF_SCALARS > 0)THEN
+(  186)     IF(PRESENT(PSPSCALAR)) THEN
+(  187)       IFIRST = ILAST+1
+(  188)       ILAST  = IFIRST - 1 + 2*KF_SCALARS
+(  189)   
+(  190)       CALL PRFI1B(ZIA(IFIRST:ILAST,:,:),PSPSCALAR(:,:),KF_SCALARS,KFLDPTRSC)
+(  191)      !!ACC update host(ZIA)
+(  192)     ELSE
+(  193)       IF(PRESENT(PSPSC2) .AND. NF_SC2 > 0) THEN
+(  194)         IFIRST = ILAST+1
+(  195)         ILAST  = IFIRST-1+2*NF_SC2
+(  196)         CALL PRFI1B(ZIA(IFIRST:ILAST,:,:),PSPSC2(:,:),NF_SC2)
+(  197)      !!ACC update host(ZIA)
+(  198)       ENDIF
+(  199)       IF(PRESENT(PSPSC3A) .AND. NF_SC3A > 0) THEN
+(  200)         IDIM1=NF_SC3A
+(  201)         IDIM3=UBOUND(PSPSC3A,3)
+(  202)         IFIRST = ILAST+1
+(  203)         ILAST  = IFIRST-1+2*IDIM1
+(  204)         DO J3=1,IDIM3
+(  205)           CALL PRFI1B(ZIA(IFIRST:ILAST,:,:),PSPSC3A(:,:,J3),IDIM1)
+(  206)      !!ACC update host(ZIA)
+(  207)         ENDDO
+(  208)       ENDIF
+(  209)       IF(PRESENT(PSPSC3B) .AND. NF_SC3B > 0) THEN
+(  210)         IDIM1=NF_SC3B
+(  211)         IDIM3=UBOUND(PSPSC3B,3)
+(  212)         DO J3=1,IDIM3
+(  213)           IFIRST = ILAST+1
+(  214)           ILAST  = IFIRST-1+2*IDIM1
+(  215)   
+(  216)           CALL PRFI1B(ZIA(IFIRST:ILAST,:,:),PSPSC3B(:,:,J3),IDIM1)
+(  217)      !!ACC update host(ZIA)
+(  218)         ENDDO
+(  219)       ENDIF
+(  220)     ENDIF
+(  221)     IF(ILAST /= 8*KF_UV+2*KF_SCALARS) THEN
+(  222)       WRITE(0,*) 'LTINV:KF_UV,KF_SCALARS,ILAST ',KF_UV,KF_SCALARS,ILAST
+(  223)       CALL ABORT_TRANS('LTINV_MOD:ILAST /= 8*KF_UV+2*KF_SCALARS')
+(  224)     ENDIF
+(  225)   ENDIF
+(  226)   
+(  227)   IF (KF_SCDERS > 0) THEN
+(  228)   !   stop 'Error: code path not (yet) supported in GPU version'
+(  229)      ISL = 2*(4*KF_UV)+1
+(  230)      ISU = ISL+2*KF_SCALARS-1
+(  231)      IDL = 2*(4*KF_UV+KF_SCALARS)+1
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:11      page 11
+
+(  232)      IDU = IDL+2*KF_SCDERS-1
+(  233)      CALL SPNSDE(KF_SCALARS,ZEPSNM,ZIA(ISL:ISU,:,:),ZIA(IDL:IDU,:,:))
+(  234)      !!ACC update host(ZIA)
+(  235)  ENDIF
+(  236)   
+(  237)   !     ------------------------------------------------------------------
+(  238)   
+(  239)   
+(  240)   !*       4.    INVERSE LEGENDRE TRANSFORM.
+(  241)   !              ---------------------------
+(  242)   
+(  243)   ISTA = 1
+(  244)   IFC  = 2*KF_OUT_LT
+(  245)   IF(KF_UV > 0 .AND. .NOT. LVORGP) THEN
+(  246)      ISTA = ISTA+2*KF_UV
+(  247)   ENDIF
+(  248)   IF(KF_UV > 0 .AND. .NOT. LDIVGP) THEN
+(  249)      ISTA = ISTA+2*KF_UV
+(  250)   ENDIF
+(  251) # 252 "ltinv_mod.F90"
+(  252)   !call cudaProfilerStart
+(  253)   CALL LEINV(IFC,KF_OUT_LT,ZIA(ISTA:ISTA+IFC-1,:,:),ZAOA1,ZSOA1)
+(  254)   !call cudaProfilerStop
+(  255) # 256 "ltinv_mod.F90"
+(  256)   !     ------------------------------------------------------------------
+(  257)   
+(  258)   !*       5.    RECOMBINATION SYMMETRIC/ANTISYMMETRIC PART.
+(  259)   !              --------------------------------------------
+(  260)    
+(  261)   
+(  262)   CALL ASRE1B(KF_OUT_LT,ZAOA1,ZSOA1,ISTAN,ISTAS)
+(  263)   
+(  264)   !     ------------------------------------------------------------------
+(  265)   
+(  266)   !     6. OPTIONAL COMPUTATIONS IN FOURIER SPACE
+(  267)   
+(  268)   
+(  269)   IF(PRESENT(FSPGL_PROC)) THEN
+(  270)   !stop 'Error: SPGL_PROC is not (yet) supported in GPU version'
+(  271)     CALL FSPGL_INT(KF_UV,KF_SCALARS,KF_SCDERS,KF_OUT_LT,FSPGL_PROC,&
+(  272)      & KFLDPTRUV,KFLDPTRSC)
+(  273)   ENDIF
+(  274)   
+(  275)   IF (LHOOK) CALL DR_HOOK('LTINV_MOD',1,ZHOOK_HANDLE)
+(  276)   !     ------------------------------------------------------------------
+(  277)   
+(  278)   !call cudaProfilerStop
+(  279)   
+(  280)   END SUBROUTINE LTINV
+(  281)   END MODULE LTINV_MOD
+(  282)   

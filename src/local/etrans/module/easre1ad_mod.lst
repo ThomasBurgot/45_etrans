@@ -1,0 +1,227 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:57      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: easre1ad_mod.F90
+
+(    1) MODULE EASRE1AD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EASRE1AD(KM,KMLOC,KF_OUT_LT,PIA)
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) 
+(    8) !USE TPM_TRANS
+(    9) USE EASRE1BAD_MOD   ,ONLY : EASRE1BAD
+(   10) 
+(   11) !**** *EASRE1AD* - Recombine antisymmetric and symmetric parts - adjoint
+(   12) 
+(   13) !     Purpose.
+(   14) !     --------
+(   15) !        To recombine the antisymmetric and symmetric parts of the
+(   16) !        Fourier arrays and update the correct parts of the state
+(   17) !        variables.
+(   18) 
+(   19) !**   Interface.
+(   20) !     ----------
+(   21) !       *CALL* *EASRE1AD(...)
+(   22) 
+(   23) !        Explicit arguments :
+(   24) !        --------------------
+(   25) !                              KM - zonal wavenumber
+(   26) !                              KMLOC - local zonal wavenumber
+(   27) !                              PAOA1 - antisymmetric part of Fourier
+(   28) !                              fields for zonal wavenumber KM (basic
+(   29) !                              variables and N-S derivatives)
+(   30) !                              PSOA1 - symmetric part of Fourier
+(   31) !                              fields for zonal wavenumber KM (basic
+(   32) !                              variables and N-S derivatives)
+(   33) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:57      page 2
+
+(   34) !        Implicit arguments :  None
+(   35) !        --------------------
+(   36) 
+(   37) !     Method.
+(   38) !     -------
+(   39) 
+(   40) !     Externals.   EASRE1BAD - basic recombination routine
+(   41) !     ----------
+(   42) 
+(   43) !     Reference.
+(   44) !     ----------
+(   45) !        ECMWF Research Department documentation of the IFS
+(   46) 
+(   47) !     Author.
+(   48) !     -------
+(   49) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   50) 
+(   51) !     Modifications.
+(   52) !     --------------
+(   53) !        Original : 00-02-01 From ASRE1AD in IFS CY22R1
+(   54) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   55) 
+(   56) !     ------------------------------------------------------------------
+(   57) 
+(   58) IMPLICIT NONE
+(   59) 
+(   60) INTEGER(KIND=JPIM) , INTENT(IN)  :: KM
+(   61) INTEGER(KIND=JPIM) , INTENT(IN)  :: KMLOC
+(   62) INTEGER(KIND=JPIM) , INTENT(IN)  :: KF_OUT_LT
+(   63) 
+(   64) REAL(KIND=JPRB)    , INTENT(OUT) :: PIA(:,:)
+(   65) 
+(   66) INTEGER(KIND=JPIM) :: IFLDS
+(   67) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   68) 
+(   69) !     ------------------------------------------------------------------
+(   70) 
+(   71) IF (LHOOK) CALL DR_HOOK('EASRE1AD_MOD:EASRE1AD',0,ZHOOK_HANDLE)
+(   72) IFLDS = KF_OUT_LT
+(   73) 
+(   74) CALL EASRE1BAD(IFLDS,KM,KMLOC,PIA)
+(   75) IF (LHOOK) CALL DR_HOOK('EASRE1AD_MOD:EASRE1AD',1,ZHOOK_HANDLE)
+(   76) 
+(   77) !     ------------------------------------------------------------------
+(   78) 
+(   79) END SUBROUTINE EASRE1AD
+(   80) END MODULE EASRE1AD_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:57      page 3
+
+(    1) # 1 "easre1ad_mod.F90"
+(    1) MODULE EASRE1AD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EASRE1AD(KM,KMLOC,KF_OUT_LT,PIA)
+(    4) # 5 "easre1ad_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) # 8 "easre1ad_mod.F90"
+(    8) !USE TPM_TRANS
+(    9) USE EASRE1BAD_MOD   ,ONLY : EASRE1BAD
+(   10) # 11 "easre1ad_mod.F90"
+(   11) !**** *EASRE1AD* - Recombine antisymmetric and symmetric parts - adjoint
+(   12) # 13 "easre1ad_mod.F90"
+(   13) !     Purpose.
+(   14) !     --------
+(   15) !        To recombine the antisymmetric and symmetric parts of the
+(   16) !        Fourier arrays and update the correct parts of the state
+(   17) !        variables.
+(   18) # 19 "easre1ad_mod.F90"
+(   19) !**   Interface.
+(   20) !     ----------
+(   21) !       *CALL* *EASRE1AD(...)
+(   22) # 23 "easre1ad_mod.F90"
+(   23) !        Explicit arguments :
+(   24) !        --------------------
+(   25) !                              KM - zonal wavenumber
+(   26) !                              KMLOC - local zonal wavenumber
+(   27) !                              PAOA1 - antisymmetric part of Fourier
+(   28) !                              fields for zonal wavenumber KM (basic
+(   29) !                              variables and N-S derivatives)
+(   30) !                              PSOA1 - symmetric part of Fourier
+(   31) !                              fields for zonal wavenumber KM (basic
+(   32) !                              variables and N-S derivatives)
+(   33) # 34 "easre1ad_mod.F90"
+(   34) !        Implicit arguments :  None
+(   35) !        --------------------
+(   36) # 37 "easre1ad_mod.F90"
+(   37) !     Method.
+(   38) !     -------
+(   39) # 40 "easre1ad_mod.F90"
+(   40) !     Externals.   EASRE1BAD - basic recombination routine
+(   41) !     ----------
+(   42) # 43 "easre1ad_mod.F90"
+(   43) !     Reference.
+(   44) !     ----------
+(   45) !        ECMWF Research Department documentation of the IFS
+(   46) # 47 "easre1ad_mod.F90"
+(   47) !     Author.
+(   48) !     -------
+(   49) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   50) # 51 "easre1ad_mod.F90"
+(   51) !     Modifications.
+(   52) !     --------------
+(   53) !        Original : 00-02-01 From ASRE1AD in IFS CY22R1
+(   54) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   55) # 56 "easre1ad_mod.F90"
+(   56) !     ------------------------------------------------------------------
+(   57) # 58 "easre1ad_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:57      page 4
+
+(   58) IMPLICIT NONE
+(   59) # 60 "easre1ad_mod.F90"
+(   60) INTEGER(KIND=JPIM) , INTENT(IN)  :: KM
+(   61) INTEGER(KIND=JPIM) , INTENT(IN)  :: KMLOC
+(   62) INTEGER(KIND=JPIM) , INTENT(IN)  :: KF_OUT_LT
+(   63) # 64 "easre1ad_mod.F90"
+(   64) REAL(KIND=JPRB)    , INTENT(OUT) :: PIA(:,:)
+(   65) # 66 "easre1ad_mod.F90"
+(   66) INTEGER(KIND=JPIM) :: IFLDS
+(   67) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   68) # 69 "easre1ad_mod.F90"
+(   69) !     ------------------------------------------------------------------
+(   70) # 71 "easre1ad_mod.F90"
+(   71) IF (LHOOK) CALL DR_HOOK('EASRE1AD_MOD:EASRE1AD',0,ZHOOK_HANDLE)
+(   72) IFLDS = KF_OUT_LT
+(   73) # 74 "easre1ad_mod.F90"
+(   74) CALL EASRE1BAD(IFLDS,KM,KMLOC,PIA)
+(   75) IF (LHOOK) CALL DR_HOOK('EASRE1AD_MOD:EASRE1AD',1,ZHOOK_HANDLE)
+(   76) # 77 "easre1ad_mod.F90"
+(   77) !     ------------------------------------------------------------------
+(   78) # 79 "easre1ad_mod.F90"
+(   79) END SUBROUTINE EASRE1AD
+(   80) END MODULE EASRE1AD_MOD

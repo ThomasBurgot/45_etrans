@@ -1,0 +1,478 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:58      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: gath_spec.F90
+
+(    1) SUBROUTINE GATH_SPEC(PSPECG,KFGATHG,KTO,KVSET,KRESOL,PSPEC,LDIM1_IS_FLD,KSMAX,LDZA0IP)
+(    2) 
+(    3) !**** *GATH_SPEC* - Gather global spectral array from processors
+(    4) 
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !        Interface routine for gathering spectral array
+(    8) 
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL GATH_SPEC(...)
+(   12) 
+(   13) !     Explicit arguments :
+(   14) !     --------------------
+(   15) !     PSPECG(:,:) - Global spectral array
+(   16) !     KFGATHG     - Global number of fields to be gathered
+(   17) !     KTO(:)      - Processor responsible for gathering each field
+(   18) !     KVSET(:)    - "B-Set" for each field
+(   19) !     KRESOL      - resolution tag  which is required ,default is the
+(   20) !                   first defined resulution (input)
+(   21) !     PSPEC(:,:)  - Local spectral array
+(   22) !     LDZA0IP     - Set to zero imaginary part of first coefficients
+(   23) !
+(   24) !     Method.
+(   25) !     -------
+(   26) 
+(   27) !     Externals.  SET_RESOL   - set resolution
+(   28) !     ----------  GATH_SPEC_CONTROL - control routine
+(   29) 
+(   30) !     Author.
+(   31) !     -------
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:58      page 2
+
+(   32) !        Mats Hamrud *ECMWF*
+(   33) 
+(   34) !     Modifications.
+(   35) !     --------------
+(   36) !        Original : 00-03-03
+(   37) !        Modified 03-09-30  Y. Seity, bug correction IFSEND=0
+(   38) !        Modified 13-10-10  P. Marguinaud add LDZA0IP option
+(   39) !     ------------------------------------------------------------------
+(   40) 
+(   41) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   42) 
+(   43) !ifndef INTERFACE
+(   44) 
+(   45) USE TPM_GEN         ,ONLY : NERR
+(   46) USE TPM_DIM         ,ONLY : R
+(   47) USE TPM_DISTR       ,ONLY : D, NPRTRV, NPRTRW, MYSETV, MYSETW, MYPROC, NPROC
+(   48) 
+(   49) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(   50) USE GATH_SPEC_CONTROL_MOD ,ONLY : GATH_SPEC_CONTROL
+(   51) USE SUWAVEDI_MOD    ,ONLY : SUWAVEDI
+(   52) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   53) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   54) 
+(   55) !endif INTERFACE
+(   56) 
+(   57) IMPLICIT NONE
+(   58) 
+(   59) ! Declaration of arguments
+(   60) 
+(   61) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT)  :: PSPECG(:,:)
+(   62) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFGATHG
+(   63) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KTO(:)
+(   64) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSET(:)
+(   65) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   66) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPEC(:,:)
+(   67) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDIM1_IS_FLD
+(   68) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KSMAX
+(   69) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDZA0IP
+(   70) 
+(   71) !ifndef INTERFACE
+(   72) 
+(   73) INTEGER(KIND=JPIM) :: IVSET(KFGATHG)
+(   74) INTEGER(KIND=JPIM) :: IFRECV,IFSEND,J
+(   75) INTEGER(KIND=JPIM) :: IFLD,ICOEFF
+(   76) INTEGER(KIND=JPIM) :: ISMAX, ISPEC2, ISPEC2_G
+(   77) INTEGER(KIND=JPIM) :: IPOSSP(NPRTRW+1)
+(   78) INTEGER(KIND=JPIM),ALLOCATABLE :: IDIM0G(:)
+(   79) LOGICAL :: LLDIM1_IS_FLD
+(   80) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   81) 
+(   82) !     ------------------------------------------------------------------
+(   83) 
+(   84) IF (LHOOK) CALL DR_HOOK('GATH_SPEC',0,ZHOOK_HANDLE)
+(   85) ! Set current resolution
+(   86) CALL SET_RESOL(KRESOL)
+(   87) 
+(   88) LLDIM1_IS_FLD = .TRUE.
+(   89) IF(PRESENT(LDIM1_IS_FLD)) LLDIM1_IS_FLD = LDIM1_IS_FLD
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:58      page 3
+
+(   90) 
+(   91) IF(LLDIM1_IS_FLD) THEN
+(   92)   IFLD = 1
+(   93)   ICOEFF = 2
+(   94) ELSE
+(   95)   IFLD = 2
+(   96)   ICOEFF = 1
+(   97) ENDIF
+(   98) IF(UBOUND(KTO,1) < KFGATHG) THEN
+(   99)  CALL ABORT_TRANS('GATH_SPEC: KTO TOO SHORT!')
+(  100) ENDIF
+(  101) 
+(  102) ISMAX = R%NSMAX
+(  103) IF(PRESENT(KSMAX)) ISMAX = KSMAX
+(  104) ALLOCATE(IDIM0G(0:ISMAX))
+(  105) IF(ISMAX /= R%NSMAX) THEN
+(  106)   CALL SUWAVEDI(ISMAX,ISMAX,NPRTRW,MYSETW,KPOSSP=IPOSSP,KSPEC2=ISPEC2,&
+(  107)    & KDIM0G=IDIM0G)
+(  108)   ISPEC2_G = (ISMAX+1)*(ISMAX+2)
+(  109) ELSE
+(  110)   ISPEC2    = D%NSPEC2
+(  111)   ISPEC2_G  = R%NSPEC2_G
+(  112)   IPOSSP(:) = D%NPOSSP(:)
+(  113)   IDIM0G(:) = D%NDIM0G(:)
+(  114) ENDIF
+(  115) 
+(  116) IFSEND = 0
+(  117) IFRECV = 0
+(  118) DO J=1,KFGATHG
+(  119)   IF(KTO(J) < 1 .OR. KTO(J) > NPROC) THEN
+(  120)     WRITE(NERR,*) 'GATH_SPEC:ILLEGAL KTO VALUE',KTO(J),J
+(  121)     CALL ABORT_TRANS('GATH_SPEC:ILLEGAL KTO VALUE')
+(  122)   ENDIF
+(  123)   IF(KTO(J) == MYPROC) IFRECV = IFRECV+1
+(  124) ENDDO
+(  125) 
+(  126) IF(IFRECV > 0) THEN
+(  127)   IF(.NOT.PRESENT(PSPECG)) THEN
+(  128)     CALL ABORT_TRANS('GATH_SPEC:PSPECG MISSING')
+(  129)   ENDIF
+(  130)   IF(UBOUND(PSPECG,IFLD) < IFRECV) THEN
+(  131)     WRITE(NERR,*) 'GATH_SPEC: ',IFLD, UBOUND(PSPECG,IFLD), IFRECV
+(  132)     CALL ABORT_TRANS('GATH_SPEC:FIELD DIMENSION OF PSPECG TOO SMALL')
+(  133)   ENDIF
+(  134)  IF(UBOUND(PSPECG,ICOEFF) < ISPEC2_G) THEN
+(  135)     WRITE(NERR,*) 'GATH_SPEC: ',ICOEFF, UBOUND(PSPECG,ICOEFF), ISPEC2_G
+(  136)     CALL ABORT_TRANS('GATH_SPEC:COEFF DIMENSION OF PSPECG TOO SMALL')
+(  137)   ENDIF
+(  138) ENDIF
+(  139) 
+(  140) IF(PRESENT(KVSET)) THEN
+(  141)   IF(UBOUND(KVSET,1) < KFGATHG) THEN
+(  142)     CALL ABORT_TRANS('GATH_SPEC: KVSET TOO SHORT!')
+(  143)   ENDIF
+(  144)   DO J=1,KFGATHG
+(  145)     IF(KVSET(J) > NPRTRV .OR. KVSET(J) < 1) THEN
+(  146)       WRITE(NERR,*) 'GATH_SPEC:KVSET(J) > NPRTRV ',J,KVSET(J),NPRTRV
+(  147)       CALL ABORT_TRANS('GATH_SPEC:KVSET CONTAINS VALUES OUTSIDE RANGE')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:58      page 4
+
+(  148)     ENDIF
+(  149)     IF(KVSET(J) == MYSETV) THEN
+(  150)       IFSEND = IFSEND+1
+(  151)     ENDIF
+(  152)   ENDDO
+(  153)   IVSET(:) = KVSET(1:KFGATHG)
+(  154) ELSEIF(NPRTRV > 1) THEN
+(  155)   WRITE(NERR,*) 'GATH_SPEC:KVSET MISSING, NPRTRV ',NPRTRV
+(  156)   CALL ABORT_TRANS('GATH_SPEC:KVSET MISSING, NPRTRV > 1')
+(  157) ELSE
+(  158)   IFSEND   = KFGATHG
+(  159)   IVSET(:) = 1
+(  160) ENDIF
+(  161) 
+(  162) IF(IFSEND > 0 ) THEN
+(  163)   IF(.NOT.PRESENT(PSPEC)) THEN
+(  164)     CALL ABORT_TRANS('GATH_SPEC: FIELDS TO RECIEVE AND PSPEC NOT PRESENT')
+(  165)   ENDIF
+(  166)   IF(UBOUND(PSPEC,IFLD) < IFSEND) THEN
+(  167)     CALL ABORT_TRANS('GATH_SPEC: FIELD DIMENSION OF PSPEC TOO SMALL')
+(  168)   ENDIF
+(  169)   IF(UBOUND(PSPEC,ICOEFF) < ISPEC2 ) THEN
+(  170)     CALL ABORT_TRANS('GATH_SPEC: COEFF DIMENSION OF PSPEC TOO SMALL')
+(  171)   ENDIF
+(  172) ENDIF
+(  173) 
+(  174) CALL GATH_SPEC_CONTROL(PSPECG,KFGATHG,KTO,IVSET,PSPEC,LLDIM1_IS_FLD,&
+(  175)  & ISMAX,ISPEC2,ISPEC2_G,IPOSSP,IDIM0G,LDZA0IP)
+(  176) DEALLOCATE(IDIM0G)
+(  177) 
+(  178) IF (LHOOK) CALL DR_HOOK('GATH_SPEC',1,ZHOOK_HANDLE)
+(  179) !endif INTERFACE
+(  180) 
+(  181) !     ------------------------------------------------------------------
+(  182) 
+(  183) END SUBROUTINE GATH_SPEC
+(  184) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:58      page 5
+
+(    1) # 1 "gath_spec.F90"
+(    1) SUBROUTINE GATH_SPEC(PSPECG,KFGATHG,KTO,KVSET,KRESOL,PSPEC,LDIM1_IS_FLD,KSMAX,LDZA0IP)
+(    2) # 3 "gath_spec.F90"
+(    3) !**** *GATH_SPEC* - Gather global spectral array from processors
+(    4) # 5 "gath_spec.F90"
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !        Interface routine for gathering spectral array
+(    8) # 9 "gath_spec.F90"
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL GATH_SPEC(...)
+(   12) # 13 "gath_spec.F90"
+(   13) !     Explicit arguments :
+(   14) !     --------------------
+(   15) !     PSPECG(:,:) - Global spectral array
+(   16) !     KFGATHG     - Global number of fields to be gathered
+(   17) !     KTO(:)      - Processor responsible for gathering each field
+(   18) !     KVSET(:)    - "B-Set" for each field
+(   19) !     KRESOL      - resolution tag  which is required ,default is the
+(   20) !                   first defined resulution (input)
+(   21) !     PSPEC(:,:)  - Local spectral array
+(   22) !     LDZA0IP     - Set to zero imaginary part of first coefficients
+(   23) !
+(   24) !     Method.
+(   25) !     -------
+(   26) # 27 "gath_spec.F90"
+(   27) !     Externals.  SET_RESOL   - set resolution
+(   28) !     ----------  GATH_SPEC_CONTROL - control routine
+(   29) # 30 "gath_spec.F90"
+(   30) !     Author.
+(   31) !     -------
+(   32) !        Mats Hamrud *ECMWF*
+(   33) # 34 "gath_spec.F90"
+(   34) !     Modifications.
+(   35) !     --------------
+(   36) !        Original : 00-03-03
+(   37) !        Modified 03-09-30  Y. Seity, bug correction IFSEND=0
+(   38) !        Modified 13-10-10  P. Marguinaud add LDZA0IP option
+(   39) !     ------------------------------------------------------------------
+(   40) # 41 "gath_spec.F90"
+(   41) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   42) # 43 "gath_spec.F90"
+(   43) !ifndef INTERFACE
+(   44) # 45 "gath_spec.F90"
+(   45) USE TPM_GEN         ,ONLY : NERR
+(   46) USE TPM_DIM         ,ONLY : R
+(   47) USE TPM_DISTR       ,ONLY : D, NPRTRV, NPRTRW, MYSETV, MYSETW, MYPROC, NPROC
+(   48) # 49 "gath_spec.F90"
+(   49) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(   50) USE GATH_SPEC_CONTROL_MOD ,ONLY : GATH_SPEC_CONTROL
+(   51) USE SUWAVEDI_MOD    ,ONLY : SUWAVEDI
+(   52) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   53) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   54) # 55 "gath_spec.F90"
+(   55) !endif INTERFACE
+(   56) # 57 "gath_spec.F90"
+(   57) IMPLICIT NONE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:58      page 6
+
+(   58) # 59 "gath_spec.F90"
+(   59) ! Declaration of arguments
+(   60) # 61 "gath_spec.F90"
+(   61) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT)  :: PSPECG(:,:)
+(   62) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFGATHG
+(   63) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KTO(:)
+(   64) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KVSET(:)
+(   65) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   66) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPEC(:,:)
+(   67) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDIM1_IS_FLD
+(   68) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KSMAX
+(   69) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDZA0IP
+(   70) # 71 "gath_spec.F90"
+(   71) !ifndef INTERFACE
+(   72) # 73 "gath_spec.F90"
+(   73) INTEGER(KIND=JPIM) :: IVSET(KFGATHG)
+(   74) INTEGER(KIND=JPIM) :: IFRECV,IFSEND,J
+(   75) INTEGER(KIND=JPIM) :: IFLD,ICOEFF
+(   76) INTEGER(KIND=JPIM) :: ISMAX, ISPEC2, ISPEC2_G
+(   77) INTEGER(KIND=JPIM) :: IPOSSP(NPRTRW+1)
+(   78) INTEGER(KIND=JPIM),ALLOCATABLE :: IDIM0G(:)
+(   79) LOGICAL :: LLDIM1_IS_FLD
+(   80) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   81) # 82 "gath_spec.F90"
+(   82) !     ------------------------------------------------------------------
+(   83) # 84 "gath_spec.F90"
+(   84) IF (LHOOK) CALL DR_HOOK('GATH_SPEC',0,ZHOOK_HANDLE)
+(   85) ! Set current resolution
+(   86) CALL SET_RESOL(KRESOL)
+(   87) # 88 "gath_spec.F90"
+(   88) LLDIM1_IS_FLD = .TRUE.
+(   89) IF(PRESENT(LDIM1_IS_FLD)) LLDIM1_IS_FLD = LDIM1_IS_FLD
+(   90) # 91 "gath_spec.F90"
+(   91) IF(LLDIM1_IS_FLD) THEN
+(   92)   IFLD = 1
+(   93)   ICOEFF = 2
+(   94) ELSE
+(   95)   IFLD = 2
+(   96)   ICOEFF = 1
+(   97) ENDIF
+(   98) IF(UBOUND(KTO,1) < KFGATHG) THEN
+(   99)  CALL ABORT_TRANS('GATH_SPEC: KTO TOO SHORT!')
+(  100) ENDIF
+(  101) # 102 "gath_spec.F90"
+(  102) ISMAX = R%NSMAX
+(  103) IF(PRESENT(KSMAX)) ISMAX = KSMAX
+(  104) ALLOCATE(IDIM0G(0:ISMAX))
+(  105) IF(ISMAX /= R%NSMAX) THEN
+(  106)   CALL SUWAVEDI(ISMAX,ISMAX,NPRTRW,MYSETW,KPOSSP=IPOSSP,KSPEC2=ISPEC2,&
+(  107)    & KDIM0G=IDIM0G)
+(  108)   ISPEC2_G = (ISMAX+1)*(ISMAX+2)
+(  109) ELSE
+(  110)   ISPEC2    = D%NSPEC2
+(  111)   ISPEC2_G  = R%NSPEC2_G
+(  112)   IPOSSP(:) = D%NPOSSP(:)
+(  113)   IDIM0G(:) = D%NDIM0G(:)
+(  114) ENDIF
+(  115) # 116 "gath_spec.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:58      page 7
+
+(  116) IFSEND = 0
+(  117) IFRECV = 0
+(  118) DO J=1,KFGATHG
+(  119)   IF(KTO(J) < 1 .OR. KTO(J) > NPROC) THEN
+(  120)     WRITE(NERR,*) 'GATH_SPEC:ILLEGAL KTO VALUE',KTO(J),J
+(  121)     CALL ABORT_TRANS('GATH_SPEC:ILLEGAL KTO VALUE')
+(  122)   ENDIF
+(  123)   IF(KTO(J) == MYPROC) IFRECV = IFRECV+1
+(  124) ENDDO
+(  125) # 126 "gath_spec.F90"
+(  126) IF(IFRECV > 0) THEN
+(  127)   IF(.NOT.PRESENT(PSPECG)) THEN
+(  128)     CALL ABORT_TRANS('GATH_SPEC:PSPECG MISSING')
+(  129)   ENDIF
+(  130)   IF(UBOUND(PSPECG,IFLD) < IFRECV) THEN
+(  131)     WRITE(NERR,*) 'GATH_SPEC: ',IFLD, UBOUND(PSPECG,IFLD), IFRECV
+(  132)     CALL ABORT_TRANS('GATH_SPEC:FIELD DIMENSION OF PSPECG TOO SMALL')
+(  133)   ENDIF
+(  134)  IF(UBOUND(PSPECG,ICOEFF) < ISPEC2_G) THEN
+(  135)     WRITE(NERR,*) 'GATH_SPEC: ',ICOEFF, UBOUND(PSPECG,ICOEFF), ISPEC2_G
+(  136)     CALL ABORT_TRANS('GATH_SPEC:COEFF DIMENSION OF PSPECG TOO SMALL')
+(  137)   ENDIF
+(  138) ENDIF
+(  139) # 140 "gath_spec.F90"
+(  140) IF(PRESENT(KVSET)) THEN
+(  141)   IF(UBOUND(KVSET,1) < KFGATHG) THEN
+(  142)     CALL ABORT_TRANS('GATH_SPEC: KVSET TOO SHORT!')
+(  143)   ENDIF
+(  144)   DO J=1,KFGATHG
+(  145)     IF(KVSET(J) > NPRTRV .OR. KVSET(J) < 1) THEN
+(  146)       WRITE(NERR,*) 'GATH_SPEC:KVSET(J) > NPRTRV ',J,KVSET(J),NPRTRV
+(  147)       CALL ABORT_TRANS('GATH_SPEC:KVSET CONTAINS VALUES OUTSIDE RANGE')
+(  148)     ENDIF
+(  149)     IF(KVSET(J) == MYSETV) THEN
+(  150)       IFSEND = IFSEND+1
+(  151)     ENDIF
+(  152)   ENDDO
+(  153)   IVSET(:) = KVSET(1:KFGATHG)
+(  154) ELSEIF(NPRTRV > 1) THEN
+(  155)   WRITE(NERR,*) 'GATH_SPEC:KVSET MISSING, NPRTRV ',NPRTRV
+(  156)   CALL ABORT_TRANS('GATH_SPEC:KVSET MISSING, NPRTRV > 1')
+(  157) ELSE
+(  158)   IFSEND   = KFGATHG
+(  159)   IVSET(:) = 1
+(  160) ENDIF
+(  161) # 162 "gath_spec.F90"
+(  162) IF(IFSEND > 0 ) THEN
+(  163)   IF(.NOT.PRESENT(PSPEC)) THEN
+(  164)     CALL ABORT_TRANS('GATH_SPEC: FIELDS TO RECIEVE AND PSPEC NOT PRESENT')
+(  165)   ENDIF
+(  166)   IF(UBOUND(PSPEC,IFLD) < IFSEND) THEN
+(  167)     CALL ABORT_TRANS('GATH_SPEC: FIELD DIMENSION OF PSPEC TOO SMALL')
+(  168)   ENDIF
+(  169)   IF(UBOUND(PSPEC,ICOEFF) < ISPEC2 ) THEN
+(  170)     CALL ABORT_TRANS('GATH_SPEC: COEFF DIMENSION OF PSPEC TOO SMALL')
+(  171)   ENDIF
+(  172) ENDIF
+(  173) # 174 "gath_spec.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:58      page 8
+
+(  174) CALL GATH_SPEC_CONTROL(PSPECG,KFGATHG,KTO,IVSET,PSPEC,LLDIM1_IS_FLD,&
+(  175)  & ISMAX,ISPEC2,ISPEC2_G,IPOSSP,IDIM0G,LDZA0IP)
+(  176) DEALLOCATE(IDIM0G)
+(  177) # 178 "gath_spec.F90"
+(  178) IF (LHOOK) CALL DR_HOOK('GATH_SPEC',1,ZHOOK_HANDLE)
+(  179) !endif INTERFACE
+(  180) # 181 "gath_spec.F90"
+(  181) !     ------------------------------------------------------------------
+(  182) # 183 "gath_spec.F90"
+(  183) END SUBROUTINE GATH_SPEC

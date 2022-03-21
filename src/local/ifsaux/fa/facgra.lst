@@ -1,0 +1,359 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:19      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: facgra.F90
+
+(    1) SUBROUTINE FACGRA_MT64                                              &
+(    2) &                     (FA,  KREP,   KRANG,  CDPREF, KNIVAU, CDSUFF, &
+(    3) &                      PCHAMP, LDCOSP, KVALCO, KLONGD,              &
+(    4) &                      LDUNDF, PUNDF)
+(    5) USE FA_MOD, ONLY : FA_COM, JPNIIL, FACADR, FAFICH,                  &
+(    6)                  & NGRIB2_GLO_SH, NGRIB2_GLO_GP, NGRIB2_LAM_GP,     &
+(    7)                  & NGRIB2_LAM_BF, NGRIB2_LATLON, NGRIB1_LATLON,     &
+(    8)                  & NUNDEF
+(    9) USE PARKIND1, ONLY : JPRB
+(   10) USE YOMHOOK , ONLY : LHOOK, DR_HOOK
+(   11) USE LFI_PRECISION
+(   12) USE GRIB_API_INTERFACE
+(   13) USE GRIB_API
+(   14) IMPLICIT NONE
+(   15) !****
+(   16) !      Sous-programme INTERNE du logiciel de Fichiers ARPEGE:
+(   17) !      PREPARATION (codage GRIB_API) d'un CHAMP HORIZONTAL
+(   18) !      destine a etre ecrit sur un fichier ARPEGE/ALADIN.
+(   19) !**
+(   20) !    Arguments : KREP   (Sortie) ==> Code-reponse du sous-programme;
+(   21) !                KRANG  (Entree) ==> Rang de l'unite logique;
+(   22) !                CDPREF (Entree) ==> Prefixe eventuel du nom d'article;
+(   23) !                KNIVAU (Entree) ==> Niveau vertical eventuel;
+(   24) !                CDSUFF (Entree) ==> Suffixe eventuel du nom d'article;
+(   25) !    ( Tableau ) PCHAMP (Entree) ==> Valeurs REELLES du champ a ecrire;
+(   26) !                LDCOSP (Entree) ==> Vrai si le champ est represente
+(   27) !                                    par des coefficients spectraux;
+(   28) !    ( Tableau ) KVALCO (Sortie) ==> Donnees destinees a l'ecriture;
+(   29) !                KLONGD (Entree/Sortie) 
+(   30) !                                ==> Nombre de mots a ecrire;
+(   31) !*
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:19      page 2
+
+(   32) !
+(   33) TYPE(FA_COM)   :: FA
+(   34) INTEGER (KIND=JPLIKB) KREP, KRANG, KNIVAU, KLONGD, ILONGD
+(   35) !
+(   36) INTEGER (KIND=JPLIKB) KVALCO(*)
+(   37) REAL (KIND=JPDBLR), TARGET :: PCHAMP(*)
+(   38) REAL (KIND=JPDBLR) PUNDF, ZUNDF
+(   39) !
+(   40) LOGICAL LDCOSP, LDUNDF, LLFATA
+(   41) !
+(   42) CHARACTER CDPREF*(*), CDSUFF*(*)
+(   43) !
+(   44) CHARACTER(LEN=FA%JPXNOM)   CLACTI 
+(   45) CHARACTER(LEN=FA%JPLSPX)   CLNSPR
+(   46) CHARACTER(LEN=FA%JPLMES)   CLMESS 
+(   47) INTEGER (KIND=JPLIKB) :: INIMES, INUMER
+(   48) CHARACTER, ALLOCATABLE :: CLGRIB (:)
+(   49) INTEGER (KIND=JPKSIZE_T) :: ILGRIB
+(   50) INTEGER (KIND=JPLIKM) :: IRET, IGRIBH
+(   51) INTEGER (KIND=JPLIKB) :: INGRIB, INBITS
+(   52) 
+(   53) !
+(   54) REAL (KIND=JPRB) :: ZHOOK_HANDLE
+(   55) 
+(   56) IF (LHOOK) CALL DR_HOOK('FACGRA_MT',0,ZHOOK_HANDLE)
+(   57) 
+(   58) KREP = 0
+(   59) 
+(   60) CALL FACGRM_MT64 (FA, KREP, KRANG, CDPREF, KNIVAU, CDSUFF, PCHAMP, &
+(   61)                 & LDCOSP, IGRIBH, LDUNDF, PUNDF, 1_JPLIKB)
+(   62) 
+(   63) IF (KREP /= 0) GOTO 1001
+(   64) 
+(   65) CALL IGRIB_GET_VALUE (IGRIBH, 'INGRIB', INGRIB)
+(   66) CALL IGRIB_GET_VALUE (IGRIBH, 'INBITS', INBITS)
+(   67) 
+(   68) CALL IGRIB_GET_MESSAGE_SIZE (IGRIBH, ILGRIB)
+(   69) 
+(   70) ALLOCATE (CLGRIB (ILGRIB))
+(   71) CALL GRIB_COPY_MESSAGE (IGRIBH, CLGRIB, STATUS=IRET)
+(   72) 
+(   73) IF (IRET == GRIB_SUCCESS) THEN
+(   74)   ILONGD = 3+(ILGRIB+JPLIKB-1)/JPLIKB
+(   75)   KVALCO (1) = INGRIB
+(   76)   IF (LDCOSP) THEN
+(   77)     KVALCO (2) = 1
+(   78)   ELSE
+(   79)     KVALCO (2) = 0
+(   80)   ENDIF
+(   81)   KVALCO (3) = INBITS
+(   82)   IF ((KLONGD < ILONGD) .AND. (KLONGD > 0)) THEN
+(   83)     KREP=-130
+(   84)     GOTO 1001
+(   85)   ELSE
+(   86)     KLONGD = ILONGD
+(   87)   ENDIF
+(   88)   KVALCO (4:ILONGD) = TRANSFER (CLGRIB, KVALCO (4:ILONGD))
+(   89) ELSE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:19      page 3
+
+(   90)   KREP = IRET-1000
+(   91)   RETURN
+(   92) ENDIF
+(   93) 
+(   94) DEALLOCATE (CLGRIB)
+(   95) 
+(   96) CALL IGRIB_RELEASE (IGRIBH)
+(   97) 
+(   98) 1001 CONTINUE
+(   99) !
+(  100) LLFATA=LLMOER (KREP,KRANG)
+(  101) !
+(  102) IF (FA%LFAMOP.OR.LLFATA) THEN
+(  103)   INIMES=2
+(  104)   CLNSPR='FACGRA'
+(  105)   INUMER=JPNIIL
+(  106) !
+(  107)   WRITE (UNIT=CLMESS,FMT='(''KREP='',I5,'', KRANG='',I4,  &
+(  108) &         '', CDPREF='''''',A,'''''', KNIVAU='',I6,       &
+(  109) &         '', CDSUFF='''''',A,'''''', LDCOSP= '',L1,      &
+(  110) &         '', KLONGD='',I10,'' < '',I10)')                &
+(  111) &     KREP, KRANG, CDPREF(1:LEN_TRIM(CDPREF)), KNIVAU,    &
+(  112) &     CDSUFF(1:LEN_TRIM(CDSUFF)), LDCOSP, KLONGD, ILONGD
+(  113) 
+(  114)   CALL FAIPAR_MT64                                        &
+(  115) &                 (FA, INUMER,INIMES,KREP,.FALSE.,CLMESS, &
+(  116) &                  CLNSPR,CLACTI,.FALSE.)
+(  117) ENDIF
+(  118) 
+(  119) IF (LHOOK) CALL DR_HOOK('FACGRA_MT',1,ZHOOK_HANDLE)
+(  120) !
+(  121) CONTAINS
+(  122) 
+(  123) #include "facom2.llmoer.h"
+(  124) 
+(  125) END SUBROUTINE
+(  126) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:19      page 4
+
+(    1) # 1 "facgra.F90"
+(    1) SUBROUTINE FACGRA_MT64                                              &
+(    2) &                     (FA,  KREP,   KRANG,  CDPREF, KNIVAU, CDSUFF, &
+(    3) &                      PCHAMP, LDCOSP, KVALCO, KLONGD,              &
+(    4) &                      LDUNDF, PUNDF)
+(    5) USE FA_MOD, ONLY : FA_COM, JPNIIL, FACADR, FAFICH,                  &
+(    6)                  & NGRIB2_GLO_SH, NGRIB2_GLO_GP, NGRIB2_LAM_GP,     &
+(    7)                  & NGRIB2_LAM_BF, NGRIB2_LATLON, NGRIB1_LATLON,     &
+(    8)                  & NUNDEF
+(    9) USE PARKIND1, ONLY : JPRB
+(   10) USE YOMHOOK , ONLY : LHOOK, DR_HOOK
+(   11) USE LFI_PRECISION
+(   12) USE GRIB_API_INTERFACE
+(   13) USE GRIB_API
+(   14) IMPLICIT NONE
+(   15) !****
+(   16) !      Sous-programme INTERNE du logiciel de Fichiers ARPEGE:
+(   17) !      PREPARATION (codage GRIB_API) d'un CHAMP HORIZONTAL
+(   18) !      destine a etre ecrit sur un fichier ARPEGE/ALADIN.
+(   19) !**
+(   20) !    Arguments : KREP   (Sortie) ==> Code-reponse du sous-programme;
+(   21) !                KRANG  (Entree) ==> Rang de l'unite logique;
+(   22) !                CDPREF (Entree) ==> Prefixe eventuel du nom d'article;
+(   23) !                KNIVAU (Entree) ==> Niveau vertical eventuel;
+(   24) !                CDSUFF (Entree) ==> Suffixe eventuel du nom d'article;
+(   25) !    ( Tableau ) PCHAMP (Entree) ==> Valeurs REELLES du champ a ecrire;
+(   26) !                LDCOSP (Entree) ==> Vrai si le champ est represente
+(   27) !                                    par des coefficients spectraux;
+(   28) !    ( Tableau ) KVALCO (Sortie) ==> Donnees destinees a l'ecriture;
+(   29) !                KLONGD (Entree/Sortie) 
+(   30) !                                ==> Nombre de mots a ecrire;
+(   31) !*
+(   32) !
+(   33) TYPE(FA_COM)   :: FA
+(   34) INTEGER (KIND=JPLIKB) KREP, KRANG, KNIVAU, KLONGD, ILONGD
+(   35) !
+(   36) INTEGER (KIND=JPLIKB) KVALCO(*)
+(   37) REAL (KIND=JPDBLR), TARGET :: PCHAMP(*)
+(   38) REAL (KIND=JPDBLR) PUNDF, ZUNDF
+(   39) !
+(   40) LOGICAL LDCOSP, LDUNDF, LLFATA
+(   41) !
+(   42) CHARACTER CDPREF*(*), CDSUFF*(*)
+(   43) !
+(   44) CHARACTER(LEN=FA%JPXNOM)   CLACTI 
+(   45) CHARACTER(LEN=FA%JPLSPX)   CLNSPR
+(   46) CHARACTER(LEN=FA%JPLMES)   CLMESS 
+(   47) INTEGER (KIND=JPLIKB) :: INIMES, INUMER
+(   48) CHARACTER, ALLOCATABLE :: CLGRIB (:)
+(   49) INTEGER (KIND=JPKSIZE_T) :: ILGRIB
+(   50) INTEGER (KIND=JPLIKM) :: IRET, IGRIBH
+(   51) INTEGER (KIND=JPLIKB) :: INGRIB, INBITS
+(   52) # 53 "facgra.F90"
+(   53) !
+(   54) REAL (KIND=JPRB) :: ZHOOK_HANDLE
+(   55) # 56 "facgra.F90"
+(   56) IF (LHOOK) CALL DR_HOOK('FACGRA_MT',0,ZHOOK_HANDLE)
+(   57) # 58 "facgra.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:19      page 5
+
+(   58) KREP = 0
+(   59) # 60 "facgra.F90"
+(   60) CALL FACGRM_MT64 (FA, KREP, KRANG, CDPREF, KNIVAU, CDSUFF, PCHAMP, &
+(   61)                 & LDCOSP, IGRIBH, LDUNDF, PUNDF, 1_JPLIKB)
+(   62) # 63 "facgra.F90"
+(   63) IF (KREP /= 0) GOTO 1001
+(   64) # 65 "facgra.F90"
+(   65) CALL IGRIB_GET_VALUE (IGRIBH, 'INGRIB', INGRIB)
+(   66) CALL IGRIB_GET_VALUE (IGRIBH, 'INBITS', INBITS)
+(   67) # 68 "facgra.F90"
+(   68) CALL IGRIB_GET_MESSAGE_SIZE (IGRIBH, ILGRIB)
+(   69) # 70 "facgra.F90"
+(   70) ALLOCATE (CLGRIB (ILGRIB))
+(   71) CALL GRIB_COPY_MESSAGE (IGRIBH, CLGRIB, STATUS=IRET)
+(   72) # 73 "facgra.F90"
+(   73) IF (IRET == GRIB_SUCCESS) THEN
+(   74)   ILONGD = 3+(ILGRIB+JPLIKB-1)/JPLIKB
+(   75)   KVALCO (1) = INGRIB
+(   76)   IF (LDCOSP) THEN
+(   77)     KVALCO (2) = 1
+(   78)   ELSE
+(   79)     KVALCO (2) = 0
+(   80)   ENDIF
+(   81)   KVALCO (3) = INBITS
+(   82)   IF ((KLONGD < ILONGD) .AND. (KLONGD > 0)) THEN
+(   83)     KREP=-130
+(   84)     GOTO 1001
+(   85)   ELSE
+(   86)     KLONGD = ILONGD
+(   87)   ENDIF
+(   88)   KVALCO (4:ILONGD) = TRANSFER (CLGRIB, KVALCO (4:ILONGD))
+(   89) ELSE
+(   90)   KREP = IRET-1000
+(   91)   RETURN
+(   92) ENDIF
+(   93) # 94 "facgra.F90"
+(   94) DEALLOCATE (CLGRIB)
+(   95) # 96 "facgra.F90"
+(   96) CALL IGRIB_RELEASE (IGRIBH)
+(   97) # 98 "facgra.F90"
+(   98) 1001 CONTINUE
+(   99) !
+(  100) LLFATA=LLMOER (KREP,KRANG)
+(  101) !
+(  102) IF (FA%LFAMOP.OR.LLFATA) THEN
+(  103)   INIMES=2
+(  104)   CLNSPR='FACGRA'
+(  105)   INUMER=JPNIIL
+(  106) !
+(  107)   WRITE (UNIT=CLMESS,FMT='(''KREP='',I5,'', KRANG='',I4,  &
+(  108) &         '', CDPREF='''''',A,'''''', KNIVAU='',I6,       &
+(  109) &         '', CDSUFF='''''',A,'''''', LDCOSP= '',L1,      &
+(  110) &         '', KLONGD='',I10,'' < '',I10)')                &
+(  111) &     KREP, KRANG, CDPREF(1:LEN_TRIM(CDPREF)), KNIVAU,    &
+(  112) &     CDSUFF(1:LEN_TRIM(CDSUFF)), LDCOSP, KLONGD, ILONGD
+(  113) # 114 "facgra.F90"
+(  114)   CALL FAIPAR_MT64                                        &
+(  115) &                 (FA, INUMER,INIMES,KREP,.FALSE.,CLMESS, &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:19      page 6
+
+(  116) &                  CLNSPR,CLACTI,.FALSE.)
+(  117) ENDIF
+(  118) # 119 "facgra.F90"
+(  119) IF (LHOOK) CALL DR_HOOK('FACGRA_MT',1,ZHOOK_HANDLE)
+(  120) !
+(  121) CONTAINS
+(  122) # 123 "facgra.F90"
+(  123) # 1 ".D[17]/facom2.llmoer.h"
+(    1) !
+(    2) !       Fonction servant a rendre fatale ou non une erreur detectee,
+(    3) !       a l'aide du code reponse courant, du niveau de filtrage global,
+(    4) !       et de l'option d'erreur fatale propre au fichier.
+(    5) !       s'il n'y a pas de fichier (I5678=0, d'ou dimensionnement de
+(    6) !          *LERRFA*), le niveau de filtrage joue le role principal.
+(    7) !
+(    8) LOGICAL FUNCTION LLMOER (I1234,I5678)
+(    9) INTEGER (KIND=JPLIKB) :: I1234,I5678
+(   10) LLMOER=I1234.EQ.-66_JPLIKB .OR. (I1234.NE.0_JPLIKB .AND.(FA%NRFAGA.EQ.0_JPLIKB &
+(   11)      & .OR. (FA%NRFAGA.EQ.1_JPLIKB .AND.FA%FICHIER(I5678)%LERRFA)))
+(   12) END FUNCTION
+(   13) # 124 "facgra.F90"
+(  124) # 125 "facgra.F90"
+(  125) END SUBROUTINE

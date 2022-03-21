@@ -1,0 +1,232 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:39      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: easre1bad_mod.F90
+
+(    1) MODULE EASRE1BAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EASRE1BAD(KFIELD,KM,KMLOC,PIA)
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) 
+(    8) USE TPM_DIM         ,ONLY : R
+(    9) USE TPM_TRANS       ,ONLY : FOUBUF_IN
+(   10) USE TPM_DISTR       ,ONLY : D
+(   11) 
+(   12) !**** *EASRE1BAD* - Recombine antisymmetric and symmetric parts - adjoint
+(   13) 
+(   14) !     Purpose.
+(   15) !     --------
+(   16) !        To recombine the antisymmetric and symmetric parts of the
+(   17) !        Fourier arrays and update the correct parts of the state
+(   18) !        variables.
+(   19) 
+(   20) !**   Interface.
+(   21) !     ----------
+(   22) !        *CALL* *EASRE1BAD(..)
+(   23) 
+(   24) !        Explicit arguments :
+(   25) !        -------------------   KFIELD - number of fields (input-c)
+(   26) !                              KM - zonal wavenumber(input-c)
+(   27) !                              KMLOC - local version of KM (input-c)
+(   28) !                              PAOA - antisymmetric part of Fourier
+(   29) !                              fields for zonal wavenumber KM (input)
+(   30) !                              PSOA - symmetric part of Fourier
+(   31) !                              fields for zonal wavenumber KM (input)
+(   32) 
+(   33) !        Implicit arguments :  FOUBUF_IN - output buffer (output)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:39      page 2
+
+(   34) !        --------------------
+(   35) 
+(   36) !     Method.
+(   37) !     -------
+(   38) 
+(   39) !     Externals.   None.
+(   40) !     ----------
+(   41) 
+(   42) !     Reference.
+(   43) !     ----------
+(   44) !        ECMWF Research Department documentation of the IFS
+(   45) 
+(   46) !     Author.
+(   47) !     -------
+(   48) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   49) 
+(   50) !     Modifications.
+(   51) !     --------------
+(   52) !        Original : 00-02-01 From ASRE1BAD in IFS CY22R1
+(   53) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   54) 
+(   55) !     ------------------------------------------------------------------
+(   56) 
+(   57) IMPLICIT NONE
+(   58) 
+(   59) INTEGER(KIND=JPIM), INTENT(IN)  :: KFIELD,KM,KMLOC
+(   60) 
+(   61) REAL(KIND=JPRB), INTENT(OUT)    :: PIA(:,:)
+(   62) 
+(   63) INTEGER(KIND=JPIM) ::   JFLD, JGL ,IPROC
+(   64) INTEGER(KIND=JPIM) :: IISTAN
+(   65) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   66) 
+(   67) !     ------------------------------------------------------------------
+(   68) 
+(   69) !*       1.    RECOMBINATION  OF SYMMETRIC AND ANTSYMMETRIC PARTS.
+(   70) !              ---------------------------------------------------
+(   71) 
+(   72) IF (LHOOK) CALL DR_HOOK('EASRE1BAD_MOD:EASRE1BAD',0,ZHOOK_HANDLE)
+(   73) DO JGL=1,R%NDGL
+(   74)   IPROC=D%NPROCL(JGL)
+(   75)   DO JFLD  =1,2*KFIELD
+(   76)     IISTAN=(D%NSTAGT0B(IPROC) + D%NPNTGTB1(KMLOC,JGL))*2*KFIELD
+(   77)     PIA(JGL,JFLD)=FOUBUF_IN(IISTAN+JFLD)
+(   78)   ENDDO
+(   79) ENDDO
+(   80) IF (LHOOK) CALL DR_HOOK('EASRE1BAD_MOD:EASRE1BAD',1,ZHOOK_HANDLE)
+(   81) 
+(   82) !     ------------------------------------------------------------------
+(   83) 
+(   84) END SUBROUTINE EASRE1BAD
+(   85) END MODULE EASRE1BAD_MOD
+(   86) 
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:39      page 3
+
+(    1) # 1 "easre1bad_mod.F90"
+(    1) MODULE EASRE1BAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EASRE1BAD(KFIELD,KM,KMLOC,PIA)
+(    4) # 5 "easre1bad_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) # 8 "easre1bad_mod.F90"
+(    8) USE TPM_DIM         ,ONLY : R
+(    9) USE TPM_TRANS       ,ONLY : FOUBUF_IN
+(   10) USE TPM_DISTR       ,ONLY : D
+(   11) # 12 "easre1bad_mod.F90"
+(   12) !**** *EASRE1BAD* - Recombine antisymmetric and symmetric parts - adjoint
+(   13) # 14 "easre1bad_mod.F90"
+(   14) !     Purpose.
+(   15) !     --------
+(   16) !        To recombine the antisymmetric and symmetric parts of the
+(   17) !        Fourier arrays and update the correct parts of the state
+(   18) !        variables.
+(   19) # 20 "easre1bad_mod.F90"
+(   20) !**   Interface.
+(   21) !     ----------
+(   22) !        *CALL* *EASRE1BAD(..)
+(   23) # 24 "easre1bad_mod.F90"
+(   24) !        Explicit arguments :
+(   25) !        -------------------   KFIELD - number of fields (input-c)
+(   26) !                              KM - zonal wavenumber(input-c)
+(   27) !                              KMLOC - local version of KM (input-c)
+(   28) !                              PAOA - antisymmetric part of Fourier
+(   29) !                              fields for zonal wavenumber KM (input)
+(   30) !                              PSOA - symmetric part of Fourier
+(   31) !                              fields for zonal wavenumber KM (input)
+(   32) # 33 "easre1bad_mod.F90"
+(   33) !        Implicit arguments :  FOUBUF_IN - output buffer (output)
+(   34) !        --------------------
+(   35) # 36 "easre1bad_mod.F90"
+(   36) !     Method.
+(   37) !     -------
+(   38) # 39 "easre1bad_mod.F90"
+(   39) !     Externals.   None.
+(   40) !     ----------
+(   41) # 42 "easre1bad_mod.F90"
+(   42) !     Reference.
+(   43) !     ----------
+(   44) !        ECMWF Research Department documentation of the IFS
+(   45) # 46 "easre1bad_mod.F90"
+(   46) !     Author.
+(   47) !     -------
+(   48) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   49) # 50 "easre1bad_mod.F90"
+(   50) !     Modifications.
+(   51) !     --------------
+(   52) !        Original : 00-02-01 From ASRE1BAD in IFS CY22R1
+(   53) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   54) # 55 "easre1bad_mod.F90"
+(   55) !     ------------------------------------------------------------------
+(   56) # 57 "easre1bad_mod.F90"
+(   57) IMPLICIT NONE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:39      page 4
+
+(   58) # 59 "easre1bad_mod.F90"
+(   59) INTEGER(KIND=JPIM), INTENT(IN)  :: KFIELD,KM,KMLOC
+(   60) # 61 "easre1bad_mod.F90"
+(   61) REAL(KIND=JPRB), INTENT(OUT)    :: PIA(:,:)
+(   62) # 63 "easre1bad_mod.F90"
+(   63) INTEGER(KIND=JPIM) ::   JFLD, JGL ,IPROC
+(   64) INTEGER(KIND=JPIM) :: IISTAN
+(   65) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   66) # 67 "easre1bad_mod.F90"
+(   67) !     ------------------------------------------------------------------
+(   68) # 69 "easre1bad_mod.F90"
+(   69) !*       1.    RECOMBINATION  OF SYMMETRIC AND ANTSYMMETRIC PARTS.
+(   70) !              ---------------------------------------------------
+(   71) # 72 "easre1bad_mod.F90"
+(   72) IF (LHOOK) CALL DR_HOOK('EASRE1BAD_MOD:EASRE1BAD',0,ZHOOK_HANDLE)
+(   73) DO JGL=1,R%NDGL
+(   74)   IPROC=D%NPROCL(JGL)
+(   75)   DO JFLD  =1,2*KFIELD
+(   76)     IISTAN=(D%NSTAGT0B(IPROC) + D%NPNTGTB1(KMLOC,JGL))*2*KFIELD
+(   77)     PIA(JGL,JFLD)=FOUBUF_IN(IISTAN+JFLD)
+(   78)   ENDDO
+(   79) ENDDO
+(   80) IF (LHOOK) CALL DR_HOOK('EASRE1BAD_MOD:EASRE1BAD',1,ZHOOK_HANDLE)
+(   81) # 82 "easre1bad_mod.F90"
+(   82) !     ------------------------------------------------------------------
+(   83) # 84 "easre1bad_mod.F90"
+(   84) END SUBROUTINE EASRE1BAD
+(   85) END MODULE EASRE1BAD_MOD

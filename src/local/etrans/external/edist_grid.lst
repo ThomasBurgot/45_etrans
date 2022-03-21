@@ -1,0 +1,356 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:14      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: edist_grid.F90
+
+(    1) SUBROUTINE EDIST_GRID(PGPG,KPROMA,KFDISTG,KFROM,KRESOL,PGP,KSORT)
+(    2) 
+(    3) !**** *EDIST_GRID* - Distribute global gridpoint array among processors
+(    4) 
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !        Interface routine for distributing gridpoint array
+(    8) 
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL EDIST_GRID(...)
+(   12) 
+(   13) !     Explicit arguments :
+(   14) !     --------------------
+(   15) !     PGPG(:,:) - Global spectral array
+(   16) !     KFDISTG     - Global number of fields to be distributed
+(   17) !     KPROMA      - required blocking factor for gridpoint input
+(   18) !     KFROM(:)    - Processor resposible for distributing each field
+(   19) !     KRESOL      - resolution tag  which is required ,default is the
+(   20) !                   first defined resulution (input)
+(   21) !     PGP(:,:)  - Local spectral array
+(   22) 
+(   23) !     Method.
+(   24) !     -------
+(   25) 
+(   26) !     Externals.  ESET_RESOL      - set resolution
+(   27) !     ----------  DIST_GRID_CTL  - control routine
+(   28) 
+(   29) !     Author.
+(   30) !     -------
+(   31) !        Mats Hamrud *ECMWF*
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:14      page 2
+
+(   32) 
+(   33) !     Modifications.
+(   34) !     --------------
+(   35) !        Original : 00-03-03
+(   36) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   37) !        P.Marguinaud  10-Oct-2014 Add KSORT argument
+(   38) 
+(   39) !     ------------------------------------------------------------------
+(   40) 
+(   41) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   42) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   43) 
+(   44) !ifndef INTERFACE
+(   45) 
+(   46) USE TPM_GEN         ,ONLY : NERR, NOUT
+(   47) !USE TPM_DIM
+(   48) USE TPM_DISTR       ,ONLY : D, MYPROC, NPROC
+(   49) 
+(   50) USE ESET_RESOL_MOD  ,ONLY : ESET_RESOL
+(   51) USE DIST_GRID_CTL_MOD ,ONLY : DIST_GRID_CTL
+(   52) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   53) 
+(   54) !endif INTERFACE
+(   55) 
+(   56) IMPLICIT NONE
+(   57) 
+(   58) ! Declaration of arguments
+(   59) 
+(   60) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PGPG(:,:)
+(   61) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KPROMA
+(   62) INTEGER(KIND=JPIM) ,          INTENT(IN)  :: KFDISTG
+(   63) INTEGER(KIND=JPIM) ,          INTENT(IN)  :: KFROM(:)
+(   64) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   65) REAL(KIND=JPRB)    ,          INTENT(OUT) :: PGP(:,:,:)
+(   66) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KSORT (:)
+(   67) !ifndef INTERFACE
+(   68) 
+(   69) INTEGER(KIND=JPIM) :: IFSEND,J,IUBOUND(3),IPROMA,IGPBLKS
+(   70) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   71) 
+(   72) !     ------------------------------------------------------------------
+(   73) 
+(   74) ! Set current resolution
+(   75) IF (LHOOK) CALL DR_HOOK('EDIST_GRID',0,ZHOOK_HANDLE)
+(   76) CALL ESET_RESOL(KRESOL)
+(   77) 
+(   78) IPROMA = D%NGPTOT
+(   79) IF(PRESENT(KPROMA)) THEN
+(   80)   IPROMA = KPROMA
+(   81) ENDIF
+(   82) IGPBLKS = (D%NGPTOT-1)/IPROMA+1
+(   83) 
+(   84) IF(UBOUND(KFROM,1) < KFDISTG) THEN
+(   85)   CALL ABORT_TRANS('DIST_GRID: KFROM TOO SHORT!')
+(   86) ENDIF
+(   87) IFSEND = 0
+(   88) DO J=1,KFDISTG
+(   89)   IF(KFROM(J) < 1 .OR. KFROM(J) > NPROC) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:14      page 3
+
+(   90)     WRITE(NERR,*) 'DIST_GRID:ILLEGAL KFROM VALUE',KFROM(J),J
+(   91)     CALL ABORT_TRANS('DIST_GRID:ILLEGAL KFROM VALUE')
+(   92)   ENDIF
+(   93)   IF(KFROM(J) == MYPROC) IFSEND = IFSEND+1
+(   94) ENDDO
+(   95) 
+(   96) IUBOUND=UBOUND(PGP)
+(   97) IF(IUBOUND(1) < IPROMA) THEN
+(   98)   WRITE(NOUT,*)'DIST_GRID:FIRST DIM. OF PGP TOO SMALL ',IUBOUND(1),IPROMA
+(   99)   CALL ABORT_TRANS('DIST_GRID:FIRST DIMENSION OF PGP TOO SMALL ')
+(  100) ENDIF
+(  101) IF(IUBOUND(2) < KFDISTG) THEN
+(  102)   WRITE(NOUT,*)'DIST_GRID:SEC. DIM. OF PGP TOO SMALL ',IUBOUND(2),KFDISTG
+(  103)   CALL ABORT_TRANS('DIST_GRID:SECOND DIMENSION OF PGP TOO SMALL ')
+(  104) ENDIF
+(  105) IF(IUBOUND(3) < IGPBLKS) THEN
+(  106)   WRITE(NOUT,*)'DIST_GRID:THIRD DIM. OF PGP TOO SMALL ',IUBOUND(3),IGPBLKS
+(  107)   CALL ABORT_TRANS('DIST_GRID:THIRD DIMENSION OF PGP TOO SMALL ')
+(  108) ENDIF
+(  109) 
+(  110) IF(IFSEND > 0) THEN
+(  111)   IF(.NOT.PRESENT(PGPG)) THEN
+(  112)     CALL ABORT_TRANS('DIST_GRID:PGPG MISSING')
+(  113)   ENDIF
+(  114)   IF(UBOUND(PGPG,1) < D%NGPTOTG) THEN
+(  115)     CALL ABORT_TRANS('DIST_GRID:FIRST DIMENSION OF PGPG TOO SMALL')
+(  116)   ENDIF
+(  117)   IF(UBOUND(PGPG,2) < IFSEND) THEN
+(  118)     CALL ABORT_TRANS('DIST_GRID:FIRST DIMENSION OF PGPG TOO SMALL')
+(  119)   ENDIF
+(  120) ENDIF
+(  121) 
+(  122) IF (PRESENT (KSORT)) THEN
+(  123)   IF (UBOUND (KSORT, 1) /= UBOUND (PGP, 2)) THEN
+(  124)     CALL ABORT_TRANS('EDIST_GRID: DIMENSION MISMATCH KSORT, PGP')
+(  125)   ENDIF
+(  126) ENDIF
+(  127) 
+(  128) CALL DIST_GRID_CTL(PGPG,KFDISTG,IPROMA,KFROM,PGP,KSORT)
+(  129) IF (LHOOK) CALL DR_HOOK('EDIST_GRID',1,ZHOOK_HANDLE)
+(  130) 
+(  131) !endif INTERFACE
+(  132) 
+(  133) !     ------------------------------------------------------------------
+(  134) 
+(  135) END SUBROUTINE EDIST_GRID
+(  136) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:14      page 4
+
+(    1) # 1 "edist_grid.F90"
+(    1) SUBROUTINE EDIST_GRID(PGPG,KPROMA,KFDISTG,KFROM,KRESOL,PGP,KSORT)
+(    2) # 3 "edist_grid.F90"
+(    3) !**** *EDIST_GRID* - Distribute global gridpoint array among processors
+(    4) # 5 "edist_grid.F90"
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !        Interface routine for distributing gridpoint array
+(    8) # 9 "edist_grid.F90"
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL EDIST_GRID(...)
+(   12) # 13 "edist_grid.F90"
+(   13) !     Explicit arguments :
+(   14) !     --------------------
+(   15) !     PGPG(:,:) - Global spectral array
+(   16) !     KFDISTG     - Global number of fields to be distributed
+(   17) !     KPROMA      - required blocking factor for gridpoint input
+(   18) !     KFROM(:)    - Processor resposible for distributing each field
+(   19) !     KRESOL      - resolution tag  which is required ,default is the
+(   20) !                   first defined resulution (input)
+(   21) !     PGP(:,:)  - Local spectral array
+(   22) # 23 "edist_grid.F90"
+(   23) !     Method.
+(   24) !     -------
+(   25) # 26 "edist_grid.F90"
+(   26) !     Externals.  ESET_RESOL      - set resolution
+(   27) !     ----------  DIST_GRID_CTL  - control routine
+(   28) # 29 "edist_grid.F90"
+(   29) !     Author.
+(   30) !     -------
+(   31) !        Mats Hamrud *ECMWF*
+(   32) # 33 "edist_grid.F90"
+(   33) !     Modifications.
+(   34) !     --------------
+(   35) !        Original : 00-03-03
+(   36) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   37) !        P.Marguinaud  10-Oct-2014 Add KSORT argument
+(   38) # 39 "edist_grid.F90"
+(   39) !     ------------------------------------------------------------------
+(   40) # 41 "edist_grid.F90"
+(   41) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   42) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   43) # 44 "edist_grid.F90"
+(   44) !ifndef INTERFACE
+(   45) # 46 "edist_grid.F90"
+(   46) USE TPM_GEN         ,ONLY : NERR, NOUT
+(   47) !USE TPM_DIM
+(   48) USE TPM_DISTR       ,ONLY : D, MYPROC, NPROC
+(   49) # 50 "edist_grid.F90"
+(   50) USE ESET_RESOL_MOD  ,ONLY : ESET_RESOL
+(   51) USE DIST_GRID_CTL_MOD ,ONLY : DIST_GRID_CTL
+(   52) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   53) # 54 "edist_grid.F90"
+(   54) !endif INTERFACE
+(   55) # 56 "edist_grid.F90"
+(   56) IMPLICIT NONE
+(   57) # 58 "edist_grid.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:14      page 5
+
+(   58) ! Declaration of arguments
+(   59) # 60 "edist_grid.F90"
+(   60) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PGPG(:,:)
+(   61) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KPROMA
+(   62) INTEGER(KIND=JPIM) ,          INTENT(IN)  :: KFDISTG
+(   63) INTEGER(KIND=JPIM) ,          INTENT(IN)  :: KFROM(:)
+(   64) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   65) REAL(KIND=JPRB)    ,          INTENT(OUT) :: PGP(:,:,:)
+(   66) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KSORT (:)
+(   67) !ifndef INTERFACE
+(   68) # 69 "edist_grid.F90"
+(   69) INTEGER(KIND=JPIM) :: IFSEND,J,IUBOUND(3),IPROMA,IGPBLKS
+(   70) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   71) # 72 "edist_grid.F90"
+(   72) !     ------------------------------------------------------------------
+(   73) # 74 "edist_grid.F90"
+(   74) ! Set current resolution
+(   75) IF (LHOOK) CALL DR_HOOK('EDIST_GRID',0,ZHOOK_HANDLE)
+(   76) CALL ESET_RESOL(KRESOL)
+(   77) # 78 "edist_grid.F90"
+(   78) IPROMA = D%NGPTOT
+(   79) IF(PRESENT(KPROMA)) THEN
+(   80)   IPROMA = KPROMA
+(   81) ENDIF
+(   82) IGPBLKS = (D%NGPTOT-1)/IPROMA+1
+(   83) # 84 "edist_grid.F90"
+(   84) IF(UBOUND(KFROM,1) < KFDISTG) THEN
+(   85)   CALL ABORT_TRANS('DIST_GRID: KFROM TOO SHORT!')
+(   86) ENDIF
+(   87) IFSEND = 0
+(   88) DO J=1,KFDISTG
+(   89)   IF(KFROM(J) < 1 .OR. KFROM(J) > NPROC) THEN
+(   90)     WRITE(NERR,*) 'DIST_GRID:ILLEGAL KFROM VALUE',KFROM(J),J
+(   91)     CALL ABORT_TRANS('DIST_GRID:ILLEGAL KFROM VALUE')
+(   92)   ENDIF
+(   93)   IF(KFROM(J) == MYPROC) IFSEND = IFSEND+1
+(   94) ENDDO
+(   95) # 96 "edist_grid.F90"
+(   96) IUBOUND=UBOUND(PGP)
+(   97) IF(IUBOUND(1) < IPROMA) THEN
+(   98)   WRITE(NOUT,*)'DIST_GRID:FIRST DIM. OF PGP TOO SMALL ',IUBOUND(1),IPROMA
+(   99)   CALL ABORT_TRANS('DIST_GRID:FIRST DIMENSION OF PGP TOO SMALL ')
+(  100) ENDIF
+(  101) IF(IUBOUND(2) < KFDISTG) THEN
+(  102)   WRITE(NOUT,*)'DIST_GRID:SEC. DIM. OF PGP TOO SMALL ',IUBOUND(2),KFDISTG
+(  103)   CALL ABORT_TRANS('DIST_GRID:SECOND DIMENSION OF PGP TOO SMALL ')
+(  104) ENDIF
+(  105) IF(IUBOUND(3) < IGPBLKS) THEN
+(  106)   WRITE(NOUT,*)'DIST_GRID:THIRD DIM. OF PGP TOO SMALL ',IUBOUND(3),IGPBLKS
+(  107)   CALL ABORT_TRANS('DIST_GRID:THIRD DIMENSION OF PGP TOO SMALL ')
+(  108) ENDIF
+(  109) # 110 "edist_grid.F90"
+(  110) IF(IFSEND > 0) THEN
+(  111)   IF(.NOT.PRESENT(PGPG)) THEN
+(  112)     CALL ABORT_TRANS('DIST_GRID:PGPG MISSING')
+(  113)   ENDIF
+(  114)   IF(UBOUND(PGPG,1) < D%NGPTOTG) THEN
+(  115)     CALL ABORT_TRANS('DIST_GRID:FIRST DIMENSION OF PGPG TOO SMALL')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:14      page 6
+
+(  116)   ENDIF
+(  117)   IF(UBOUND(PGPG,2) < IFSEND) THEN
+(  118)     CALL ABORT_TRANS('DIST_GRID:FIRST DIMENSION OF PGPG TOO SMALL')
+(  119)   ENDIF
+(  120) ENDIF
+(  121) # 122 "edist_grid.F90"
+(  122) IF (PRESENT (KSORT)) THEN
+(  123)   IF (UBOUND (KSORT, 1) /= UBOUND (PGP, 2)) THEN
+(  124)     CALL ABORT_TRANS('EDIST_GRID: DIMENSION MISMATCH KSORT, PGP')
+(  125)   ENDIF
+(  126) ENDIF
+(  127) # 128 "edist_grid.F90"
+(  128) CALL DIST_GRID_CTL(PGPG,KFDISTG,IPROMA,KFROM,PGP,KSORT)
+(  129) IF (LHOOK) CALL DR_HOOK('EDIST_GRID',1,ZHOOK_HANDLE)
+(  130) # 131 "edist_grid.F90"
+(  131) !endif INTERFACE
+(  132) # 133 "edist_grid.F90"
+(  133) !     ------------------------------------------------------------------
+(  134) # 135 "edist_grid.F90"
+(  135) END SUBROUTINE EDIST_GRID

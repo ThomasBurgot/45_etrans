@@ -1,0 +1,869 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:09      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: sutrle_mod.F90
+
+(    1) MODULE SUTRLE_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUTRLE(PNM,KGL,KLOOP)
+(    4) 
+(    5) !**** *sutrle * - transposition of Legendre polynomials during set-up
+(    6) 
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !           transposition of Legendre polynomials during set-up
+(   10) 
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        *call* *sutrle(pnm)
+(   14) 
+(   15) !        Explicit arguments :
+(   16) !        --------------------
+(   17) 
+(   18) !        Implicit arguments :
+(   19) !        --------------------
+(   20) 
+(   21) !     Method.
+(   22) !     -------
+(   23) !        See documentation
+(   24) 
+(   25) !     Externals.
+(   26) !     ----------
+(   27) 
+(   28) !     Reference.
+(   29) !     ----------
+(   30) !        ECMWF Research Department documentation of the IFS
+(   31) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:09      page 2
+
+(   32) !     Author.
+(   33) !     -------
+(   34) !        MPP Group *ECMWF*
+(   35) 
+(   36) !     Modifications.
+(   37) !     --------------
+(   38) !        Original : 95-10-01
+(   39) !        P.Towers : 10-01-12  Corrected over allocation of ZSNDBUF (XT4 fix)
+(   40) !        G.Mozdzynski: March 2011 Support 2D (RW,RV) initialisation of legendre coeffs
+(   41) !      F. Vana  05-Mar-2015  Support for single precision
+(   42) !     ------------------------------------------------------------------
+(   43) 
+(   44) 
+(   45) USE PARKIND1  ,ONLY : JPRD, JPIM
+(   46) USE MPL_MODULE  ,ONLY : MPL_ALLREDUCE, MPL_RECV, MPL_SEND, MPL_BARRIER, MPL_WAIT, &
+(   47)      &                  JP_NON_BLOCKING_STANDARD
+(   48) 
+(   49) USE TPM_GEN         ,ONLY : NOUT
+(   50) USE TPM_DIM         ,ONLY : R
+(   51) USE TPM_DISTR       ,ONLY : D, MTAGLETR, NCOMBFLEN, NPRCIDS, NPRTRW, NPRTRV, &
+(   52)      &                      MYSETV, MYSETW, NPROC
+(   53) USE TPM_FIELDS      ,ONLY : F
+(   54) USE SET2PE_MOD      ,ONLY : SET2PE
+(   55) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   56) !
+(   57) 
+(   58) IMPLICIT NONE
+(   59) 
+(   60) REAL(KIND=JPRD),INTENT(IN) :: PNM(:)
+(   61) INTEGER(KIND=JPIM),INTENT(IN) :: KGL
+(   62) INTEGER(KIND=JPIM),INTENT(IN) :: KLOOP
+(   63) 
+(   64) !     LOCAL
+(   65) 
+(   66) REAL(KIND=JPRD), ALLOCATABLE :: ZSNDBUFV(:),ZRCVBUFV(:,:)
+(   67) REAL(KIND=JPRD), ALLOCATABLE :: ZSNDBUFW(:,:),ZRCVBUFW(:,:)
+(   68) INTEGER(KIND=JPIM) :: ILREC, IM, IPOS, &
+(   69)              & IRECVSET, IRECV, ISEND, ISENDSET, ITAG,ISENDSIZE, IRECVSIZE, &
+(   70)              & J, JM, JMLOC, JN, JV, JROC ,IOFFT, IOFFG, IGL, ISREQ, IRREQ
+(   71) INTEGER(KIND=JPIM) :: ISENDREQ(MAX(NPRTRW,NPRTRV))
+(   72) INTEGER(KIND=JPIM) :: IRECVREQ(MAX(NPRTRW,NPRTRV))
+(   73) INTEGER(KIND=JPIM) :: IGLVS(NPRTRV)
+(   74) INTEGER(KIND=JPIM) :: IGLVR(NPRTRV)
+(   75) INTEGER(KIND=JPIM) :: IPOSW(NPRTRW)
+(   76) 
+(   77) !     ------------------------------------------------------------------
+(   78) 
+(   79) !*       0.    Some initializations.
+(   80) !              ---------------------
+(   81) 
+(   82) ITAG = MTAGLETR+KLOOP
+(   83) 
+(   84) ! Perform barrier synchronisation to guarantee all processors have
+(   85) ! completed all previous communication
+(   86) 
+(   87) IF( NPROC > 1 .AND. KLOOP ==1)THEN
+(   88)   CALL GSTATS(783,0)
+(   89)   CALL MPL_BARRIER(CDSTRING='SUTRLE:')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:09      page 3
+
+(   90)   CALL GSTATS(783,1)
+(   91) ENDIF
+(   92) 
+(   93) !
+(   94) ! First do communications in NPRTRV direction
+(   95) !
+(   96) 
+(   97) !*     Calculate send buffer size
+(   98) 
+(   99) IF(KGL > 0) THEN
+(  100)   ISENDSIZE = R%NSPOLEG+1
+(  101) ELSE
+(  102)   ISENDSIZE=1
+(  103) ENDIF
+(  104) 
+(  105) ALLOCATE (ZSNDBUFV(ISENDSIZE))
+(  106) ALLOCATE (ZRCVBUFV(R%NSPOLEG+1,NPRTRV))
+(  107) 
+(  108) !*   copy data to be sent into zsndbufv
+(  109) 
+(  110) ZSNDBUFV(1) = KGL
+(  111) IF(KGL > 0) THEN
+(  112)   CALL GSTATS(1141,0)
+(  113) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(J)
+(  114)   DO J=1,R%NSPOLEG
+(  115)     ZSNDBUFV(J+1) = PNM(J)
+(  116)   ENDDO
+(  117) !$OMP END PARALLEL DO
+(  118)   CALL GSTATS(1141,1)
+(  119) ENDIF
+(  120) 
+(  121) ISREQ = 0
+(  122) DO JROC=1,NPRTRV-1
+(  123)   ISEND = MYSETV-JROC
+(  124)   IF (ISEND <= 0)     ISEND = ISEND+NPRTRV
+(  125)   ISENDSET = ISEND
+(  126)   CALL SET2PE(ISEND,0,0,MYSETW,ISENDSET)
+(  127)   ISREQ = ISREQ+1
+(  128)   CALL GSTATS(801,0)
+(  129)   CALL MPL_SEND(ZSNDBUFV(1:ISENDSIZE),KDEST=NPRCIDS(ISEND), &
+(  130)    &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(ISREQ),&
+(  131)    & KTAG=ITAG,CDSTRING='SUTRLE:')
+(  132)   CALL GSTATS(801,1)
+(  133) ENDDO
+(  134) 
+(  135) 
+(  136) IRREQ=0
+(  137) DO JROC=1,NPRTRV-1
+(  138)   IRECV = MYSETV+JROC
+(  139)   IF (IRECV > NPRTRV) IRECV = IRECV-NPRTRV
+(  140)   IRECVSET = IRECV
+(  141)   CALL SET2PE(IRECV,0,0,MYSETW,IRECVSET)
+(  142)   IRREQ = IRREQ+1
+(  143)   CALL GSTATS(801,0)
+(  144)   CALL MPL_RECV(ZRCVBUFV(:,IRECVSET),KSOURCE=NPRCIDS(IRECV), &
+(  145)    &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IRECVREQ(IRREQ),&
+(  146)    & KTAG=ITAG,CDSTRING='SUTRLE:')
+(  147)   CALL GSTATS(801,1)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:09      page 4
+
+(  148) ENDDO
+(  149) 
+(  150) IF(ISREQ > 0) THEN
+(  151)   CALL GSTATS(801,0)
+(  152)   CALL MPL_WAIT(KREQUEST=ISENDREQ(1:ISREQ), &
+(  153)    & CDSTRING='SUTRLE: WAIT')
+(  154)   CALL GSTATS(801,1)
+(  155) ENDIF
+(  156) 
+(  157) IF(IRREQ > 0) THEN
+(  158)   CALL GSTATS(801,0)
+(  159)   CALL MPL_WAIT(KREQUEST=IRECVREQ(1:IRREQ), &
+(  160)    & CDSTRING='SUTRLE: WAIT')
+(  161)   CALL GSTATS(801,1)
+(  162) ENDIF
+(  163) 
+(  164) !*   copy data from buffer to f%rpnm
+(  165) CALL GSTATS(1141,0)
+(  166) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JROC,IRECV,IRECVSET,IGL,JMLOC,IM,IOFFT,IOFFG,JN)
+(  167) DO JROC=1,NPRTRV-1
+(  168)   IRECV = MYSETV+JROC
+(  169)   IF (IRECV > NPRTRV) IRECV = IRECV-NPRTRV
+(  170)   IRECVSET = IRECV
+(  171)   CALL SET2PE(IRECV,0,0,MYSETW,IRECVSET)
+(  172)   IGL = ZRCVBUFV(1,IRECVSET)
+(  173)   IGLVS(IRECVSET)=IGL
+(  174)   IF( IGL > 0 )THEN
+(  175)     DO JMLOC=1,D%NUMP
+(  176)       IM = D%MYMS(JMLOC)
+(  177)       IOFFT = D%NPMT(IM)
+(  178)       IOFFG = D%NPMG(IM)
+(  179)       DO JN=1,R%NTMAX-IM+2
+(  180)         F%RPNM(IGL,IOFFT+JN) = ZRCVBUFV(1+IOFFG+JN,IRECVSET)
+(  181)       ENDDO
+(  182)     ENDDO
+(  183)   ENDIF
+(  184) ENDDO
+(  185) !$OMP END PARALLEL DO
+(  186) 
+(  187) DEALLOCATE (ZSNDBUFV)
+(  188) 
+(  189) !*    copy data from pnm to rpnm
+(  190) 
+(  191) IGLVS(MYSETV)=KGL
+(  192) IF(KGL > 0) THEN
+(  193)   ZRCVBUFV(1,MYSETV)=KGL
+(  194)   ZRCVBUFV(2:R%NSPOLEG+1,MYSETV)=PNM(1:R%NSPOLEG)
+(  195) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JMLOC,IM,IOFFT,IOFFG,JN)
+(  196)   DO JMLOC=1,D%NUMP
+(  197)     IM = D%MYMS(JMLOC)
+(  198)     IOFFT = D%NPMT(IM)
+(  199)     IOFFG = D%NPMG(IM)
+(  200)     DO JN=1,R%NTMAX-IM+2
+(  201)       F%RPNM(KGL,IOFFT+JN) = PNM(IOFFG+JN)
+(  202)     ENDDO
+(  203)   ENDDO
+(  204) !$OMP END PARALLEL DO
+(  205) ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:09      page 5
+
+(  206) CALL GSTATS(1141,1)
+(  207) 
+(  208) 
+(  209) !
+(  210) ! Now do communications in the NPRTRW direction
+(  211) !
+(  212) 
+(  213) !*     Calculate send buffer size
+(  214) 
+(  215) ISENDSIZE=0
+(  216) DO JROC=1,NPRTRW-1
+(  217)   ISEND = MYSETW-JROC
+(  218)   IF (ISEND <= 0)     ISEND = ISEND+NPRTRW
+(  219)   ISENDSET = ISEND
+(  220)   CALL SET2PE(ISEND,0,0,ISENDSET,MYSETV)
+(  221)   IPOS = 0
+(  222)   DO JM=0,R%NSMAX
+(  223)     IF (ISENDSET == D%NPROCM(JM) ) IPOS = IPOS + R%NTMAX-JM+2 
+(  224)   ENDDO
+(  225)   ISENDSIZE = MAX(IPOS,ISENDSIZE)
+(  226) ENDDO
+(  227) ISENDSIZE=ISENDSIZE*NPRTRV+NPRTRV
+(  228) IRECVSIZE=ISENDSIZE
+(  229) IF( NPROC > 1 )THEN
+(  230)   CALL GSTATS(801,0)
+(  231)   CALL MPL_ALLREDUCE(IRECVSIZE,'MAX',CDSTRING='SUTRLE:')
+(  232)   CALL GSTATS(801,1)
+(  233) ENDIF
+(  234) 
+(  235) ALLOCATE (ZSNDBUFW(ISENDSIZE,NPRTRW))
+(  236) ALLOCATE (ZRCVBUFW(IRECVSIZE,NPRTRW))
+(  237) 
+(  238) CALL GSTATS(1141,0)
+(  239) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JROC,ISEND,ISENDSET,IPOS,JV,IGL,JM,JN)
+(  240) DO JROC=1,NPRTRW-1
+(  241)   ISEND = MYSETW-JROC
+(  242)   IF (ISEND <= 0)     ISEND = ISEND+NPRTRW
+(  243)   ISENDSET = ISEND
+(  244)   CALL SET2PE(ISEND,0,0,ISENDSET,MYSETV)
+(  245) !*   copy data to be sent into zsndbufw
+(  246)   IPOS=0
+(  247)   DO JV=1,NPRTRV
+(  248)     IPOS=IPOS+1
+(  249)     ZSNDBUFW(IPOS,ISENDSET) = IGLVS(JV)
+(  250)   ENDDO
+(  251)   DO JV=1,NPRTRV
+(  252)     IGL = IGLVS(JV)
+(  253)     IF( IGL > 0 )THEN
+(  254)       DO JM=0,R%NSMAX
+(  255)         IF (ISENDSET == D%NPROCM(JM) ) THEN
+(  256)           DO JN=1,R%NTMAX-JM+2
+(  257)             IPOS = IPOS + 1
+(  258)             ZSNDBUFW(IPOS,ISENDSET) = ZRCVBUFV(1+D%NPMG(JM)+JN,JV)
+(  259)           ENDDO
+(  260)         ENDIF
+(  261)       ENDDO
+(  262)     ENDIF
+(  263)   ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:09      page 6
+
+(  264)   IPOSW(ISENDSET)=IPOS
+(  265) ENDDO
+(  266) !$OMP END PARALLEL DO
+(  267) CALL GSTATS(1141,1)
+(  268) 
+(  269) ISREQ = 0
+(  270) DO JROC=1,NPRTRW-1
+(  271)   ISEND = MYSETW-JROC
+(  272)   IF (ISEND <= 0)     ISEND = ISEND+NPRTRW
+(  273)   ISENDSET = ISEND
+(  274)   CALL SET2PE(ISEND,0,0,ISENDSET,MYSETV)
+(  275)   ISENDSIZE = IPOSW(ISENDSET)
+(  276)   ISREQ = ISREQ+1
+(  277)   CALL GSTATS(801,0)
+(  278)   CALL MPL_SEND(ZSNDBUFW(1:ISENDSIZE,ISENDSET),KDEST=NPRCIDS(ISEND), &
+(  279)    & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(ISREQ),&
+(  280)    & KTAG=ITAG,CDSTRING='SUTRLE:')
+(  281)   CALL GSTATS(801,1)
+(  282) ENDDO
+(  283) 
+(  284) 
+(  285) IRREQ = 0
+(  286) DO JROC=1,NPRTRW-1
+(  287) 
+(  288)   IRECV = MYSETW+JROC
+(  289)   IF (IRECV > NPRTRW) IRECV = IRECV-NPRTRW
+(  290)   IRECVSET = IRECV
+(  291)   CALL SET2PE(IRECV,0,0,IRECVSET,MYSETV)
+(  292) !*   receive message (if not empty)
+(  293) 
+(  294)   IRREQ = IRREQ+1
+(  295)   CALL GSTATS(801,0)
+(  296)   CALL MPL_RECV(ZRCVBUFW(:,IRECVSET),KSOURCE=NPRCIDS(IRECV), &
+(  297)    & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IRECVREQ(IRREQ),&
+(  298)    & KTAG=ITAG,CDSTRING='SUTRLE:')
+(  299)   CALL GSTATS(801,1)
+(  300) ENDDO
+(  301) 
+(  302) IF(ISREQ > 0) THEN
+(  303)   CALL GSTATS(801,0)
+(  304)   CALL MPL_WAIT(KREQUEST=ISENDREQ(1:ISREQ), &
+(  305)    & CDSTRING='SUTRLE: WAIT')
+(  306)   CALL GSTATS(801,1)
+(  307) ENDIF
+(  308) 
+(  309) IF(IRREQ > 0) THEN
+(  310)   CALL GSTATS(801,0)
+(  311)   CALL MPL_WAIT(KREQUEST=IRECVREQ(1:IRREQ), &
+(  312)    & CDSTRING='SUTRLE: WAIT')
+(  313)   CALL GSTATS(801,1)
+(  314) ENDIF
+(  315) 
+(  316) CALL GSTATS(1141,0)
+(  317) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JROC,IRECV,IRECVSET,IPOS,IGLVR,JV,IGL,JMLOC,IM,IOFFT,JN)
+(  318) DO JROC=1,NPRTRW-1
+(  319)   IRECV = MYSETW+JROC
+(  320)   IF (IRECV > NPRTRW) IRECV = IRECV-NPRTRW
+(  321)   IRECVSET = IRECV
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:09      page 7
+
+(  322)   CALL SET2PE(IRECV,0,0,IRECVSET,MYSETV)
+(  323) !*   copy data from buffer to f%rpnm
+(  324)   IPOS=0
+(  325)   DO JV=1,NPRTRV
+(  326)     IPOS=IPOS+1
+(  327)     IGLVR(JV)=ZRCVBUFW(IPOS,IRECVSET)
+(  328)   ENDDO
+(  329)   DO JV=1,NPRTRV
+(  330)     IGL = IGLVR(JV)
+(  331)     IF( IGL > 0 )THEN
+(  332)       DO JMLOC=1,D%NUMP
+(  333)         IM = D%MYMS(JMLOC)
+(  334)         IOFFT = D%NPMT(IM)
+(  335)         DO JN=1,R%NTMAX-IM+2
+(  336)           IPOS = IPOS + 1
+(  337)           F%RPNM(IGL,IOFFT+JN) = ZRCVBUFW(IPOS,IRECVSET)
+(  338)         ENDDO
+(  339)       ENDDO
+(  340)     ENDIF
+(  341)   ENDDO
+(  342) ENDDO
+(  343) !$OMP END PARALLEL DO
+(  344) CALL GSTATS(1141,1)
+(  345) 
+(  346) DEALLOCATE (ZRCVBUFV)
+(  347) DEALLOCATE (ZSNDBUFW)
+(  348) DEALLOCATE (ZRCVBUFW)
+(  349) 
+(  350) IF( NPROC > 1 .AND. KLOOP ==1)THEN
+(  351)   CALL GSTATS(783,0)
+(  352)   CALL MPL_BARRIER(CDSTRING='SUTRLE:')
+(  353)   CALL GSTATS(783,1)
+(  354) ENDIF
+(  355) END SUBROUTINE SUTRLE
+(  356) END MODULE SUTRLE_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:09      page 8
+
+(    1) # 1 "sutrle_mod.F90"
+(    1) MODULE SUTRLE_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUTRLE(PNM,KGL,KLOOP)
+(    4) # 5 "sutrle_mod.F90"
+(    5) !**** *sutrle * - transposition of Legendre polynomials during set-up
+(    6) # 7 "sutrle_mod.F90"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !           transposition of Legendre polynomials during set-up
+(   10) # 11 "sutrle_mod.F90"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !        *call* *sutrle(pnm)
+(   14) # 15 "sutrle_mod.F90"
+(   15) !        Explicit arguments :
+(   16) !        --------------------
+(   17) # 18 "sutrle_mod.F90"
+(   18) !        Implicit arguments :
+(   19) !        --------------------
+(   20) # 21 "sutrle_mod.F90"
+(   21) !     Method.
+(   22) !     -------
+(   23) !        See documentation
+(   24) # 25 "sutrle_mod.F90"
+(   25) !     Externals.
+(   26) !     ----------
+(   27) # 28 "sutrle_mod.F90"
+(   28) !     Reference.
+(   29) !     ----------
+(   30) !        ECMWF Research Department documentation of the IFS
+(   31) # 32 "sutrle_mod.F90"
+(   32) !     Author.
+(   33) !     -------
+(   34) !        MPP Group *ECMWF*
+(   35) # 36 "sutrle_mod.F90"
+(   36) !     Modifications.
+(   37) !     --------------
+(   38) !        Original : 95-10-01
+(   39) !        P.Towers : 10-01-12  Corrected over allocation of ZSNDBUF (XT4 fix)
+(   40) !        G.Mozdzynski: March 2011 Support 2D (RW,RV) initialisation of legendre coeffs
+(   41) !      F. Vana  05-Mar-2015  Support for single precision
+(   42) !     ------------------------------------------------------------------
+(   43) # 45 "sutrle_mod.F90"
+(   45) USE PARKIND1  ,ONLY : JPRD, JPIM
+(   46) USE MPL_MODULE  ,ONLY : MPL_ALLREDUCE, MPL_RECV, MPL_SEND, MPL_BARRIER, MPL_WAIT, &
+(   47)      &                  JP_NON_BLOCKING_STANDARD
+(   48) # 49 "sutrle_mod.F90"
+(   49) USE TPM_GEN         ,ONLY : NOUT
+(   50) USE TPM_DIM         ,ONLY : R
+(   51) USE TPM_DISTR       ,ONLY : D, MTAGLETR, NCOMBFLEN, NPRCIDS, NPRTRW, NPRTRV, &
+(   52)      &                      MYSETV, MYSETW, NPROC
+(   53) USE TPM_FIELDS      ,ONLY : F
+(   54) USE SET2PE_MOD      ,ONLY : SET2PE
+(   55) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   56) !
+(   57) # 58 "sutrle_mod.F90"
+(   58) IMPLICIT NONE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:09      page 9
+
+(   59) # 60 "sutrle_mod.F90"
+(   60) REAL(KIND=JPRD),INTENT(IN) :: PNM(:)
+(   61) INTEGER(KIND=JPIM),INTENT(IN) :: KGL
+(   62) INTEGER(KIND=JPIM),INTENT(IN) :: KLOOP
+(   63) # 64 "sutrle_mod.F90"
+(   64) !     LOCAL
+(   65) # 66 "sutrle_mod.F90"
+(   66) REAL(KIND=JPRD), ALLOCATABLE :: ZSNDBUFV(:),ZRCVBUFV(:,:)
+(   67) REAL(KIND=JPRD), ALLOCATABLE :: ZSNDBUFW(:,:),ZRCVBUFW(:,:)
+(   68) INTEGER(KIND=JPIM) :: ILREC, IM, IPOS, &
+(   69)              & IRECVSET, IRECV, ISEND, ISENDSET, ITAG,ISENDSIZE, IRECVSIZE, &
+(   70)              & J, JM, JMLOC, JN, JV, JROC ,IOFFT, IOFFG, IGL, ISREQ, IRREQ
+(   71) INTEGER(KIND=JPIM) :: ISENDREQ(MAX(NPRTRW,NPRTRV))
+(   72) INTEGER(KIND=JPIM) :: IRECVREQ(MAX(NPRTRW,NPRTRV))
+(   73) INTEGER(KIND=JPIM) :: IGLVS(NPRTRV)
+(   74) INTEGER(KIND=JPIM) :: IGLVR(NPRTRV)
+(   75) INTEGER(KIND=JPIM) :: IPOSW(NPRTRW)
+(   76) # 77 "sutrle_mod.F90"
+(   77) !     ------------------------------------------------------------------
+(   78) # 79 "sutrle_mod.F90"
+(   79) !*       0.    Some initializations.
+(   80) !              ---------------------
+(   81) # 82 "sutrle_mod.F90"
+(   82) ITAG = MTAGLETR+KLOOP
+(   83) # 84 "sutrle_mod.F90"
+(   84) ! Perform barrier synchronisation to guarantee all processors have
+(   85) ! completed all previous communication
+(   86) # 87 "sutrle_mod.F90"
+(   87) IF( NPROC > 1 .AND. KLOOP ==1)THEN
+(   88)   CALL GSTATS(783,0)
+(   89)   CALL MPL_BARRIER(CDSTRING='SUTRLE:')
+(   90)   CALL GSTATS(783,1)
+(   91) ENDIF
+(   92) # 93 "sutrle_mod.F90"
+(   93) !
+(   94) ! First do communications in NPRTRV direction
+(   95) !
+(   96) # 97 "sutrle_mod.F90"
+(   97) !*     Calculate send buffer size
+(   98) # 99 "sutrle_mod.F90"
+(   99) IF(KGL > 0) THEN
+(  100)   ISENDSIZE = R%NSPOLEG+1
+(  101) ELSE
+(  102)   ISENDSIZE=1
+(  103) ENDIF
+(  104) # 105 "sutrle_mod.F90"
+(  105) ALLOCATE (ZSNDBUFV(ISENDSIZE))
+(  106) ALLOCATE (ZRCVBUFV(R%NSPOLEG+1,NPRTRV))
+(  107) # 108 "sutrle_mod.F90"
+(  108) !*   copy data to be sent into zsndbufv
+(  109) # 110 "sutrle_mod.F90"
+(  110) ZSNDBUFV(1) = KGL
+(  111) IF(KGL > 0) THEN
+(  112)   CALL GSTATS(1141,0)
+(  113) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(J)
+(  114)   DO J=1,R%NSPOLEG
+(  115)     ZSNDBUFV(J+1) = PNM(J)
+(  116)   ENDDO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:09      page 10
+
+(  117) !$OMP END PARALLEL DO
+(  118)   CALL GSTATS(1141,1)
+(  119) ENDIF
+(  120) # 121 "sutrle_mod.F90"
+(  121) ISREQ = 0
+(  122) DO JROC=1,NPRTRV-1
+(  123)   ISEND = MYSETV-JROC
+(  124)   IF (ISEND <= 0)     ISEND = ISEND+NPRTRV
+(  125)   ISENDSET = ISEND
+(  126)   CALL SET2PE(ISEND,0,0,MYSETW,ISENDSET)
+(  127)   ISREQ = ISREQ+1
+(  128)   CALL GSTATS(801,0)
+(  129)   CALL MPL_SEND(ZSNDBUFV(1:ISENDSIZE),KDEST=NPRCIDS(ISEND), &
+(  130)    &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(ISREQ),&
+(  131)    & KTAG=ITAG,CDSTRING='SUTRLE:')
+(  132)   CALL GSTATS(801,1)
+(  133) ENDDO
+(  134) # 136 "sutrle_mod.F90"
+(  136) IRREQ=0
+(  137) DO JROC=1,NPRTRV-1
+(  138)   IRECV = MYSETV+JROC
+(  139)   IF (IRECV > NPRTRV) IRECV = IRECV-NPRTRV
+(  140)   IRECVSET = IRECV
+(  141)   CALL SET2PE(IRECV,0,0,MYSETW,IRECVSET)
+(  142)   IRREQ = IRREQ+1
+(  143)   CALL GSTATS(801,0)
+(  144)   CALL MPL_RECV(ZRCVBUFV(:,IRECVSET),KSOURCE=NPRCIDS(IRECV), &
+(  145)    &KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IRECVREQ(IRREQ),&
+(  146)    & KTAG=ITAG,CDSTRING='SUTRLE:')
+(  147)   CALL GSTATS(801,1)
+(  148) ENDDO
+(  149) # 150 "sutrle_mod.F90"
+(  150) IF(ISREQ > 0) THEN
+(  151)   CALL GSTATS(801,0)
+(  152)   CALL MPL_WAIT(KREQUEST=ISENDREQ(1:ISREQ), &
+(  153)    & CDSTRING='SUTRLE: WAIT')
+(  154)   CALL GSTATS(801,1)
+(  155) ENDIF
+(  156) # 157 "sutrle_mod.F90"
+(  157) IF(IRREQ > 0) THEN
+(  158)   CALL GSTATS(801,0)
+(  159)   CALL MPL_WAIT(KREQUEST=IRECVREQ(1:IRREQ), &
+(  160)    & CDSTRING='SUTRLE: WAIT')
+(  161)   CALL GSTATS(801,1)
+(  162) ENDIF
+(  163) # 164 "sutrle_mod.F90"
+(  164) !*   copy data from buffer to f%rpnm
+(  165) CALL GSTATS(1141,0)
+(  166) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JROC,IRECV,IRECVSET,IGL,JMLOC,IM,IOFFT,IOFFG,JN)
+(  167) DO JROC=1,NPRTRV-1
+(  168)   IRECV = MYSETV+JROC
+(  169)   IF (IRECV > NPRTRV) IRECV = IRECV-NPRTRV
+(  170)   IRECVSET = IRECV
+(  171)   CALL SET2PE(IRECV,0,0,MYSETW,IRECVSET)
+(  172)   IGL = ZRCVBUFV(1,IRECVSET)
+(  173)   IGLVS(IRECVSET)=IGL
+(  174)   IF( IGL > 0 )THEN
+(  175)     DO JMLOC=1,D%NUMP
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:09      page 11
+
+(  176)       IM = D%MYMS(JMLOC)
+(  177)       IOFFT = D%NPMT(IM)
+(  178)       IOFFG = D%NPMG(IM)
+(  179)       DO JN=1,R%NTMAX-IM+2
+(  180)         F%RPNM(IGL,IOFFT+JN) = ZRCVBUFV(1+IOFFG+JN,IRECVSET)
+(  181)       ENDDO
+(  182)     ENDDO
+(  183)   ENDIF
+(  184) ENDDO
+(  185) !$OMP END PARALLEL DO
+(  186) # 187 "sutrle_mod.F90"
+(  187) DEALLOCATE (ZSNDBUFV)
+(  188) # 189 "sutrle_mod.F90"
+(  189) !*    copy data from pnm to rpnm
+(  190) # 191 "sutrle_mod.F90"
+(  191) IGLVS(MYSETV)=KGL
+(  192) IF(KGL > 0) THEN
+(  193)   ZRCVBUFV(1,MYSETV)=KGL
+(  194)   ZRCVBUFV(2:R%NSPOLEG+1,MYSETV)=PNM(1:R%NSPOLEG)
+(  195) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JMLOC,IM,IOFFT,IOFFG,JN)
+(  196)   DO JMLOC=1,D%NUMP
+(  197)     IM = D%MYMS(JMLOC)
+(  198)     IOFFT = D%NPMT(IM)
+(  199)     IOFFG = D%NPMG(IM)
+(  200)     DO JN=1,R%NTMAX-IM+2
+(  201)       F%RPNM(KGL,IOFFT+JN) = PNM(IOFFG+JN)
+(  202)     ENDDO
+(  203)   ENDDO
+(  204) !$OMP END PARALLEL DO
+(  205) ENDIF
+(  206) CALL GSTATS(1141,1)
+(  207) # 209 "sutrle_mod.F90"
+(  209) !
+(  210) ! Now do communications in the NPRTRW direction
+(  211) !
+(  212) # 213 "sutrle_mod.F90"
+(  213) !*     Calculate send buffer size
+(  214) # 215 "sutrle_mod.F90"
+(  215) ISENDSIZE=0
+(  216) DO JROC=1,NPRTRW-1
+(  217)   ISEND = MYSETW-JROC
+(  218)   IF (ISEND <= 0)     ISEND = ISEND+NPRTRW
+(  219)   ISENDSET = ISEND
+(  220)   CALL SET2PE(ISEND,0,0,ISENDSET,MYSETV)
+(  221)   IPOS = 0
+(  222)   DO JM=0,R%NSMAX
+(  223)     IF (ISENDSET == D%NPROCM(JM) ) IPOS = IPOS + R%NTMAX-JM+2 
+(  224)   ENDDO
+(  225)   ISENDSIZE = MAX(IPOS,ISENDSIZE)
+(  226) ENDDO
+(  227) ISENDSIZE=ISENDSIZE*NPRTRV+NPRTRV
+(  228) IRECVSIZE=ISENDSIZE
+(  229) IF( NPROC > 1 )THEN
+(  230)   CALL GSTATS(801,0)
+(  231)   CALL MPL_ALLREDUCE(IRECVSIZE,'MAX',CDSTRING='SUTRLE:')
+(  232)   CALL GSTATS(801,1)
+(  233) ENDIF
+(  234) # 235 "sutrle_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:09      page 12
+
+(  235) ALLOCATE (ZSNDBUFW(ISENDSIZE,NPRTRW))
+(  236) ALLOCATE (ZRCVBUFW(IRECVSIZE,NPRTRW))
+(  237) # 238 "sutrle_mod.F90"
+(  238) CALL GSTATS(1141,0)
+(  239) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JROC,ISEND,ISENDSET,IPOS,JV,IGL,JM,JN)
+(  240) DO JROC=1,NPRTRW-1
+(  241)   ISEND = MYSETW-JROC
+(  242)   IF (ISEND <= 0)     ISEND = ISEND+NPRTRW
+(  243)   ISENDSET = ISEND
+(  244)   CALL SET2PE(ISEND,0,0,ISENDSET,MYSETV)
+(  245) !*   copy data to be sent into zsndbufw
+(  246)   IPOS=0
+(  247)   DO JV=1,NPRTRV
+(  248)     IPOS=IPOS+1
+(  249)     ZSNDBUFW(IPOS,ISENDSET) = IGLVS(JV)
+(  250)   ENDDO
+(  251)   DO JV=1,NPRTRV
+(  252)     IGL = IGLVS(JV)
+(  253)     IF( IGL > 0 )THEN
+(  254)       DO JM=0,R%NSMAX
+(  255)         IF (ISENDSET == D%NPROCM(JM) ) THEN
+(  256)           DO JN=1,R%NTMAX-JM+2
+(  257)             IPOS = IPOS + 1
+(  258)             ZSNDBUFW(IPOS,ISENDSET) = ZRCVBUFV(1+D%NPMG(JM)+JN,JV)
+(  259)           ENDDO
+(  260)         ENDIF
+(  261)       ENDDO
+(  262)     ENDIF
+(  263)   ENDDO
+(  264)   IPOSW(ISENDSET)=IPOS
+(  265) ENDDO
+(  266) !$OMP END PARALLEL DO
+(  267) CALL GSTATS(1141,1)
+(  268) # 269 "sutrle_mod.F90"
+(  269) ISREQ = 0
+(  270) DO JROC=1,NPRTRW-1
+(  271)   ISEND = MYSETW-JROC
+(  272)   IF (ISEND <= 0)     ISEND = ISEND+NPRTRW
+(  273)   ISENDSET = ISEND
+(  274)   CALL SET2PE(ISEND,0,0,ISENDSET,MYSETV)
+(  275)   ISENDSIZE = IPOSW(ISENDSET)
+(  276)   ISREQ = ISREQ+1
+(  277)   CALL GSTATS(801,0)
+(  278)   CALL MPL_SEND(ZSNDBUFW(1:ISENDSIZE,ISENDSET),KDEST=NPRCIDS(ISEND), &
+(  279)    & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(ISREQ),&
+(  280)    & KTAG=ITAG,CDSTRING='SUTRLE:')
+(  281)   CALL GSTATS(801,1)
+(  282) ENDDO
+(  283) # 285 "sutrle_mod.F90"
+(  285) IRREQ = 0
+(  286) DO JROC=1,NPRTRW-1
+(  287) # 288 "sutrle_mod.F90"
+(  288)   IRECV = MYSETW+JROC
+(  289)   IF (IRECV > NPRTRW) IRECV = IRECV-NPRTRW
+(  290)   IRECVSET = IRECV
+(  291)   CALL SET2PE(IRECV,0,0,IRECVSET,MYSETV)
+(  292) !*   receive message (if not empty)
+(  293) # 294 "sutrle_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:09      page 13
+
+(  294)   IRREQ = IRREQ+1
+(  295)   CALL GSTATS(801,0)
+(  296)   CALL MPL_RECV(ZRCVBUFW(:,IRECVSET),KSOURCE=NPRCIDS(IRECV), &
+(  297)    & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=IRECVREQ(IRREQ),&
+(  298)    & KTAG=ITAG,CDSTRING='SUTRLE:')
+(  299)   CALL GSTATS(801,1)
+(  300) ENDDO
+(  301) # 302 "sutrle_mod.F90"
+(  302) IF(ISREQ > 0) THEN
+(  303)   CALL GSTATS(801,0)
+(  304)   CALL MPL_WAIT(KREQUEST=ISENDREQ(1:ISREQ), &
+(  305)    & CDSTRING='SUTRLE: WAIT')
+(  306)   CALL GSTATS(801,1)
+(  307) ENDIF
+(  308) # 309 "sutrle_mod.F90"
+(  309) IF(IRREQ > 0) THEN
+(  310)   CALL GSTATS(801,0)
+(  311)   CALL MPL_WAIT(KREQUEST=IRECVREQ(1:IRREQ), &
+(  312)    & CDSTRING='SUTRLE: WAIT')
+(  313)   CALL GSTATS(801,1)
+(  314) ENDIF
+(  315) # 316 "sutrle_mod.F90"
+(  316) CALL GSTATS(1141,0)
+(  317) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JROC,IRECV,IRECVSET,IPOS,IGLVR,JV,IGL,JMLOC,IM,IOFFT,JN)
+(  318) DO JROC=1,NPRTRW-1
+(  319)   IRECV = MYSETW+JROC
+(  320)   IF (IRECV > NPRTRW) IRECV = IRECV-NPRTRW
+(  321)   IRECVSET = IRECV
+(  322)   CALL SET2PE(IRECV,0,0,IRECVSET,MYSETV)
+(  323) !*   copy data from buffer to f%rpnm
+(  324)   IPOS=0
+(  325)   DO JV=1,NPRTRV
+(  326)     IPOS=IPOS+1
+(  327)     IGLVR(JV)=ZRCVBUFW(IPOS,IRECVSET)
+(  328)   ENDDO
+(  329)   DO JV=1,NPRTRV
+(  330)     IGL = IGLVR(JV)
+(  331)     IF( IGL > 0 )THEN
+(  332)       DO JMLOC=1,D%NUMP
+(  333)         IM = D%MYMS(JMLOC)
+(  334)         IOFFT = D%NPMT(IM)
+(  335)         DO JN=1,R%NTMAX-IM+2
+(  336)           IPOS = IPOS + 1
+(  337)           F%RPNM(IGL,IOFFT+JN) = ZRCVBUFW(IPOS,IRECVSET)
+(  338)         ENDDO
+(  339)       ENDDO
+(  340)     ENDIF
+(  341)   ENDDO
+(  342) ENDDO
+(  343) !$OMP END PARALLEL DO
+(  344) CALL GSTATS(1141,1)
+(  345) # 346 "sutrle_mod.F90"
+(  346) DEALLOCATE (ZRCVBUFV)
+(  347) DEALLOCATE (ZSNDBUFW)
+(  348) DEALLOCATE (ZRCVBUFW)
+(  349) # 350 "sutrle_mod.F90"
+(  350) IF( NPROC > 1 .AND. KLOOP ==1)THEN
+(  351)   CALL GSTATS(783,0)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:09      page 14
+
+(  352)   CALL MPL_BARRIER(CDSTRING='SUTRLE:')
+(  353)   CALL GSTATS(783,1)
+(  354) ENDIF
+(  355) END SUBROUTINE SUTRLE
+(  356) END MODULE SUTRLE_MOD

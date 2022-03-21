@@ -1,0 +1,178 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:33      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: sufft_mod.F90
+
+(    1) MODULE SUFFT_MOD
+(    2)   CONTAINS
+(    3)   SUBROUTINE SUFFT
+(    4)   
+(    5)   USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    6)   
+(    7)   USE TPM_DIM         ,ONLY : R
+(    8)   USE TPM_GEN         ,ONLY : NOUT, NPRINTLEV
+(    9)   USE TPM_DISTR       ,ONLY : D, MYSETW
+(   10)   USE TPM_GEOMETRY    ,ONLY : G
+(   11)   USE TPM_FFT         ,ONLY : T
+(   12)   USE TPM_FFTC        ,ONLY : TC, INIT_PLANS_FFT
+(   13) #ifdef WITH_FFTW
+(   14)   USE TPM_FFTW        ,ONLY : TW, INIT_PLANS_FFTW
+(   15) #endif
+(   16)   !
+(   17)   
+(   18)   IMPLICIT NONE
+(   19)   
+(   20)   INTEGER(KIND=JPIM) :: JGL,IGLG
+(   21)   LOGICAL :: LLP1,LLP2
+(   22)   
+(   23)   !     ------------------------------------------------------------------
+(   24)   
+(   25)   IF(.NOT.D%LGRIDONLY) THEN
+(   26)   
+(   27)     LLP1 = NPRINTLEV>0
+(   28)     LLP2 = NPRINTLEV>1
+(   29)     IF(LLP1) WRITE(NOUT,*) '=== ENTER ROUTINE SUFFT ==='
+(   30) 
+(   31) #ifdef WITH_FFTW
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:33      page 2
+
+(   32)     IF(TW%LFFTW)THEN
+(   33)       CALL INIT_PLANS_FFTW(R%NDLON)
+(   34)     ELSE
+(   35)       NULLIFY(TW%FFTW_PLANS)
+(   36)       !NULLIFY(TW%N_PLANS)
+(   37)     ENDIF
+(   38) #endif
+(   39)   
+(   40)     CALL INIT_PLANS_FFT(R%NDLON)
+(   41)   
+(   42)   ENDIF
+(   43)   
+(   44)   !     ------------------------------------------------------------------
+(   45)   
+(   46)   9 FORMAT(1X,'ARRAY ',A10,' ALLOCATED ',8I8)
+(   47)   
+(   48)   END SUBROUTINE SUFFT
+(   49)   END MODULE SUFFT_MOD  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:33      page 3
+
+(    1) # 1 "sufft_mod.F90"
+(    1) MODULE SUFFT_MOD
+(    2)   CONTAINS
+(    3)   SUBROUTINE SUFFT
+(    4)   
+(    5)   USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    6)   
+(    7)   USE TPM_DIM         ,ONLY : R
+(    8)   USE TPM_GEN         ,ONLY : NOUT, NPRINTLEV
+(    9)   USE TPM_DISTR       ,ONLY : D, MYSETW
+(   10)   USE TPM_GEOMETRY    ,ONLY : G
+(   11)   USE TPM_FFT         ,ONLY : T
+(   12)   USE TPM_FFTC        ,ONLY : TC, INIT_PLANS_FFT
+(   13) # 16 "sufft_mod.F90"
+(   16)   !
+(   17)   
+(   18)   IMPLICIT NONE
+(   19)   
+(   20)   INTEGER(KIND=JPIM) :: JGL,IGLG
+(   21)   LOGICAL :: LLP1,LLP2
+(   22)   
+(   23)   !     ------------------------------------------------------------------
+(   24)   
+(   25)   IF(.NOT.D%LGRIDONLY) THEN
+(   26)   
+(   27)     LLP1 = NPRINTLEV>0
+(   28)     LLP2 = NPRINTLEV>1
+(   29)     IF(LLP1) WRITE(NOUT,*) '=== ENTER ROUTINE SUFFT ==='
+(   30) # 39 "sufft_mod.F90"
+(   39)   
+(   40)     CALL INIT_PLANS_FFT(R%NDLON)
+(   41)   
+(   42)   ENDIF
+(   43)   
+(   44)   !     ------------------------------------------------------------------
+(   45)   
+(   46)   9 FORMAT(1X,'ARRAY ',A10,' ALLOCATED ',8I8)
+(   47)   
+(   48)   END SUBROUTINE SUFFT
+(   49)   END MODULE SUFFT_MOD  

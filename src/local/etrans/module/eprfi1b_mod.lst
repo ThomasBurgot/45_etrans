@@ -1,0 +1,350 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:57      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eprfi1b_mod.F90
+
+(    1) MODULE EPRFI1B_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EPRFI1B(PFFT,PSPEC,KFIELDS,KFLDPTR)
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) 
+(    8) !USE TPM_DIM
+(    9) USE TPM_DISTR
+(   10) USE TPMALD_DISTR    ,ONLY : DALD, DALD_NESM0, DALD_NCPL2M
+(   11) !
+(   12) !**** *PRFI1* - Prepare spectral fields for inverse Legendre transform
+(   13) 
+(   14) !     Purpose.
+(   15) !     --------
+(   16) !        To extract the spectral fields for a specific zonal wavenumber
+(   17) !        and put them in an order suitable for the inverse Legendre           .
+(   18) !        tranforms.The ordering is from NSMAX to KM for better conditioning.
+(   19) !        Elements 1,2 and NLCM(KM)+1 are zeroed in preparation for computing
+(   20) !        u,v and derivatives in spectral space.
+(   21) 
+(   22) !**   Interface.
+(   23) !     ----------
+(   24) !        *CALL* *PRFI1B(...)*
+(   25) 
+(   26) !        Explicit arguments :  KM     - zonal wavenumber
+(   27) !        ------------------    PIA    - spectral components for transform
+(   28) !                              PSPEC  - spectral array
+(   29) !                              KFIELDS  - number of fields
+(   30) 
+(   31) !        Implicit arguments :  None.
+(   32) !        --------------------
+(   33) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:57      page 2
+
+(   34) !     Method.
+(   35) !     -------
+(   36) 
+(   37) !     Externals.   None.
+(   38) !     ----------
+(   39) 
+(   40) !     Reference.
+(   41) !     ----------
+(   42) !        ECMWF Research Department documentation of the IFS
+(   43) 
+(   44) !     Author.
+(   45) !     -------
+(   46) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   47) 
+(   48) !     Modifications.
+(   49) !     --------------
+(   50) !        Original : 00-02-01 From PRFI1B in IFS CY22R1
+(   51) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   52) 
+(   53) !     ------------------------------------------------------------------
+(   54) 
+(   55) IMPLICIT NONE
+(   56) 
+(   57) INTEGER(KIND=JPIM),INTENT(IN)   :: KFIELDS
+(   58) REAL(KIND=JPRB)   ,INTENT(IN)   :: PSPEC(:,:)
+(   59) REAL(KIND=JPRB)   ,INTENT(OUT)  :: PFFT(:,:,:)
+(   60) INTEGER(KIND=JPIM),INTENT(IN),OPTIONAL :: KFLDPTR(:)
+(   61) 
+(   62) INTEGER(KIND=JPIM) :: II, INM, IR, J, JFLD, ILCM, IOFF,IFLD
+(   63) INTEGER(KIND=JPIM) :: IM, JM, MAX_NCPL2M
+(   64) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   65) 
+(   66) !     ------------------------------------------------------------------
+(   67) 
+(   68) !*       1.    EXTRACT FIELDS FROM SPECTRAL ARRAYS.
+(   69) !              --------------------------------------------------
+(   70) 
+(   71) IF (LHOOK) CALL DR_HOOK('EPRFI1B_MOD:EPRFI1B',0,ZHOOK_HANDLE)
+(   72) 
+(   73) !$acc data present (PFFT, PSPEC)
+(   74) 
+(   75) !$acc kernels default(none)
+(   76) PFFT = 0._JPRB
+(   77) !$acc end kernels
+(   78) 
+(   79) IF(PRESENT(KFLDPTR)) THEN
+(   80)   ! TODO 
+(   81)   DO JFLD=1,KFIELDS
+(   82)     IR = 2*(JFLD-1)+1
+(   83)     II = IR+1
+(   84)     IFLD = KFLDPTR(JFLD)
+(   85)     DO JM = 1, D%NUMP
+(   86)       IM   = D%MYMS(JM)
+(   87)       ILCM = DALD%NCPL2M(IM)
+(   88)       IOFF = DALD%NESM0(IM)
+(   89)       DO J=1,ILCM,2
+(   90)         INM = IOFF+(J-1)*2
+(   91)         PFFT(J  ,JM,IR) = PSPEC(IFLD,INM  )
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:57      page 3
+
+(   92)         PFFT(J+1,JM,IR) = PSPEC(IFLD,INM+1)
+(   93)         PFFT(J  ,JM,II) = PSPEC(IFLD,INM+2)
+(   94)         PFFT(J+1,JM,II) = PSPEC(IFLD,INM+3)
+(   95)       ENDDO
+(   96)     ENDDO
+(   97)   ENDDO
+(   98) ELSE
+(   99)   MAX_NCPL2M = MAXVAL (DALD_NCPL2M)
+(  100)   !$ACC parallel loop collapse(3) &
+(  101)   !$ACC& present(D_MYMS,DALD_NCPL2M,DALD_NESM0) &
+(  102)   !$ACC& present(PFFT,PSPEC) &
+(  103)   !$ACC& private(IR,II,IM,ILCM,IOFF,INM) default(none)
+(  104)   DO JFLD=1,KFIELDS
+(  105)     DO JM = 1, D_NUMP
+(  106)       DO J=1,MAX_NCPL2M,2
+(  107)        IR = 2*(JFLD-1)+1
+(  108)        II = IR+1
+(  109)        IM   = D_MYMS(JM)
+(  110)        ILCM = DALD_NCPL2M(IM)
+(  111)        if (J > ILCM) CYCLE
+(  112)        IOFF = DALD_NESM0(IM)
+(  113)        INM = IOFF+(J-1)*2
+(  114)        PFFT(J  ,JM,IR) = PSPEC(JFLD,INM  )
+(  115)        PFFT(J+1,JM,IR) = PSPEC(JFLD,INM+1)
+(  116)        PFFT(J  ,JM,II) = PSPEC(JFLD,INM+2)
+(  117)        PFFT(J+1,JM,II) = PSPEC(JFLD,INM+3)
+(  118)       ENDDO
+(  119)     ENDDO
+(  120)   ENDDO
+(  121) ENDIF
+(  122) 
+(  123) !$acc end data
+(  124) 
+(  125) 
+(  126) IF (LHOOK) CALL DR_HOOK('EPRFI1B_MOD:EPRFI1B',1,ZHOOK_HANDLE)
+(  127) 
+(  128) !     ------------------------------------------------------------------
+(  129) 
+(  130) END SUBROUTINE EPRFI1B
+(  131) END MODULE EPRFI1B_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:57      page 4
+
+(    1) # 1 "eprfi1b_mod.F90"
+(    1) MODULE EPRFI1B_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EPRFI1B(PFFT,PSPEC,KFIELDS,KFLDPTR)
+(    4) # 5 "eprfi1b_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) # 8 "eprfi1b_mod.F90"
+(    8) !USE TPM_DIM
+(    9) USE TPM_DISTR
+(   10) USE TPMALD_DISTR    ,ONLY : DALD, DALD_NESM0, DALD_NCPL2M
+(   11) !
+(   12) !**** *PRFI1* - Prepare spectral fields for inverse Legendre transform
+(   13) # 14 "eprfi1b_mod.F90"
+(   14) !     Purpose.
+(   15) !     --------
+(   16) !        To extract the spectral fields for a specific zonal wavenumber
+(   17) !        and put them in an order suitable for the inverse Legendre           .
+(   18) !        tranforms.The ordering is from NSMAX to KM for better conditioning.
+(   19) !        Elements 1,2 and NLCM(KM)+1 are zeroed in preparation for computing
+(   20) !        u,v and derivatives in spectral space.
+(   21) # 22 "eprfi1b_mod.F90"
+(   22) !**   Interface.
+(   23) !     ----------
+(   24) !        *CALL* *PRFI1B(...)*
+(   25) # 26 "eprfi1b_mod.F90"
+(   26) !        Explicit arguments :  KM     - zonal wavenumber
+(   27) !        ------------------    PIA    - spectral components for transform
+(   28) !                              PSPEC  - spectral array
+(   29) !                              KFIELDS  - number of fields
+(   30) # 31 "eprfi1b_mod.F90"
+(   31) !        Implicit arguments :  None.
+(   32) !        --------------------
+(   33) # 34 "eprfi1b_mod.F90"
+(   34) !     Method.
+(   35) !     -------
+(   36) # 37 "eprfi1b_mod.F90"
+(   37) !     Externals.   None.
+(   38) !     ----------
+(   39) # 40 "eprfi1b_mod.F90"
+(   40) !     Reference.
+(   41) !     ----------
+(   42) !        ECMWF Research Department documentation of the IFS
+(   43) # 44 "eprfi1b_mod.F90"
+(   44) !     Author.
+(   45) !     -------
+(   46) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   47) # 48 "eprfi1b_mod.F90"
+(   48) !     Modifications.
+(   49) !     --------------
+(   50) !        Original : 00-02-01 From PRFI1B in IFS CY22R1
+(   51) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   52) # 53 "eprfi1b_mod.F90"
+(   53) !     ------------------------------------------------------------------
+(   54) # 55 "eprfi1b_mod.F90"
+(   55) IMPLICIT NONE
+(   56) # 57 "eprfi1b_mod.F90"
+(   57) INTEGER(KIND=JPIM),INTENT(IN)   :: KFIELDS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:57      page 5
+
+(   58) REAL(KIND=JPRB)   ,INTENT(IN)   :: PSPEC(:,:)
+(   59) REAL(KIND=JPRB)   ,INTENT(OUT)  :: PFFT(:,:,:)
+(   60) INTEGER(KIND=JPIM),INTENT(IN),OPTIONAL :: KFLDPTR(:)
+(   61) # 62 "eprfi1b_mod.F90"
+(   62) INTEGER(KIND=JPIM) :: II, INM, IR, J, JFLD, ILCM, IOFF,IFLD
+(   63) INTEGER(KIND=JPIM) :: IM, JM, MAX_NCPL2M
+(   64) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   65) # 66 "eprfi1b_mod.F90"
+(   66) !     ------------------------------------------------------------------
+(   67) # 68 "eprfi1b_mod.F90"
+(   68) !*       1.    EXTRACT FIELDS FROM SPECTRAL ARRAYS.
+(   69) !              --------------------------------------------------
+(   70) # 71 "eprfi1b_mod.F90"
+(   71) IF (LHOOK) CALL DR_HOOK('EPRFI1B_MOD:EPRFI1B',0,ZHOOK_HANDLE)
+(   72) # 73 "eprfi1b_mod.F90"
+(   73) !$acc data present (PFFT, PSPEC)
+(   74) # 75 "eprfi1b_mod.F90"
+(   75) !$acc kernels default(none)
+(   76) PFFT = 0._JPRB
+(   77) !$acc end kernels
+(   78) # 79 "eprfi1b_mod.F90"
+(   79) IF(PRESENT(KFLDPTR)) THEN
+(   80)   ! TODO 
+(   81)   DO JFLD=1,KFIELDS
+(   82)     IR = 2*(JFLD-1)+1
+(   83)     II = IR+1
+(   84)     IFLD = KFLDPTR(JFLD)
+(   85)     DO JM = 1, D%NUMP
+(   86)       IM   = D%MYMS(JM)
+(   87)       ILCM = DALD%NCPL2M(IM)
+(   88)       IOFF = DALD%NESM0(IM)
+(   89)       DO J=1,ILCM,2
+(   90)         INM = IOFF+(J-1)*2
+(   91)         PFFT(J  ,JM,IR) = PSPEC(IFLD,INM  )
+(   92)         PFFT(J+1,JM,IR) = PSPEC(IFLD,INM+1)
+(   93)         PFFT(J  ,JM,II) = PSPEC(IFLD,INM+2)
+(   94)         PFFT(J+1,JM,II) = PSPEC(IFLD,INM+3)
+(   95)       ENDDO
+(   96)     ENDDO
+(   97)   ENDDO
+(   98) ELSE
+(   99)   MAX_NCPL2M = MAXVAL (DALD_NCPL2M)
+(  101)   !$ACC& present(D_MYMS,DALD_NCPL2M,DALD_NESM0) &
+(  102)   !$ACC& present(PFFT,PSPEC) &
+(  103)   !$ACC& private(IR,II,IM,ILCM,IOFF,INM) default(none)
+(  104)   DO JFLD=1,KFIELDS
+(  105)     DO JM = 1, D_NUMP
+(  106)       DO J=1,MAX_NCPL2M,2
+(  107)        IR = 2*(JFLD-1)+1
+(  108)        II = IR+1
+(  109)        IM   = D_MYMS(JM)
+(  110)        ILCM = DALD_NCPL2M(IM)
+(  111)        if (J > ILCM) CYCLE
+(  112)        IOFF = DALD_NESM0(IM)
+(  113)        INM = IOFF+(J-1)*2
+(  114)        PFFT(J  ,JM,IR) = PSPEC(JFLD,INM  )
+(  115)        PFFT(J+1,JM,IR) = PSPEC(JFLD,INM+1)
+(  116)        PFFT(J  ,JM,II) = PSPEC(JFLD,INM+2)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:57      page 6
+
+(  117)        PFFT(J+1,JM,II) = PSPEC(JFLD,INM+3)
+(  118)       ENDDO
+(  119)     ENDDO
+(  120)   ENDDO
+(  121) ENDIF
+(  122) # 123 "eprfi1b_mod.F90"
+(  123) !$acc end data
+(  124) # 126 "eprfi1b_mod.F90"
+(  126) IF (LHOOK) CALL DR_HOOK('EPRFI1B_MOD:EPRFI1B',1,ZHOOK_HANDLE)
+(  127) # 128 "eprfi1b_mod.F90"
+(  128) !     ------------------------------------------------------------------
+(  129) # 130 "eprfi1b_mod.F90"
+(  130) END SUBROUTINE EPRFI1B
+(  131) END MODULE EPRFI1B_MOD

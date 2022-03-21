@@ -1,0 +1,478 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:26      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: dir_trans_ctlad_mod.F90
+
+(    1) MODULE DIR_TRANS_CTLAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE DIR_TRANS_CTLAD(KF_UV_G,KF_SCALARS_G,KF_GP,KF_FS,KF_UV,KF_SCALARS,&
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,KVSETUV,KVSETSC,PGP,&
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2,KVSETSC3A,KVSETSC3B,KVSETSC2,PGPUV,PGP3A,PGP3B,PGP2)
+(    6) 
+(    7) !**** *DIR_TRANS_CTLAD* - Control routine for direct spectral transform-adj.
+(    8) 
+(    9) !     Purpose.
+(   10) !     --------
+(   11) !        Control routine for the direct spectral transform
+(   12) 
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !     CALL DIR_TRANS_CTLAD(...)
+(   16) 
+(   17) !     Explicit arguments :
+(   18) !     --------------------
+(   19) !     KF_UV_G      - global number of spectral u-v fields
+(   20) !     KF_SCALARS_G - global number of scalar spectral fields
+(   21) !     KF_GP        - total number of output gridpoint fields
+(   22) !     KF_FS        - total number of fields in fourier space
+(   23) !     KF_UV        - local number of spectral u-v fields
+(   24) !     KF_SCALARS   - local number of scalar spectral fields
+(   25) !     PSPVOR(:,:)  - spectral vorticity
+(   26) !     PSPDIV(:,:)  - spectral divergence
+(   27) !     PSPSCALAR(:,:) - spectral scalarvalued fields
+(   28) !     KVSETUV(:)  - indicating which 'b-set' in spectral space owns a
+(   29) !                   vor/div field. Equivalant to NBSETLEV in the IFS.
+(   30) !                   The length of KVSETUV should be the GLOBAL number
+(   31) !                   of u/v fields which is the dimension of u and v releated
+(   32) !                   fields in grid-point space.
+(   33) !     KVESETSC(:) - indicating which 'b-set' in spectral space owns a
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:26      page 2
+
+(   34) !                   scalar field. As for KVSETUV this argument is required
+(   35) !                   if the total number of processors is greater than
+(   36) !                   the number of processors used for distribution in
+(   37) !                   spectral wave space.
+(   38) !     PGP(:,:,:)  - gridpoint fields
+(   39) 
+(   40) !                  The ordering of the output fields is as follows (all
+(   41) !                  parts are optional depending on the input switches):
+(   42) 
+(   43) !       u             : KF_UV_G fields
+(   44) !       v             : KF_UV_G fields
+(   45) !       scalar fields : KF_SCALARS_G fields
+(   46) 
+(   47) !     Method.
+(   48) !     -------
+(   49) 
+(   50) !     Externals.  SHUFFLE     - reshuffle fields for load balancing
+(   51) !     ----------  FIELD_SPLIT - split fields in NPROMATR packets
+(   52) !                 LTDIR_CTLAD   - control of Legendre transform
+(   53) !                 FTDIR_CTLAD   - control of Fourier transform
+(   54) 
+(   55) !     Author.
+(   56) !     -------
+(   57) !        Mats Hamrud *ECMWF*
+(   58) 
+(   59) !     Modifications.
+(   60) !     --------------
+(   61) !        Original : 01-01-03
+(   62) 
+(   63) !     ------------------------------------------------------------------
+(   64) 
+(   65) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   66) USE TPM_GEN         ,ONLY : NPROMATR
+(   67) !USE TPM_TRANS
+(   68) !USE TPM_DISTR
+(   69) 
+(   70) USE SHUFFLE_MOD     ,ONLY : SHUFFLE
+(   71) USE FIELD_SPLIT_MOD ,ONLY : FIELD_SPLIT
+(   72) USE LTDIR_CTLAD_MOD ,ONLY : LTDIR_CTLAD
+(   73) USE FTDIR_CTLAD_MOD ,ONLY : FTDIR_CTLAD
+(   74) !
+(   75) 
+(   76) IMPLICIT NONE
+(   77) 
+(   78) ! Declaration of arguments
+(   79) 
+(   80) INTEGER(KIND=JPIM), INTENT(IN) :: KF_UV_G
+(   81) INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCALARS_G
+(   82) INTEGER(KIND=JPIM), INTENT(IN) :: KF_GP
+(   83) INTEGER(KIND=JPIM), INTENT(IN) :: KF_FS
+(   84) INTEGER(KIND=JPIM), INTENT(IN) :: KF_UV
+(   85) INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCALARS
+(   86) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPVOR(:,:)
+(   87) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPDIV(:,:)
+(   88) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPSCALAR(:,:)
+(   89) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPSC3A(:,:,:)
+(   90) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPSC3B(:,:,:)
+(   91) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPSC2(:,:)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:26      page 3
+
+(   92) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)    :: KVSETUV(:)
+(   93) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)    :: KVSETSC(:)
+(   94) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)    :: KVSETSC3A(:)
+(   95) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)    :: KVSETSC3B(:)
+(   96) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)    :: KVSETSC2(:)
+(   97) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT)   :: PGP(:,:,:)
+(   98) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT)   :: PGPUV(:,:,:,:)
+(   99) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT)   :: PGP3A(:,:,:,:)
+(  100) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT)   :: PGP3B(:,:,:,:)
+(  101) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT)   :: PGP2(:,:,:)
+(  102) 
+(  103) ! Local variables
+(  104) 
+(  105) INTEGER(KIND=JPIM) :: IPTRGP(KF_GP),IPTRSPUV(NPROMATR),IPTRSPSC(NPROMATR)
+(  106) INTEGER(KIND=JPIM) :: ISHFUV_G(KF_GP),ISHFSC_G(KF_GP)
+(  107) INTEGER(KIND=JPIM) :: IVSETUV(KF_GP),IVSETSC(KF_GP)
+(  108) INTEGER(KIND=JPIM) :: IBLKS,JBLK,ISTUV_G,IENUV_G
+(  109) INTEGER(KIND=JPIM) :: IF_UV_G,IF_UV,ISTUV,IF_SCALARS,IF_SCALARS_G,IF_FS,IF_GP
+(  110) INTEGER(KIND=JPIM) :: JFLD,ISTSC_G,IENSC_G,ISTSC,IENSC,IENUV,IF_GPB
+(  111) 
+(  112) 
+(  113) !     ------------------------------------------------------------------
+(  114) 
+(  115) ! Perform transform
+(  116) 
+(  117) IF_GPB = 2*KF_UV_G+KF_SCALARS_G
+(  118) IF(NPROMATR > 0 .AND. IF_GPB > NPROMATR) THEN
+(  119) 
+(  120)   ! Fields to be split into packets
+(  121) 
+(  122)   CALL SHUFFLE(KF_UV_G,KF_SCALARS_G,ISHFUV_G,IVSETUV,ISHFSC_G,IVSETSC,&
+(  123)  & KVSETUV,KVSETSC)
+(  124) 
+(  125)   IBLKS=(IF_GPB-1)/NPROMATR+1
+(  126) 
+(  127)   DO JBLK=1,IBLKS
+(  128)   
+(  129)     CALL FIELD_SPLIT(JBLK,KF_GP,KF_UV_G,IVSETUV,IVSETSC,&
+(  130)      & ISTUV_G,IENUV_G,IF_UV_G,ISTSC_G,IENSC_G,IF_SCALARS_G,&
+(  131)      & ISTUV,IENUV,IF_UV,ISTSC,IENSC,IF_SCALARS)
+(  132) 
+(  133)     IF_FS = 2*IF_UV + IF_SCALARS
+(  134)     IF_GP = 2*IF_UV_G+IF_SCALARS_G
+(  135)     DO JFLD=1,IF_UV_G
+(  136)       IPTRGP(JFLD) = ISHFUV_G(ISTUV_G+JFLD-1)
+(  137)       IPTRGP(JFLD+IF_UV_G) = KF_UV_G+ISHFUV_G(ISTUV_G+JFLD-1)
+(  138)     ENDDO
+(  139)     DO JFLD=1,IF_SCALARS_G
+(  140)       IPTRGP(JFLD+2*IF_UV_G) = 2*KF_UV_G+ISHFSC_G(ISTSC_G+JFLD-1)
+(  141)     ENDDO
+(  142)     DO JFLD=1,IF_UV
+(  143)       IPTRSPUV(JFLD) = ISTUV+JFLD-1
+(  144)     ENDDO
+(  145)     DO JFLD=1,IF_SCALARS
+(  146)       IPTRSPSC(JFLD) = ISTSC+JFLD-1
+(  147)     ENDDO
+(  148) 
+(  149)     CALL LTDIR_CTLAD(IF_FS,IF_UV,IF_SCALARS, &
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:26      page 4
+
+(  150)      & PSPVOR=PSPVOR,PSPDIV=PSPDIV,PSPSCALAR=PSPSCALAR,&
+(  151)      & KFLDPTRUV=IPTRSPUV,KFLDPTRSC=IPTRSPSC)
+(  152)     IF(IF_UV_G > 0 .AND. IF_SCALARS_G > 0) THEN
+(  153)       CALL FTDIR_CTLAD(IF_UV_G,IF_SCALARS_G,IF_GP,IF_FS,&
+(  154)        & KVSETUV=IVSETUV(ISTUV_G:IENUV_G),&
+(  155)        & KVSETSC=IVSETSC(ISTSC_G:IENSC_G),KPTRGP=IPTRGP,PGP=PGP)
+(  156)     ELSEIF(IF_UV_G > 0) THEN
+(  157)       CALL FTDIR_CTLAD(IF_UV_G,IF_SCALARS_G,IF_GP,IF_FS,&
+(  158)        & KVSETUV=IVSETUV(ISTUV_G:IENUV_G),&
+(  159)        & KPTRGP=IPTRGP,PGP=PGP)
+(  160)     ELSEIF(IF_SCALARS_G > 0) THEN
+(  161)       CALL FTDIR_CTLAD(IF_UV_G,IF_SCALARS_G,IF_GP,IF_FS,&
+(  162)        & KVSETSC=IVSETSC(ISTSC_G:IENSC_G),KPTRGP=IPTRGP,PGP=PGP)
+(  163)     ENDIF
+(  164)   ENDDO
+(  165) 
+(  166) ELSE
+(  167) 
+(  168)   ! No splitting of fields, transform done in one go
+(  169) 
+(  170)   CALL LTDIR_CTLAD(KF_FS,KF_UV,KF_SCALARS, &
+(  171)    &PSPVOR=PSPVOR,PSPDIV=PSPDIV,PSPSCALAR=PSPSCALAR,&
+(  172)    &PSPSC3A=PSPSC3A,PSPSC3B=PSPSC3B,PSPSC2=PSPSC2)
+(  173) 
+(  174)   CALL FTDIR_CTLAD(KF_UV_G,KF_SCALARS_G,KF_GP,KF_FS,&
+(  175)    & KVSETUV=KVSETUV,KVSETSC=KVSETSC,&
+(  176)    & KVSETSC3A=KVSETSC3A,KVSETSC3B=KVSETSC3B,KVSETSC2=KVSETSC2,&
+(  177)    & PGP=PGP,PGPUV=PGPUV,PGP3A=PGP3A,PGP3B=PGP3B,PGP2=PGP2)
+(  178) 
+(  179) ENDIF
+(  180) 
+(  181) !     ------------------------------------------------------------------
+(  182) 
+(  183) END SUBROUTINE DIR_TRANS_CTLAD
+(  184) END MODULE DIR_TRANS_CTLAD_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:26      page 5
+
+(    1) # 1 "dir_trans_ctlad_mod.F90"
+(    1) MODULE DIR_TRANS_CTLAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE DIR_TRANS_CTLAD(KF_UV_G,KF_SCALARS_G,KF_GP,KF_FS,KF_UV,KF_SCALARS,&
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,KVSETUV,KVSETSC,PGP,&
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2,KVSETSC3A,KVSETSC3B,KVSETSC2,PGPUV,PGP3A,PGP3B,PGP2)
+(    6) # 7 "dir_trans_ctlad_mod.F90"
+(    7) !**** *DIR_TRANS_CTLAD* - Control routine for direct spectral transform-adj.
+(    8) # 9 "dir_trans_ctlad_mod.F90"
+(    9) !     Purpose.
+(   10) !     --------
+(   11) !        Control routine for the direct spectral transform
+(   12) # 13 "dir_trans_ctlad_mod.F90"
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !     CALL DIR_TRANS_CTLAD(...)
+(   16) # 17 "dir_trans_ctlad_mod.F90"
+(   17) !     Explicit arguments :
+(   18) !     --------------------
+(   19) !     KF_UV_G      - global number of spectral u-v fields
+(   20) !     KF_SCALARS_G - global number of scalar spectral fields
+(   21) !     KF_GP        - total number of output gridpoint fields
+(   22) !     KF_FS        - total number of fields in fourier space
+(   23) !     KF_UV        - local number of spectral u-v fields
+(   24) !     KF_SCALARS   - local number of scalar spectral fields
+(   25) !     PSPVOR(:,:)  - spectral vorticity
+(   26) !     PSPDIV(:,:)  - spectral divergence
+(   27) !     PSPSCALAR(:,:) - spectral scalarvalued fields
+(   28) !     KVSETUV(:)  - indicating which 'b-set' in spectral space owns a
+(   29) !                   vor/div field. Equivalant to NBSETLEV in the IFS.
+(   30) !                   The length of KVSETUV should be the GLOBAL number
+(   31) !                   of u/v fields which is the dimension of u and v releated
+(   32) !                   fields in grid-point space.
+(   33) !     KVESETSC(:) - indicating which 'b-set' in spectral space owns a
+(   34) !                   scalar field. As for KVSETUV this argument is required
+(   35) !                   if the total number of processors is greater than
+(   36) !                   the number of processors used for distribution in
+(   37) !                   spectral wave space.
+(   38) !     PGP(:,:,:)  - gridpoint fields
+(   39) # 40 "dir_trans_ctlad_mod.F90"
+(   40) !                  The ordering of the output fields is as follows (all
+(   41) !                  parts are optional depending on the input switches):
+(   42) # 43 "dir_trans_ctlad_mod.F90"
+(   43) !       u             : KF_UV_G fields
+(   44) !       v             : KF_UV_G fields
+(   45) !       scalar fields : KF_SCALARS_G fields
+(   46) # 47 "dir_trans_ctlad_mod.F90"
+(   47) !     Method.
+(   48) !     -------
+(   49) # 50 "dir_trans_ctlad_mod.F90"
+(   50) !     Externals.  SHUFFLE     - reshuffle fields for load balancing
+(   51) !     ----------  FIELD_SPLIT - split fields in NPROMATR packets
+(   52) !                 LTDIR_CTLAD   - control of Legendre transform
+(   53) !                 FTDIR_CTLAD   - control of Fourier transform
+(   54) # 55 "dir_trans_ctlad_mod.F90"
+(   55) !     Author.
+(   56) !     -------
+(   57) !        Mats Hamrud *ECMWF*
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:26      page 6
+
+(   58) # 59 "dir_trans_ctlad_mod.F90"
+(   59) !     Modifications.
+(   60) !     --------------
+(   61) !        Original : 01-01-03
+(   62) # 63 "dir_trans_ctlad_mod.F90"
+(   63) !     ------------------------------------------------------------------
+(   64) # 65 "dir_trans_ctlad_mod.F90"
+(   65) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   66) USE TPM_GEN         ,ONLY : NPROMATR
+(   67) !USE TPM_TRANS
+(   68) !USE TPM_DISTR
+(   69) # 70 "dir_trans_ctlad_mod.F90"
+(   70) USE SHUFFLE_MOD     ,ONLY : SHUFFLE
+(   71) USE FIELD_SPLIT_MOD ,ONLY : FIELD_SPLIT
+(   72) USE LTDIR_CTLAD_MOD ,ONLY : LTDIR_CTLAD
+(   73) USE FTDIR_CTLAD_MOD ,ONLY : FTDIR_CTLAD
+(   74) !
+(   75) # 76 "dir_trans_ctlad_mod.F90"
+(   76) IMPLICIT NONE
+(   77) # 78 "dir_trans_ctlad_mod.F90"
+(   78) ! Declaration of arguments
+(   79) # 80 "dir_trans_ctlad_mod.F90"
+(   80) INTEGER(KIND=JPIM), INTENT(IN) :: KF_UV_G
+(   81) INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCALARS_G
+(   82) INTEGER(KIND=JPIM), INTENT(IN) :: KF_GP
+(   83) INTEGER(KIND=JPIM), INTENT(IN) :: KF_FS
+(   84) INTEGER(KIND=JPIM), INTENT(IN) :: KF_UV
+(   85) INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCALARS
+(   86) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPVOR(:,:)
+(   87) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPDIV(:,:)
+(   88) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPSCALAR(:,:)
+(   89) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPSC3A(:,:,:)
+(   90) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPSC3B(:,:,:)
+(   91) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(INOUT) :: PSPSC2(:,:)
+(   92) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)    :: KVSETUV(:)
+(   93) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)    :: KVSETSC(:)
+(   94) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)    :: KVSETSC3A(:)
+(   95) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)    :: KVSETSC3B(:)
+(   96) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)    :: KVSETSC2(:)
+(   97) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT)   :: PGP(:,:,:)
+(   98) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT)   :: PGPUV(:,:,:,:)
+(   99) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT)   :: PGP3A(:,:,:,:)
+(  100) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT)   :: PGP3B(:,:,:,:)
+(  101) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT)   :: PGP2(:,:,:)
+(  102) # 103 "dir_trans_ctlad_mod.F90"
+(  103) ! Local variables
+(  104) # 105 "dir_trans_ctlad_mod.F90"
+(  105) INTEGER(KIND=JPIM) :: IPTRGP(KF_GP),IPTRSPUV(NPROMATR),IPTRSPSC(NPROMATR)
+(  106) INTEGER(KIND=JPIM) :: ISHFUV_G(KF_GP),ISHFSC_G(KF_GP)
+(  107) INTEGER(KIND=JPIM) :: IVSETUV(KF_GP),IVSETSC(KF_GP)
+(  108) INTEGER(KIND=JPIM) :: IBLKS,JBLK,ISTUV_G,IENUV_G
+(  109) INTEGER(KIND=JPIM) :: IF_UV_G,IF_UV,ISTUV,IF_SCALARS,IF_SCALARS_G,IF_FS,IF_GP
+(  110) INTEGER(KIND=JPIM) :: JFLD,ISTSC_G,IENSC_G,ISTSC,IENSC,IENUV,IF_GPB
+(  111) # 113 "dir_trans_ctlad_mod.F90"
+(  113) !     ------------------------------------------------------------------
+(  114) # 115 "dir_trans_ctlad_mod.F90"
+(  115) ! Perform transform
+(  116) # 117 "dir_trans_ctlad_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:26      page 7
+
+(  117) IF_GPB = 2*KF_UV_G+KF_SCALARS_G
+(  118) IF(NPROMATR > 0 .AND. IF_GPB > NPROMATR) THEN
+(  119) # 120 "dir_trans_ctlad_mod.F90"
+(  120)   ! Fields to be split into packets
+(  121) # 122 "dir_trans_ctlad_mod.F90"
+(  122)   CALL SHUFFLE(KF_UV_G,KF_SCALARS_G,ISHFUV_G,IVSETUV,ISHFSC_G,IVSETSC,&
+(  123)  & KVSETUV,KVSETSC)
+(  124) # 125 "dir_trans_ctlad_mod.F90"
+(  125)   IBLKS=(IF_GPB-1)/NPROMATR+1
+(  126) # 127 "dir_trans_ctlad_mod.F90"
+(  127)   DO JBLK=1,IBLKS
+(  128)   
+(  129)     CALL FIELD_SPLIT(JBLK,KF_GP,KF_UV_G,IVSETUV,IVSETSC,&
+(  130)      & ISTUV_G,IENUV_G,IF_UV_G,ISTSC_G,IENSC_G,IF_SCALARS_G,&
+(  131)      & ISTUV,IENUV,IF_UV,ISTSC,IENSC,IF_SCALARS)
+(  132) # 133 "dir_trans_ctlad_mod.F90"
+(  133)     IF_FS = 2*IF_UV + IF_SCALARS
+(  134)     IF_GP = 2*IF_UV_G+IF_SCALARS_G
+(  135)     DO JFLD=1,IF_UV_G
+(  136)       IPTRGP(JFLD) = ISHFUV_G(ISTUV_G+JFLD-1)
+(  137)       IPTRGP(JFLD+IF_UV_G) = KF_UV_G+ISHFUV_G(ISTUV_G+JFLD-1)
+(  138)     ENDDO
+(  139)     DO JFLD=1,IF_SCALARS_G
+(  140)       IPTRGP(JFLD+2*IF_UV_G) = 2*KF_UV_G+ISHFSC_G(ISTSC_G+JFLD-1)
+(  141)     ENDDO
+(  142)     DO JFLD=1,IF_UV
+(  143)       IPTRSPUV(JFLD) = ISTUV+JFLD-1
+(  144)     ENDDO
+(  145)     DO JFLD=1,IF_SCALARS
+(  146)       IPTRSPSC(JFLD) = ISTSC+JFLD-1
+(  147)     ENDDO
+(  148) # 149 "dir_trans_ctlad_mod.F90"
+(  149)     CALL LTDIR_CTLAD(IF_FS,IF_UV,IF_SCALARS, &
+(  150)      & PSPVOR=PSPVOR,PSPDIV=PSPDIV,PSPSCALAR=PSPSCALAR,&
+(  151)      & KFLDPTRUV=IPTRSPUV,KFLDPTRSC=IPTRSPSC)
+(  152)     IF(IF_UV_G > 0 .AND. IF_SCALARS_G > 0) THEN
+(  153)       CALL FTDIR_CTLAD(IF_UV_G,IF_SCALARS_G,IF_GP,IF_FS,&
+(  154)        & KVSETUV=IVSETUV(ISTUV_G:IENUV_G),&
+(  155)        & KVSETSC=IVSETSC(ISTSC_G:IENSC_G),KPTRGP=IPTRGP,PGP=PGP)
+(  156)     ELSEIF(IF_UV_G > 0) THEN
+(  157)       CALL FTDIR_CTLAD(IF_UV_G,IF_SCALARS_G,IF_GP,IF_FS,&
+(  158)        & KVSETUV=IVSETUV(ISTUV_G:IENUV_G),&
+(  159)        & KPTRGP=IPTRGP,PGP=PGP)
+(  160)     ELSEIF(IF_SCALARS_G > 0) THEN
+(  161)       CALL FTDIR_CTLAD(IF_UV_G,IF_SCALARS_G,IF_GP,IF_FS,&
+(  162)        & KVSETSC=IVSETSC(ISTSC_G:IENSC_G),KPTRGP=IPTRGP,PGP=PGP)
+(  163)     ENDIF
+(  164)   ENDDO
+(  165) # 166 "dir_trans_ctlad_mod.F90"
+(  166) ELSE
+(  167) # 168 "dir_trans_ctlad_mod.F90"
+(  168)   ! No splitting of fields, transform done in one go
+(  169) # 170 "dir_trans_ctlad_mod.F90"
+(  170)   CALL LTDIR_CTLAD(KF_FS,KF_UV,KF_SCALARS, &
+(  171)    &PSPVOR=PSPVOR,PSPDIV=PSPDIV,PSPSCALAR=PSPSCALAR,&
+(  172)    &PSPSC3A=PSPSC3A,PSPSC3B=PSPSC3B,PSPSC2=PSPSC2)
+(  173) # 174 "dir_trans_ctlad_mod.F90"
+(  174)   CALL FTDIR_CTLAD(KF_UV_G,KF_SCALARS_G,KF_GP,KF_FS,&
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:26      page 8
+
+(  175)    & KVSETUV=KVSETUV,KVSETSC=KVSETSC,&
+(  176)    & KVSETSC3A=KVSETSC3A,KVSETSC3B=KVSETSC3B,KVSETSC2=KVSETSC2,&
+(  177)    & PGP=PGP,PGPUV=PGPUV,PGP3A=PGP3A,PGP3B=PGP3B,PGP2=PGP2)
+(  178) # 179 "dir_trans_ctlad_mod.F90"
+(  179) ENDIF
+(  180) # 181 "dir_trans_ctlad_mod.F90"
+(  181) !     ------------------------------------------------------------------
+(  182) # 183 "dir_trans_ctlad_mod.F90"
+(  183) END SUBROUTINE DIR_TRANS_CTLAD
+(  184) END MODULE DIR_TRANS_CTLAD_MOD

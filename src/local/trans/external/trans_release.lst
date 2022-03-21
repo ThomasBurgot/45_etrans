@@ -1,0 +1,190 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: trans_release.F90
+
+(    1) SUBROUTINE TRANS_RELEASE(KRESOL)
+(    2) 
+(    3) !**** *TRANS_RELEASE* - release a spectral resolution
+(    4) 
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !      Release all arrays related to a given resolution tag
+(    8) 
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL TRANS_RELEASE
+(   12) 
+(   13) !     Explicit arguments : KRESOL : resolution tag
+(   14) !     --------------------
+(   15) 
+(   16) !     Method.
+(   17) !     -------
+(   18) 
+(   19) !     Externals.  None
+(   20) !     ----------
+(   21) 
+(   22) !     Author.
+(   23) !     -------
+(   24) !        R. El Khatib *METEO-FRANCE*
+(   25) 
+(   26) !     Modifications.
+(   27) !     --------------
+(   28) !        Original : 09-Jul-2013
+(   29) 
+(   30) !     ------------------------------------------------------------------
+(   31) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 2
+
+(   32) USE PARKIND1  ,ONLY : JPIM
+(   33) 
+(   34) !ifndef INTERFACE
+(   35) 
+(   36) USE DEALLOC_RESOL_MOD   ,ONLY : DEALLOC_RESOL
+(   37) !
+(   38) 
+(   39) IMPLICIT NONE
+(   40) 
+(   41) INTEGER(KIND=JPIM),INTENT(IN) :: KRESOL
+(   42) 
+(   43) !endif INTERFACE
+(   44) 
+(   45) !     ------------------------------------------------------------------
+(   46) 
+(   47) CALL DEALLOC_RESOL(KRESOL)
+(   48) 
+(   49) !     ------------------------------------------------------------------
+(   50) 
+(   51) END SUBROUTINE TRANS_RELEASE
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:22      page 3
+
+(    1) # 1 "trans_release.F90"
+(    1) SUBROUTINE TRANS_RELEASE(KRESOL)
+(    2) # 3 "trans_release.F90"
+(    3) !**** *TRANS_RELEASE* - release a spectral resolution
+(    4) # 5 "trans_release.F90"
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !      Release all arrays related to a given resolution tag
+(    8) # 9 "trans_release.F90"
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL TRANS_RELEASE
+(   12) # 13 "trans_release.F90"
+(   13) !     Explicit arguments : KRESOL : resolution tag
+(   14) !     --------------------
+(   15) # 16 "trans_release.F90"
+(   16) !     Method.
+(   17) !     -------
+(   18) # 19 "trans_release.F90"
+(   19) !     Externals.  None
+(   20) !     ----------
+(   21) # 22 "trans_release.F90"
+(   22) !     Author.
+(   23) !     -------
+(   24) !        R. El Khatib *METEO-FRANCE*
+(   25) # 26 "trans_release.F90"
+(   26) !     Modifications.
+(   27) !     --------------
+(   28) !        Original : 09-Jul-2013
+(   29) # 30 "trans_release.F90"
+(   30) !     ------------------------------------------------------------------
+(   31) # 32 "trans_release.F90"
+(   32) USE PARKIND1  ,ONLY : JPIM
+(   33) # 34 "trans_release.F90"
+(   34) !ifndef INTERFACE
+(   35) # 36 "trans_release.F90"
+(   36) USE DEALLOC_RESOL_MOD   ,ONLY : DEALLOC_RESOL
+(   37) !
+(   38) # 39 "trans_release.F90"
+(   39) IMPLICIT NONE
+(   40) # 41 "trans_release.F90"
+(   41) INTEGER(KIND=JPIM),INTENT(IN) :: KRESOL
+(   42) # 43 "trans_release.F90"
+(   43) !endif INTERFACE
+(   44) # 45 "trans_release.F90"
+(   45) !     ------------------------------------------------------------------
+(   46) # 47 "trans_release.F90"
+(   47) CALL DEALLOC_RESOL(KRESOL)
+(   48) # 49 "trans_release.F90"
+(   49) !     ------------------------------------------------------------------
+(   50) # 51 "trans_release.F90"
+(   51) END SUBROUTINE TRANS_RELEASE

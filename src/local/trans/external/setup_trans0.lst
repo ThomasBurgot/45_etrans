@@ -1,0 +1,573 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:23      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: setup_trans0.F90
+
+(    1) SUBROUTINE SETUP_TRANS0(KOUT,KERR,KPRINTLEV,KMAX_RESOL,KPROMATR,&
+(    2) &                       KPRGPNS,KPRGPEW,KPRTRW,KCOMBFLEN,&
+(    3) &                       LDMPOFF,LDSYNC_TRANS,KTRANS_SYNC_LEVEL,&
+(    4) &                       LDEQ_REGIONS,K_REGIONS_NS,K_REGIONS_EW,K_REGIONS,&
+(    5) &                       PRAD,LDALLOPERM,LDALLOPERM2)
+(    6) 
+(    7) !**** *SETUP_TRANS0* - General setup routine for transform package
+(    8) 
+(    9) !     Purpose.
+(   10) !     --------
+(   11) !     Resolution independent part of setup of transform package
+(   12) !     Has to be called BEFORE SETUP_TRANS
+(   13) 
+(   14) !**   Interface.
+(   15) !     ----------
+(   16) !     CALL SETUP_TRANS0(...)
+(   17) 
+(   18) !     Explicit arguments : All arguments are optional, [..] default value
+(   19) !     -------------------
+(   20) !     KOUT - Unit number for listing output [6]
+(   21) !     KERR - Unit number for error messages [0]
+(   22) !     KPRINTLEV - level of output to KOUT, 0->no output,1->normal,2->debug [0]
+(   23) !     KMAX_RESOL - maximum number of different resolutions for this run [1]
+(   24) !     KPRGPNS - splitting level in N-S direction in grid-point space [1]
+(   25) !     KPRGPEW - splitting level in E-W direction in grid-point space [1]
+(   26) !     KPRTRW  - splitting level in wave direction in spectral space [1]
+(   27) !     KCOMBFLEN - Size of communication buffer [1800000 (*8bytes) ]
+(   28) !     LDMPOFF - switch off message passing [false]
+(   29) !     LDSYNC_TRANS - switch to activate barriers in trmtol trltom [false]
+(   30) !     KTRANS_SYNC_LEVEL - use of synchronization/blocking [0]
+(   31) !     LDEQ_REGIONS - true if new eq_regions partitioning [false]
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:23      page 2
+
+(   32) !     K_REGIONS    - Number of regions (1D or 2D partitioning)
+(   33) !     K_REGIONS_NS - Maximum number of NS partitions
+(   34) !     K_REGIONS_EW - Maximum number of EW partitions
+(   35) !     PRAD         - Radius of the planet
+(   36) !     LDALLOPERM  - Allocate certain arrays permanently
+(   37) !     The total number of (MPI)-processors has to be equal to KPRGPNS*KPRGPEW
+(   38) 
+(   39) !     Method.
+(   40) !     -------
+(   41) 
+(   42) !     Externals.  SUMP_TRANS0 - initial setup routine
+(   43) !     ----------
+(   44) 
+(   45) !     Author.
+(   46) !     -------
+(   47) !        Mats Hamrud *ECMWF*
+(   48) 
+(   49) !     Modifications.
+(   50) !     --------------
+(   51) !        Original : 00-03-03
+(   52) !        R. El Khatib 03-01-24 LDMPOFF
+(   53) !        G. Mozdzynski 2006-09-13 LDEQ_REGIONS
+(   54) !        N. Wedi  2009-11-30 add radius
+(   55) 
+(   56) !     ------------------------------------------------------------------
+(   57) 
+(   58) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   59) 
+(   60) !ifndef INTERFACE
+(   61) 
+(   62) USE TPM_GEN         ,ONLY : NERR, NOUT, LMPOFF, LSYNC_TRANS, NTRANS_SYNC_LEVEL, MSETUP0, &
+(   63)      &                      NMAX_RESOL, NPRINTLEV, NPROMATR, LALLOPERM, LALLOPERM2
+(   64) USE TPM_DISTR       ,ONLY : LEQ_REGIONS, NCOMBFLEN, NPRGPEW,NPRGPNS, NPRTRW, NPRTRV, MYSETV
+(   65) USE TPM_CONSTANTS   ,ONLY : RA
+(   66) USE MPL_MODULE
+(   67) 
+(   68) USE SUMP_TRANS0_MOD ,ONLY : SUMP_TRANS0
+(   69) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   70) USE EQ_REGIONS_MOD  ,ONLY : N_REGIONS, N_REGIONS_EW, N_REGIONS_NS
+(   71) #ifdef _OPENACC
+(   72) use openacc
+(   73) #endif
+(   74) 
+(   75) !endif INTERFACE
+(   76) 
+(   77) IMPLICIT NONE
+(   78) 
+(   79) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN)  :: KOUT,KERR,KPRINTLEV,KMAX_RESOL,KPROMATR
+(   80) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN)  :: KPRGPNS,KPRGPEW,KPRTRW,KCOMBFLEN
+(   81) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDMPOFF
+(   82) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDSYNC_TRANS
+(   83) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN)  :: KTRANS_SYNC_LEVEL
+(   84) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDEQ_REGIONS
+(   85) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDALLOPERM
+(   86) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDALLOPERM2
+(   87) REAL(KIND=JPRB)    ,OPTIONAL,INTENT(IN)  :: PRAD
+(   88) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT) :: K_REGIONS(:)
+(   89) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT) :: K_REGIONS_NS
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:23      page 3
+
+(   90) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT) :: K_REGIONS_EW
+(   91) 
+(   92) !ifndef INTERFACE
+(   93) 
+(   94) LOGICAL :: LLP1,LLP2
+(   95) 
+(   96) !     ------------------------------------------------------------------
+(   97) 
+(   98) 
+(   99) IF (PRESENT (LDMPOFF)) LMPOFF = LDMPOFF
+(  100) 
+(  101) IF(MSETUP0 /= 0) THEN
+(  102) !gr  CALL ABORT_TRANS('SETUP_TRANS0: SETUP_TRANS0 MAY ONLY BE CALLED ONCE')
+(  103) ENDIF
+(  104) 
+(  105) ! Default values
+(  106) 
+(  107) NOUT = 6
+(  108) NERR = 0
+(  109) NPRINTLEV = 0
+(  110) NMAX_RESOL = 1
+(  111) NPRGPNS = 1
+(  112) NPRGPEW = 1
+(  113) NPRTRW = 1
+(  114) N_REGIONS_NS=1
+(  115) N_REGIONS_EW=1
+(  116) NPROMATR = 0
+(  117) NCOMBFLEN = 1800000
+(  118) LMPOFF = .FALSE.
+(  119) LSYNC_TRANS=.FALSE.
+(  120) NTRANS_SYNC_LEVEL=0
+(  121) LEQ_REGIONS=.FALSE.
+(  122) RA=6371229._JPRBT
+(  123) LALLOPERM=.FALSE.
+(  124) LALLOPERM2=.FALSE.
+(  125) 
+(  126) ! Optional arguments
+(  127) 
+(  128) IF(PRESENT(KOUT)) THEN
+(  129)   NOUT = KOUT
+(  130) ENDIF
+(  131) IF(PRESENT(KERR)) THEN
+(  132)   NERR = KERR
+(  133) ENDIF
+(  134) IF(PRESENT(KPRINTLEV)) THEN
+(  135)   NPRINTLEV = KPRINTLEV
+(  136) ENDIF
+(  137) 
+(  138) LLP1 = NPRINTLEV>0
+(  139) LLP2 = NPRINTLEV>1
+(  140) IF(LLP1) WRITE(NOUT,*) '=== ENTER ROUTINE SETUP_TRANS0 ==='
+(  141) 
+(  142) IF(PRESENT(KMAX_RESOL))THEN
+(  143)   NMAX_RESOL = KMAX_RESOL
+(  144) ENDIF
+(  145) IF(PRESENT(KPROMATR))THEN
+(  146)   IF(MOD(KPROMATR,2) /= 0) THEN
+(  147)     CALL ABORT_TRANS('SETUP_TRANS0: KPROMATR HAS TO BE MULTIPLE OF 2')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:23      page 4
+
+(  148)   ENDIF
+(  149)   NPROMATR = KPROMATR
+(  150) ENDIF
+(  151) IF(PRESENT(KPRGPNS)) THEN
+(  152)   NPRGPNS = KPRGPNS
+(  153) ENDIF
+(  154) IF(PRESENT(KPRGPEW)) THEN
+(  155)   NPRGPEW = KPRGPEW
+(  156) ENDIF
+(  157) IF(PRESENT(KPRTRW)) THEN
+(  158)   NPRTRW = KPRTRW
+(  159) ENDIF
+(  160) IF(PRESENT(KCOMBFLEN)) THEN
+(  161)   NCOMBFLEN = KCOMBFLEN
+(  162) ENDIF
+(  163) IF(PRESENT(LDMPOFF)) THEN
+(  164)   LMPOFF = LDMPOFF
+(  165) ENDIF
+(  166) IF(PRESENT(LDSYNC_TRANS)) THEN
+(  167)   LSYNC_TRANS = LDSYNC_TRANS
+(  168) ENDIF
+(  169) IF(PRESENT(KTRANS_SYNC_LEVEL)) THEN
+(  170)   NTRANS_SYNC_LEVEL = KTRANS_SYNC_LEVEL
+(  171) ENDIF
+(  172) IF(PRESENT(LDEQ_REGIONS)) THEN
+(  173)   LEQ_REGIONS = LDEQ_REGIONS
+(  174) ENDIF
+(  175) 
+(  176) ! Initial setup
+(  177) CALL SUMP_TRANS0
+(  178) 
+(  179) IF(PRESENT(K_REGIONS_NS)) THEN
+(  180)   K_REGIONS_NS = N_REGIONS_NS
+(  181) ENDIF
+(  182) 
+(  183) IF(PRESENT(K_REGIONS_EW)) THEN
+(  184)   K_REGIONS_EW = N_REGIONS_EW
+(  185) ENDIF
+(  186) 
+(  187) IF(PRESENT(K_REGIONS)) THEN
+(  188)   IF(UBOUND(K_REGIONS,1) < N_REGIONS_NS) THEN
+(  189)     CALL ABORT_TRANS('SETUP_TRANS0: K_REGIONS TOO SMALL')
+(  190)   ELSE
+(  191)     K_REGIONS(1:N_REGIONS_NS)=N_REGIONS(1:N_REGIONS_NS)
+(  192)   ENDIF
+(  193) ENDIF
+(  194) 
+(  195) IF(PRESENT(PRAD)) THEN
+(  196)   RA=PRAD
+(  197) ENDIF
+(  198) 
+(  199) IF(PRESENT(LDALLOPERM)) THEN
+(  200)   LALLOPERM=LDALLOPERM
+(  201) ENDIF
+(  202) 
+(  203) IF(PRESENT(LDALLOPERM2)) THEN
+(  204)   LALLOPERM2=LDALLOPERM2
+(  205) ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:23      page 5
+
+(  206) 
+(  207) ! Setup level 0 complete
+(  208) MSETUP0 = 1
+(  209) 
+(  210) !     ------------------------------------------------------------------
+(  211) 
+(  212) !endif INTERFACE
+(  213) 
+(  214) END SUBROUTINE SETUP_TRANS0
+(  215) 
+(  216) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:23      page 6
+
+(    1) # 1 "setup_trans0.F90"
+(    1) SUBROUTINE SETUP_TRANS0(KOUT,KERR,KPRINTLEV,KMAX_RESOL,KPROMATR,&
+(    2) &                       KPRGPNS,KPRGPEW,KPRTRW,KCOMBFLEN,&
+(    3) &                       LDMPOFF,LDSYNC_TRANS,KTRANS_SYNC_LEVEL,&
+(    4) &                       LDEQ_REGIONS,K_REGIONS_NS,K_REGIONS_EW,K_REGIONS,&
+(    5) &                       PRAD,LDALLOPERM,LDALLOPERM2)
+(    6) # 7 "setup_trans0.F90"
+(    7) !**** *SETUP_TRANS0* - General setup routine for transform package
+(    8) # 9 "setup_trans0.F90"
+(    9) !     Purpose.
+(   10) !     --------
+(   11) !     Resolution independent part of setup of transform package
+(   12) !     Has to be called BEFORE SETUP_TRANS
+(   13) # 14 "setup_trans0.F90"
+(   14) !**   Interface.
+(   15) !     ----------
+(   16) !     CALL SETUP_TRANS0(...)
+(   17) # 18 "setup_trans0.F90"
+(   18) !     Explicit arguments : All arguments are optional, [..] default value
+(   19) !     -------------------
+(   20) !     KOUT - Unit number for listing output [6]
+(   21) !     KERR - Unit number for error messages [0]
+(   22) !     KPRINTLEV - level of output to KOUT, 0->no output,1->normal,2->debug [0]
+(   23) !     KMAX_RESOL - maximum number of different resolutions for this run [1]
+(   24) !     KPRGPNS - splitting level in N-S direction in grid-point space [1]
+(   25) !     KPRGPEW - splitting level in E-W direction in grid-point space [1]
+(   26) !     KPRTRW  - splitting level in wave direction in spectral space [1]
+(   27) !     KCOMBFLEN - Size of communication buffer [1800000 (*8bytes) ]
+(   28) !     LDMPOFF - switch off message passing [false]
+(   29) !     LDSYNC_TRANS - switch to activate barriers in trmtol trltom [false]
+(   30) !     KTRANS_SYNC_LEVEL - use of synchronization/blocking [0]
+(   31) !     LDEQ_REGIONS - true if new eq_regions partitioning [false]
+(   32) !     K_REGIONS    - Number of regions (1D or 2D partitioning)
+(   33) !     K_REGIONS_NS - Maximum number of NS partitions
+(   34) !     K_REGIONS_EW - Maximum number of EW partitions
+(   35) !     PRAD         - Radius of the planet
+(   36) !     LDALLOPERM  - Allocate certain arrays permanently
+(   37) !     The total number of (MPI)-processors has to be equal to KPRGPNS*KPRGPEW
+(   38) # 39 "setup_trans0.F90"
+(   39) !     Method.
+(   40) !     -------
+(   41) # 42 "setup_trans0.F90"
+(   42) !     Externals.  SUMP_TRANS0 - initial setup routine
+(   43) !     ----------
+(   44) # 45 "setup_trans0.F90"
+(   45) !     Author.
+(   46) !     -------
+(   47) !        Mats Hamrud *ECMWF*
+(   48) # 49 "setup_trans0.F90"
+(   49) !     Modifications.
+(   50) !     --------------
+(   51) !        Original : 00-03-03
+(   52) !        R. El Khatib 03-01-24 LDMPOFF
+(   53) !        G. Mozdzynski 2006-09-13 LDEQ_REGIONS
+(   54) !        N. Wedi  2009-11-30 add radius
+(   55) # 56 "setup_trans0.F90"
+(   56) !     ------------------------------------------------------------------
+(   57) # 58 "setup_trans0.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:23      page 7
+
+(   58) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   59) # 60 "setup_trans0.F90"
+(   60) !ifndef INTERFACE
+(   61) # 62 "setup_trans0.F90"
+(   62) USE TPM_GEN         ,ONLY : NERR, NOUT, LMPOFF, LSYNC_TRANS, NTRANS_SYNC_LEVEL, MSETUP0, &
+(   63)      &                      NMAX_RESOL, NPRINTLEV, NPROMATR, LALLOPERM, LALLOPERM2
+(   64) USE TPM_DISTR       ,ONLY : LEQ_REGIONS, NCOMBFLEN, NPRGPEW,NPRGPNS, NPRTRW, NPRTRV, MYSETV
+(   65) USE TPM_CONSTANTS   ,ONLY : RA
+(   66) USE MPL_MODULE
+(   67) # 68 "setup_trans0.F90"
+(   68) USE SUMP_TRANS0_MOD ,ONLY : SUMP_TRANS0
+(   69) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   70) USE EQ_REGIONS_MOD  ,ONLY : N_REGIONS, N_REGIONS_EW, N_REGIONS_NS
+(   71) # 72 "setup_trans0.F90"
+(   72) use openacc
+(   73) # 75 "setup_trans0.F90"
+(   75) !endif INTERFACE
+(   76) # 77 "setup_trans0.F90"
+(   77) IMPLICIT NONE
+(   78) # 79 "setup_trans0.F90"
+(   79) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN)  :: KOUT,KERR,KPRINTLEV,KMAX_RESOL,KPROMATR
+(   80) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN)  :: KPRGPNS,KPRGPEW,KPRTRW,KCOMBFLEN
+(   81) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDMPOFF
+(   82) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDSYNC_TRANS
+(   83) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(IN)  :: KTRANS_SYNC_LEVEL
+(   84) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDEQ_REGIONS
+(   85) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDALLOPERM
+(   86) LOGICAL            ,OPTIONAL,INTENT(IN)  :: LDALLOPERM2
+(   87) REAL(KIND=JPRB)    ,OPTIONAL,INTENT(IN)  :: PRAD
+(   88) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT) :: K_REGIONS(:)
+(   89) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT) :: K_REGIONS_NS
+(   90) INTEGER(KIND=JPIM) ,OPTIONAL,INTENT(OUT) :: K_REGIONS_EW
+(   91) # 92 "setup_trans0.F90"
+(   92) !ifndef INTERFACE
+(   93) # 94 "setup_trans0.F90"
+(   94) LOGICAL :: LLP1,LLP2
+(   95) # 96 "setup_trans0.F90"
+(   96) !     ------------------------------------------------------------------
+(   97) # 99 "setup_trans0.F90"
+(   99) IF (PRESENT (LDMPOFF)) LMPOFF = LDMPOFF
+(  100) # 101 "setup_trans0.F90"
+(  101) IF(MSETUP0 /= 0) THEN
+(  102) !gr  CALL ABORT_TRANS('SETUP_TRANS0: SETUP_TRANS0 MAY ONLY BE CALLED ONCE')
+(  103) ENDIF
+(  104) # 105 "setup_trans0.F90"
+(  105) ! Default values
+(  106) # 107 "setup_trans0.F90"
+(  107) NOUT = 6
+(  108) NERR = 0
+(  109) NPRINTLEV = 0
+(  110) NMAX_RESOL = 1
+(  111) NPRGPNS = 1
+(  112) NPRGPEW = 1
+(  113) NPRTRW = 1
+(  114) N_REGIONS_NS=1
+(  115) N_REGIONS_EW=1
+(  116) NPROMATR = 0
+(  117) NCOMBFLEN = 1800000
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:23      page 8
+
+(  118) LMPOFF = .FALSE.
+(  119) LSYNC_TRANS=.FALSE.
+(  120) NTRANS_SYNC_LEVEL=0
+(  121) LEQ_REGIONS=.FALSE.
+(  122) RA=6371229._JPRBT
+(  123) LALLOPERM=.FALSE.
+(  124) LALLOPERM2=.FALSE.
+(  125) # 126 "setup_trans0.F90"
+(  126) ! Optional arguments
+(  127) # 128 "setup_trans0.F90"
+(  128) IF(PRESENT(KOUT)) THEN
+(  129)   NOUT = KOUT
+(  130) ENDIF
+(  131) IF(PRESENT(KERR)) THEN
+(  132)   NERR = KERR
+(  133) ENDIF
+(  134) IF(PRESENT(KPRINTLEV)) THEN
+(  135)   NPRINTLEV = KPRINTLEV
+(  136) ENDIF
+(  137) # 138 "setup_trans0.F90"
+(  138) LLP1 = NPRINTLEV>0
+(  139) LLP2 = NPRINTLEV>1
+(  140) IF(LLP1) WRITE(NOUT,*) '=== ENTER ROUTINE SETUP_TRANS0 ==='
+(  141) # 142 "setup_trans0.F90"
+(  142) IF(PRESENT(KMAX_RESOL))THEN
+(  143)   NMAX_RESOL = KMAX_RESOL
+(  144) ENDIF
+(  145) IF(PRESENT(KPROMATR))THEN
+(  146)   IF(MOD(KPROMATR,2) /= 0) THEN
+(  147)     CALL ABORT_TRANS('SETUP_TRANS0: KPROMATR HAS TO BE MULTIPLE OF 2')
+(  148)   ENDIF
+(  149)   NPROMATR = KPROMATR
+(  150) ENDIF
+(  151) IF(PRESENT(KPRGPNS)) THEN
+(  152)   NPRGPNS = KPRGPNS
+(  153) ENDIF
+(  154) IF(PRESENT(KPRGPEW)) THEN
+(  155)   NPRGPEW = KPRGPEW
+(  156) ENDIF
+(  157) IF(PRESENT(KPRTRW)) THEN
+(  158)   NPRTRW = KPRTRW
+(  159) ENDIF
+(  160) IF(PRESENT(KCOMBFLEN)) THEN
+(  161)   NCOMBFLEN = KCOMBFLEN
+(  162) ENDIF
+(  163) IF(PRESENT(LDMPOFF)) THEN
+(  164)   LMPOFF = LDMPOFF
+(  165) ENDIF
+(  166) IF(PRESENT(LDSYNC_TRANS)) THEN
+(  167)   LSYNC_TRANS = LDSYNC_TRANS
+(  168) ENDIF
+(  169) IF(PRESENT(KTRANS_SYNC_LEVEL)) THEN
+(  170)   NTRANS_SYNC_LEVEL = KTRANS_SYNC_LEVEL
+(  171) ENDIF
+(  172) IF(PRESENT(LDEQ_REGIONS)) THEN
+(  173)   LEQ_REGIONS = LDEQ_REGIONS
+(  174) ENDIF
+(  175) # 176 "setup_trans0.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:23      page 9
+
+(  176) ! Initial setup
+(  177) CALL SUMP_TRANS0
+(  178) # 179 "setup_trans0.F90"
+(  179) IF(PRESENT(K_REGIONS_NS)) THEN
+(  180)   K_REGIONS_NS = N_REGIONS_NS
+(  181) ENDIF
+(  182) # 183 "setup_trans0.F90"
+(  183) IF(PRESENT(K_REGIONS_EW)) THEN
+(  184)   K_REGIONS_EW = N_REGIONS_EW
+(  185) ENDIF
+(  186) # 187 "setup_trans0.F90"
+(  187) IF(PRESENT(K_REGIONS)) THEN
+(  188)   IF(UBOUND(K_REGIONS,1) < N_REGIONS_NS) THEN
+(  189)     CALL ABORT_TRANS('SETUP_TRANS0: K_REGIONS TOO SMALL')
+(  190)   ELSE
+(  191)     K_REGIONS(1:N_REGIONS_NS)=N_REGIONS(1:N_REGIONS_NS)
+(  192)   ENDIF
+(  193) ENDIF
+(  194) # 195 "setup_trans0.F90"
+(  195) IF(PRESENT(PRAD)) THEN
+(  196)   RA=PRAD
+(  197) ENDIF
+(  198) # 199 "setup_trans0.F90"
+(  199) IF(PRESENT(LDALLOPERM)) THEN
+(  200)   LALLOPERM=LDALLOPERM
+(  201) ENDIF
+(  202) # 203 "setup_trans0.F90"
+(  203) IF(PRESENT(LDALLOPERM2)) THEN
+(  204)   LALLOPERM2=LDALLOPERM2
+(  205) ENDIF
+(  206) # 207 "setup_trans0.F90"
+(  207) ! Setup level 0 complete
+(  208) MSETUP0 = 1
+(  209) # 210 "setup_trans0.F90"
+(  210) !     ------------------------------------------------------------------
+(  211) # 212 "setup_trans0.F90"
+(  212) !endif INTERFACE
+(  213) # 214 "setup_trans0.F90"
+(  214) END SUBROUTINE SETUP_TRANS0

@@ -1,0 +1,207 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:21      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: pre_suleg_mod.F90
+
+(    1) MODULE PRE_SULEG_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE PRE_SULEG
+(    4) USE PARKIND1  ,ONLY : JPRD, JPIM
+(    5) USE PARKIND2  ,ONLY : JPRH
+(    6) USE TPM_GEN
+(    7) USE TPM_DIM
+(    8) USE TPM_CONSTANTS
+(    9) USE TPM_DISTR
+(   10) USE TPM_FIELDS
+(   11) 
+(   12) INTEGER(KIND=JPIM) :: INM, IM, ICOUNT,JMLOC,JN
+(   13) LOGICAL :: LLP1,LLP2
+(   14) 
+(   15) 
+(   16) LLP1 = NPRINTLEV>0
+(   17) LLP2 = NPRINTLEV>1
+(   18) 
+(   19) ICOUNT = 0
+(   20) DO JMLOC=1,D%NUMP
+(   21)   IM = D%MYMS(JMLOC)
+(   22)   DO JN=IM,R%NTMAX+2
+(   23)     ICOUNT = ICOUNT+1
+(   24)   ENDDO
+(   25) ENDDO
+(   26) 
+(   27) ALLOCATE(F%REPSNM(ICOUNT))
+(   28) IF (LLP2) WRITE(NOUT,9) 'F%REPSNM  ',SIZE(F%REPSNM ),SHAPE(F%REPSNM )
+(   29) ALLOCATE(F%RN(-1:R%NTMAX+3))
+(   30) IF (LLP2) WRITE(NOUT,9) 'F%RN      ',SIZE(F%RN     ),SHAPE(F%RN     ) 
+(   31) ALLOCATE(F%RLAPIN(-1:R%NSMAX+2))
+(   32) IF (LLP2) WRITE(NOUT,9) 'F%RLAPIN  ',SIZE(F%RLAPIN ),SHAPE(F%RLAPIN ) 
+(   33) ALLOCATE(F%NLTN(-1:R%NTMAX+3))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:21      page 2
+
+(   34) IF (LLP2) WRITE(NOUT,9) 'F%NLTN    ',SIZE(F%NLTN ),SHAPE(F%NLTN ) 
+(   35) 
+(   36) ICOUNT = 0
+(   37) DO JMLOC=1,D%NUMP
+(   38)   IM = D%MYMS(JMLOC)
+(   39)   DO JN=IM,R%NTMAX+2
+(   40)     ICOUNT = ICOUNT+1
+(   41)     F%REPSNM(ICOUNT) = SQRT(REAL(JN*JN-IM*IM,JPRD)/&
+(   42)      &REAL(4*JN*JN-1,JPRD))
+(   43)   ENDDO
+(   44) ENDDO
+(   45) 
+(   46) DO JN=-1,R%NTMAX+3
+(   47)   F%RN(JN) = REAL(JN,JPRD)
+(   48)   F%NLTN(JN) = R%NTMAX+2-JN
+(   49) ENDDO
+(   50) F%RLAPIN(:)  = 0.0_JPRD
+(   51) F%RLAPIN(0)  = 0.0_JPRD
+(   52) F%RLAPIN(-1) = 0.0_JPRD
+(   53) DO JN=1,R%NSMAX+2
+(   54)   F%RLAPIN(JN)=-(REAL(RA,JPRD)*REAL(RA,JPRD)/REAL(JN*(JN+1),JPRD))
+(   55) ENDDO
+(   56) 
+(   57) !     ------------------------------------------------------------------
+(   58) 9 FORMAT(1X,'ARRAY ',A10,' ALLOCATED ',8I8)
+(   59) 
+(   60) END SUBROUTINE PRE_SULEG
+(   61) END MODULE PRE_SULEG_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:21      page 3
+
+(    1) # 1 "pre_suleg_mod.F90"
+(    1) MODULE PRE_SULEG_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE PRE_SULEG
+(    4) USE PARKIND1  ,ONLY : JPRD, JPIM
+(    5) USE PARKIND2  ,ONLY : JPRH
+(    6) USE TPM_GEN
+(    7) USE TPM_DIM
+(    8) USE TPM_CONSTANTS
+(    9) USE TPM_DISTR
+(   10) USE TPM_FIELDS
+(   11) # 12 "pre_suleg_mod.F90"
+(   12) INTEGER(KIND=JPIM) :: INM, IM, ICOUNT,JMLOC,JN
+(   13) LOGICAL :: LLP1,LLP2
+(   14) # 16 "pre_suleg_mod.F90"
+(   16) LLP1 = NPRINTLEV>0
+(   17) LLP2 = NPRINTLEV>1
+(   18) # 19 "pre_suleg_mod.F90"
+(   19) ICOUNT = 0
+(   20) DO JMLOC=1,D%NUMP
+(   21)   IM = D%MYMS(JMLOC)
+(   22)   DO JN=IM,R%NTMAX+2
+(   23)     ICOUNT = ICOUNT+1
+(   24)   ENDDO
+(   25) ENDDO
+(   26) # 27 "pre_suleg_mod.F90"
+(   27) ALLOCATE(F%REPSNM(ICOUNT))
+(   28) IF (LLP2) WRITE(NOUT,9) 'F%REPSNM  ',SIZE(F%REPSNM ),SHAPE(F%REPSNM )
+(   29) ALLOCATE(F%RN(-1:R%NTMAX+3))
+(   30) IF (LLP2) WRITE(NOUT,9) 'F%RN      ',SIZE(F%RN     ),SHAPE(F%RN     ) 
+(   31) ALLOCATE(F%RLAPIN(-1:R%NSMAX+2))
+(   32) IF (LLP2) WRITE(NOUT,9) 'F%RLAPIN  ',SIZE(F%RLAPIN ),SHAPE(F%RLAPIN ) 
+(   33) ALLOCATE(F%NLTN(-1:R%NTMAX+3))
+(   34) IF (LLP2) WRITE(NOUT,9) 'F%NLTN    ',SIZE(F%NLTN ),SHAPE(F%NLTN ) 
+(   35) # 36 "pre_suleg_mod.F90"
+(   36) ICOUNT = 0
+(   37) DO JMLOC=1,D%NUMP
+(   38)   IM = D%MYMS(JMLOC)
+(   39)   DO JN=IM,R%NTMAX+2
+(   40)     ICOUNT = ICOUNT+1
+(   41)     F%REPSNM(ICOUNT) = SQRT(REAL(JN*JN-IM*IM,JPRD)/&
+(   42)      &REAL(4*JN*JN-1,JPRD))
+(   43)   ENDDO
+(   44) ENDDO
+(   45) # 46 "pre_suleg_mod.F90"
+(   46) DO JN=-1,R%NTMAX+3
+(   47)   F%RN(JN) = REAL(JN,JPRD)
+(   48)   F%NLTN(JN) = R%NTMAX+2-JN
+(   49) ENDDO
+(   50) F%RLAPIN(:)  = 0.0_JPRD
+(   51) F%RLAPIN(0)  = 0.0_JPRD
+(   52) F%RLAPIN(-1) = 0.0_JPRD
+(   53) DO JN=1,R%NSMAX+2
+(   54)   F%RLAPIN(JN)=-(REAL(RA,JPRD)*REAL(RA,JPRD)/REAL(JN*(JN+1),JPRD))
+(   55) ENDDO
+(   56) # 57 "pre_suleg_mod.F90"
+(   57) !     ------------------------------------------------------------------
+(   58) 9 FORMAT(1X,'ARRAY ',A10,' ALLOCATED ',8I8)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:21      page 4
+
+(   59) # 60 "pre_suleg_mod.F90"
+(   60) END SUBROUTINE PRE_SULEG
+(   61) END MODULE PRE_SULEG_MOD

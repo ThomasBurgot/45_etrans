@@ -1,0 +1,484 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:00      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: trans_pnm.F90
+
+(    1) SUBROUTINE TRANS_PNM(KRESOL,KM,PRPNM,LDTRANSPOSE,LDCHEAP)
+(    2) 
+(    3) !**** *TRANS_PNM* - Compute Legendre polynomials for a given wavenember
+(    4) 
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !     Interface routine for computing Legendre polynomials for a given wavenember
+(    8) 
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL TRANS_PNM(...)
+(   12) 
+(   13) !     Explicit arguments : All arguments are optional.
+(   14) !     --------------------
+(   15) !     KRESOL   - resolution tag for which info is required ,default is the
+(   16) !                first defined resulution (input)
+(   17) !     KM       - wave number
+(   18) !     PRPNM    - Legendre polynomials
+(   19) !     LDTRANSPOSE - Legendre polynomials array is transposed
+(   20) !     LDCHEAP   - cheapest but less accurate computation
+(   21) 
+(   22) !     Method.
+(   23) !     -------
+(   24) 
+(   25) !     Externals.  SET_RESOL - set resolution
+(   26) !     ----------
+(   27) 
+(   28) !     Author.
+(   29) !     -------
+(   30) !        R. El Khatib *METEO-FRANCE*
+(   31) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:00      page 2
+
+(   32) !     Modifications.
+(   33) !     --------------
+(   34) !        Original : 22-Jan-2016 from G. Mozdzynski's getpnm
+(   35) 
+(   36) !     ------------------------------------------------------------------
+(   37) 
+(   38) USE PARKIND1  ,ONLY : JPRD, JPIM, JPRBT
+(   39) 
+(   40) !ifndef INTERFACE
+(   41) 
+(   42) USE TPM_DIM         ,ONLY : R
+(   43) USE TPM_DISTR       ,ONLY : D
+(   44) USE TPM_GEOMETRY    ,ONLY : G
+(   45) USE TPM_FIELDS      ,ONLY : F
+(   46) USE TPM_FLT         ,ONLY : S
+(   47) 
+(   48) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(   49) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   50) USE TPM_POL
+(   51) USE SUPOLF_MOD
+(   52) 
+(   53) !endif INTERFACE
+(   54) 
+(   55) IMPLICIT NONE
+(   56) 
+(   57) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+(   58) INTEGER(KIND=JPIM) ,INTENT(IN)  :: KM
+(   59) REAL(KIND=JPRBT)    ,OPTIONAL, INTENT(OUT) :: PRPNM(:,:)
+(   60) LOGICAL, OPTIONAL, INTENT(IN) :: LDTRANSPOSE
+(   61) LOGICAL, OPTIONAL, INTENT(IN) :: LDCHEAP
+(   62) 
+(   63) !ifndef INTERFACE
+(   64) 
+(   65) INTEGER(KIND=JPIM) :: IU1, IU2, IMAXN, INMAX, ICHEAP_SYM, ICHEAP_ANTISYM
+(   66) INTEGER(KIND=JPIM) :: IC, JN, JMLOC, JGL, JI
+(   67) INTEGER(KIND=JPIM) :: IA, IS, IDGLU, ILA, ILS, ISL
+(   68) REAL(KIND=JPRD), ALLOCATABLE :: ZLPOL(:)
+(   69) LOGICAL :: LLTRANSPOSE, LLCHEAP
+(   70) !     ------------------------------------------------------------------
+(   71) 
+(   72) ! Set current resolution
+(   73) IF (PRESENT(KRESOL)) THEN
+(   74)   CALL SET_RESOL(KRESOL)
+(   75) ENDIF
+(   76) 
+(   77) IF (PRESENT(LDTRANSPOSE)) THEN
+(   78)   LLTRANSPOSE=LDTRANSPOSE
+(   79) ELSE
+(   80)   LLTRANSPOSE=.FALSE.
+(   81) ENDIF
+(   82) 
+(   83) IF (PRESENT(LDCHEAP)) THEN
+(   84)   LLCHEAP=LDCHEAP
+(   85) ELSE
+(   86)   LLCHEAP=.FALSE.
+(   87) ENDIF
+(   88) IF (LLCHEAP) THEN
+(   89)   ICHEAP_SYM    =2
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:00      page 3
+
+(   90)   ICHEAP_ANTISYM=3
+(   91) ELSE
+(   92)   ICHEAP_SYM    =1
+(   93)   ICHEAP_ANTISYM=1
+(   94) ENDIF
+(   95) 
+(   96) IF (PRESENT(PRPNM)) THEN
+(   97)   IF(D%LGRIDONLY) THEN
+(   98)     CALL ABORT_TRANS('TRANS_PNM: PRPNM REQUIRED BUT LGRIDONLY=T')
+(   99)   ENDIF
+(  100) ENDIF
+(  101) 
+(  102) IU1 = UBOUND(PRPNM,1)
+(  103) IU2 = UBOUND(PRPNM,2)
+(  104) 
+(  105) IF (LLTRANSPOSE) THEN
+(  106) 
+(  107)   IF(IU2 < R%NLEI3) THEN
+(  108)     CALL ABORT_TRANS('TRANS_PNM : FIRST DIM. OF PRPNM TOO SMALL')
+(  109)   ENDIF
+(  110)   IF(IU1 < R%NTMAX-KM+3) THEN
+(  111)     CALL ABORT_TRANS('TRANS_PNM : SECOND DIM. OF PRPNM TOO SMALL')
+(  112)   ENDIF
+(  113) 
+(  114)   IF (IU2 >= R%NLEI3) THEN
+(  115)     PRPNM(:,R%NLEI3) = 0.0_JPRBT
+(  116)   ENDIF
+(  117) 
+(  118) ELSE
+(  119) 
+(  120)   IF(IU1 < R%NLEI3) THEN
+(  121)     CALL ABORT_TRANS('TRANS_PNM : FIRST DIM. OF PRPNM TOO SMALL')
+(  122)   ENDIF
+(  123)   IF(IU2 < R%NTMAX-KM+3) THEN
+(  124)     CALL ABORT_TRANS('TRANS_PNM : SECOND DIM. OF PRPNM TOO SMALL')
+(  125)   ENDIF
+(  126) 
+(  127)   IF (IU1 >= R%NLEI3) THEN
+(  128)     PRPNM(R%NLEI3,:) = 0.0_JPRBT
+(  129)   ENDIF
+(  130) 
+(  131) ENDIF
+(  132) 
+(  133) ILA = (R%NTMAX-KM+2)/2
+(  134) ILS = (R%NTMAX-KM+3)/2
+(  135) 
+(  136) CALL INI_POL(R%NTMAX+2,LDFAST=.TRUE.)
+(  137) 
+(  138) IMAXN=R%NTMAX+1
+(  139) 
+(  140) IA  = 1+MOD(R%NTMAX-KM+2,2)
+(  141) IS  = 1+MOD(R%NTMAX-KM+1,2)
+(  142) 
+(  143) ISL = MAX(R%NDGNH-G%NDGLU(KM)+1,1)
+(  144) IF (S%LSOUTHPNM) THEN
+(  145)   IDGLU = 2*MIN(R%NDGNH,G%NDGLU(KM))
+(  146) ELSE
+(  147)   IDGLU = MIN(R%NDGNH,G%NDGLU(KM))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:00      page 4
+
+(  148) ENDIF
+(  149) 
+(  150) IF(MOD(IMAXN-KM,2) == 0) THEN
+(  151)   INMAX=IMAXN+1
+(  152) ELSE
+(  153)   INMAX=IMAXN
+(  154) ENDIF
+(  155) 
+(  156) ALLOCATE(ZLPOL(0:R%NTMAX+2))
+(  157) 
+(  158) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JGL,ZLPOL,JI,JN)
+(  159) DO JGL=1,IDGLU
+(  160)   CALL SUPOLF(KM,INMAX,REAL (F%RMU(ISL+JGL-1), JPRD),ZLPOL(0:INMAX),KCHEAP=ICHEAP_ANTISYM)
+(  161)   IF (LLTRANSPOSE) THEN
+(  162)     DO JI=1,ILA
+(  163)       PRPNM(IA+(JI-1)*2,ISL+JGL-1) = ZLPOL(KM+2*(ILA-JI)+1)
+(  164)     ENDDO
+(  165)   ELSE
+(  166)     DO JI=1,ILA
+(  167)       PRPNM(ISL+JGL-1,IA+(JI-1)*2) = ZLPOL(KM+2*(ILA-JI)+1)
+(  168)     ENDDO
+(  169)   ENDIF
+(  170)   CALL SUPOLF(KM,INMAX,REAL (F%RMU(ISL+JGL-1), JPRD),ZLPOL(0:INMAX),KCHEAP=ICHEAP_SYM)
+(  171)   IF (LLTRANSPOSE) THEN
+(  172)     DO JI=1,ILS
+(  173)       PRPNM(IS+(JI-1)*2,ISL+JGL-1) = ZLPOL(KM+2*(ILS-JI))
+(  174)     ENDDO
+(  175)   ELSE
+(  176)     DO JI=1,ILS
+(  177)       PRPNM(ISL+JGL-1,IS+(JI-1)*2) = ZLPOL(KM+2*(ILS-JI))
+(  178)     ENDDO
+(  179)   ENDIF
+(  180) ENDDO
+(  181) !$OMP END PARALLEL DO
+(  182) 
+(  183) CALL END_POL
+(  184) 
+(  185) !     ------------------------------------------------------------------
+(  186) 
+(  187) !endif INTERFACE
+(  188) 
+(  189) END SUBROUTINE TRANS_PNM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:00      page 5
+
+(    1) # 1 "trans_pnm.F90"
+(    1) SUBROUTINE TRANS_PNM(KRESOL,KM,PRPNM,LDTRANSPOSE,LDCHEAP)
+(    2) # 3 "trans_pnm.F90"
+(    3) !**** *TRANS_PNM* - Compute Legendre polynomials for a given wavenember
+(    4) # 5 "trans_pnm.F90"
+(    5) !     Purpose.
+(    6) !     --------
+(    7) !     Interface routine for computing Legendre polynomials for a given wavenember
+(    8) # 9 "trans_pnm.F90"
+(    9) !**   Interface.
+(   10) !     ----------
+(   11) !     CALL TRANS_PNM(...)
+(   12) # 13 "trans_pnm.F90"
+(   13) !     Explicit arguments : All arguments are optional.
+(   14) !     --------------------
+(   15) !     KRESOL   - resolution tag for which info is required ,default is the
+(   16) !                first defined resulution (input)
+(   17) !     KM       - wave number
+(   18) !     PRPNM    - Legendre polynomials
+(   19) !     LDTRANSPOSE - Legendre polynomials array is transposed
+(   20) !     LDCHEAP   - cheapest but less accurate computation
+(   21) # 22 "trans_pnm.F90"
+(   22) !     Method.
+(   23) !     -------
+(   24) # 25 "trans_pnm.F90"
+(   25) !     Externals.  SET_RESOL - set resolution
+(   26) !     ----------
+(   27) # 28 "trans_pnm.F90"
+(   28) !     Author.
+(   29) !     -------
+(   30) !        R. El Khatib *METEO-FRANCE*
+(   31) # 32 "trans_pnm.F90"
+(   32) !     Modifications.
+(   33) !     --------------
+(   34) !        Original : 22-Jan-2016 from G. Mozdzynski's getpnm
+(   35) # 36 "trans_pnm.F90"
+(   36) !     ------------------------------------------------------------------
+(   37) # 38 "trans_pnm.F90"
+(   38) USE PARKIND1  ,ONLY : JPRD, JPIM, JPRBT
+(   39) # 40 "trans_pnm.F90"
+(   40) !ifndef INTERFACE
+(   41) # 42 "trans_pnm.F90"
+(   42) USE TPM_DIM         ,ONLY : R
+(   43) USE TPM_DISTR       ,ONLY : D
+(   44) USE TPM_GEOMETRY    ,ONLY : G
+(   45) USE TPM_FIELDS      ,ONLY : F
+(   46) USE TPM_FLT         ,ONLY : S
+(   47) # 48 "trans_pnm.F90"
+(   48) USE SET_RESOL_MOD   ,ONLY : SET_RESOL
+(   49) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   50) USE TPM_POL
+(   51) USE SUPOLF_MOD
+(   52) # 53 "trans_pnm.F90"
+(   53) !endif INTERFACE
+(   54) # 55 "trans_pnm.F90"
+(   55) IMPLICIT NONE
+(   56) # 57 "trans_pnm.F90"
+(   57) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN)  :: KRESOL
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:00      page 6
+
+(   58) INTEGER(KIND=JPIM) ,INTENT(IN)  :: KM
+(   59) REAL(KIND=JPRBT)    ,OPTIONAL, INTENT(OUT) :: PRPNM(:,:)
+(   60) LOGICAL, OPTIONAL, INTENT(IN) :: LDTRANSPOSE
+(   61) LOGICAL, OPTIONAL, INTENT(IN) :: LDCHEAP
+(   62) # 63 "trans_pnm.F90"
+(   63) !ifndef INTERFACE
+(   64) # 65 "trans_pnm.F90"
+(   65) INTEGER(KIND=JPIM) :: IU1, IU2, IMAXN, INMAX, ICHEAP_SYM, ICHEAP_ANTISYM
+(   66) INTEGER(KIND=JPIM) :: IC, JN, JMLOC, JGL, JI
+(   67) INTEGER(KIND=JPIM) :: IA, IS, IDGLU, ILA, ILS, ISL
+(   68) REAL(KIND=JPRD), ALLOCATABLE :: ZLPOL(:)
+(   69) LOGICAL :: LLTRANSPOSE, LLCHEAP
+(   70) !     ------------------------------------------------------------------
+(   71) # 72 "trans_pnm.F90"
+(   72) ! Set current resolution
+(   73) IF (PRESENT(KRESOL)) THEN
+(   74)   CALL SET_RESOL(KRESOL)
+(   75) ENDIF
+(   76) # 77 "trans_pnm.F90"
+(   77) IF (PRESENT(LDTRANSPOSE)) THEN
+(   78)   LLTRANSPOSE=LDTRANSPOSE
+(   79) ELSE
+(   80)   LLTRANSPOSE=.FALSE.
+(   81) ENDIF
+(   82) # 83 "trans_pnm.F90"
+(   83) IF (PRESENT(LDCHEAP)) THEN
+(   84)   LLCHEAP=LDCHEAP
+(   85) ELSE
+(   86)   LLCHEAP=.FALSE.
+(   87) ENDIF
+(   88) IF (LLCHEAP) THEN
+(   89)   ICHEAP_SYM    =2
+(   90)   ICHEAP_ANTISYM=3
+(   91) ELSE
+(   92)   ICHEAP_SYM    =1
+(   93)   ICHEAP_ANTISYM=1
+(   94) ENDIF
+(   95) # 96 "trans_pnm.F90"
+(   96) IF (PRESENT(PRPNM)) THEN
+(   97)   IF(D%LGRIDONLY) THEN
+(   98)     CALL ABORT_TRANS('TRANS_PNM: PRPNM REQUIRED BUT LGRIDONLY=T')
+(   99)   ENDIF
+(  100) ENDIF
+(  101) # 102 "trans_pnm.F90"
+(  102) IU1 = UBOUND(PRPNM,1)
+(  103) IU2 = UBOUND(PRPNM,2)
+(  104) # 105 "trans_pnm.F90"
+(  105) IF (LLTRANSPOSE) THEN
+(  106) # 107 "trans_pnm.F90"
+(  107)   IF(IU2 < R%NLEI3) THEN
+(  108)     CALL ABORT_TRANS('TRANS_PNM : FIRST DIM. OF PRPNM TOO SMALL')
+(  109)   ENDIF
+(  110)   IF(IU1 < R%NTMAX-KM+3) THEN
+(  111)     CALL ABORT_TRANS('TRANS_PNM : SECOND DIM. OF PRPNM TOO SMALL')
+(  112)   ENDIF
+(  113) # 114 "trans_pnm.F90"
+(  114)   IF (IU2 >= R%NLEI3) THEN
+(  115)     PRPNM(:,R%NLEI3) = 0.0_JPRBT
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:00      page 7
+
+(  116)   ENDIF
+(  117) # 118 "trans_pnm.F90"
+(  118) ELSE
+(  119) # 120 "trans_pnm.F90"
+(  120)   IF(IU1 < R%NLEI3) THEN
+(  121)     CALL ABORT_TRANS('TRANS_PNM : FIRST DIM. OF PRPNM TOO SMALL')
+(  122)   ENDIF
+(  123)   IF(IU2 < R%NTMAX-KM+3) THEN
+(  124)     CALL ABORT_TRANS('TRANS_PNM : SECOND DIM. OF PRPNM TOO SMALL')
+(  125)   ENDIF
+(  126) # 127 "trans_pnm.F90"
+(  127)   IF (IU1 >= R%NLEI3) THEN
+(  128)     PRPNM(R%NLEI3,:) = 0.0_JPRBT
+(  129)   ENDIF
+(  130) # 131 "trans_pnm.F90"
+(  131) ENDIF
+(  132) # 133 "trans_pnm.F90"
+(  133) ILA = (R%NTMAX-KM+2)/2
+(  134) ILS = (R%NTMAX-KM+3)/2
+(  135) # 136 "trans_pnm.F90"
+(  136) CALL INI_POL(R%NTMAX+2,LDFAST=.TRUE.)
+(  137) # 138 "trans_pnm.F90"
+(  138) IMAXN=R%NTMAX+1
+(  139) # 140 "trans_pnm.F90"
+(  140) IA  = 1+MOD(R%NTMAX-KM+2,2)
+(  141) IS  = 1+MOD(R%NTMAX-KM+1,2)
+(  142) # 143 "trans_pnm.F90"
+(  143) ISL = MAX(R%NDGNH-G%NDGLU(KM)+1,1)
+(  144) IF (S%LSOUTHPNM) THEN
+(  145)   IDGLU = 2*MIN(R%NDGNH,G%NDGLU(KM))
+(  146) ELSE
+(  147)   IDGLU = MIN(R%NDGNH,G%NDGLU(KM))
+(  148) ENDIF
+(  149) # 150 "trans_pnm.F90"
+(  150) IF(MOD(IMAXN-KM,2) == 0) THEN
+(  151)   INMAX=IMAXN+1
+(  152) ELSE
+(  153)   INMAX=IMAXN
+(  154) ENDIF
+(  155) # 156 "trans_pnm.F90"
+(  156) ALLOCATE(ZLPOL(0:R%NTMAX+2))
+(  157) # 158 "trans_pnm.F90"
+(  158) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JGL,ZLPOL,JI,JN)
+(  159) DO JGL=1,IDGLU
+(  160)   CALL SUPOLF(KM,INMAX,REAL (F%RMU(ISL+JGL-1), JPRD),ZLPOL(0:INMAX),KCHEAP=ICHEAP_ANTISYM)
+(  161)   IF (LLTRANSPOSE) THEN
+(  162)     DO JI=1,ILA
+(  163)       PRPNM(IA+(JI-1)*2,ISL+JGL-1) = ZLPOL(KM+2*(ILA-JI)+1)
+(  164)     ENDDO
+(  165)   ELSE
+(  166)     DO JI=1,ILA
+(  167)       PRPNM(ISL+JGL-1,IA+(JI-1)*2) = ZLPOL(KM+2*(ILA-JI)+1)
+(  168)     ENDDO
+(  169)   ENDIF
+(  170)   CALL SUPOLF(KM,INMAX,REAL (F%RMU(ISL+JGL-1), JPRD),ZLPOL(0:INMAX),KCHEAP=ICHEAP_SYM)
+(  171)   IF (LLTRANSPOSE) THEN
+(  172)     DO JI=1,ILS
+(  173)       PRPNM(IS+(JI-1)*2,ISL+JGL-1) = ZLPOL(KM+2*(ILS-JI))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:31:00      page 8
+
+(  174)     ENDDO
+(  175)   ELSE
+(  176)     DO JI=1,ILS
+(  177)       PRPNM(ISL+JGL-1,IS+(JI-1)*2) = ZLPOL(KM+2*(ILS-JI))
+(  178)     ENDDO
+(  179)   ENDIF
+(  180) ENDDO
+(  181) !$OMP END PARALLEL DO
+(  182) # 183 "trans_pnm.F90"
+(  183) CALL END_POL
+(  184) # 185 "trans_pnm.F90"
+(  185) !     ------------------------------------------------------------------
+(  186) # 187 "trans_pnm.F90"
+(  187) !endif INTERFACE
+(  188) # 189 "trans_pnm.F90"
+(  189) END SUBROUTINE TRANS_PNM

@@ -1,0 +1,361 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:20      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: spnsde_mod.F90
+
+(    1) MODULE SPNSDE_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SPNSDE(KF_SCALARS,PEPSNM,PF,PNSD)
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRBT, JPRB
+(    6) 
+(    7) USE TPM_GEN, only: nout
+(    8) USE TPM_DIM         ,ONLY : R
+(    9) USE TPM_FIELDS      ,ONLY : F
+(   10) USE TPM_DISTR       ,ONLY : D
+(   11) !USE TPM_TRANS
+(   12) 
+(   13) 
+(   14) !**** *SPNSDE* - Compute North-South derivative in spectral space
+(   15) 
+(   16) !     Purpose.
+(   17) !     --------
+(   18) !        In Laplace space compute the the North-south derivative
+(   19) 
+(   20) !**   Interface.
+(   21) !     ----------
+(   22) !        CALL SPNSDE(...)
+(   23) 
+(   24) !        Explicit arguments :
+(   25) !        --------------------
+(   26) !        KM -zonal wavenumber (input-c)
+(   27) !        PEPSNM - REPSNM for wavenumber KM (input-c)
+(   28) !        PF  (NLEI1,2*KF_SCALARS) - input field (input)
+(   29) !        PNSD(NLEI1,2*KF_SCALARS) - N-S derivative (output)
+(   30) 
+(   31) !        Organisation within NLEI1:
+(   32) !        NLEI1 = NSMAX+4+mod(NSMAX+4+1,2)
+(   33) !                        overdimensioning
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:20      page 2
+
+(   34) !        1        : n=NSMAX+2
+(   35) !        2        : n=NSMAX+1
+(   36) !        3        : n=NSMAX
+(   37) !        .        :
+(   38) !        .        :
+(   39) !        NSMAX+3  : n=0
+(   40) !        NSMAX+4  : n=-1
+(   41) 
+(   42) !        Implicit arguments :  YOMLAP
+(   43) !        --------------------
+(   44) 
+(   45) !     Method.
+(   46) !     -------
+(   47) 
+(   48) !     Externals.   None.
+(   49) !     ----------
+(   50) 
+(   51) !     Reference.
+(   52) !     ----------
+(   53) !        ECMWF Research Department documentation of the IFS
+(   54) !        Temperton, 1991, MWR 119 p1303
+(   55) 
+(   56) !     Author.
+(   57) !     -------
+(   58) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+(   59) 
+(   60) !     Modifications.
+(   61) !     --------------
+(   62) !        Original : 00-02-01 From SPNSDE in IFS CY22R1
+(   63) 
+(   64) !     ------------------------------------------------------------------
+(   65) 
+(   66) IMPLICIT NONE
+(   67) 
+(   68) INTEGER(KIND=JPIM)  :: KM, KMLOC
+(   69) INTEGER(KIND=JPIM), INTENT(IN)  :: KF_SCALARS
+(   70) !REAL(KIND=JPRBT),    INTENT(IN)  :: PEPSNM(0:R%NTMAX+2)
+(   71) REAL(KIND=JPRBT),    INTENT(IN)  :: PEPSNM(1:D%NUMP,0:R%NTMAX+2)
+(   72) REAL(KIND=JPRB),    INTENT(IN)  :: PF(:,:,:)
+(   73) REAL(KIND=JPRB),    INTENT(OUT) :: PNSD(:,:,:)
+(   74) 
+(   75) !     LOCAL INTEGER SCALARS
+(   76) INTEGER(KIND=JPIM) :: IJ, ISKIP, J, JN,JI,ISMAX, IR, II
+(   77) REAL(KIND=JPRBT) :: ZZEPSNM(-1:R%NSMAX+4)
+(   78) REAL(KIND=JPRBT) :: ZN(-1:R%NTMAX+4)
+(   79) 
+(   80) !$ACC DATA                             &
+(   81) !$ACC      CREATE (ZN,ZZEPSNM)         &
+(   82) !$ACC      COPYIN (D,D%MYMS,F,F%RN)   &
+(   83) !$ACC      present (PEPSNM, PF)         &
+(   84) !$ACC      present (PNSD)
+(   85) 
+(   86) !     ------------------------------------------------------------------
+(   87) 
+(   88) !*       1.    COMPUTE NORTH SOUTH DERIVATIVE.
+(   89) !              -------------------------------
+(   90) 
+(   91) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:20      page 3
+
+(   92) !*       1.1      COMPUTE
+(   93) 
+(   94) ISMAX = R%NSMAX
+(   95) !loop over wavenumber
+(   96) DO KMLOC=1,D%NUMP
+(   97)   KM = D%MYMS(KMLOC)
+(   98)   !$ACC parallel loop private(IJ)
+(   99)   DO JN=KM-1,ISMAX+2
+(  100)    IJ = ISMAX+3-JN
+(  101)    ZN(IJ) = F%RN(JN)
+(  102)    IF( JN >= 0 ) ZZEPSNM(IJ) = PEPSNM(KMLOC,JN)
+(  103)    !write(nout,*) 'deriv dy debug in ; ',JN, IJ, ZN(IJ),ZZEPSNM(IJ),PEPSNM(KMLOC,JN)
+(  104)   ENDDO
+(  105)   ZN(0) = F%RN(ISMAX+3)
+(  106) 
+(  107)   IF(KM == 0) THEN
+(  108)       !$ACC PARALLEL LOOP PRIVATE(IR)
+(  109)       DO J=1,KF_SCALARS
+(  110)         IR = 2*J-1
+(  111)         DO JI=2,ISMAX+3
+(  112)           PNSD(IR,JI,KMLOC) = -ZN(JI+1)*ZZEPSNM(JI)*PF(IR,JI+1,KMLOC)+&
+(  113)             &ZN(JI-2)*ZZEPSNM(JI-1)*PF(IR,JI-1,KMLOC)
+(  114)         ENDDO
+(  115)       ENDDO
+(  116)   ELSE  
+(  117) 
+(  118)     !$ACC parallel loop collapse(2) private(IR,II)
+(  119)     DO J=1,KF_SCALARS
+(  120)       DO JI=2,ISMAX+3-KM
+(  121)         IR = 2*J-1
+(  122)         II = IR+1
+(  123)         PNSD(IR,JI,KMLOC) = -ZN(JI+1)*ZZEPSNM(JI)*PF(IR,JI+1,KMLOC)+&
+(  124)           &ZN(JI-2)*ZZEPSNM(JI-1)*PF(IR,JI-1,KMLOC)
+(  125)         PNSD(II,JI,KMLOC) = -ZN(JI+1)*ZZEPSNM(JI)*PF(II,JI+1,KMLOC)+&
+(  126)           &ZN(JI-2)*ZZEPSNM(JI-1)*PF(II,JI-1,KMLOC)
+(  127)         !write(301,*) 'deriv dy debug 2nd; ',KMLOC,IR,II,JI,J,PNSD(IR,JI,KMLOC),PNSD(II,JI,KMLOC)
+(  128)         !call flush(301)
+(  129)       ENDDO
+(  130)     ENDDO
+(  131)     !write(301,*) 'deriv dy debug 2nd; ',KMLOC,maxval(PNSD(1,:,KMLOC)),maxval(PNSD(2,:,KMLOC))
+(  132)     !call flush(301)
+(  133)   ENDIF
+(  134) 
+(  135) !end loop over wavenumber
+(  136) END DO
+(  137) 
+(  138) !$ACC END DATA
+(  139) 
+(  140) !     ------------------------------------------------------------------
+(  141) 
+(  142) END SUBROUTINE SPNSDE
+(  143) END MODULE SPNSDE_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:20      page 4
+
+(    1) # 1 "spnsde_mod.F90"
+(    1) MODULE SPNSDE_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SPNSDE(KF_SCALARS,PEPSNM,PF,PNSD)
+(    4) # 5 "spnsde_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRBT, JPRB
+(    6) # 7 "spnsde_mod.F90"
+(    7) USE TPM_GEN, only: nout
+(    8) USE TPM_DIM         ,ONLY : R
+(    9) USE TPM_FIELDS      ,ONLY : F
+(   10) USE TPM_DISTR       ,ONLY : D
+(   11) !USE TPM_TRANS
+(   12) # 14 "spnsde_mod.F90"
+(   14) !**** *SPNSDE* - Compute North-South derivative in spectral space
+(   15) # 16 "spnsde_mod.F90"
+(   16) !     Purpose.
+(   17) !     --------
+(   18) !        In Laplace space compute the the North-south derivative
+(   19) # 20 "spnsde_mod.F90"
+(   20) !**   Interface.
+(   21) !     ----------
+(   22) !        CALL SPNSDE(...)
+(   23) # 24 "spnsde_mod.F90"
+(   24) !        Explicit arguments :
+(   25) !        --------------------
+(   26) !        KM -zonal wavenumber (input-c)
+(   27) !        PEPSNM - REPSNM for wavenumber KM (input-c)
+(   28) !        PF  (NLEI1,2*KF_SCALARS) - input field (input)
+(   29) !        PNSD(NLEI1,2*KF_SCALARS) - N-S derivative (output)
+(   30) # 31 "spnsde_mod.F90"
+(   31) !        Organisation within NLEI1:
+(   32) !        NLEI1 = NSMAX+4+mod(NSMAX+4+1,2)
+(   33) !                        overdimensioning
+(   34) !        1        : n=NSMAX+2
+(   35) !        2        : n=NSMAX+1
+(   36) !        3        : n=NSMAX
+(   37) !        .        :
+(   38) !        .        :
+(   39) !        NSMAX+3  : n=0
+(   40) !        NSMAX+4  : n=-1
+(   41) # 42 "spnsde_mod.F90"
+(   42) !        Implicit arguments :  YOMLAP
+(   43) !        --------------------
+(   44) # 45 "spnsde_mod.F90"
+(   45) !     Method.
+(   46) !     -------
+(   47) # 48 "spnsde_mod.F90"
+(   48) !     Externals.   None.
+(   49) !     ----------
+(   50) # 51 "spnsde_mod.F90"
+(   51) !     Reference.
+(   52) !     ----------
+(   53) !        ECMWF Research Department documentation of the IFS
+(   54) !        Temperton, 1991, MWR 119 p1303
+(   55) # 56 "spnsde_mod.F90"
+(   56) !     Author.
+(   57) !     -------
+(   58) !        Mats Hamrud and Philippe Courtier  *ECMWF*
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:20      page 5
+
+(   59) # 60 "spnsde_mod.F90"
+(   60) !     Modifications.
+(   61) !     --------------
+(   62) !        Original : 00-02-01 From SPNSDE in IFS CY22R1
+(   63) # 64 "spnsde_mod.F90"
+(   64) !     ------------------------------------------------------------------
+(   65) # 66 "spnsde_mod.F90"
+(   66) IMPLICIT NONE
+(   67) # 68 "spnsde_mod.F90"
+(   68) INTEGER(KIND=JPIM)  :: KM, KMLOC
+(   69) INTEGER(KIND=JPIM), INTENT(IN)  :: KF_SCALARS
+(   70) !REAL(KIND=JPRBT),    INTENT(IN)  :: PEPSNM(0:R%NTMAX+2)
+(   71) REAL(KIND=JPRBT),    INTENT(IN)  :: PEPSNM(1:D%NUMP,0:R%NTMAX+2)
+(   72) REAL(KIND=JPRB),    INTENT(IN)  :: PF(:,:,:)
+(   73) REAL(KIND=JPRB),    INTENT(OUT) :: PNSD(:,:,:)
+(   74) # 75 "spnsde_mod.F90"
+(   75) !     LOCAL INTEGER SCALARS
+(   76) INTEGER(KIND=JPIM) :: IJ, ISKIP, J, JN,JI,ISMAX, IR, II
+(   77) REAL(KIND=JPRBT) :: ZZEPSNM(-1:R%NSMAX+4)
+(   78) REAL(KIND=JPRBT) :: ZN(-1:R%NTMAX+4)
+(   79) # 80 "spnsde_mod.F90"
+(   81) !$ACC      CREATE (ZN,ZZEPSNM)         &
+(   82) !$ACC      COPYIN (D,D%MYMS,F,F%RN)   &
+(   83) !$ACC      present (PEPSNM, PF)         &
+(   84) !$ACC      present (PNSD)
+(   85) # 86 "spnsde_mod.F90"
+(   86) !     ------------------------------------------------------------------
+(   87) # 88 "spnsde_mod.F90"
+(   88) !*       1.    COMPUTE NORTH SOUTH DERIVATIVE.
+(   89) !              -------------------------------
+(   90) # 92 "spnsde_mod.F90"
+(   92) !*       1.1      COMPUTE
+(   93) # 94 "spnsde_mod.F90"
+(   94) ISMAX = R%NSMAX
+(   95) !loop over wavenumber
+(   96) DO KMLOC=1,D%NUMP
+(   97)   KM = D%MYMS(KMLOC)
+(   98)   !$ACC parallel loop private(IJ)
+(   99)   DO JN=KM-1,ISMAX+2
+(  100)    IJ = ISMAX+3-JN
+(  101)    ZN(IJ) = F%RN(JN)
+(  102)    IF( JN >= 0 ) ZZEPSNM(IJ) = PEPSNM(KMLOC,JN)
+(  103)    !write(nout,*) 'deriv dy debug in ; ',JN, IJ, ZN(IJ),ZZEPSNM(IJ),PEPSNM(KMLOC,JN)
+(  104)   ENDDO
+(  105)   ZN(0) = F%RN(ISMAX+3)
+(  106) # 107 "spnsde_mod.F90"
+(  107)   IF(KM == 0) THEN
+(  108)       !$ACC PARALLEL LOOP PRIVATE(IR)
+(  109)       DO J=1,KF_SCALARS
+(  110)         IR = 2*J-1
+(  111)         DO JI=2,ISMAX+3
+(  112)           PNSD(IR,JI,KMLOC) = -ZN(JI+1)*ZZEPSNM(JI)*PF(IR,JI+1,KMLOC)+&
+(  113)             &ZN(JI-2)*ZZEPSNM(JI-1)*PF(IR,JI-1,KMLOC)
+(  114)         ENDDO
+(  115)       ENDDO
+(  116)   ELSE  
+(  117) # 118 "spnsde_mod.F90"
+(  118)     !$ACC parallel loop collapse(2) private(IR,II)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:20      page 6
+
+(  119)     DO J=1,KF_SCALARS
+(  120)       DO JI=2,ISMAX+3-KM
+(  121)         IR = 2*J-1
+(  122)         II = IR+1
+(  123)         PNSD(IR,JI,KMLOC) = -ZN(JI+1)*ZZEPSNM(JI)*PF(IR,JI+1,KMLOC)+&
+(  124)           &ZN(JI-2)*ZZEPSNM(JI-1)*PF(IR,JI-1,KMLOC)
+(  125)         PNSD(II,JI,KMLOC) = -ZN(JI+1)*ZZEPSNM(JI)*PF(II,JI+1,KMLOC)+&
+(  126)           &ZN(JI-2)*ZZEPSNM(JI-1)*PF(II,JI-1,KMLOC)
+(  127)         !write(301,*) 'deriv dy debug 2nd; ',KMLOC,IR,II,JI,J,PNSD(IR,JI,KMLOC),PNSD(II,JI,KMLOC)
+(  128)         !call flush(301)
+(  129)       ENDDO
+(  130)     ENDDO
+(  131)     !write(301,*) 'deriv dy debug 2nd; ',KMLOC,maxval(PNSD(1,:,KMLOC)),maxval(PNSD(2,:,KMLOC))
+(  132)     !call flush(301)
+(  133)   ENDIF
+(  134) # 135 "spnsde_mod.F90"
+(  135) !end loop over wavenumber
+(  136) END DO
+(  137) # 138 "spnsde_mod.F90"
+(  138) !$ACC END DATA
+(  139) # 140 "spnsde_mod.F90"
+(  140) !     ------------------------------------------------------------------
+(  141) # 142 "spnsde_mod.F90"
+(  142) END SUBROUTINE SPNSDE
+(  143) END MODULE SPNSDE_MOD

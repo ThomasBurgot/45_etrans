@@ -1,0 +1,316 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:06      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eltdir_ctlad_mod.F90
+
+(    1) MODULE ELTDIR_CTLAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ELTDIR_CTLAD(KF_FS,KF_UV,KF_SCALARS, &
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR, &
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2, &
+(    6)  & KFLDPTRUV,KFLDPTRSC,PSPMEANU,PSPMEANV)
+(    7) 
+(    8) !**** *ELTDIR_CTLAD* - Control routine for direct Legendre transform
+(    9) 
+(   10) !     Purpose.
+(   11) !     --------
+(   12) !        Direct Legendre transform
+(   13) 
+(   14) !**   Interface.
+(   15) !     ----------
+(   16) !     CALL LTDIR_CTLAD(...)
+(   17) 
+(   18) !     Explicit arguments :
+(   19) !     --------------------
+(   20) !     PSPVOR(:,:) - spectral vorticity (output)
+(   21) !     PSPDIV(:,:) - spectral divergence (output)
+(   22) !     PSPSCALAR(:,:) - spectral scalarvalued fields (output)
+(   23) 
+(   24) !     ------------------------------------------------------------------
+(   25) 
+(   26) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   27) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   28) 
+(   29) USE TPM_GEN         ,ONLY : LALLOPERM
+(   30) !USE TPM_DIM
+(   31) USE TPM_TRANS       ,ONLY : FOUBUF, FOUBUF_IN
+(   32) USE TPM_DISTR       ,ONLY : D
+(   33) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:06      page 2
+
+(   34) USE ELTDIRAD_MOD    ,ONLY : ELTDIRAD
+(   35) USE TRMTOL_MOD      ,ONLY : TRMTOL
+(   36) 
+(   37) 
+(   38) IMPLICIT NONE
+(   39) 
+(   40) INTEGER(KIND=JPIM),INTENT(IN) :: KF_FS,KF_UV,KF_SCALARS
+(   41) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT) :: PSPVOR(:,:)
+(   42) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT) :: PSPDIV(:,:)
+(   43) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT) :: PSPSCALAR(:,:)
+(   44) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT) :: PSPSC3A(:,:,:)
+(   45) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT) :: PSPSC3B(:,:,:)
+(   46) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT) :: PSPSC2(:,:)
+(   47) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)   :: KFLDPTRUV(:)
+(   48) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)   :: KFLDPTRSC(:)
+(   49) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT) :: PSPMEANU(:)
+(   50) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT) :: PSPMEANV(:)
+(   51) 
+(   52) INTEGER(KIND=JPIM) :: JM,IM,IBLEN,ILED2
+(   53) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   54) 
+(   55) !     ------------------------------------------------------------------
+(   56) 
+(   57) ! Transposition from Fourier space distribution to spectral space distribution
+(   58) 
+(   59) IF (LHOOK) CALL DR_HOOK('ELTDIR_CTLAD_MOD:ELTDIR_CTLAD',0,ZHOOK_HANDLE)
+(   60) IBLEN = D%NLENGT0B*2*KF_FS
+(   61) IF (ALLOCATED(FOUBUF_IN)) THEN
+(   62)   IF (MAX(1,IBLEN) > SIZE(FOUBUF_IN)) THEN
+(   63)     DEALLOCATE(FOUBUF_IN)
+(   64)     ALLOCATE(FOUBUF_IN(MAX(1,IBLEN)))
+(   65)   ENDIF
+(   66) ELSE
+(   67)   ALLOCATE(FOUBUF_IN(MAX(1,IBLEN)))
+(   68) ENDIF
+(   69) IF (ALLOCATED(FOUBUF)) THEN
+(   70)   IF (MAX(1,IBLEN) > SIZE(FOUBUF)) THEN
+(   71)     DEALLOCATE(FOUBUF)
+(   72)     ALLOCATE(FOUBUF(MAX(1,IBLEN)))
+(   73)   ENDIF
+(   74) ELSE
+(   75)   ALLOCATE(FOUBUF(MAX(1,IBLEN)))
+(   76) ENDIF
+(   77) 
+(   78) ! Direct Legendre transform
+(   79) 
+(   80) ILED2 = 2*KF_FS
+(   81) CALL GSTATS(1646,0)
+(   82) IF(KF_FS > 0) THEN
+(   83) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JM,IM)
+(   84)   DO JM=1,D%NUMP
+(   85)     IM = D%MYMS(JM)
+(   86)     CALL ELTDIRAD(IM,JM,KF_FS,KF_UV,KF_SCALARS,ILED2, &
+(   87)      & PSPVOR,PSPDIV,PSPSCALAR,&
+(   88)      & PSPSC3A,PSPSC3B,PSPSC2 , &
+(   89)      & KFLDPTRUV,KFLDPTRSC, PSPMEANU,PSPMEANV)
+(   90)   ENDDO
+(   91) !$OMP END PARALLEL DO
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:06      page 3
+
+(   92) ENDIF
+(   93) CALL GSTATS(1646,1)
+(   94) 
+(   95) CALL GSTATS(181,0)
+(   96) CALL TRMTOL(FOUBUF,FOUBUF_IN,2*KF_FS)
+(   97) CALL GSTATS(181,1)
+(   98) IF (.NOT.LALLOPERM) DEALLOCATE(FOUBUF)
+(   99) IF (LHOOK) CALL DR_HOOK('ELTDIR_CTLAD_MOD:ELTDIR_CTLAD',1,ZHOOK_HANDLE)
+(  100) 
+(  101) !     ------------------------------------------------------------------
+(  102) 
+(  103) END SUBROUTINE ELTDIR_CTLAD
+(  104) END MODULE ELTDIR_CTLAD_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:06      page 4
+
+(    1) # 1 "eltdir_ctlad_mod.F90"
+(    1) MODULE ELTDIR_CTLAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ELTDIR_CTLAD(KF_FS,KF_UV,KF_SCALARS, &
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR, &
+(    5)  & PSPSC3A,PSPSC3B,PSPSC2, &
+(    6)  & KFLDPTRUV,KFLDPTRSC,PSPMEANU,PSPMEANV)
+(    7) # 8 "eltdir_ctlad_mod.F90"
+(    8) !**** *ELTDIR_CTLAD* - Control routine for direct Legendre transform
+(    9) # 10 "eltdir_ctlad_mod.F90"
+(   10) !     Purpose.
+(   11) !     --------
+(   12) !        Direct Legendre transform
+(   13) # 14 "eltdir_ctlad_mod.F90"
+(   14) !**   Interface.
+(   15) !     ----------
+(   16) !     CALL LTDIR_CTLAD(...)
+(   17) # 18 "eltdir_ctlad_mod.F90"
+(   18) !     Explicit arguments :
+(   19) !     --------------------
+(   20) !     PSPVOR(:,:) - spectral vorticity (output)
+(   21) !     PSPDIV(:,:) - spectral divergence (output)
+(   22) !     PSPSCALAR(:,:) - spectral scalarvalued fields (output)
+(   23) # 24 "eltdir_ctlad_mod.F90"
+(   24) !     ------------------------------------------------------------------
+(   25) # 26 "eltdir_ctlad_mod.F90"
+(   26) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   27) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   28) # 29 "eltdir_ctlad_mod.F90"
+(   29) USE TPM_GEN         ,ONLY : LALLOPERM
+(   30) !USE TPM_DIM
+(   31) USE TPM_TRANS       ,ONLY : FOUBUF, FOUBUF_IN
+(   32) USE TPM_DISTR       ,ONLY : D
+(   33) # 34 "eltdir_ctlad_mod.F90"
+(   34) USE ELTDIRAD_MOD    ,ONLY : ELTDIRAD
+(   35) USE TRMTOL_MOD      ,ONLY : TRMTOL
+(   36) # 38 "eltdir_ctlad_mod.F90"
+(   38) IMPLICIT NONE
+(   39) # 40 "eltdir_ctlad_mod.F90"
+(   40) INTEGER(KIND=JPIM),INTENT(IN) :: KF_FS,KF_UV,KF_SCALARS
+(   41) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT) :: PSPVOR(:,:)
+(   42) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT) :: PSPDIV(:,:)
+(   43) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT) :: PSPSCALAR(:,:)
+(   44) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT) :: PSPSC3A(:,:,:)
+(   45) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT) :: PSPSC3B(:,:,:)
+(   46) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT) :: PSPSC2(:,:)
+(   47) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)   :: KFLDPTRUV(:)
+(   48) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)   :: KFLDPTRSC(:)
+(   49) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT) :: PSPMEANU(:)
+(   50) REAL(KIND=JPRB) ,OPTIONAL, INTENT(INOUT) :: PSPMEANV(:)
+(   51) # 52 "eltdir_ctlad_mod.F90"
+(   52) INTEGER(KIND=JPIM) :: JM,IM,IBLEN,ILED2
+(   53) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   54) # 55 "eltdir_ctlad_mod.F90"
+(   55) !     ------------------------------------------------------------------
+(   56) # 57 "eltdir_ctlad_mod.F90"
+(   57) ! Transposition from Fourier space distribution to spectral space distribution
+(   58) # 59 "eltdir_ctlad_mod.F90"
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:46:06      page 5
+
+(   59) IF (LHOOK) CALL DR_HOOK('ELTDIR_CTLAD_MOD:ELTDIR_CTLAD',0,ZHOOK_HANDLE)
+(   60) IBLEN = D%NLENGT0B*2*KF_FS
+(   61) IF (ALLOCATED(FOUBUF_IN)) THEN
+(   62)   IF (MAX(1,IBLEN) > SIZE(FOUBUF_IN)) THEN
+(   63)     DEALLOCATE(FOUBUF_IN)
+(   64)     ALLOCATE(FOUBUF_IN(MAX(1,IBLEN)))
+(   65)   ENDIF
+(   66) ELSE
+(   67)   ALLOCATE(FOUBUF_IN(MAX(1,IBLEN)))
+(   68) ENDIF
+(   69) IF (ALLOCATED(FOUBUF)) THEN
+(   70)   IF (MAX(1,IBLEN) > SIZE(FOUBUF)) THEN
+(   71)     DEALLOCATE(FOUBUF)
+(   72)     ALLOCATE(FOUBUF(MAX(1,IBLEN)))
+(   73)   ENDIF
+(   74) ELSE
+(   75)   ALLOCATE(FOUBUF(MAX(1,IBLEN)))
+(   76) ENDIF
+(   77) # 78 "eltdir_ctlad_mod.F90"
+(   78) ! Direct Legendre transform
+(   79) # 80 "eltdir_ctlad_mod.F90"
+(   80) ILED2 = 2*KF_FS
+(   81) CALL GSTATS(1646,0)
+(   82) IF(KF_FS > 0) THEN
+(   83) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JM,IM)
+(   84)   DO JM=1,D%NUMP
+(   85)     IM = D%MYMS(JM)
+(   86)     CALL ELTDIRAD(IM,JM,KF_FS,KF_UV,KF_SCALARS,ILED2, &
+(   87)      & PSPVOR,PSPDIV,PSPSCALAR,&
+(   88)      & PSPSC3A,PSPSC3B,PSPSC2 , &
+(   89)      & KFLDPTRUV,KFLDPTRSC, PSPMEANU,PSPMEANV)
+(   90)   ENDDO
+(   91) !$OMP END PARALLEL DO
+(   92) ENDIF
+(   93) CALL GSTATS(1646,1)
+(   94) # 95 "eltdir_ctlad_mod.F90"
+(   95) CALL GSTATS(181,0)
+(   96) CALL TRMTOL(FOUBUF,FOUBUF_IN,2*KF_FS)
+(   97) CALL GSTATS(181,1)
+(   98) IF (.NOT.LALLOPERM) DEALLOCATE(FOUBUF)
+(   99) IF (LHOOK) CALL DR_HOOK('ELTDIR_CTLAD_MOD:ELTDIR_CTLAD',1,ZHOOK_HANDLE)
+(  100) # 101 "eltdir_ctlad_mod.F90"
+(  101) !     ------------------------------------------------------------------
+(  102) # 103 "eltdir_ctlad_mod.F90"
+(  103) END SUBROUTINE ELTDIR_CTLAD
+(  104) END MODULE ELTDIR_CTLAD_MOD

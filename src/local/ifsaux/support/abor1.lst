@@ -1,0 +1,221 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:37      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: abor1.F90
+
+(    1) SUBROUTINE ABOR1(CDTEXT)
+(    2) 
+(    3) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    4) USE YOMLUN_IFSAUX, ONLY : NULOUT,NULERR
+(    5) USE MPL_MODULE, ONLY : MPL_ABORT, MPL_RANK, MPL_NUMPROC
+(    6) USE SDL_MOD, ONLY : SDL_TRACEBACK, SDL_SRLABORT
+(    7) #ifdef NAG
+(    8) USE F90_UNIX_IO, ONLY: FLUSH
+(    9) #endif
+(   10) 
+(   11) IMPLICIT NONE
+(   12) 
+(   13) CHARACTER(LEN=*), INTENT(IN) :: CDTEXT
+(   14) INTEGER(KIND=JPIM) :: ILEN
+(   15) 
+(   16) ILEN=LEN(CDTEXT)
+(   17) IF (NULOUT >= 0) WRITE(NULOUT,'(1X,A)') 'ABOR1 CALLED'
+(   18) 
+(   19) IF(ILEN <= 512) THEN
+(   20)   IF (NULOUT >= 0) WRITE(NULOUT,'(1X,A)') CDTEXT
+(   21)   IF (NULERR >= 0) WRITE(NULERR,'(1X,A,1X,I3,1X,A)') 'ABORT! ',MPL_RANK,CDTEXT
+(   22) ELSE
+(   23)   IF (NULERR >= 0) WRITE(NULERR,'(1X,A,1X,I3,1X,A)') 'ABORT! ',MPL_RANK,&
+(   24)    & 'ABOR1 CALLED WITHOUT TEXT STRING'  
+(   25) ENDIF
+(   26) 
+(   27) IF (NULOUT >= 0) THEN
+(   28)   CALL FLUSH(NULOUT)
+(   29)   IF (NULOUT /= 0 .AND. NULOUT /= 6) CLOSE(NULOUT)
+(   30) ENDIF
+(   31) 
+(   32) CALL BREXIT(CDTEXT)
+(   33) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:37      page 2
+
+(   34) END SUBROUTINE ABOR1
+(   35) 
+(   36) SUBROUTINE BREXIT(CDTEXT)
+(   37) USE MPL_MODULE, ONLY : MPL_ABORT, MPL_NUMPROC
+(   38) USE SDL_MOD, ONLY : SDL_TRACEBACK, SDL_SRLABORT
+(   39) CHARACTER(LEN=*), INTENT(IN) :: CDTEXT
+(   40) ! Added Arpege/Ifs collaboration for 01-Apr-2019
+(   41) ! Brexit means Brexit !
+(   42) IF (MPL_NUMPROC > 1) THEN
+(   43)   IF(LEN(CDTEXT) <= 512) THEN
+(   44)     CALL MPL_ABORT(CDTEXT)
+(   45)   ELSE
+(   46)     CALL MPL_ABORT
+(   47)   ENDIF
+(   48) ELSE
+(   49)   CALL SDL_TRACEBACK
+(   50)   CALL FLUSH(0)
+(   51)   CALL SDL_SRLABORT
+(   52) ENDIF
+(   53) END SUBROUTINE BREXIT
+(   54) 
+(   55) SUBROUTINE ABOR1FL(CDFILE, KLINENUM, CDTEXT)
+(   56) USE PARKIND1  ,ONLY : JPIM
+(   57) USE YOMLUN_IFSAUX, ONLY : NULOUT,NULERR
+(   58) #ifdef NAG
+(   59) USE F90_UNIX_IO, ONLY: FLUSH
+(   60) #endif
+(   61) IMPLICIT NONE
+(   62) CHARACTER(LEN=*), INTENT(IN) :: CDFILE,CDTEXT
+(   63) INTEGER(KIND=JPIM), INTENT(IN) :: KLINENUM
+(   64) IF (LEN(CDFILE) > 0 .AND. KLINENUM > 0 .AND. NULERR >= 0) THEN
+(   65)  1000 FORMAT(1X,A,A,":",I6.6)
+(   66)   WRITE(NULERR,1000) 'ABOR1FL HAS BEEN CALLED AT ',CDFILE,KLINENUM
+(   67)   CALL FLUSH(NULERR)
+(   68) ENDIF
+(   69) CALL ABOR1(CDTEXT)
+(   70) END SUBROUTINE ABOR1FL
+(   71) 
+(   72) 
+(   73) SUBROUTINE ABOR1_EXCEPTION_HANDLER()
+(   74)   !! This routine, when registered as the fckit exception handler, will be called
+(   75)   !! whenever any C++ exception is thrown. The exception is intercepted and can
+(   76)   !! be inquired through the variable FCKIT_EXCEPTION.
+(   77)   !! The exception can then also be thrown by:
+(   78)   !!    CALL FCKIT_EXCEPTION%ABORT("I have my reasons")
+(   79) 
+(   80) #ifdef WITH_FCKIT
+(   81) USE FCKIT_MODULE, ONLY : FCKIT_EXCEPTION
+(   82) IF( FCKIT_EXCEPTION%LOCATION%IS_SET() ) then 
+(   83)   CALL ABOR1FL( FCKIT_EXCEPTION%LOCATION%FILE(), FCKIT_EXCEPTION%LOCATION%LINE(), FCKIT_EXCEPTION%WHAT() )
+(   84) ELSE
+(   85)   CALL ABOR1( FCKIT_EXCEPTION%WHAT() )
+(   86) ENDIF
+(   87) #endif
+(   88) END SUBROUTINE
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:37      page 3
+
+(    1) # 1 "abor1.F90"
+(    1) SUBROUTINE ABOR1(CDTEXT)
+(    2) # 3 "abor1.F90"
+(    3) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    4) USE YOMLUN_IFSAUX, ONLY : NULOUT,NULERR
+(    5) USE MPL_MODULE, ONLY : MPL_ABORT, MPL_RANK, MPL_NUMPROC
+(    6) USE SDL_MOD, ONLY : SDL_TRACEBACK, SDL_SRLABORT
+(    7) # 11 "abor1.F90"
+(   11) IMPLICIT NONE
+(   12) # 13 "abor1.F90"
+(   13) CHARACTER(LEN=*), INTENT(IN) :: CDTEXT
+(   14) INTEGER(KIND=JPIM) :: ILEN
+(   15) # 16 "abor1.F90"
+(   16) ILEN=LEN(CDTEXT)
+(   17) IF (NULOUT >= 0) WRITE(NULOUT,'(1X,A)') 'ABOR1 CALLED'
+(   18) # 19 "abor1.F90"
+(   19) IF(ILEN <= 512) THEN
+(   20)   IF (NULOUT >= 0) WRITE(NULOUT,'(1X,A)') CDTEXT
+(   21)   IF (NULERR >= 0) WRITE(NULERR,'(1X,A,1X,I3,1X,A)') 'ABORT! ',MPL_RANK,CDTEXT
+(   22) ELSE
+(   23)   IF (NULERR >= 0) WRITE(NULERR,'(1X,A,1X,I3,1X,A)') 'ABORT! ',MPL_RANK,&
+(   24)    & 'ABOR1 CALLED WITHOUT TEXT STRING'  
+(   25) ENDIF
+(   26) # 27 "abor1.F90"
+(   27) IF (NULOUT >= 0) THEN
+(   28)   CALL FLUSH(NULOUT)
+(   29)   IF (NULOUT /= 0 .AND. NULOUT /= 6) CLOSE(NULOUT)
+(   30) ENDIF
+(   31) # 32 "abor1.F90"
+(   32) CALL BREXIT(CDTEXT)
+(   33) # 34 "abor1.F90"
+(   34) END SUBROUTINE ABOR1
+(   35) # 36 "abor1.F90"
+(   36) SUBROUTINE BREXIT(CDTEXT)
+(   37) USE MPL_MODULE, ONLY : MPL_ABORT, MPL_NUMPROC
+(   38) USE SDL_MOD, ONLY : SDL_TRACEBACK, SDL_SRLABORT
+(   39) CHARACTER(LEN=*), INTENT(IN) :: CDTEXT
+(   40) ! Added Arpege/Ifs collaboration for 01-Apr-2019
+(   41) ! Brexit means Brexit !
+(   42) IF (MPL_NUMPROC > 1) THEN
+(   43)   IF(LEN(CDTEXT) <= 512) THEN
+(   44)     CALL MPL_ABORT(CDTEXT)
+(   45)   ELSE
+(   46)     CALL MPL_ABORT
+(   47)   ENDIF
+(   48) ELSE
+(   49)   CALL SDL_TRACEBACK
+(   50)   CALL FLUSH(0)
+(   51)   CALL SDL_SRLABORT
+(   52) ENDIF
+(   53) END SUBROUTINE BREXIT
+(   54) # 55 "abor1.F90"
+(   55) SUBROUTINE ABOR1FL(CDFILE, KLINENUM, CDTEXT)
+(   56) USE PARKIND1  ,ONLY : JPIM
+(   57) USE YOMLUN_IFSAUX, ONLY : NULOUT,NULERR
+(   58) # 61 "abor1.F90"
+(   61) IMPLICIT NONE
+(   62) CHARACTER(LEN=*), INTENT(IN) :: CDFILE,CDTEXT
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:37      page 4
+
+(   63) INTEGER(KIND=JPIM), INTENT(IN) :: KLINENUM
+(   64) IF (LEN(CDFILE) > 0 .AND. KLINENUM > 0 .AND. NULERR >= 0) THEN
+(   65)  1000 FORMAT(1X,A,A,":",I6.6)
+(   66)   WRITE(NULERR,1000) 'ABOR1FL HAS BEEN CALLED AT ',CDFILE,KLINENUM
+(   67)   CALL FLUSH(NULERR)
+(   68) ENDIF
+(   69) CALL ABOR1(CDTEXT)
+(   70) END SUBROUTINE ABOR1FL
+(   71) # 73 "abor1.F90"
+(   73) SUBROUTINE ABOR1_EXCEPTION_HANDLER()
+(   74)   !! This routine, when registered as the fckit exception handler, will be called
+(   75)   !! whenever any C++ exception is thrown. The exception is intercepted and can
+(   76)   !! be inquired through the variable FCKIT_EXCEPTION.
+(   77)   !! The exception can then also be thrown by:
+(   78)   !!    CALL FCKIT_EXCEPTION%ABORT("I have my reasons")
+(   79) # 88 "abor1.F90"
+(   88) END SUBROUTINE

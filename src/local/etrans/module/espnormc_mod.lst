@@ -1,0 +1,232 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:35      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: espnormc_mod.F90
+
+(    1) MODULE ESPNORMC_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ESPNORMC(PSM,KFLD_G,KVSET,KMASTER,PGM)
+(    4) 
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) USE MPL_MODULE  ,ONLY : MPL_RECV, MPL_SEND, MPL_BARRIER
+(    8) !USE TPM_DIM
+(    9) USE TPM_DISTR       ,ONLY : D, NPRCIDS, NPRTRV, MYPROC, NPROC
+(   10) 
+(   11) USE PE2SET_MOD      ,ONLY : PE2SET
+(   12) 
+(   13) USE TPMALD_DIM      ,ONLY : RALD
+(   14) !
+(   15) 
+(   16) IMPLICIT NONE
+(   17) 
+(   18) REAL(KIND=JPRB)    ,INTENT(IN) :: PSM(:,:)
+(   19) INTEGER(KIND=JPIM) ,INTENT(IN)  :: KFLD_G
+(   20) INTEGER(KIND=JPIM) ,INTENT(IN)  :: KVSET(:)
+(   21) INTEGER(KIND=JPIM) ,INTENT(IN)  :: KMASTER
+(   22) REAL(KIND=JPRB)    ,INTENT(OUT) :: PGM(:,0:)
+(   23) 
+(   24) REAL(KIND=JPRB) :: ZRECVBUF(KFLD_G*(RALD%NMSMAX+1))
+(   25) 
+(   26) INTEGER(KIND=JPIM) :: IFLDR(NPRTRV)
+(   27) 
+(   28) INTEGER(KIND=JPIM) :: ISTOTAL,JFLD,ITAG,JROC,IMSGLEN,IRECVID
+(   29) INTEGER(KIND=JPIM) :: IRECVNUMP,IRECVFLD,IFLD,JMLOC,IM,IBUFLENR,IA,IB
+(   30) INTEGER(KIND=JPIM) :: IRECVSETA,IRECVSETB
+(   31) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:35      page 2
+
+(   32) !     ------------------------------------------------------------------
+(   33) 
+(   34) IF (LHOOK) CALL DR_HOOK('ESPNORMC_MOD:ESPNORMC',0,ZHOOK_HANDLE)
+(   35) ISTOTAL = SIZE(PSM)
+(   36) IBUFLENR =SIZE(ZRECVBUF)
+(   37) 
+(   38) IFLDR(:) = 0
+(   39) DO JFLD=1,KFLD_G
+(   40)   IFLDR(KVSET(JFLD)) = IFLDR(KVSET(JFLD))+1
+(   41) ENDDO
+(   42) ITAG = 100
+(   43) 
+(   44) IF (NPROC > 1.AND.MYPROC /= KMASTER) THEN
+(   45)   CALL MPL_SEND(PSM(:,:),KDEST=NPRCIDS(KMASTER),KTAG=ITAG,&
+(   46)    & CDSTRING='ESPNORMC:')
+(   47) ENDIF
+(   48) 
+(   49) IF (MYPROC == KMASTER) THEN
+(   50)   DO JROC=1,NPROC
+(   51)     IF (JROC == KMASTER) THEN
+(   52)       ZRECVBUF(1:ISTOTAL) = RESHAPE(PSM,SHAPE(ZRECVBUF(1:ISTOTAL)))
+(   53)       IRECVID = MYPROC
+(   54)       IMSGLEN = ISTOTAL
+(   55)     ELSE
+(   56)       CALL MPL_RECV(ZRECVBUF(1:IBUFLENR),KTAG=ITAG,&
+(   57)        & KFROM=IRECVID,CDSTRING='ESPNORMC :')
+(   58)     ENDIF
+(   59)     CALL PE2SET(IRECVID,IA,IB,IRECVSETA,IRECVSETB)
+(   60)     IRECVNUMP = D%NUMPP(IRECVSETA)
+(   61)     IRECVFLD  = IFLDR(IRECVSETB)
+(   62)     IFLD = 0
+(   63)     DO JFLD=1,KFLD_G
+(   64)       IF(KVSET(JFLD) == IRECVSETB) THEN
+(   65)         IFLD=IFLD+1
+(   66)         DO JMLOC=1,IRECVNUMP
+(   67)           IM = D%NALLMS(D%NPTRMS(IRECVSETA)-1+JMLOC)
+(   68)           PGM(JFLD,IM) = ZRECVBUF((JMLOC-1)*IRECVFLD+IFLD)
+(   69)         ENDDO
+(   70)       ENDIF
+(   71)     ENDDO
+(   72)   ENDDO
+(   73) ENDIF
+(   74) 
+(   75) ! Perform barrier synchronisation to guarantee all processors have
+(   76) ! completed communication
+(   77) 
+(   78) IF( NPROC > 1 )THEN
+(   79)   CALL MPL_BARRIER(CDSTRING='ESPNORMC')
+(   80) ENDIF
+(   81) IF (LHOOK) CALL DR_HOOK('ESPNORMC_MOD:ESPNORMC',1,ZHOOK_HANDLE)
+(   82) !     ------------------------------------------------------------------
+(   83) 
+(   84) END SUBROUTINE ESPNORMC
+(   85) END MODULE ESPNORMC_MOD
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:35      page 3
+
+(    1) # 1 "espnormc_mod.F90"
+(    1) MODULE ESPNORMC_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ESPNORMC(PSM,KFLD_G,KVSET,KMASTER,PGM)
+(    4) # 5 "espnormc_mod.F90"
+(    5) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    6) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(    7) USE MPL_MODULE  ,ONLY : MPL_RECV, MPL_SEND, MPL_BARRIER
+(    8) !USE TPM_DIM
+(    9) USE TPM_DISTR       ,ONLY : D, NPRCIDS, NPRTRV, MYPROC, NPROC
+(   10) # 11 "espnormc_mod.F90"
+(   11) USE PE2SET_MOD      ,ONLY : PE2SET
+(   12) # 13 "espnormc_mod.F90"
+(   13) USE TPMALD_DIM      ,ONLY : RALD
+(   14) !
+(   15) # 16 "espnormc_mod.F90"
+(   16) IMPLICIT NONE
+(   17) # 18 "espnormc_mod.F90"
+(   18) REAL(KIND=JPRB)    ,INTENT(IN) :: PSM(:,:)
+(   19) INTEGER(KIND=JPIM) ,INTENT(IN)  :: KFLD_G
+(   20) INTEGER(KIND=JPIM) ,INTENT(IN)  :: KVSET(:)
+(   21) INTEGER(KIND=JPIM) ,INTENT(IN)  :: KMASTER
+(   22) REAL(KIND=JPRB)    ,INTENT(OUT) :: PGM(:,0:)
+(   23) # 24 "espnormc_mod.F90"
+(   24) REAL(KIND=JPRB) :: ZRECVBUF(KFLD_G*(RALD%NMSMAX+1))
+(   25) # 26 "espnormc_mod.F90"
+(   26) INTEGER(KIND=JPIM) :: IFLDR(NPRTRV)
+(   27) # 28 "espnormc_mod.F90"
+(   28) INTEGER(KIND=JPIM) :: ISTOTAL,JFLD,ITAG,JROC,IMSGLEN,IRECVID
+(   29) INTEGER(KIND=JPIM) :: IRECVNUMP,IRECVFLD,IFLD,JMLOC,IM,IBUFLENR,IA,IB
+(   30) INTEGER(KIND=JPIM) :: IRECVSETA,IRECVSETB
+(   31) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   32) !     ------------------------------------------------------------------
+(   33) # 34 "espnormc_mod.F90"
+(   34) IF (LHOOK) CALL DR_HOOK('ESPNORMC_MOD:ESPNORMC',0,ZHOOK_HANDLE)
+(   35) ISTOTAL = SIZE(PSM)
+(   36) IBUFLENR =SIZE(ZRECVBUF)
+(   37) # 38 "espnormc_mod.F90"
+(   38) IFLDR(:) = 0
+(   39) DO JFLD=1,KFLD_G
+(   40)   IFLDR(KVSET(JFLD)) = IFLDR(KVSET(JFLD))+1
+(   41) ENDDO
+(   42) ITAG = 100
+(   43) # 44 "espnormc_mod.F90"
+(   44) IF (NPROC > 1.AND.MYPROC /= KMASTER) THEN
+(   45)   CALL MPL_SEND(PSM(:,:),KDEST=NPRCIDS(KMASTER),KTAG=ITAG,&
+(   46)    & CDSTRING='ESPNORMC:')
+(   47) ENDIF
+(   48) # 49 "espnormc_mod.F90"
+(   49) IF (MYPROC == KMASTER) THEN
+(   50)   DO JROC=1,NPROC
+(   51)     IF (JROC == KMASTER) THEN
+(   52)       ZRECVBUF(1:ISTOTAL) = RESHAPE(PSM,SHAPE(ZRECVBUF(1:ISTOTAL)))
+(   53)       IRECVID = MYPROC
+(   54)       IMSGLEN = ISTOTAL
+(   55)     ELSE
+(   56)       CALL MPL_RECV(ZRECVBUF(1:IBUFLENR),KTAG=ITAG,&
+(   57)        & KFROM=IRECVID,CDSTRING='ESPNORMC :')
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:35      page 4
+
+(   58)     ENDIF
+(   59)     CALL PE2SET(IRECVID,IA,IB,IRECVSETA,IRECVSETB)
+(   60)     IRECVNUMP = D%NUMPP(IRECVSETA)
+(   61)     IRECVFLD  = IFLDR(IRECVSETB)
+(   62)     IFLD = 0
+(   63)     DO JFLD=1,KFLD_G
+(   64)       IF(KVSET(JFLD) == IRECVSETB) THEN
+(   65)         IFLD=IFLD+1
+(   66)         DO JMLOC=1,IRECVNUMP
+(   67)           IM = D%NALLMS(D%NPTRMS(IRECVSETA)-1+JMLOC)
+(   68)           PGM(JFLD,IM) = ZRECVBUF((JMLOC-1)*IRECVFLD+IFLD)
+(   69)         ENDDO
+(   70)       ENDIF
+(   71)     ENDDO
+(   72)   ENDDO
+(   73) ENDIF
+(   74) # 75 "espnormc_mod.F90"
+(   75) ! Perform barrier synchronisation to guarantee all processors have
+(   76) ! completed communication
+(   77) # 78 "espnormc_mod.F90"
+(   78) IF( NPROC > 1 )THEN
+(   79)   CALL MPL_BARRIER(CDSTRING='ESPNORMC')
+(   80) ENDIF
+(   81) IF (LHOOK) CALL DR_HOOK('ESPNORMC_MOD:ESPNORMC',1,ZHOOK_HANDLE)
+(   82) !     ------------------------------------------------------------------
+(   83) # 84 "espnormc_mod.F90"
+(   84) END SUBROUTINE ESPNORMC
+(   85) END MODULE ESPNORMC_MOD

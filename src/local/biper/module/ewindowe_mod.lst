@@ -1,0 +1,441 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:32      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: ewindowe_mod.F90
+
+(    1) MODULE EWINDOWE_MOD
+(    2) 
+(    3) CONTAINS
+(    4) 
+(    5) SUBROUTINE EWINDOWE(KDLON,KDLUX,KBWX,KDGL,KDGUX,KBWY,KFLD,PGPIN,PSCAL,LDBIX,LDBIY)
+(    6) 
+(    7) !   purpose  :
+(    8) !   --------
+(    9) !     Make boyd periodic extension.
+(   10) 
+(   11) !      externals :
+(   12) !      ----------
+(   13) !             None
+(   14) 
+(   15) !      explicit arguments :
+(   16) !      ------------------
+(   17) !     KDLON  : upper bound for the x (or longitude) dimension
+(   18) !              of  C U I U P.  
+(   19) !     KDGL  : upper bound for the y (or latitude) dimension
+(   20) !              of the gridpoint array on C U I U P
+(   21) !     PGPIN  : gridpoint array on C U I U P (gp:fields).
+(   22) !     PSCAL  : window function scaling  parameter
+(   23) !     LDBIX  : .TRUE. windowing  in x direction  ( and vice versa )
+(   24) !     LDBIY  : .TRUE. windowing  in y direction  ( and vice versa )
+(   25) 
+(   26) 
+(   27) !      references :
+(   28) !      ----------
+(   29) 
+(   30) !      author : Fabrice Voitus and Piet Termonia, 07/2009
+(   31) !      ------
+(   32) !      
+(   33) !      modification :
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:32      page 2
+
+(   34) !         Daan Degrauwe    02/2012    Cleaned and generalized
+(   35) !         S. Martinez      03/2012    Calls to ERF under CPP key __PGI
+(   36) !                                     (ERF function is not intrinsic with PGI)
+(   37) !         R. El Khatib 27-Sep-2013 implicit sized PGPIN 
+(   38) !         R. El Khatib 04-Aug-2016 new interface
+(   39) !      -----------------------------------------------
+(   40) 
+(   41) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   42) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   43) 
+(   44) IMPLICIT NONE
+(   45) 
+(   46) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLON
+(   47) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLUX
+(   48) INTEGER(KIND=JPIM),INTENT(IN)    :: KBWX
+(   49) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGL
+(   50) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGUX
+(   51) INTEGER(KIND=JPIM),INTENT(IN)    :: KBWY
+(   52) INTEGER(KIND=JPIM),INTENT(IN)    :: KFLD
+(   53) REAL(KIND=JPRB)   ,INTENT(INOUT) :: PGPIN((KDLUX+2*KBWX+2*(KDLON-KDLUX))*(KDGUX+2*KBWY+2*(KDGL-KDGUX)),KFLD)
+(   54) REAL(KIND=JPRB)   ,INTENT(IN)    :: PSCAL 
+(   55) LOGICAL           ,INTENT(IN)    :: LDBIX 
+(   56) LOGICAL           ,INTENT(IN)    :: LDBIY  
+(   57) 
+(   58) !      FERF function
+(   59) !      -------------
+(   60) 
+(   61) #ifdef __PGI
+(   62) REAL(KIND=JPRB), EXTERNAL :: ERF
+(   63) #endif
+(   64) 
+(   65) !      scalars
+(   66) !     --------
+(   67) 
+(   68) INTEGER(KIND=JPIM) :: JFL, JGL, JLON, IOFF, IDLW, IDGW
+(   69) INTEGER(KIND=JPIM) :: IWX, ILWX, IRWX, IWY, ILWY, IRWY, IBWXO, IBWYO
+(   70) INTEGER(KIND=JPIM) :: ILATF, ILONF, IND1, IND, IOFF_LEFT,IOFF_RIGHT,IOFF_BOTTOM,IOFF_TOP
+(   71) REAL(KIND=JPRB) :: ZI, ZJ, ZK, ZL  
+(   72) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   73) 
+(   74) !     local arrays :
+(   75) !     ------------
+(   76) 
+(   77) REAL(KIND=JPRB)  :: ZBELX(2*KBWX+(KDLON-KDLUX))
+(   78) REAL(KIND=JPRB)  :: ZBELY(2*KBWY+(KDGL -KDGUX))
+(   79) 
+(   80) !*         1. Boyd Bi-periodic Extension Method.
+(   81) !             ---------------------------------
+(   82) 
+(   83) IF (LHOOK) CALL DR_HOOK('EWINDOWE',0,ZHOOK_HANDLE)
+(   84) 
+(   85) IF ((.NOT.LDBIX).AND.(.NOT.LDBIY)) THEN
+(   86)   IF (LHOOK) CALL DR_HOOK('EWINDOWE',1,ZHOOK_HANDLE)
+(   87)   RETURN
+(   88) ENDIF
+(   89) 
+(   90) IDGW=SIZE(ZBELY)
+(   91) IDLW=SIZE(ZBELX)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:32      page 3
+
+(   92) 
+(   93) !   Bell window functions :
+(   94) !   ---------------------
+(   95) 
+(   96) IF (LDBIX) THEN
+(   97)   DO JLON=1,IDLW
+(   98)     ! variable between -1 and 1
+(   99)     ZJ=REAL(-IDLW-1+2*JLON,JPRB)/(IDLW+1)
+(  100)     ZL=ZJ/SQRT(1.0_JPRB-(ZJ*ZJ))
+(  101) #ifdef __PGI
+(  102)     ZBELX(JLON)=(1.0_JPRB+ERF(REAL(PSCAL*ZL)))/2.0_JPRB
+(  103) #else
+(  104)     ZBELX(JLON)=(1.0_JPRB+ERF(PSCAL*ZL))/2.0_JPRB
+(  105) #endif
+(  106)   ENDDO
+(  107) ENDIF
+(  108) 
+(  109) IF (LDBIY) THEN
+(  110)   DO JGL=1,IDGW
+(  111)     ! variable between -1 and 1
+(  112)     ZJ=REAL(-IDGW-1+2*JGL,JPRB)/(IDGW+1)
+(  113)     ZL=ZJ/SQRT(1.0_JPRB-(ZJ*ZJ))
+(  114) #ifdef __PGI
+(  115)     ZBELY(JGL)=(1.0_JPRB+ERF(REAL(PSCAL*ZL)))/2.0_JPRB
+(  116) #else
+(  117)     ZBELY(JGL)=(1.0_JPRB+ERF(PSCAL*ZL))/2.0_JPRB
+(  118) #endif
+(  119)   ENDDO
+(  120) ENDIF
+(  121) 
+(  122) 
+(  123) !    Windowing on P+G-zone :
+(  124) !    --------------------
+(  125) 
+(  126) IOFF=(KDLUX+2*(KBWX+KDGL-KDGUX))
+(  127) IBWXO=KBWX+(KDLON-KDLUX)
+(  128) IBWYO=KBWY+(KDGL-KDGUX)
+(  129) 
+(  130) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JFL,JGL,JLON,ILONF,ILATF,IND1,IND,IOFF_LEFT,IOFF_RIGHT,IOFF_BOTTOM,IOFF_TOP)
+(  131) DO JFL=1,KFLD
+(  132)   IF (LDBIX) THEN
+(  133)     ! X-direction
+(  134)     DO JGL=1,KDGL+IDGW
+(  135)       IOFF_LEFT=(JGL-1)*IOFF
+(  136)       IOFF_RIGHT=IOFF_LEFT+KDLON
+(  137)       DO JLON=1,IDLW
+(  138)         PGPIN(IOFF_RIGHT+JLON,JFL) = ZBELX(JLON)*PGPIN(IOFF_LEFT+JLON,JFL) +&
+(  139)          & (1.0_JPRB-ZBELX(JLON))*PGPIN(IOFF_RIGHT+JLON,JFL)
+(  140)       ENDDO
+(  141)     ENDDO 
+(  142)   ENDIF
+(  143)   IF (LDBIY) THEN
+(  144)     ! Y-direction  
+(  145)     DO JGL=1,IDGW
+(  146)       IOFF_BOTTOM=(JGL-1)*IOFF
+(  147)       IOFF_TOP=(KDGL+JGL-1)*IOFF
+(  148) !DIR$ IVDEP
+(  149)       DO JLON=1,KDLON+IDLW
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:32      page 4
+
+(  150)         PGPIN(IOFF_TOP+JLON,JFL) = ZBELY(JGL)*PGPIN(IOFF_BOTTOM+JLON,JFL) +&
+(  151)          & (1.0_JPRB-ZBELY(JGL))*PGPIN(IOFF_TOP+JLON,JFL)
+(  152)       ENDDO 
+(  153)     ENDDO 
+(  154)   ENDIF
+(  155) ENDDO
+(  156) !$OMP END PARALLEL DO
+(  157) 
+(  158) IF (LHOOK) CALL DR_HOOK('EWINDOWE',1,ZHOOK_HANDLE)
+(  159) 
+(  160) END SUBROUTINE EWINDOWE
+(  161) 
+(  162) END MODULE EWINDOWE_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:32      page 5
+
+(    1) # 1 "ewindowe_mod.F90"
+(    1) MODULE EWINDOWE_MOD
+(    2) # 3 "ewindowe_mod.F90"
+(    3) CONTAINS
+(    4) # 5 "ewindowe_mod.F90"
+(    5) SUBROUTINE EWINDOWE(KDLON,KDLUX,KBWX,KDGL,KDGUX,KBWY,KFLD,PGPIN,PSCAL,LDBIX,LDBIY)
+(    6) # 7 "ewindowe_mod.F90"
+(    7) !   purpose  :
+(    8) !   --------
+(    9) !     Make boyd periodic extension.
+(   10) # 11 "ewindowe_mod.F90"
+(   11) !      externals :
+(   12) !      ----------
+(   13) !             None
+(   14) # 15 "ewindowe_mod.F90"
+(   15) !      explicit arguments :
+(   16) !      ------------------
+(   17) !     KDLON  : upper bound for the x (or longitude) dimension
+(   18) !              of  C U I U P.  
+(   19) !     KDGL  : upper bound for the y (or latitude) dimension
+(   20) !              of the gridpoint array on C U I U P
+(   21) !     PGPIN  : gridpoint array on C U I U P (gp:fields).
+(   22) !     PSCAL  : window function scaling  parameter
+(   23) !     LDBIX  : .TRUE. windowing  in x direction  ( and vice versa )
+(   24) !     LDBIY  : .TRUE. windowing  in y direction  ( and vice versa )
+(   25) # 27 "ewindowe_mod.F90"
+(   27) !      references :
+(   28) !      ----------
+(   29) # 30 "ewindowe_mod.F90"
+(   30) !      author : Fabrice Voitus and Piet Termonia, 07/2009
+(   31) !      ------
+(   32) !      
+(   33) !      modification :
+(   34) !         Daan Degrauwe    02/2012    Cleaned and generalized
+(   35) !         S. Martinez      03/2012    Calls to ERF under CPP key 1
+(   36) !                                     (ERF function is not intrinsic with PGI)
+(   37) !         R. El Khatib 27-Sep-2013 implicit sized PGPIN 
+(   38) !         R. El Khatib 04-Aug-2016 new interface
+(   39) !      -----------------------------------------------
+(   40) # 41 "ewindowe_mod.F90"
+(   41) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   42) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   43) # 44 "ewindowe_mod.F90"
+(   44) IMPLICIT NONE
+(   45) # 46 "ewindowe_mod.F90"
+(   46) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLON
+(   47) INTEGER(KIND=JPIM),INTENT(IN)    :: KDLUX
+(   48) INTEGER(KIND=JPIM),INTENT(IN)    :: KBWX
+(   49) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGL
+(   50) INTEGER(KIND=JPIM),INTENT(IN)    :: KDGUX
+(   51) INTEGER(KIND=JPIM),INTENT(IN)    :: KBWY
+(   52) INTEGER(KIND=JPIM),INTENT(IN)    :: KFLD
+(   53) REAL(KIND=JPRB)   ,INTENT(INOUT) :: PGPIN((KDLUX+2*KBWX+2*(KDLON-KDLUX))*(KDGUX+2*KBWY+2*(KDGL-KDGUX)),KFLD)
+(   54) REAL(KIND=JPRB)   ,INTENT(IN)    :: PSCAL 
+(   55) LOGICAL           ,INTENT(IN)    :: LDBIX 
+(   56) LOGICAL           ,INTENT(IN)    :: LDBIY  
+(   57) # 58 "ewindowe_mod.F90"
+(   58) !      FERF function
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:32      page 6
+
+(   59) !      -------------
+(   60) # 62 "ewindowe_mod.F90"
+(   62) REAL(KIND=JPRB), EXTERNAL :: ERF
+(   63) # 65 "ewindowe_mod.F90"
+(   65) !      scalars
+(   66) !     --------
+(   67) # 68 "ewindowe_mod.F90"
+(   68) INTEGER(KIND=JPIM) :: JFL, JGL, JLON, IOFF, IDLW, IDGW
+(   69) INTEGER(KIND=JPIM) :: IWX, ILWX, IRWX, IWY, ILWY, IRWY, IBWXO, IBWYO
+(   70) INTEGER(KIND=JPIM) :: ILATF, ILONF, IND1, IND, IOFF_LEFT,IOFF_RIGHT,IOFF_BOTTOM,IOFF_TOP
+(   71) REAL(KIND=JPRB) :: ZI, ZJ, ZK, ZL  
+(   72) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   73) # 74 "ewindowe_mod.F90"
+(   74) !     local arrays :
+(   75) !     ------------
+(   76) # 77 "ewindowe_mod.F90"
+(   77) REAL(KIND=JPRB)  :: ZBELX(2*KBWX+(KDLON-KDLUX))
+(   78) REAL(KIND=JPRB)  :: ZBELY(2*KBWY+(KDGL -KDGUX))
+(   79) # 80 "ewindowe_mod.F90"
+(   80) !*         1. Boyd Bi-periodic Extension Method.
+(   81) !             ---------------------------------
+(   82) # 83 "ewindowe_mod.F90"
+(   83) IF (LHOOK) CALL DR_HOOK('EWINDOWE',0,ZHOOK_HANDLE)
+(   84) # 85 "ewindowe_mod.F90"
+(   85) IF ((.NOT.LDBIX).AND.(.NOT.LDBIY)) THEN
+(   86)   IF (LHOOK) CALL DR_HOOK('EWINDOWE',1,ZHOOK_HANDLE)
+(   87)   RETURN
+(   88) ENDIF
+(   89) # 90 "ewindowe_mod.F90"
+(   90) IDGW=SIZE(ZBELY)
+(   91) IDLW=SIZE(ZBELX)
+(   92) # 93 "ewindowe_mod.F90"
+(   93) !   Bell window functions :
+(   94) !   ---------------------
+(   95) # 96 "ewindowe_mod.F90"
+(   96) IF (LDBIX) THEN
+(   97)   DO JLON=1,IDLW
+(   98)     ! variable between -1 and 1
+(   99)     ZJ=REAL(-IDLW-1+2*JLON,JPRB)/(IDLW+1)
+(  100)     ZL=ZJ/SQRT(1.0_JPRB-(ZJ*ZJ))
+(  101) # 102 "ewindowe_mod.F90"
+(  102)     ZBELX(JLON)=(1.0_JPRB+ERF(REAL(PSCAL*ZL)))/2.0_JPRB
+(  103) # 106 "ewindowe_mod.F90"
+(  106)   ENDDO
+(  107) ENDIF
+(  108) # 109 "ewindowe_mod.F90"
+(  109) IF (LDBIY) THEN
+(  110)   DO JGL=1,IDGW
+(  111)     ! variable between -1 and 1
+(  112)     ZJ=REAL(-IDGW-1+2*JGL,JPRB)/(IDGW+1)
+(  113)     ZL=ZJ/SQRT(1.0_JPRB-(ZJ*ZJ))
+(  114) # 115 "ewindowe_mod.F90"
+(  115)     ZBELY(JGL)=(1.0_JPRB+ERF(REAL(PSCAL*ZL)))/2.0_JPRB
+(  116) # 119 "ewindowe_mod.F90"
+(  119)   ENDDO
+(  120) ENDIF
+(  121) # 123 "ewindowe_mod.F90"
+(  123) !    Windowing on P+G-zone :
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:27:32      page 7
+
+(  124) !    --------------------
+(  125) # 126 "ewindowe_mod.F90"
+(  126) IOFF=(KDLUX+2*(KBWX+KDGL-KDGUX))
+(  127) IBWXO=KBWX+(KDLON-KDLUX)
+(  128) IBWYO=KBWY+(KDGL-KDGUX)
+(  129) # 130 "ewindowe_mod.F90"
+(  130) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JFL,JGL,JLON,ILONF,ILATF,IND1,IND,IOFF_LEFT,IOFF_RIGHT,IOFF_BOTTOM,IOFF_TOP)
+(  131) DO JFL=1,KFLD
+(  132)   IF (LDBIX) THEN
+(  133)     ! X-direction
+(  134)     DO JGL=1,KDGL+IDGW
+(  135)       IOFF_LEFT=(JGL-1)*IOFF
+(  136)       IOFF_RIGHT=IOFF_LEFT+KDLON
+(  137)       DO JLON=1,IDLW
+(  138)         PGPIN(IOFF_RIGHT+JLON,JFL) = ZBELX(JLON)*PGPIN(IOFF_LEFT+JLON,JFL) +&
+(  139)          & (1.0_JPRB-ZBELX(JLON))*PGPIN(IOFF_RIGHT+JLON,JFL)
+(  140)       ENDDO
+(  141)     ENDDO 
+(  142)   ENDIF
+(  143)   IF (LDBIY) THEN
+(  144)     ! Y-direction  
+(  145)     DO JGL=1,IDGW
+(  146)       IOFF_BOTTOM=(JGL-1)*IOFF
+(  147)       IOFF_TOP=(KDGL+JGL-1)*IOFF
+(  148) !DIR$ IVDEP
+(  149)       DO JLON=1,KDLON+IDLW
+(  150)         PGPIN(IOFF_TOP+JLON,JFL) = ZBELY(JGL)*PGPIN(IOFF_BOTTOM+JLON,JFL) +&
+(  151)          & (1.0_JPRB-ZBELY(JGL))*PGPIN(IOFF_TOP+JLON,JFL)
+(  152)       ENDDO 
+(  153)     ENDDO 
+(  154)   ENDIF
+(  155) ENDDO
+(  156) !$OMP END PARALLEL DO
+(  157) # 158 "ewindowe_mod.F90"
+(  158) IF (LHOOK) CALL DR_HOOK('EWINDOWE',1,ZHOOK_HANDLE)
+(  159) # 160 "ewindowe_mod.F90"
+(  160) END SUBROUTINE EWINDOWE
+(  161) # 162 "ewindowe_mod.F90"
+(  162) END MODULE EWINDOWE_MOD

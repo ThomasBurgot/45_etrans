@@ -1,0 +1,497 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:41      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: edist_spec_control_mod.F90
+
+(    1) MODULE EDIST_SPEC_CONTROL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EDIST_SPEC_CONTROL(PSPECG,KFDISTG,KFROM,KVSET,PSPEC,LDIM1_IS_FLD,&
+(    4)  & KSMAX,KSPEC2,KSPEC2_G,KPOSSP,KDIM0G,KSORT)
+(    5) 
+(    6) !**** *EDIST_SPEC_CONTROL* - Distribute global spectral array among processors
+(    7) 
+(    8) !     Purpose.
+(    9) !     --------
+(   10) !        Routine for distributing spectral array
+(   11) 
+(   12) !**   Interface.
+(   13) !     ----------
+(   14) !     CALL EDIST_SPEC_CONTROL(...)
+(   15) 
+(   16) !     Explicit arguments :
+(   17) !     --------------------
+(   18) !     PSPECG(:,:) - Global spectral array
+(   19) !     KFDISTG     - Global number of fields to be distributed
+(   20) !     KFROM(:)    - Processor resposible for distributing each field
+(   21) !     KVSET(:)    - "B-Set" for each field
+(   22) !     PSPEC(:,:)  - Local spectral array
+(   23) 
+(   24) !     Externals.  SET2PE - compute "A and B" set from PE
+(   25) !     ----------  MPL..  - message passing routines
+(   26) 
+(   27) !     Author.
+(   28) !     -------
+(   29) !        Mats Hamrud *ECMWF*
+(   30) 
+(   31) !     Modifications.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:41      page 2
+
+(   32) !     --------------
+(   33) !        Original : 2000-04-01
+(   34) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   35) !        R. Hamdi      Feb. 2006 Phasing CY31
+(   36) !        P. Marguinaud Oct. 2014 Add KSORT argument (change output fields order)
+(   37) 
+(   38) !     ------------------------------------------------------------------
+(   39) 
+(   40) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   41) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   42) USE MPL_MODULE  ,ONLY : MPL_RECV, MPL_SEND, MPL_BARRIER, MPL_WAIT, &
+(   43)      &                  JP_NON_BLOCKING_STANDARD
+(   44) !USE TPM_GEN
+(   45) !USE TPM_DIM
+(   46) USE TPM_DISTR       ,ONLY : NPRCIDS, NPRTRW, MTAGDISTSP, MYSETV, MYPROC, NPROC
+(   47) USE TPMALD_DISTR    ,ONLY : DALD
+(   48) !USE TPMALD_DIM
+(   49) USE SET2PE_MOD      ,ONLY : SET2PE
+(   50) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   51) 
+(   52) IMPLICIT NONE
+(   53) 
+(   54) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDIM1_IS_FLD
+(   55) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KSMAX
+(   56) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KSPEC2
+(   57) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KSPEC2_G
+(   58) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KPOSSP(:)
+(   59) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KDIM0G(0:)
+(   60) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFDISTG
+(   61) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFROM(:)
+(   62) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KVSET(:)
+(   63) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPECG(:,:)
+(   64) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPEC(:,:)
+(   65) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN), TARGET :: KSORT (:)
+(   66) 
+(   67) INTEGER(KIND=JPIM) :: IDIST(KSPEC2_G)
+(   68) REAL(KIND=JPRB)    :: ZFLD(KSPEC2_G),ZBUF(KSPEC2_G)
+(   69) INTEGER(KIND=JPIM) :: JM,JN,II,IFLDR,IFLDS,JFLD,ITAG,JNM,IBSET,ILEN,JA,ISND
+(   70) INTEGER(KIND=JPIM) :: IRCV,ISTA,ISTP,ILENR,ISENDREQ(NPRTRW)
+(   71) INTEGER(KIND=JPIM), POINTER :: ISORT (:)
+(   72) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   73) 
+(   74) !     ------------------------------------------------------------------
+(   75) 
+(   76) ! Compute help array for distribution
+(   77) IF (LHOOK) CALL DR_HOOK('EDIST_SPEC_CONTROL_MOD:EDIST_SPEC_CONTROL',0,ZHOOK_HANDLE)
+(   78) 
+(   79) IF (PRESENT (KSORT)) THEN
+(   80)   ISORT => KSORT
+(   81) ELSE
+(   82)   ALLOCATE (ISORT (KFDISTG))
+(   83)   DO JFLD = 1, KFDISTG
+(   84)     ISORT (JFLD) = JFLD
+(   85)   ENDDO
+(   86) ENDIF
+(   87) 
+(   88) IF( NPROC == 1 ) THEN
+(   89)   CALL GSTATS(1644,0)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:41      page 3
+
+(   90)   IF(LDIM1_IS_FLD) THEN
+(   91) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JM,JFLD)
+(   92)     DO JM=1,KSPEC2_G
+(   93)       DO JFLD=1,KFDISTG
+(   94)         PSPEC(ISORT (JFLD),JM) = PSPECG(JFLD,JM)
+(   95)       ENDDO
+(   96)     ENDDO
+(   97) !$OMP END PARALLEL DO
+(   98)   ELSE
+(   99) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JM,JFLD)
+(  100)     DO JFLD=1,KFDISTG
+(  101)       DO JM=1,KSPEC2_G
+(  102)         PSPEC(JM,ISORT (JFLD)) = PSPECG(JM,JFLD)
+(  103)       ENDDO
+(  104)     ENDDO
+(  105) !$OMP END PARALLEL DO
+(  106)   ENDIF
+(  107)   CALL GSTATS(1644,1)
+(  108) ELSE
+(  109)   II = 0
+(  110)   CALL GSTATS(1804,0)
+(  111)   DO JM=0,KSMAX
+(  112)     DO JN=0,DALD%NCPL2M(JM)/2-1
+(  113)       IDIST(II+1)= KDIM0G(JM)+4*JN
+(  114)       IDIST(II+2)= KDIM0G(JM)+4*JN+1
+(  115)       IDIST(II+3)= KDIM0G(JM)+4*JN+2
+(  116)       IDIST(II+4)= KDIM0G(JM)+4*JN+3
+(  117)       II = II+4
+(  118)     ENDDO
+(  119)   ENDDO
+(  120)   CALL GSTATS(1804,1)
+(  121) !Distribute spectral array
+(  122) 
+(  123)   IFLDR = 0
+(  124)   IFLDS = 0
+(  125) 
+(  126)   CALL GSTATS(812,0)
+(  127)   DO JFLD=1,KFDISTG
+(  128)     IBSET = KVSET(JFLD)
+(  129)     ITAG = MTAGDISTSP+JFLD
+(  130) 
+(  131)     ! Send
+(  132)   IF(KFROM(JFLD) == MYPROC) THEN
+(  133)     IFLDS = IFLDS+1
+(  134)     IF (LDIM1_IS_FLD) THEN
+(  135)       DO JNM=1,KSPEC2_G
+(  136)         ZBUF(IDIST(JNM)) = PSPECG(IFLDS,JNM)
+(  137)       ENDDO
+(  138)     ELSE
+(  139)       DO JNM=1,KSPEC2_G
+(  140)         ZBUF(IDIST(JNM)) = PSPECG(JNM,IFLDS)
+(  141)       ENDDO
+(  142)     ENDIF
+(  143)     DO JA=1,NPRTRW
+(  144)       ILEN = KPOSSP(JA+1)-KPOSSP(JA)
+(  145)       IF( ILEN > 0 )THEN
+(  146)         CALL SET2PE(ISND,0,0,JA,IBSET)
+(  147)           ISTA = KPOSSP(JA)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:41      page 4
+
+(  148)           ISTP = ISTA+ILEN-1
+(  149)           CALL MPL_SEND(ZBUF(ISTA:ISTP),KDEST=NPRCIDS(ISND),KTAG=ITAG,&
+(  150)            & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(JA),&
+(  151)            & CDSTRING='EDIST_SPEC_CONTROL:')
+(  152)       ENDIF
+(  153)     ENDDO
+(  154)   ENDIF
+(  155) 
+(  156)   !Recieve
+(  157)   IF( IBSET == MYSETV )THEN
+(  158) 
+(  159)     IF( KSPEC2 > 0 )THEN
+(  160)         IRCV = KFROM(JFLD)
+(  161)         CALL MPL_RECV(ZFLD(1:KSPEC2),KSOURCE=NPRCIDS(IRCV),KTAG=ITAG,&
+(  162)          & KOUNT=ILENR,CDSTRING='EDIST_SPEC_CONTROL:')
+(  163)         IF( ILENR /= KSPEC2 )THEN
+(  164)           CALL ABORT_TRANS(' EDIST_SPEC_CONTROL: INVALID RECEIVE MESSAGE LENGTH')
+(  165)         ENDIF
+(  166)     IFLDR = IFLDR+1
+(  167)     IF (LDIM1_IS_FLD) THEN
+(  168)       PSPEC(ISORT (IFLDR),:) = ZFLD(1:KSPEC2)
+(  169)     ELSE
+(  170)       PSPEC(:,ISORT (IFLDR)) = ZFLD(1:KSPEC2)
+(  171)     ENDIF
+(  172)   ENDIF
+(  173)   ENDIF
+(  174)  IF (KFROM(JFLD) == MYPROC) THEN
+(  175)     DO JA=1,NPRTRW
+(  176)        ILEN = KPOSSP(JA+1)-KPOSSP(JA)
+(  177)        IF (ILEN > 0) THEN
+(  178)           CALL MPL_WAIT(KREQUEST=ISENDREQ(JA),&
+(  179)             & CDSTRING='DIST_SPEC_CTL: WAIT')
+(  180)        ENDIF
+(  181)     ENDDO
+(  182)    ENDIF
+(  183)   ENDDO
+(  184)     CALL GSTATS(812,1)
+(  185)   !Synchronize processors
+(  186) CALL GSTATS(787,0)
+(  187)   IF( NPROC > 1 )THEN
+(  188)     CALL MPL_BARRIER(CDSTRING='EDIST_SPEC_CONTROL:')
+(  189)   ENDIF
+(  190) CALL GSTATS(787,1)
+(  191) ENDIF
+(  192) 
+(  193) IF (.NOT. PRESENT (KSORT)) THEN
+(  194)   DEALLOCATE (ISORT)
+(  195) ENDIF
+(  196) 
+(  197) IF (LHOOK) CALL DR_HOOK('EDIST_SPEC_CONTROL_MOD:EDIST_SPEC_CONTROL',1,ZHOOK_HANDLE)
+(  198) 
+(  199) !     ------------------------------------------------------------------
+(  200) 
+(  201) END SUBROUTINE EDIST_SPEC_CONTROL
+(  202) END MODULE EDIST_SPEC_CONTROL_MOD
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:41      page 5
+
+(    1) # 1 "edist_spec_control_mod.F90"
+(    1) MODULE EDIST_SPEC_CONTROL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE EDIST_SPEC_CONTROL(PSPECG,KFDISTG,KFROM,KVSET,PSPEC,LDIM1_IS_FLD,&
+(    4)  & KSMAX,KSPEC2,KSPEC2_G,KPOSSP,KDIM0G,KSORT)
+(    5) # 6 "edist_spec_control_mod.F90"
+(    6) !**** *EDIST_SPEC_CONTROL* - Distribute global spectral array among processors
+(    7) # 8 "edist_spec_control_mod.F90"
+(    8) !     Purpose.
+(    9) !     --------
+(   10) !        Routine for distributing spectral array
+(   11) # 12 "edist_spec_control_mod.F90"
+(   12) !**   Interface.
+(   13) !     ----------
+(   14) !     CALL EDIST_SPEC_CONTROL(...)
+(   15) # 16 "edist_spec_control_mod.F90"
+(   16) !     Explicit arguments :
+(   17) !     --------------------
+(   18) !     PSPECG(:,:) - Global spectral array
+(   19) !     KFDISTG     - Global number of fields to be distributed
+(   20) !     KFROM(:)    - Processor resposible for distributing each field
+(   21) !     KVSET(:)    - "B-Set" for each field
+(   22) !     PSPEC(:,:)  - Local spectral array
+(   23) # 24 "edist_spec_control_mod.F90"
+(   24) !     Externals.  SET2PE - compute "A and B" set from PE
+(   25) !     ----------  MPL..  - message passing routines
+(   26) # 27 "edist_spec_control_mod.F90"
+(   27) !     Author.
+(   28) !     -------
+(   29) !        Mats Hamrud *ECMWF*
+(   30) # 31 "edist_spec_control_mod.F90"
+(   31) !     Modifications.
+(   32) !     --------------
+(   33) !        Original : 2000-04-01
+(   34) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   35) !        R. Hamdi      Feb. 2006 Phasing CY31
+(   36) !        P. Marguinaud Oct. 2014 Add KSORT argument (change output fields order)
+(   37) # 38 "edist_spec_control_mod.F90"
+(   38) !     ------------------------------------------------------------------
+(   39) # 40 "edist_spec_control_mod.F90"
+(   40) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   41) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   42) USE MPL_MODULE  ,ONLY : MPL_RECV, MPL_SEND, MPL_BARRIER, MPL_WAIT, &
+(   43)      &                  JP_NON_BLOCKING_STANDARD
+(   44) !USE TPM_GEN
+(   45) !USE TPM_DIM
+(   46) USE TPM_DISTR       ,ONLY : NPRCIDS, NPRTRW, MTAGDISTSP, MYSETV, MYPROC, NPROC
+(   47) USE TPMALD_DISTR    ,ONLY : DALD
+(   48) !USE TPMALD_DIM
+(   49) USE SET2PE_MOD      ,ONLY : SET2PE
+(   50) USE ABORT_TRANS_MOD ,ONLY : ABORT_TRANS
+(   51) # 52 "edist_spec_control_mod.F90"
+(   52) IMPLICIT NONE
+(   53) # 54 "edist_spec_control_mod.F90"
+(   54) LOGICAL            ,OPTIONAL, INTENT(IN)  :: LDIM1_IS_FLD
+(   55) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KSMAX
+(   56) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KSPEC2
+(   57) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KSPEC2_G
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:41      page 6
+
+(   58) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KPOSSP(:)
+(   59) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KDIM0G(0:)
+(   60) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFDISTG
+(   61) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KFROM(:)
+(   62) INTEGER(KIND=JPIM)          , INTENT(IN)  :: KVSET(:)
+(   63) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(IN)  :: PSPECG(:,:)
+(   64) REAL(KIND=JPRB)    ,OPTIONAL, INTENT(OUT) :: PSPEC(:,:)
+(   65) INTEGER(KIND=JPIM) ,OPTIONAL, INTENT(IN), TARGET :: KSORT (:)
+(   66) # 67 "edist_spec_control_mod.F90"
+(   67) INTEGER(KIND=JPIM) :: IDIST(KSPEC2_G)
+(   68) REAL(KIND=JPRB)    :: ZFLD(KSPEC2_G),ZBUF(KSPEC2_G)
+(   69) INTEGER(KIND=JPIM) :: JM,JN,II,IFLDR,IFLDS,JFLD,ITAG,JNM,IBSET,ILEN,JA,ISND
+(   70) INTEGER(KIND=JPIM) :: IRCV,ISTA,ISTP,ILENR,ISENDREQ(NPRTRW)
+(   71) INTEGER(KIND=JPIM), POINTER :: ISORT (:)
+(   72) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   73) # 74 "edist_spec_control_mod.F90"
+(   74) !     ------------------------------------------------------------------
+(   75) # 76 "edist_spec_control_mod.F90"
+(   76) ! Compute help array for distribution
+(   77) IF (LHOOK) CALL DR_HOOK('EDIST_SPEC_CONTROL_MOD:EDIST_SPEC_CONTROL',0,ZHOOK_HANDLE)
+(   78) # 79 "edist_spec_control_mod.F90"
+(   79) IF (PRESENT (KSORT)) THEN
+(   80)   ISORT => KSORT
+(   81) ELSE
+(   82)   ALLOCATE (ISORT (KFDISTG))
+(   83)   DO JFLD = 1, KFDISTG
+(   84)     ISORT (JFLD) = JFLD
+(   85)   ENDDO
+(   86) ENDIF
+(   87) # 88 "edist_spec_control_mod.F90"
+(   88) IF( NPROC == 1 ) THEN
+(   89)   CALL GSTATS(1644,0)
+(   90)   IF(LDIM1_IS_FLD) THEN
+(   91) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JM,JFLD)
+(   92)     DO JM=1,KSPEC2_G
+(   93)       DO JFLD=1,KFDISTG
+(   94)         PSPEC(ISORT (JFLD),JM) = PSPECG(JFLD,JM)
+(   95)       ENDDO
+(   96)     ENDDO
+(   97) !$OMP END PARALLEL DO
+(   98)   ELSE
+(   99) !$OMP PARALLEL DO SCHEDULE(STATIC) PRIVATE(JM,JFLD)
+(  100)     DO JFLD=1,KFDISTG
+(  101)       DO JM=1,KSPEC2_G
+(  102)         PSPEC(JM,ISORT (JFLD)) = PSPECG(JM,JFLD)
+(  103)       ENDDO
+(  104)     ENDDO
+(  105) !$OMP END PARALLEL DO
+(  106)   ENDIF
+(  107)   CALL GSTATS(1644,1)
+(  108) ELSE
+(  109)   II = 0
+(  110)   CALL GSTATS(1804,0)
+(  111)   DO JM=0,KSMAX
+(  112)     DO JN=0,DALD%NCPL2M(JM)/2-1
+(  113)       IDIST(II+1)= KDIM0G(JM)+4*JN
+(  114)       IDIST(II+2)= KDIM0G(JM)+4*JN+1
+(  115)       IDIST(II+3)= KDIM0G(JM)+4*JN+2
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:41      page 7
+
+(  116)       IDIST(II+4)= KDIM0G(JM)+4*JN+3
+(  117)       II = II+4
+(  118)     ENDDO
+(  119)   ENDDO
+(  120)   CALL GSTATS(1804,1)
+(  121) !Distribute spectral array
+(  122) # 123 "edist_spec_control_mod.F90"
+(  123)   IFLDR = 0
+(  124)   IFLDS = 0
+(  125) # 126 "edist_spec_control_mod.F90"
+(  126)   CALL GSTATS(812,0)
+(  127)   DO JFLD=1,KFDISTG
+(  128)     IBSET = KVSET(JFLD)
+(  129)     ITAG = MTAGDISTSP+JFLD
+(  130) # 131 "edist_spec_control_mod.F90"
+(  131)     ! Send
+(  132)   IF(KFROM(JFLD) == MYPROC) THEN
+(  133)     IFLDS = IFLDS+1
+(  134)     IF (LDIM1_IS_FLD) THEN
+(  135)       DO JNM=1,KSPEC2_G
+(  136)         ZBUF(IDIST(JNM)) = PSPECG(IFLDS,JNM)
+(  137)       ENDDO
+(  138)     ELSE
+(  139)       DO JNM=1,KSPEC2_G
+(  140)         ZBUF(IDIST(JNM)) = PSPECG(JNM,IFLDS)
+(  141)       ENDDO
+(  142)     ENDIF
+(  143)     DO JA=1,NPRTRW
+(  144)       ILEN = KPOSSP(JA+1)-KPOSSP(JA)
+(  145)       IF( ILEN > 0 )THEN
+(  146)         CALL SET2PE(ISND,0,0,JA,IBSET)
+(  147)           ISTA = KPOSSP(JA)
+(  148)           ISTP = ISTA+ILEN-1
+(  149)           CALL MPL_SEND(ZBUF(ISTA:ISTP),KDEST=NPRCIDS(ISND),KTAG=ITAG,&
+(  150)            & KMP_TYPE=JP_NON_BLOCKING_STANDARD,KREQUEST=ISENDREQ(JA),&
+(  151)            & CDSTRING='EDIST_SPEC_CONTROL:')
+(  152)       ENDIF
+(  153)     ENDDO
+(  154)   ENDIF
+(  155) # 156 "edist_spec_control_mod.F90"
+(  156)   !Recieve
+(  157)   IF( IBSET == MYSETV )THEN
+(  158) # 159 "edist_spec_control_mod.F90"
+(  159)     IF( KSPEC2 > 0 )THEN
+(  160)         IRCV = KFROM(JFLD)
+(  161)         CALL MPL_RECV(ZFLD(1:KSPEC2),KSOURCE=NPRCIDS(IRCV),KTAG=ITAG,&
+(  162)          & KOUNT=ILENR,CDSTRING='EDIST_SPEC_CONTROL:')
+(  163)         IF( ILENR /= KSPEC2 )THEN
+(  164)           CALL ABORT_TRANS(' EDIST_SPEC_CONTROL: INVALID RECEIVE MESSAGE LENGTH')
+(  165)         ENDIF
+(  166)     IFLDR = IFLDR+1
+(  167)     IF (LDIM1_IS_FLD) THEN
+(  168)       PSPEC(ISORT (IFLDR),:) = ZFLD(1:KSPEC2)
+(  169)     ELSE
+(  170)       PSPEC(:,ISORT (IFLDR)) = ZFLD(1:KSPEC2)
+(  171)     ENDIF
+(  172)   ENDIF
+(  173)   ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:41      page 8
+
+(  174)  IF (KFROM(JFLD) == MYPROC) THEN
+(  175)     DO JA=1,NPRTRW
+(  176)        ILEN = KPOSSP(JA+1)-KPOSSP(JA)
+(  177)        IF (ILEN > 0) THEN
+(  178)           CALL MPL_WAIT(KREQUEST=ISENDREQ(JA),&
+(  179)             & CDSTRING='DIST_SPEC_CTL: WAIT')
+(  180)        ENDIF
+(  181)     ENDDO
+(  182)    ENDIF
+(  183)   ENDDO
+(  184)     CALL GSTATS(812,1)
+(  185)   !Synchronize processors
+(  186) CALL GSTATS(787,0)
+(  187)   IF( NPROC > 1 )THEN
+(  188)     CALL MPL_BARRIER(CDSTRING='EDIST_SPEC_CONTROL:')
+(  189)   ENDIF
+(  190) CALL GSTATS(787,1)
+(  191) ENDIF
+(  192) # 193 "edist_spec_control_mod.F90"
+(  193) IF (.NOT. PRESENT (KSORT)) THEN
+(  194)   DEALLOCATE (ISORT)
+(  195) ENDIF
+(  196) # 197 "edist_spec_control_mod.F90"
+(  197) IF (LHOOK) CALL DR_HOOK('EDIST_SPEC_CONTROL_MOD:EDIST_SPEC_CONTROL',1,ZHOOK_HANDLE)
+(  198) # 199 "edist_spec_control_mod.F90"
+(  199) !     ------------------------------------------------------------------
+(  200) # 201 "edist_spec_control_mod.F90"
+(  201) END SUBROUTINE EDIST_SPEC_CONTROL
+(  202) END MODULE EDIST_SPEC_CONTROL_MOD

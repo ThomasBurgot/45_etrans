@@ -1,0 +1,360 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:19      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: sump_trans_preleg_mod.F90
+
+(    1) MODULE SUMP_TRANS_PRELEG_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUMP_TRANS_PRELEG
+(    4) 
+(    5) ! Set up distributed environment for the transform package (part 1)
+(    6) 
+(    7) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    8) 
+(    9) USE TPM_GEN         ,ONLY : NOUT, NPRINTLEV
+(   10) USE TPM_DIM         ,ONLY : R
+(   11) USE TPM_DISTR       ,ONLY : D, NPRTRW, NPRTRV, MYSETW
+(   12) 
+(   13) USE SUWAVEDI_MOD    ,ONLY : SUWAVEDI
+(   14) !USE ABORT_TRANS_MOD
+(   15) !
+(   16) 
+(   17) IMPLICIT NONE
+(   18) 
+(   19) INTEGER(KIND=JPIM) :: JW,JV,JJ,JM,JMLOC,ILATPP,IRESTL,IMLOC,IDT,INM,ILAST
+(   20) 
+(   21) INTEGER(KIND=JPIM) :: IMYMS(R%NSMAX+1),INUMTPP(NPRTRW)
+(   22) INTEGER(KIND=JPIM) :: IDUMI1,IDUMI2,IDUMI3
+(   23) INTEGER(KIND=JPIM) :: IDUM2(0:R%NSMAX), IDUM3(NPRTRW+1), IDUM4(R%NSMAX+1)
+(   24) 
+(   25) LOGICAL :: LLP1,LLP2
+(   26) 
+(   27) !     ------------------------------------------------------------------
+(   28) 
+(   29) IF(.NOT.D%LGRIDONLY) THEN
+(   30) 
+(   31) LLP1 = NPRINTLEV>0
+(   32) LLP2 = NPRINTLEV>1
+(   33) IF(LLP1) WRITE(NOUT,*) '=== ENTER ROUTINE SUMP_TRANS_PRELEG ==='
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:19      page 2
+
+(   34) 
+(   35) !*       1.    Initialize partitioning of wave numbers to PEs !
+(   36) !             ----------------------------------------------
+(   37) 
+(   38)   ALLOCATE(D%NASM0(0:R%NSMAX))
+(   39)   IF(LLP2)WRITE(NOUT,9) 'D%NASM0 ',SIZE(D%NASM0   ),SHAPE(D%NASM0   )
+(   40)   ALLOCATE(D%NATM0(0:R%NTMAX))
+(   41)   IF(LLP2)WRITE(NOUT,9) 'D%NATM0 ',SIZE(D%NATM0   ),SHAPE(D%NATM0   )
+(   42)   ALLOCATE(D%NUMPP(NPRTRW))
+(   43)   IF(LLP2)WRITE(NOUT,9) 'D%NUMPP ',SIZE(D%NUMPP   ),SHAPE(D%NUMPP   )
+(   44)   ALLOCATE(D%NPOSSP(NPRTRW+1))
+(   45)   IF(LLP2)WRITE(NOUT,9) 'D%NPOSSP',SIZE(D%NPOSSP  ),SHAPE(D%NPOSSP  )
+(   46)   ALLOCATE(D%NPROCM(0:R%NSMAX))
+(   47)   IF(LLP2)WRITE(NOUT,9) 'D%NPROCM',SIZE(D%NPROCM  ),SHAPE(D%NPROCM  )
+(   48)   ALLOCATE(D%NPTRMS(NPRTRW))
+(   49)   IF(LLP2)WRITE(NOUT,9) 'D%NPTRMS   ',SIZE(D%NPTRMS   ),SHAPE(D%NPTRMS   )
+(   50)   ALLOCATE(D%NALLMS(R%NSMAX+1))
+(   51)   IF(LLP2)WRITE(NOUT,9) 'D%NALLMS   ',SIZE(D%NALLMS   ),SHAPE(D%NALLMS   )
+(   52)   ALLOCATE(D%NDIM0G(0:R%NSMAX))
+(   53)   IF(LLP2)WRITE(NOUT,9) 'D%NDIM0G   ',SIZE(D%NDIM0G   ),SHAPE(D%NDIM0G   )
+(   54) 
+(   55)   CALL SUWAVEDI(R%NSMAX,R%NTMAX,NPRTRW,MYSETW,&
+(   56)       &D%NASM0,D%NSPOLEGL,D%NPROCM,D%NUMPP,&
+(   57)       &D%NSPEC,D%NSPEC2,D%NSPEC2MX,D%NPOSSP,IMYMS,&
+(   58)       &D%NPTRMS,D%NALLMS,D%NDIM0G)
+(   59)   CALL SUWAVEDI(R%NTMAX,R%NTMAX,NPRTRW,MYSETW,&
+(   60)       &KASM0=D%NATM0,KUMPP=INUMTPP,KSPEC2=D%NTPEC2)
+(   61) 
+(   62)   D%NUMP  = D%NUMPP (MYSETW)
+(   63)   ALLOCATE(D%MYMS(D%NUMP))
+(   64)   IF(LLP2)WRITE(NOUT,9) 'D%MYMS    ',SIZE(D%MYMS   ),SHAPE(D%MYMS   )
+(   65)   D%MYMS(:) = IMYMS(1:D%NUMP)
+(   66)   D%NUMTP = INUMTPP(MYSETW)
+(   67)   ALLOCATE(D%NLATLS(NPRTRW,NPRTRV))
+(   68)   IF(LLP2)WRITE(NOUT,9) 'D%NLATLS',SIZE(D%NLATLS   ),SHAPE(D%NLATLS )
+(   69)   ALLOCATE(D%NLATLE(NPRTRW,NPRTRV))
+(   70)   IF(LLP2)WRITE(NOUT,9) 'D%NLATLE',SIZE(D%NLATLE   ),SHAPE(D%NLATLE )
+(   71) 
+(   72)   D%NLATLS(:,:) = 999999
+(   73)   D%NLATLE(:,:) = -1
+(   74) 
+(   75)   ILATPP = R%NDGNH/NPRTRW
+(   76)   IRESTL  = R%NDGNH-NPRTRW*ILATPP
+(   77)   DO JW=1,NPRTRW
+(   78)     IF (JW > IRESTL) THEN
+(   79)       D%NLATLS(JW,1) = IRESTL*(ILATPP+1)+(JW-IRESTL-1)*ILATPP+1
+(   80)       D%NLATLE(JW,1) = D%NLATLS(JW,1)+ILATPP-1
+(   81)     ELSE
+(   82)       D%NLATLS(JW,1) = (JW-1)*(ILATPP+1)+1
+(   83)       D%NLATLE(JW,1) = D%NLATLS(JW,1)+ILATPP
+(   84)     ENDIF
+(   85)   ENDDO
+(   86)   ILAST=0
+(   87)   DO JW=1,NPRTRW
+(   88)     ILATPP = (D%NLATLE(JW,1)-D%NLATLS(JW,1)+1)/NPRTRV
+(   89)     IRESTL  = (D%NLATLE(JW,1)-D%NLATLS(JW,1)+1)-NPRTRV*ILATPP
+(   90)     DO JV=1,NPRTRV
+(   91)       IF (JV > IRESTL) THEN
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:19      page 3
+
+(   92)         D%NLATLS(JW,JV) = IRESTL*(ILATPP+1)+(JV-IRESTL-1)*ILATPP+1+ILAST
+(   93)         D%NLATLE(JW,JV) = D%NLATLS(JW,JV)+ILATPP-1
+(   94)       ELSE
+(   95)         D%NLATLS(JW,JV) = (JV-1)*(ILATPP+1)+1+ILAST
+(   96)         D%NLATLE(JW,JV) = D%NLATLS(JW,JV)+ILATPP
+(   97)       ENDIF
+(   98)     ENDDO
+(   99)     ILAST=D%NLATLE(JW,NPRTRV)
+(  100)   ENDDO
+(  101) 
+(  102)   IF (LLP1) THEN
+(  103)     DO JW=1,NPRTRW
+(  104)       DO JV=1,NPRTRV
+(  105)         WRITE(NOUT,'(" JW=",I6," JV=",I6," D%NLATLS=",I6," D%NLATLE=",I6)')&
+(  106)            & JW,JV,D%NLATLS(JW,JV),D%NLATLE(JW,JV)
+(  107)       ENDDO
+(  108)     ENDDO
+(  109)   ENDIF
+(  110) 
+(  111)   ALLOCATE(D%NPMT(0:R%NSMAX))
+(  112)   IF(LLP2)WRITE(NOUT,9) 'D%NPMT   ',SIZE(D%NPMT   ),SHAPE(D%NPMT   )
+(  113)   ALLOCATE(D%NPMS(0:R%NSMAX))
+(  114)   IF(LLP2)WRITE(NOUT,9) 'D%NPMS   ',SIZE(D%NPMS   ),SHAPE(D%NPMS   )
+(  115)   ALLOCATE(D%NPMG(0:R%NSMAX))
+(  116)   IF(LLP2)WRITE(NOUT,9) 'D%NPMG   ',SIZE(D%NPMG   ),SHAPE(D%NPMG   )
+(  117)   IDT = R%NTMAX-R%NSMAX
+(  118)   INM = 0
+(  119)   DO JMLOC=1,D%NUMP
+(  120)     IMLOC = D%MYMS(JMLOC)
+(  121)     D%NPMT(IMLOC) = INM
+(  122)     D%NPMS(IMLOC) = INM+IDT
+(  123)     INM = INM+R%NTMAX+2-IMLOC
+(  124)   ENDDO
+(  125)   INM = 0
+(  126)   DO JM=0,R%NSMAX
+(  127)     D%NPMG(JM) = INM
+(  128)     INM = INM+R%NTMAX+2-JM
+(  129)   ENDDO
+(  130) 
+(  131)   D%NLEI3D = (R%NLEI3-1)/NPRTRW+1
+(  132) 
+(  133) ENDIF
+(  134) 
+(  135) !     ------------------------------------------------------------------
+(  136) 9 FORMAT(1X,'ARRAY ',A10,' ALLOCATED ',8I8)
+(  137) 
+(  138) END SUBROUTINE SUMP_TRANS_PRELEG
+(  139) END MODULE SUMP_TRANS_PRELEG_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:19      page 4
+
+(    1) # 1 "sump_trans_preleg_mod.F90"
+(    1) MODULE SUMP_TRANS_PRELEG_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE SUMP_TRANS_PRELEG
+(    4) # 5 "sump_trans_preleg_mod.F90"
+(    5) ! Set up distributed environment for the transform package (part 1)
+(    6) # 7 "sump_trans_preleg_mod.F90"
+(    7) USE PARKIND1  ,ONLY : JPIM     ,JPRBT
+(    8) # 9 "sump_trans_preleg_mod.F90"
+(    9) USE TPM_GEN         ,ONLY : NOUT, NPRINTLEV
+(   10) USE TPM_DIM         ,ONLY : R
+(   11) USE TPM_DISTR       ,ONLY : D, NPRTRW, NPRTRV, MYSETW
+(   12) # 13 "sump_trans_preleg_mod.F90"
+(   13) USE SUWAVEDI_MOD    ,ONLY : SUWAVEDI
+(   14) !USE ABORT_TRANS_MOD
+(   15) !
+(   16) # 17 "sump_trans_preleg_mod.F90"
+(   17) IMPLICIT NONE
+(   18) # 19 "sump_trans_preleg_mod.F90"
+(   19) INTEGER(KIND=JPIM) :: JW,JV,JJ,JM,JMLOC,ILATPP,IRESTL,IMLOC,IDT,INM,ILAST
+(   20) # 21 "sump_trans_preleg_mod.F90"
+(   21) INTEGER(KIND=JPIM) :: IMYMS(R%NSMAX+1),INUMTPP(NPRTRW)
+(   22) INTEGER(KIND=JPIM) :: IDUMI1,IDUMI2,IDUMI3
+(   23) INTEGER(KIND=JPIM) :: IDUM2(0:R%NSMAX), IDUM3(NPRTRW+1), IDUM4(R%NSMAX+1)
+(   24) # 25 "sump_trans_preleg_mod.F90"
+(   25) LOGICAL :: LLP1,LLP2
+(   26) # 27 "sump_trans_preleg_mod.F90"
+(   27) !     ------------------------------------------------------------------
+(   28) # 29 "sump_trans_preleg_mod.F90"
+(   29) IF(.NOT.D%LGRIDONLY) THEN
+(   30) # 31 "sump_trans_preleg_mod.F90"
+(   31) LLP1 = NPRINTLEV>0
+(   32) LLP2 = NPRINTLEV>1
+(   33) IF(LLP1) WRITE(NOUT,*) '=== ENTER ROUTINE SUMP_TRANS_PRELEG ==='
+(   34) # 35 "sump_trans_preleg_mod.F90"
+(   35) !*       1.    Initialize partitioning of wave numbers to PEs !
+(   36) !             ----------------------------------------------
+(   37) # 38 "sump_trans_preleg_mod.F90"
+(   38)   ALLOCATE(D%NASM0(0:R%NSMAX))
+(   39)   IF(LLP2)WRITE(NOUT,9) 'D%NASM0 ',SIZE(D%NASM0   ),SHAPE(D%NASM0   )
+(   40)   ALLOCATE(D%NATM0(0:R%NTMAX))
+(   41)   IF(LLP2)WRITE(NOUT,9) 'D%NATM0 ',SIZE(D%NATM0   ),SHAPE(D%NATM0   )
+(   42)   ALLOCATE(D%NUMPP(NPRTRW))
+(   43)   IF(LLP2)WRITE(NOUT,9) 'D%NUMPP ',SIZE(D%NUMPP   ),SHAPE(D%NUMPP   )
+(   44)   ALLOCATE(D%NPOSSP(NPRTRW+1))
+(   45)   IF(LLP2)WRITE(NOUT,9) 'D%NPOSSP',SIZE(D%NPOSSP  ),SHAPE(D%NPOSSP  )
+(   46)   ALLOCATE(D%NPROCM(0:R%NSMAX))
+(   47)   IF(LLP2)WRITE(NOUT,9) 'D%NPROCM',SIZE(D%NPROCM  ),SHAPE(D%NPROCM  )
+(   48)   ALLOCATE(D%NPTRMS(NPRTRW))
+(   49)   IF(LLP2)WRITE(NOUT,9) 'D%NPTRMS   ',SIZE(D%NPTRMS   ),SHAPE(D%NPTRMS   )
+(   50)   ALLOCATE(D%NALLMS(R%NSMAX+1))
+(   51)   IF(LLP2)WRITE(NOUT,9) 'D%NALLMS   ',SIZE(D%NALLMS   ),SHAPE(D%NALLMS   )
+(   52)   ALLOCATE(D%NDIM0G(0:R%NSMAX))
+(   53)   IF(LLP2)WRITE(NOUT,9) 'D%NDIM0G   ',SIZE(D%NDIM0G   ),SHAPE(D%NDIM0G   )
+(   54) # 55 "sump_trans_preleg_mod.F90"
+(   55)   CALL SUWAVEDI(R%NSMAX,R%NTMAX,NPRTRW,MYSETW,&
+(   56)       &D%NASM0,D%NSPOLEGL,D%NPROCM,D%NUMPP,&
+(   57)       &D%NSPEC,D%NSPEC2,D%NSPEC2MX,D%NPOSSP,IMYMS,&
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:19      page 5
+
+(   58)       &D%NPTRMS,D%NALLMS,D%NDIM0G)
+(   59)   CALL SUWAVEDI(R%NTMAX,R%NTMAX,NPRTRW,MYSETW,&
+(   60)       &KASM0=D%NATM0,KUMPP=INUMTPP,KSPEC2=D%NTPEC2)
+(   61) # 62 "sump_trans_preleg_mod.F90"
+(   62)   D%NUMP  = D%NUMPP (MYSETW)
+(   63)   ALLOCATE(D%MYMS(D%NUMP))
+(   64)   IF(LLP2)WRITE(NOUT,9) 'D%MYMS    ',SIZE(D%MYMS   ),SHAPE(D%MYMS   )
+(   65)   D%MYMS(:) = IMYMS(1:D%NUMP)
+(   66)   D%NUMTP = INUMTPP(MYSETW)
+(   67)   ALLOCATE(D%NLATLS(NPRTRW,NPRTRV))
+(   68)   IF(LLP2)WRITE(NOUT,9) 'D%NLATLS',SIZE(D%NLATLS   ),SHAPE(D%NLATLS )
+(   69)   ALLOCATE(D%NLATLE(NPRTRW,NPRTRV))
+(   70)   IF(LLP2)WRITE(NOUT,9) 'D%NLATLE',SIZE(D%NLATLE   ),SHAPE(D%NLATLE )
+(   71) # 72 "sump_trans_preleg_mod.F90"
+(   72)   D%NLATLS(:,:) = 999999
+(   73)   D%NLATLE(:,:) = -1
+(   74) # 75 "sump_trans_preleg_mod.F90"
+(   75)   ILATPP = R%NDGNH/NPRTRW
+(   76)   IRESTL  = R%NDGNH-NPRTRW*ILATPP
+(   77)   DO JW=1,NPRTRW
+(   78)     IF (JW > IRESTL) THEN
+(   79)       D%NLATLS(JW,1) = IRESTL*(ILATPP+1)+(JW-IRESTL-1)*ILATPP+1
+(   80)       D%NLATLE(JW,1) = D%NLATLS(JW,1)+ILATPP-1
+(   81)     ELSE
+(   82)       D%NLATLS(JW,1) = (JW-1)*(ILATPP+1)+1
+(   83)       D%NLATLE(JW,1) = D%NLATLS(JW,1)+ILATPP
+(   84)     ENDIF
+(   85)   ENDDO
+(   86)   ILAST=0
+(   87)   DO JW=1,NPRTRW
+(   88)     ILATPP = (D%NLATLE(JW,1)-D%NLATLS(JW,1)+1)/NPRTRV
+(   89)     IRESTL  = (D%NLATLE(JW,1)-D%NLATLS(JW,1)+1)-NPRTRV*ILATPP
+(   90)     DO JV=1,NPRTRV
+(   91)       IF (JV > IRESTL) THEN
+(   92)         D%NLATLS(JW,JV) = IRESTL*(ILATPP+1)+(JV-IRESTL-1)*ILATPP+1+ILAST
+(   93)         D%NLATLE(JW,JV) = D%NLATLS(JW,JV)+ILATPP-1
+(   94)       ELSE
+(   95)         D%NLATLS(JW,JV) = (JV-1)*(ILATPP+1)+1+ILAST
+(   96)         D%NLATLE(JW,JV) = D%NLATLS(JW,JV)+ILATPP
+(   97)       ENDIF
+(   98)     ENDDO
+(   99)     ILAST=D%NLATLE(JW,NPRTRV)
+(  100)   ENDDO
+(  101) # 102 "sump_trans_preleg_mod.F90"
+(  102)   IF (LLP1) THEN
+(  103)     DO JW=1,NPRTRW
+(  104)       DO JV=1,NPRTRV
+(  105)         WRITE(NOUT,'(" JW=",I6," JV=",I6," D%NLATLS=",I6," D%NLATLE=",I6)')&
+(  106)            & JW,JV,D%NLATLS(JW,JV),D%NLATLE(JW,JV)
+(  107)       ENDDO
+(  108)     ENDDO
+(  109)   ENDIF
+(  110) # 111 "sump_trans_preleg_mod.F90"
+(  111)   ALLOCATE(D%NPMT(0:R%NSMAX))
+(  112)   IF(LLP2)WRITE(NOUT,9) 'D%NPMT   ',SIZE(D%NPMT   ),SHAPE(D%NPMT   )
+(  113)   ALLOCATE(D%NPMS(0:R%NSMAX))
+(  114)   IF(LLP2)WRITE(NOUT,9) 'D%NPMS   ',SIZE(D%NPMS   ),SHAPE(D%NPMS   )
+(  115)   ALLOCATE(D%NPMG(0:R%NSMAX))
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:19      page 6
+
+(  116)   IF(LLP2)WRITE(NOUT,9) 'D%NPMG   ',SIZE(D%NPMG   ),SHAPE(D%NPMG   )
+(  117)   IDT = R%NTMAX-R%NSMAX
+(  118)   INM = 0
+(  119)   DO JMLOC=1,D%NUMP
+(  120)     IMLOC = D%MYMS(JMLOC)
+(  121)     D%NPMT(IMLOC) = INM
+(  122)     D%NPMS(IMLOC) = INM+IDT
+(  123)     INM = INM+R%NTMAX+2-IMLOC
+(  124)   ENDDO
+(  125)   INM = 0
+(  126)   DO JM=0,R%NSMAX
+(  127)     D%NPMG(JM) = INM
+(  128)     INM = INM+R%NTMAX+2-JM
+(  129)   ENDDO
+(  130) # 131 "sump_trans_preleg_mod.F90"
+(  131)   D%NLEI3D = (R%NLEI3-1)/NPRTRW+1
+(  132) # 133 "sump_trans_preleg_mod.F90"
+(  133) ENDIF
+(  134) # 135 "sump_trans_preleg_mod.F90"
+(  135) !     ------------------------------------------------------------------
+(  136) 9 FORMAT(1X,'ARRAY ',A10,' ALLOCATED ',8I8)
+(  137) # 138 "sump_trans_preleg_mod.F90"
+(  138) END SUBROUTINE SUMP_TRANS_PRELEG
+(  139) END MODULE SUMP_TRANS_PRELEG_MOD

@@ -1,0 +1,217 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:32      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: vd2uv_ctl_mod.F90
+
+(    1) MODULE VD2UV_CTL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE VD2UV_CTL(KF_UV,PSPVOR,PSPDIV,PU,PV)
+(    4) 
+(    5) !**** *VD2UV_CTL* - Control routine for going from vor/div to spectral U and V.
+(    6) 
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Control routine for computing spectral U (u*cos(theta)) and V 
+(   10) 
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !     CALL INV_TRANS_CTL(...)
+(   14) !     KF_UV        - local number of spectral u-v fields
+(   15) !     PSPVOR(:,:)  - spectral vorticity (input)
+(   16) !     PSPDIV(:,:)  - spectral divergence (input)
+(   17) !     PU(:,:)      - U (out)
+(   18) !     PV(:,:)      - V (out)
+(   19) 
+(   20) !     Method.
+(   21) !     -------
+(   22) 
+(   23) !     Externals.
+(   24) !     ----------
+(   25) 
+(   26) 
+(   27) !     Author.
+(   28) !     -------
+(   29) !        Mats Hamrud *ECMWF*
+(   30) 
+(   31) !     Modifications.
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:32      page 2
+
+(   32) !     --------------
+(   33) !        Original : July 2015
+(   34) 
+(   35) !     ------------------------------------------------------------------
+(   36) 
+(   37) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   38) 
+(   39) USE TPM_DISTR       ,ONLY : D
+(   40) 
+(   41) USE VD2UV_MOD       ,ONLY : VD2UV
+(   42) 
+(   43) IMPLICIT NONE
+(   44) 
+(   45) INTEGER(KIND=JPIM),INTENT(IN) :: KF_UV
+(   46) REAL(KIND=JPRB),INTENT(IN)    :: PSPVOR(:,:)
+(   47) REAL(KIND=JPRB),INTENT(IN)    :: PSPDIV(:,:)
+(   48) REAL(KIND=JPRB),INTENT(OUT)   :: PU(:,:)
+(   49) REAL(KIND=JPRB),INTENT(OUT)   :: PV(:,:)
+(   50) 
+(   51) INTEGER(KIND=JPIM) :: JM,IM,ILEI2
+(   52) 
+(   53) !     ------------------------------------------------------------------
+(   54) 
+(   55) CALL GSTATS(102,0)
+(   56) ILEI2 = 8*KF_UV
+(   57) 
+(   58) CALL GSTATS(1647,0)
+(   59) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JM,IM)
+(   60) DO JM=1,D%NUMP
+(   61)   IM = D%MYMS(JM)
+(   62)   CALL VD2UV(IM,JM,KF_UV,ILEI2,PSPVOR,PSPDIV,PU,PV)
+(   63) ENDDO
+(   64) !$OMP END PARALLEL DO
+(   65) CALL GSTATS(1647,1)
+(   66) CALL GSTATS(102,1)
+(   67) 
+(   68) !     ------------------------------------------------------------------
+(   69) 
+(   70) END SUBROUTINE VD2UV_CTL
+(   71) END MODULE VD2UV_CTL_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:32      page 3
+
+(    1) # 1 "vd2uv_ctl_mod.F90"
+(    1) MODULE VD2UV_CTL_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE VD2UV_CTL(KF_UV,PSPVOR,PSPDIV,PU,PV)
+(    4) # 5 "vd2uv_ctl_mod.F90"
+(    5) !**** *VD2UV_CTL* - Control routine for going from vor/div to spectral U and V.
+(    6) # 7 "vd2uv_ctl_mod.F90"
+(    7) !     Purpose.
+(    8) !     --------
+(    9) !        Control routine for computing spectral U (u*cos(theta)) and V 
+(   10) # 11 "vd2uv_ctl_mod.F90"
+(   11) !**   Interface.
+(   12) !     ----------
+(   13) !     CALL INV_TRANS_CTL(...)
+(   14) !     KF_UV        - local number of spectral u-v fields
+(   15) !     PSPVOR(:,:)  - spectral vorticity (input)
+(   16) !     PSPDIV(:,:)  - spectral divergence (input)
+(   17) !     PU(:,:)      - U (out)
+(   18) !     PV(:,:)      - V (out)
+(   19) # 20 "vd2uv_ctl_mod.F90"
+(   20) !     Method.
+(   21) !     -------
+(   22) # 23 "vd2uv_ctl_mod.F90"
+(   23) !     Externals.
+(   24) !     ----------
+(   25) # 27 "vd2uv_ctl_mod.F90"
+(   27) !     Author.
+(   28) !     -------
+(   29) !        Mats Hamrud *ECMWF*
+(   30) # 31 "vd2uv_ctl_mod.F90"
+(   31) !     Modifications.
+(   32) !     --------------
+(   33) !        Original : July 2015
+(   34) # 35 "vd2uv_ctl_mod.F90"
+(   35) !     ------------------------------------------------------------------
+(   36) # 37 "vd2uv_ctl_mod.F90"
+(   37) USE PARKIND1  ,ONLY : JPIM     ,JPRBT ,JPRB
+(   38) # 39 "vd2uv_ctl_mod.F90"
+(   39) USE TPM_DISTR       ,ONLY : D
+(   40) # 41 "vd2uv_ctl_mod.F90"
+(   41) USE VD2UV_MOD       ,ONLY : VD2UV
+(   42) # 43 "vd2uv_ctl_mod.F90"
+(   43) IMPLICIT NONE
+(   44) # 45 "vd2uv_ctl_mod.F90"
+(   45) INTEGER(KIND=JPIM),INTENT(IN) :: KF_UV
+(   46) REAL(KIND=JPRB),INTENT(IN)    :: PSPVOR(:,:)
+(   47) REAL(KIND=JPRB),INTENT(IN)    :: PSPDIV(:,:)
+(   48) REAL(KIND=JPRB),INTENT(OUT)   :: PU(:,:)
+(   49) REAL(KIND=JPRB),INTENT(OUT)   :: PV(:,:)
+(   50) # 51 "vd2uv_ctl_mod.F90"
+(   51) INTEGER(KIND=JPIM) :: JM,IM,ILEI2
+(   52) # 53 "vd2uv_ctl_mod.F90"
+(   53) !     ------------------------------------------------------------------
+(   54) # 55 "vd2uv_ctl_mod.F90"
+(   55) CALL GSTATS(102,0)
+(   56) ILEI2 = 8*KF_UV
+(   57) # 58 "vd2uv_ctl_mod.F90"
+(   58) CALL GSTATS(1647,0)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:29:32      page 4
+
+(   59) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JM,IM)
+(   60) DO JM=1,D%NUMP
+(   61)   IM = D%MYMS(JM)
+(   62)   CALL VD2UV(IM,JM,KF_UV,ILEI2,PSPVOR,PSPDIV,PU,PV)
+(   63) ENDDO
+(   64) !$OMP END PARALLEL DO
+(   65) CALL GSTATS(1647,1)
+(   66) CALL GSTATS(102,1)
+(   67) # 68 "vd2uv_ctl_mod.F90"
+(   68) !     ------------------------------------------------------------------
+(   69) # 70 "vd2uv_ctl_mod.F90"
+(   70) END SUBROUTINE VD2UV_CTL
+(   71) END MODULE VD2UV_CTL_MOD

@@ -1,0 +1,617 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:22      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir .D[18]
+          -idir .D[19]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: eltinvad_mod.F90
+
+(    1) MODULE ELTINVAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ELTINVAD(KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS,KLEI2,&
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,PSPSC3A,PSPSC3B,PSPSC2,&
+(    5)  & KFLDPTRUV,KFLDPTRSC,FSPGL_PROC,PSPMEANU,PSPMEANV)
+(    6) 
+(    7) !**** *ELTINVAD* - Control routine for inverse Legandre transform - adj.
+(    8) 
+(    9) !     Purpose.
+(   10) !     --------
+(   11) !     Control routine for the inverse LEGENDRE transform
+(   12) 
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !     CALL ELTINVAD(...)
+(   16) !     KF_OUT_LT    - number of fields coming out from inverse LT
+(   17) !     KF_UV        - local number of spectral u-v fields
+(   18) !     KF_SCALARS   - local number of scalar spectral fields
+(   19) !     KF_SCDERS    - local number of derivatives of scalar spectral fields
+(   20) !     PSPVOR(:,:)  - spectral vorticity (input)
+(   21) !     PSPDIV(:,:)  - spectral divergence (input)
+(   22) !     PSPSCALAR(:,:) - spectral scalarvalued fields (input)
+(   23) !     KFLDPTRUV(:) - field pointer array for vor./div.
+(   24) !     KFLDPTRSC(:) - field pointer array for PSPSCALAR
+(   25) !     FSPGL_PROC  - external procedure to be executed in fourier space
+(   26) !                   before transposition  
+(   27) 
+(   28) !     Method.
+(   29) !     -------
+(   30) 
+(   31) !     Externals.  
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:22      page 2
+
+(   32) !     ----------  
+(   33) 
+(   34) !     Author.
+(   35) !     -------
+(   36) !        Mats Hamrud *ECMWF*
+(   37) 
+(   38) !     Modifications.
+(   39) !     --------------
+(   40) !        Original : 00-02-01 From LTINVAD in IFS CY22R1
+(   41) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   42) !        01-Dec-2004   A. Deckmyn    add KMLOC to EVDTUVAD call
+(   43) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   44) !        N. Lopes & R. El Khatib 15-Jun-2012 Scalability enhancement +
+(   45) !        thread-safety
+(   46) !     ------------------------------------------------------------------
+(   47) 
+(   48) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   49) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   50) 
+(   51) USE TPM_GEN
+(   52) USE TPM_DIM         ,ONLY : R
+(   53) USE TPMALD_DIM      ,ONLY : RALD
+(   54) USE TPM_TRANS       ,ONLY : LDIVGP, LVORGP, NF_SC2, NF_SC3A, NF_SC3B
+(   55) USE TPM_DISTR
+(   56) 
+(   57) USE EASRE1BAD_MOD   ,ONLY : EASRE1BAD
+(   58) USE ELEINVAD_MOD    ,ONLY : ELEINVAD
+(   59) USE EPRFI1BAD_MOD   ,ONLY : EPRFI1BAD
+(   60) USE ESPNSDEAD_MOD   ,ONLY : ESPNSDEAD
+(   61) USE EVDTUVAD_MOD    ,ONLY : EVDTUVAD
+(   62) USE EVDTUVAD_COMM_MOD
+(   63) USE EXTPER_MOD      ,ONLY : EXTPER
+(   64) 
+(   65) IMPLICIT NONE
+(   66) 
+(   67) INTEGER(KIND=JPIM), INTENT(IN) :: KF_OUT_LT
+(   68) INTEGER(KIND=JPIM), INTENT(IN) :: KF_UV
+(   69) INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCALARS
+(   70) INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCDERS
+(   71) INTEGER(KIND=JPIM), INTENT(IN) :: KLEI2
+(   72) 
+(   73) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPVOR(:,:)
+(   74) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPDIV(:,:)
+(   75) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPSCALAR(:,:)
+(   76) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPSC2(:,:)
+(   77) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPSC3A(:,:,:)
+(   78) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPSC3B(:,:,:)
+(   79) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPMEANU(:)
+(   80) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPMEANV(:)
+(   81) 
+(   82) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRUV(:)
+(   83) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRSC(:)
+(   84) 
+(   85) EXTERNAL  FSPGL_PROC
+(   86) OPTIONAL  FSPGL_PROC
+(   87) 
+(   88) REAL(KIND=JPRB) :: ZIA(RALD%NDGLSUR+R%NNOEXTZG,KLEI2,D%NUMP)
+(   89) REAL(KIND=JPRB) :: ZIA2(KLEI2,RALD%NDGLSUR+R%NNOEXTZG)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:22      page 3
+
+(   90) 
+(   91) INTEGER(KIND=JPIM) :: IFC, ISTA, IINDEX(2*KF_OUT_LT), JF, JDIM, IM, JM
+(   92) INTEGER(KIND=JPIM) :: IVORL,IVORU,IDIVL,IDIVU,IUL,IUU,IVL,IVU,ISL,ISU,IDL,IDU
+(   93) INTEGER(KIND=JPIM) :: ILAST,IFIRST,IDIM1,IDIM3,J3
+(   94) 
+(   95) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   96) 
+(   97) !     ------------------------------------------------------------------
+(   98) 
+(   99) IF (LHOOK) CALL DR_HOOK('ELTINVAD_MOD:ELTINVAD',0,ZHOOK_HANDLE)
+(  100) 
+(  101) IF (KF_UV > 0) THEN
+(  102)   IVORL = 1
+(  103)   IVORU = 2*KF_UV
+(  104)   IDIVL = 2*KF_UV+1
+(  105)   IDIVU = 4*KF_UV
+(  106)   IUL   = 4*KF_UV+1
+(  107)   IUU   = 6*KF_UV
+(  108)   IVL   = 6*KF_UV+1
+(  109)   IVU   = 8*KF_UV
+(  110) ENDIF
+(  111) ISTA = 1
+(  112) IFC  = 2*KF_OUT_LT
+(  113) IF(KF_UV > 0 .AND. .NOT. LVORGP) THEN
+(  114)   ISTA = ISTA+2*KF_UV
+(  115) ENDIF
+(  116) IF(KF_UV > 0 .AND. .NOT. LDIVGP) THEN
+(  117)   ISTA = ISTA+2*KF_UV
+(  118) ENDIF
+(  119) IF (KF_SCDERS > 0) THEN
+(  120)   ISL = 2*(4*KF_UV)+1
+(  121)   ISU = ISL+2*KF_SCALARS-1
+(  122)   IDL = 2*(4*KF_UV+KF_SCALARS)+1
+(  123)   IDU = IDL+2*KF_SCDERS-1
+(  124) ENDIF
+(  125) 
+(  126) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JM,IM,JF,JDIM,IINDEX,ZIA2)
+(  127) DO JM=1,D%NUMP
+(  128)   IM = D%MYMS(JM)
+(  129) 
+(  130) !        7.    OPTIONAL COMPUTATIONS IN FOURIER SPACE
+(  131) !              --------------------------------------
+(  132) 
+(  133) !commented  IF(PRESENT(FSPGL_PROC)) THEN
+(  134) !commented    CALL FSPGL_INT(IM,JM,FSPGL_PROC)
+(  135) !commented  ENDIF
+(  136) 
+(  137) 
+(  138) !*       6.    RECOMBINATION SYMMETRIC/ANTISYMMETRIC PART.
+(  139) !              --------------------------------------------
+(  140) 
+(  141)   ZIA(:,:,JM)=0.0_JPRB
+(  142)   CALL EASRE1BAD(KF_OUT_LT,IM,JM,ZIA(:,ISTA:ISTA+IFC-1,JM))
+(  143) 
+(  144) 
+(  145) !*       5.    PERIODICIZATION IN Y DIRECTION
+(  146) !              ------------------------------
+(  147) 
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:22      page 4
+
+(  148)   IF(R%NNOEXTZG>0) THEN
+(  149)     DO JF = 1,IFC
+(  150)       DO JDIM = 1,R%NDGL
+(  151)         ZIA2(JF,JDIM)=ZIA(JDIM,JF,JM)
+(  152)       ENDDO
+(  153)     ENDDO
+(  154)     IINDEX(1)=0
+(  155)     CALL EXTPER(ZIA2(:,:),R%NDGL+R%NNOEXTZG,1,R%NDGL,IFC,1,IINDEX,0)
+(  156)     DO JF = 1,IFC
+(  157)       DO JDIM = 1,R%NDGL+R%NNOEXTZG
+(  158)         ZIA(JDIM,JF,JM) = ZIA2(JF,JDIM)
+(  159)       ENDDO
+(  160)     ENDDO
+(  161)   ENDIF
+(  162) 
+(  163) !*       4.    INVERSE LEGENDRE TRANSFORM.
+(  164) !              ---------------------------
+(  165) 
+(  166)   CALL ELEINVAD(IM,IFC,KF_OUT_LT,ZIA(:,ISTA:ISTA+IFC-1,JM))
+(  167) 
+(  168) 
+(  169) !*       3.    SPECTRAL COMPUTATIONS FOR U,V AND DERIVATIVES.
+(  170) !              ----------------------------------------------
+(  171) 
+(  172)   ZIA(:,1:ISTA-1,JM) = 0.0_JPRB
+(  173) 
+(  174)   IF (KF_UV > 0) THEN
+(  175)     CALL EVDTUVAD(IM,JM,KF_UV,KFLDPTRUV,ZIA(:,IVORL:IVORU,JM),ZIA(:,IDIVL:IDIVU,JM),&
+(  176)      & ZIA(:,IUL:IUU,JM),ZIA(:,IVL:IVU,JM),PSPMEANU,PSPMEANV)
+(  177)   ENDIF
+(  178) 
+(  179) 
+(  180) ENDDO
+(  181) !$OMP END PARALLEL DO
+(  182) 
+(  183) !*       2.    COMMUNICATION OF MEAN WIND
+(  184) !              --------------------------
+(  185) 
+(  186) IF (KF_UV > 0) THEN
+(  187)   DO JM=1,D%NUMP
+(  188)     IM = D%MYMS(JM)
+(  189)     CALL EVDTUVAD_COMM(IM,JM,KF_UV,KFLDPTRUV,PSPMEANU,PSPMEANV)
+(  190)   ENDDO
+(  191) ENDIF
+(  192) 
+(  193) !*       2.    PREPARE SPECTRAL FIELDS
+(  194) !              -----------------------
+(  195) 
+(  196) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JM,IM,IFIRST,ILAST,IDIM1,IDIM3)
+(  197) DO JM=1,D%NUMP
+(  198)   IM = D%MYMS(JM)
+(  199) 
+(  200)   IFIRST = 1
+(  201)   ILAST  = 4*KF_UV
+(  202)   IF (KF_UV > 0) THEN
+(  203)     CALL EPRFI1BAD(IM,ZIA(:,IVORL:IVORU,JM),PSPVOR,KF_UV,KFLDPTRUV)
+(  204)     CALL EPRFI1BAD(IM,ZIA(:,IDIVL:IDIVU,JM),PSPDIV,KF_UV,KFLDPTRUV)
+(  205)     ILAST = ILAST+4*KF_UV
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:22      page 5
+
+(  206)   ENDIF
+(  207) 
+(  208)   IF (KF_SCDERS > 0) THEN
+(  209)     CALL ESPNSDEAD(IM,KF_SCALARS,ZIA(:,ISL:ISU,JM),ZIA(:,IDL:IDU,JM))
+(  210)   ENDIF
+(  211) 
+(  212)   IF(KF_SCALARS > 0)THEN
+(  213)     IF(PRESENT(PSPSCALAR)) THEN
+(  214)       IFIRST = ILAST+1
+(  215)       ILAST  = IFIRST - 1 + 2*KF_SCALARS 
+(  216)       CALL EPRFI1BAD(IM,ZIA(:,IFIRST:ILAST,JM),PSPSCALAR(:,:),KF_SCALARS,KFLDPTRSC)
+(  217)     ELSE
+(  218)       IF(PRESENT(PSPSC2) .AND. NF_SC2 > 0) THEN
+(  219)         IFIRST = ILAST+1
+(  220)         ILAST  = IFIRST-1+2*NF_SC2
+(  221)         CALL EPRFI1BAD(IM,ZIA(:,IFIRST:ILAST,JM),PSPSC2(:,:),NF_SC2)
+(  222)       ENDIF
+(  223)       IF(PRESENT(PSPSC3A) .AND. NF_SC3A > 0) THEN
+(  224)         IDIM1=NF_SC3A
+(  225)         IDIM3=UBOUND(PSPSC3A,3)
+(  226)         DO J3=1,IDIM3
+(  227)           IFIRST = ILAST+1
+(  228)           ILAST  = IFIRST-1+2*IDIM1
+(  229)           CALL EPRFI1BAD(IM,ZIA(:,IFIRST:ILAST,JM),PSPSC3A(:,:,J3),IDIM1)
+(  230)         ENDDO
+(  231)       ENDIF
+(  232)       IF(PRESENT(PSPSC3B) .AND. NF_SC3B > 0) THEN
+(  233)         IDIM1=NF_SC3B
+(  234)         IDIM3=UBOUND(PSPSC3B,3)
+(  235)         DO J3=1,IDIM3
+(  236)           IFIRST = ILAST+1
+(  237)           ILAST  = IFIRST-1+2*IDIM1
+(  238)           CALL EPRFI1BAD(IM,ZIA(:,IFIRST:ILAST,JM),PSPSC3B(:,:,J3),IDIM1)
+(  239)         ENDDO
+(  240)       ENDIF
+(  241)     ENDIF
+(  242)   ENDIF
+(  243) 
+(  244) ENDDO
+(  245) !$OMP END PARALLEL DO
+(  246) 
+(  247) IF (LHOOK) CALL DR_HOOK('ELTINVAD_MOD:ELTINVAD',1,ZHOOK_HANDLE)
+(  248) 
+(  249) !     ------------------------------------------------------------------
+(  250) 
+(  251) END SUBROUTINE ELTINVAD
+(  252) END MODULE ELTINVAD_MOD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:22      page 6
+
+(    1) # 1 "eltinvad_mod.F90"
+(    1) MODULE ELTINVAD_MOD
+(    2) CONTAINS
+(    3) SUBROUTINE ELTINVAD(KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS,KLEI2,&
+(    4)  & PSPVOR,PSPDIV,PSPSCALAR,PSPSC3A,PSPSC3B,PSPSC2,&
+(    5)  & KFLDPTRUV,KFLDPTRSC,FSPGL_PROC,PSPMEANU,PSPMEANV)
+(    6) # 7 "eltinvad_mod.F90"
+(    7) !**** *ELTINVAD* - Control routine for inverse Legandre transform - adj.
+(    8) # 9 "eltinvad_mod.F90"
+(    9) !     Purpose.
+(   10) !     --------
+(   11) !     Control routine for the inverse LEGENDRE transform
+(   12) # 13 "eltinvad_mod.F90"
+(   13) !**   Interface.
+(   14) !     ----------
+(   15) !     CALL ELTINVAD(...)
+(   16) !     KF_OUT_LT    - number of fields coming out from inverse LT
+(   17) !     KF_UV        - local number of spectral u-v fields
+(   18) !     KF_SCALARS   - local number of scalar spectral fields
+(   19) !     KF_SCDERS    - local number of derivatives of scalar spectral fields
+(   20) !     PSPVOR(:,:)  - spectral vorticity (input)
+(   21) !     PSPDIV(:,:)  - spectral divergence (input)
+(   22) !     PSPSCALAR(:,:) - spectral scalarvalued fields (input)
+(   23) !     KFLDPTRUV(:) - field pointer array for vor./div.
+(   24) !     KFLDPTRSC(:) - field pointer array for PSPSCALAR
+(   25) !     FSPGL_PROC  - external procedure to be executed in fourier space
+(   26) !                   before transposition  
+(   27) # 28 "eltinvad_mod.F90"
+(   28) !     Method.
+(   29) !     -------
+(   30) # 31 "eltinvad_mod.F90"
+(   31) !     Externals.  
+(   32) !     ----------  
+(   33) # 34 "eltinvad_mod.F90"
+(   34) !     Author.
+(   35) !     -------
+(   36) !        Mats Hamrud *ECMWF*
+(   37) # 38 "eltinvad_mod.F90"
+(   38) !     Modifications.
+(   39) !     --------------
+(   40) !        Original : 00-02-01 From LTINVAD in IFS CY22R1
+(   41) !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+(   42) !        01-Dec-2004   A. Deckmyn    add KMLOC to EVDTUVAD call
+(   43) !        D. Degrauwe  (Feb 2012): Alternative extension zone (E')
+(   44) !        N. Lopes & R. El Khatib 15-Jun-2012 Scalability enhancement +
+(   45) !        thread-safety
+(   46) !     ------------------------------------------------------------------
+(   47) # 48 "eltinvad_mod.F90"
+(   48) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(   49) USE YOMHOOK   ,ONLY : LHOOK,   DR_HOOK
+(   50) # 51 "eltinvad_mod.F90"
+(   51) USE TPM_GEN
+(   52) USE TPM_DIM         ,ONLY : R
+(   53) USE TPMALD_DIM      ,ONLY : RALD
+(   54) USE TPM_TRANS       ,ONLY : LDIVGP, LVORGP, NF_SC2, NF_SC3A, NF_SC3B
+(   55) USE TPM_DISTR
+(   56) # 57 "eltinvad_mod.F90"
+(   57) USE EASRE1BAD_MOD   ,ONLY : EASRE1BAD
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:22      page 7
+
+(   58) USE ELEINVAD_MOD    ,ONLY : ELEINVAD
+(   59) USE EPRFI1BAD_MOD   ,ONLY : EPRFI1BAD
+(   60) USE ESPNSDEAD_MOD   ,ONLY : ESPNSDEAD
+(   61) USE EVDTUVAD_MOD    ,ONLY : EVDTUVAD
+(   62) USE EVDTUVAD_COMM_MOD
+(   63) USE EXTPER_MOD      ,ONLY : EXTPER
+(   64) # 65 "eltinvad_mod.F90"
+(   65) IMPLICIT NONE
+(   66) # 67 "eltinvad_mod.F90"
+(   67) INTEGER(KIND=JPIM), INTENT(IN) :: KF_OUT_LT
+(   68) INTEGER(KIND=JPIM), INTENT(IN) :: KF_UV
+(   69) INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCALARS
+(   70) INTEGER(KIND=JPIM), INTENT(IN) :: KF_SCDERS
+(   71) INTEGER(KIND=JPIM), INTENT(IN) :: KLEI2
+(   72) # 73 "eltinvad_mod.F90"
+(   73) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPVOR(:,:)
+(   74) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPDIV(:,:)
+(   75) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPSCALAR(:,:)
+(   76) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPSC2(:,:)
+(   77) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPSC3A(:,:,:)
+(   78) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPSC3B(:,:,:)
+(   79) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPMEANU(:)
+(   80) REAL(KIND=JPRB)  ,OPTIONAL, INTENT(INOUT) :: PSPMEANV(:)
+(   81) # 82 "eltinvad_mod.F90"
+(   82) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRUV(:)
+(   83) INTEGER(KIND=JPIM),OPTIONAL,INTENT(IN)    :: KFLDPTRSC(:)
+(   84) # 85 "eltinvad_mod.F90"
+(   85) EXTERNAL  FSPGL_PROC
+(   86) OPTIONAL  FSPGL_PROC
+(   87) # 88 "eltinvad_mod.F90"
+(   88) REAL(KIND=JPRB) :: ZIA(RALD%NDGLSUR+R%NNOEXTZG,KLEI2,D%NUMP)
+(   89) REAL(KIND=JPRB) :: ZIA2(KLEI2,RALD%NDGLSUR+R%NNOEXTZG)
+(   90) # 91 "eltinvad_mod.F90"
+(   91) INTEGER(KIND=JPIM) :: IFC, ISTA, IINDEX(2*KF_OUT_LT), JF, JDIM, IM, JM
+(   92) INTEGER(KIND=JPIM) :: IVORL,IVORU,IDIVL,IDIVU,IUL,IUU,IVL,IVU,ISL,ISU,IDL,IDU
+(   93) INTEGER(KIND=JPIM) :: ILAST,IFIRST,IDIM1,IDIM3,J3
+(   94) # 95 "eltinvad_mod.F90"
+(   95) REAL(KIND=JPRB) :: ZHOOK_HANDLE
+(   96) # 97 "eltinvad_mod.F90"
+(   97) !     ------------------------------------------------------------------
+(   98) # 99 "eltinvad_mod.F90"
+(   99) IF (LHOOK) CALL DR_HOOK('ELTINVAD_MOD:ELTINVAD',0,ZHOOK_HANDLE)
+(  100) # 101 "eltinvad_mod.F90"
+(  101) IF (KF_UV > 0) THEN
+(  102)   IVORL = 1
+(  103)   IVORU = 2*KF_UV
+(  104)   IDIVL = 2*KF_UV+1
+(  105)   IDIVU = 4*KF_UV
+(  106)   IUL   = 4*KF_UV+1
+(  107)   IUU   = 6*KF_UV
+(  108)   IVL   = 6*KF_UV+1
+(  109)   IVU   = 8*KF_UV
+(  110) ENDIF
+(  111) ISTA = 1
+(  112) IFC  = 2*KF_OUT_LT
+(  113) IF(KF_UV > 0 .AND. .NOT. LVORGP) THEN
+(  114)   ISTA = ISTA+2*KF_UV
+(  115) ENDIF
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:22      page 8
+
+(  116) IF(KF_UV > 0 .AND. .NOT. LDIVGP) THEN
+(  117)   ISTA = ISTA+2*KF_UV
+(  118) ENDIF
+(  119) IF (KF_SCDERS > 0) THEN
+(  120)   ISL = 2*(4*KF_UV)+1
+(  121)   ISU = ISL+2*KF_SCALARS-1
+(  122)   IDL = 2*(4*KF_UV+KF_SCALARS)+1
+(  123)   IDU = IDL+2*KF_SCDERS-1
+(  124) ENDIF
+(  125) # 126 "eltinvad_mod.F90"
+(  126) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JM,IM,JF,JDIM,IINDEX,ZIA2)
+(  127) DO JM=1,D%NUMP
+(  128)   IM = D%MYMS(JM)
+(  129) # 130 "eltinvad_mod.F90"
+(  130) !        7.    OPTIONAL COMPUTATIONS IN FOURIER SPACE
+(  131) !              --------------------------------------
+(  132) # 133 "eltinvad_mod.F90"
+(  133) !commented  IF(PRESENT(FSPGL_PROC)) THEN
+(  134) !commented    CALL FSPGL_INT(IM,JM,FSPGL_PROC)
+(  135) !commented  ENDIF
+(  136) # 138 "eltinvad_mod.F90"
+(  138) !*       6.    RECOMBINATION SYMMETRIC/ANTISYMMETRIC PART.
+(  139) !              --------------------------------------------
+(  140) # 141 "eltinvad_mod.F90"
+(  141)   ZIA(:,:,JM)=0.0_JPRB
+(  142)   CALL EASRE1BAD(KF_OUT_LT,IM,JM,ZIA(:,ISTA:ISTA+IFC-1,JM))
+(  143) # 145 "eltinvad_mod.F90"
+(  145) !*       5.    PERIODICIZATION IN Y DIRECTION
+(  146) !              ------------------------------
+(  147) # 148 "eltinvad_mod.F90"
+(  148)   IF(R%NNOEXTZG>0) THEN
+(  149)     DO JF = 1,IFC
+(  150)       DO JDIM = 1,R%NDGL
+(  151)         ZIA2(JF,JDIM)=ZIA(JDIM,JF,JM)
+(  152)       ENDDO
+(  153)     ENDDO
+(  154)     IINDEX(1)=0
+(  155)     CALL EXTPER(ZIA2(:,:),R%NDGL+R%NNOEXTZG,1,R%NDGL,IFC,1,IINDEX,0)
+(  156)     DO JF = 1,IFC
+(  157)       DO JDIM = 1,R%NDGL+R%NNOEXTZG
+(  158)         ZIA(JDIM,JF,JM) = ZIA2(JF,JDIM)
+(  159)       ENDDO
+(  160)     ENDDO
+(  161)   ENDIF
+(  162) # 163 "eltinvad_mod.F90"
+(  163) !*       4.    INVERSE LEGENDRE TRANSFORM.
+(  164) !              ---------------------------
+(  165) # 166 "eltinvad_mod.F90"
+(  166)   CALL ELEINVAD(IM,IFC,KF_OUT_LT,ZIA(:,ISTA:ISTA+IFC-1,JM))
+(  167) # 169 "eltinvad_mod.F90"
+(  169) !*       3.    SPECTRAL COMPUTATIONS FOR U,V AND DERIVATIVES.
+(  170) !              ----------------------------------------------
+(  171) # 172 "eltinvad_mod.F90"
+(  172)   ZIA(:,1:ISTA-1,JM) = 0.0_JPRB
+(  173) # 174 "eltinvad_mod.F90"
+(  174)   IF (KF_UV > 0) THEN
+(  175)     CALL EVDTUVAD(IM,JM,KF_UV,KFLDPTRUV,ZIA(:,IVORL:IVORU,JM),ZIA(:,IDIVL:IDIVU,JM),&
+(  176)      & ZIA(:,IUL:IUU,JM),ZIA(:,IVL:IVU,JM),PSPMEANU,PSPMEANV)
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:22      page 9
+
+(  177)   ENDIF
+(  178) # 180 "eltinvad_mod.F90"
+(  180) ENDDO
+(  181) !$OMP END PARALLEL DO
+(  182) # 183 "eltinvad_mod.F90"
+(  183) !*       2.    COMMUNICATION OF MEAN WIND
+(  184) !              --------------------------
+(  185) # 186 "eltinvad_mod.F90"
+(  186) IF (KF_UV > 0) THEN
+(  187)   DO JM=1,D%NUMP
+(  188)     IM = D%MYMS(JM)
+(  189)     CALL EVDTUVAD_COMM(IM,JM,KF_UV,KFLDPTRUV,PSPMEANU,PSPMEANV)
+(  190)   ENDDO
+(  191) ENDIF
+(  192) # 193 "eltinvad_mod.F90"
+(  193) !*       2.    PREPARE SPECTRAL FIELDS
+(  194) !              -----------------------
+(  195) # 196 "eltinvad_mod.F90"
+(  196) !$OMP PARALLEL DO SCHEDULE(DYNAMIC,1) PRIVATE(JM,IM,IFIRST,ILAST,IDIM1,IDIM3)
+(  197) DO JM=1,D%NUMP
+(  198)   IM = D%MYMS(JM)
+(  199) # 200 "eltinvad_mod.F90"
+(  200)   IFIRST = 1
+(  201)   ILAST  = 4*KF_UV
+(  202)   IF (KF_UV > 0) THEN
+(  203)     CALL EPRFI1BAD(IM,ZIA(:,IVORL:IVORU,JM),PSPVOR,KF_UV,KFLDPTRUV)
+(  204)     CALL EPRFI1BAD(IM,ZIA(:,IDIVL:IDIVU,JM),PSPDIV,KF_UV,KFLDPTRUV)
+(  205)     ILAST = ILAST+4*KF_UV
+(  206)   ENDIF
+(  207) # 208 "eltinvad_mod.F90"
+(  208)   IF (KF_SCDERS > 0) THEN
+(  209)     CALL ESPNSDEAD(IM,KF_SCALARS,ZIA(:,ISL:ISU,JM),ZIA(:,IDL:IDU,JM))
+(  210)   ENDIF
+(  211) # 212 "eltinvad_mod.F90"
+(  212)   IF(KF_SCALARS > 0)THEN
+(  213)     IF(PRESENT(PSPSCALAR)) THEN
+(  214)       IFIRST = ILAST+1
+(  215)       ILAST  = IFIRST - 1 + 2*KF_SCALARS 
+(  216)       CALL EPRFI1BAD(IM,ZIA(:,IFIRST:ILAST,JM),PSPSCALAR(:,:),KF_SCALARS,KFLDPTRSC)
+(  217)     ELSE
+(  218)       IF(PRESENT(PSPSC2) .AND. NF_SC2 > 0) THEN
+(  219)         IFIRST = ILAST+1
+(  220)         ILAST  = IFIRST-1+2*NF_SC2
+(  221)         CALL EPRFI1BAD(IM,ZIA(:,IFIRST:ILAST,JM),PSPSC2(:,:),NF_SC2)
+(  222)       ENDIF
+(  223)       IF(PRESENT(PSPSC3A) .AND. NF_SC3A > 0) THEN
+(  224)         IDIM1=NF_SC3A
+(  225)         IDIM3=UBOUND(PSPSC3A,3)
+(  226)         DO J3=1,IDIM3
+(  227)           IFIRST = ILAST+1
+(  228)           ILAST  = IFIRST-1+2*IDIM1
+(  229)           CALL EPRFI1BAD(IM,ZIA(:,IFIRST:ILAST,JM),PSPSC3A(:,:,J3),IDIM1)
+(  230)         ENDDO
+(  231)       ENDIF
+(  232)       IF(PRESENT(PSPSC3B) .AND. NF_SC3B > 0) THEN
+(  233)         IDIM1=NF_SC3B
+(  234)         IDIM3=UBOUND(PSPSC3B,3)
+(  235)         DO J3=1,IDIM3
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:30:22      page 10
+
+(  236)           IFIRST = ILAST+1
+(  237)           ILAST  = IFIRST-1+2*IDIM1
+(  238)           CALL EPRFI1BAD(IM,ZIA(:,IFIRST:ILAST,JM),PSPSC3B(:,:,J3),IDIM1)
+(  239)         ENDDO
+(  240)       ENDIF
+(  241)     ENDIF
+(  242)   ENDIF
+(  243) # 244 "eltinvad_mod.F90"
+(  244) ENDDO
+(  245) !$OMP END PARALLEL DO
+(  246) # 247 "eltinvad_mod.F90"
+(  247) IF (LHOOK) CALL DR_HOOK('ELTINVAD_MOD:ELTINVAD',1,ZHOOK_HANDLE)
+(  248) # 249 "eltinvad_mod.F90"
+(  249) !     ------------------------------------------------------------------
+(  250) # 251 "eltinvad_mod.F90"
+(  251) END SUBROUTINE ELTINVAD
+(  252) END MODULE ELTINVAD_MOD

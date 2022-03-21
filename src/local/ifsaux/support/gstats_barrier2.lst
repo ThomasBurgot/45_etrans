@@ -1,0 +1,98 @@
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:37      page 1
+
+Switches: -noasm -nodclchk -debug -nodlines -line -list
+          -idir .D[1]
+          -idir .D[2]
+          -idir .D[3]
+          -idir .D[4]
+          -idir .D[5]
+          -idir .D[6]
+          -idir .D[7]
+          -idir .D[8]
+          -idir .D[9]
+          -idir .D[10]
+          -idir .D[11]
+          -idir .D[12]
+          -idir .D[13]
+          -idir .D[14]
+          -idir .D[15]
+          -idir .D[16]
+          -idir .D[17]
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/include
+          -idir /gpfslocalsup/spack_soft/openmpi/4.0.5/nvhpc-20.11-3li3t3xykfzndqfr4oxyhh22iqiendl2/lib
+          -inform severe -opt 2 -nosave -object -noonetrip
+          -depchk on -nostandard     
+          -symbol -noupcase    
+
+Filename: gstats_barrier2.F90
+
+(    1) SUBROUTINE GSTATS_BARRIER2(KNUM)
+(    2) 
+(    3) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    4) 
+(    5) USE YOMGSTATS, ONLY : LBARRIER_STATS2,NBAR_PTR,NBAR2
+(    6) USE MPL_MODULE  , ONLY : MPL_BARRIER
+(    7) 
+(    8) IMPLICIT NONE
+(    9) 
+(   10) INTEGER(KIND=JPIM) :: KNUM
+(   11) INTEGER(KIND=JPIM) :: INUM
+(   12) 
+(   13) IF(LBARRIER_STATS2)THEN
+(   14)   IF(NBAR_PTR(KNUM) == 0) THEN
+(   15)     INUM=NBAR2
+(   16)     NBAR2=NBAR2+1
+(   17)     NBAR_PTR(KNUM)=INUM
+(   18)   ENDIF
+(   19)   INUM=NBAR_PTR(KNUM)
+(   20)   CALL GSTATS(INUM,0)
+(   21)   CALL MPL_BARRIER()
+(   22)   CALL GSTATS(INUM,1)
+(   23) ENDIF
+(   24) 
+(   25) END SUBROUTINE GSTATS_BARRIER2
+(   26) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+NVFORTRAN (Version    20.11)          02/16/2022  17:28:37      page 2
+
+(    1) # 1 "gstats_barrier2.F90"
+(    1) SUBROUTINE GSTATS_BARRIER2(KNUM)
+(    2) # 3 "gstats_barrier2.F90"
+(    3) USE PARKIND1  ,ONLY : JPIM     ,JPRB
+(    4) # 5 "gstats_barrier2.F90"
+(    5) USE YOMGSTATS, ONLY : LBARRIER_STATS2,NBAR_PTR,NBAR2
+(    6) USE MPL_MODULE  , ONLY : MPL_BARRIER
+(    7) # 8 "gstats_barrier2.F90"
+(    8) IMPLICIT NONE
+(    9) # 10 "gstats_barrier2.F90"
+(   10) INTEGER(KIND=JPIM) :: KNUM
+(   11) INTEGER(KIND=JPIM) :: INUM
+(   12) # 13 "gstats_barrier2.F90"
+(   13) IF(LBARRIER_STATS2)THEN
+(   14)   IF(NBAR_PTR(KNUM) == 0) THEN
+(   15)     INUM=NBAR2
+(   16)     NBAR2=NBAR2+1
+(   17)     NBAR_PTR(KNUM)=INUM
+(   18)   ENDIF
+(   19)   INUM=NBAR_PTR(KNUM)
+(   20)   CALL GSTATS(INUM,0)
+(   21)   CALL MPL_BARRIER()
+(   22)   CALL GSTATS(INUM,1)
+(   23) ENDIF
+(   24) # 25 "gstats_barrier2.F90"
+(   25) END SUBROUTINE GSTATS_BARRIER2
